@@ -1,0 +1,1177 @@
+# Fusion Design workspace toolbar: tab, panel, command id, command name (ids and names only).
+# Regenerate with `cargo xtask parity --refresh` (needs the local plan/fusion/menu-tree.json).
+SOLID	CREATE	SketchCreate	Create Sketch
+SOLID	CREATE	TSplineBaseFeatureCreationCommand	Create Form
+SOLID	CREATE	PushDeriveCommand	Derive
+SOLID	CREATE	AutomatedModelingCommand	Automated Modeling
+SOLID	CREATE	Extrude	Extrude
+SOLID	CREATE	Revolve	Revolve
+SOLID	CREATE	Sweep	Sweep
+SOLID	CREATE	SolidLoft	Loft
+SOLID	CREATE	FusionRibCommand	Rib
+SOLID	CREATE	FusionWebCommand	Web
+SOLID	CREATE	EmbossCmd	Emboss
+SOLID	CREATE	FusionHoleCommand	Hole
+SOLID	CREATE	FusionThreadCommand	Thread
+SOLID	CREATE	PrimitiveBox	Box
+SOLID	CREATE	PrimitiveCylinder	Cylinder
+SOLID	CREATE	PrimitiveSphere	Sphere
+SOLID	CREATE	PrimitiveTorus	Torus
+SOLID	CREATE	PrimitiveCoil	Coil
+SOLID	CREATE	PrimitivePipe	Pipe
+SOLID	CREATE	StockModelCommand	Bounding Solid
+SOLID	CREATE	PatternRectangular	Rectangular Pattern
+SOLID	CREATE	PatternCircular	Circular Pattern
+SOLID	CREATE	PatternOnPath	Pattern on Path
+SOLID	CREATE	FusionPatternGeometricCommand	Geometric Pattern
+SOLID	CREATE	MirrorCommand	Mirror
+SOLID	CREATE	FusionSurfaceThickenCommand	Thicken
+SOLID	CREATE	SurfaceSculpt	Boundary Fill
+SOLID	CREATE	FusionFindFeaturesCommand	Find Features
+SOLID	CREATE	EnclosureCommand	Fluid Volume
+SOLID	CREATE	BaseFeatureCreationCommand	Create Base Feature
+SOLID	CREATE	PCBExternalComponentCreationCmd	Create Linked PCB
+SOLID	CREATE	PCBDeriveCmd	Derive PCB
+SOLID	CREATE	PCBCreateCmd	Create Unlinked PCB
+SOLID	CREATE	JointOrigin	Joint Origin
+SOLID	CREATE	TimelineBuilderCommand	Generate Timeline
+SOLID	MODIFY	FusionPressPullCommand	Press Pull
+SOLID	MODIFY	EditFaceCommand	Edit Face
+SOLID	MODIFY	FusionFilletEdgesCommand	Fillet
+SOLID	MODIFY	FusionChamferCommand	Chamfer
+SOLID	MODIFY	FusionShellBodyCommand	Shell
+SOLID	MODIFY	FusionDraftCommand	Draft
+SOLID	MODIFY	ModifyScale	Scale
+SOLID	MODIFY	FusionCombineCommand	Combine
+SOLID	MODIFY	FusionOffsetFacesCommand	Offset Face
+SOLID	MODIFY	FusionReplaceFaceCommand	Replace Face
+SOLID	MODIFY	FusionSplitFaceCommand	Split Face
+SOLID	MODIFY	FusionSplitBodyCommand	Split Body
+SOLID	MODIFY	FusionPartingLineSplitCmd	Silhouette Split
+SOLID	MODIFY	FusionMoveCommand	Move/Copy
+SOLID	MODIFY	AlignCmd	Align
+SOLID	MODIFY	FusionDeleteCommand	Delete
+SOLID	MODIFY	SoftDeleteCommand	Remove
+SOLID	MODIFY	ArrangeCommand	Arrange
+SOLID	MODIFY	FusionRemoveFeaturesCommand	Remove Features
+SOLID	MODIFY	FusionRemoveFacesCommand	Remove Faces
+SOLID	MODIFY	ReplaceWithPrimitivesCommand	Replace with Primitives
+SOLID	MODIFY	VolFieldCreateLatticeCommand	Volumetric Lattice
+SOLID	MODIFY	VolFieldTextureCommand	Volumetric Texture
+SOLID	MODIFY	VolFieldModifyModelCommand	VolFieldModifyModelCommand
+SOLID	MODIFY	PhysicalMaterialCommand	Physical Material
+SOLID	MODIFY	AppearanceCommand	Appearance
+SOLID	MODIFY	MaterialCommand	Manage Materials
+SOLID	MODIFY	ChangeParameterCommand	Change Parameters
+SOLID	MODIFY	FusionComputeAllCommand	Compute All
+SOLID	MODIFY	FusionComputeUnresolvedCommand	Compute Unresolved
+SOLID	MODIFY	TSpline2BRepCommand	Convert
+SOLID	MODIFY	MaterializedBomHybridCmd	Bill of Materials
+SOLID	ASSEMBLE	FusionImportCommandFromToolbar	Insert Component
+SOLID	ASSEMBLE	FusionCreateNewComponentCommand	New Component
+SOLID	ASSEMBLE	FusionDuplicateWithJointsCommand	Duplicate With Joints
+SOLID	ASSEMBLE	AssemblyMateCommand	Constrain Components
+SOLID	ASSEMBLE	AlignConstraintCmd	Align Constraint
+SOLID	ASSEMBLE	AngleConstraintCmd	Angle Constraint
+SOLID	ASSEMBLE	MidplaneConstraintCmd	Center Constraint
+SOLID	ASSEMBLE	TangentConstraintCmd	Tangent Constraint
+SOLID	ASSEMBLE	JointConstraintCmd	Joint Constraint
+SOLID	ASSEMBLE	JointAssembleCmdNew	Joint
+SOLID	ASSEMBLE	JointAsBuiltCmd	As-Built Joint
+SOLID	ASSEMBLE	AsBuiltConstraintCmd	As-Built Constraint
+SOLID	ASSEMBLE	RigidGroupCmd	Rigid Group
+SOLID	ASSEMBLE	FusionMoveJointsCommand	Drive Joints
+SOLID	ASSEMBLE	FusionMotionRelationshipCommand	Motion Link
+SOLID	ASSEMBLE	FusionMotionStudyCommand	Motion Study
+SOLID	ASSEMBLE	EnableContactSetsCmd	Enable Contact Sets
+SOLID	ASSEMBLE	EnableAllContactCmd	Enable All Contact
+SOLID	ASSEMBLE	DisableAllContactCmd	Disable Contact
+SOLID	ASSEMBLE	ContactSetCmd	New Contact Set
+SOLID	CONFIGURE	FusionStartDesignConfigModeCmd	Configure
+SOLID	CONFIGURE	FusionShowDesignConfigPanelCmd	Display Configuration Table
+SOLID	CONFIGURE	FusionConfigurationRulesCmd	Create Configuration Rules
+SOLID	CONSTRUCT	CoordinateSystemCommand	User Coordinate System (UCS)
+SOLID	CONSTRUCT	ConstructionPlaneOffsetFromPlaneCommand	Offset Plane
+SOLID	CONSTRUCT	ConstructionPlaneAtAngleCommand	Plane at Angle
+SOLID	CONSTRUCT	ConstructionTangentPlaneCommand	Tangent Plane
+SOLID	CONSTRUCT	ConstructionMidPlaneCommand	Midplane
+SOLID	CONSTRUCT	ConstructionPlanePerpendicularToPlaneCommand	Perpendicular Plane
+SOLID	CONSTRUCT	ConstructionPlaneFromTwoEdgesCommand	Plane Through Two Edges
+SOLID	CONSTRUCT	ConstructionPlaneFromThreePointsCommand	Plane Through Three Points
+SOLID	CONSTRUCT	ConstructionPlaneAlongPathCommand	Plane Along Path
+SOLID	CONSTRUCT	ConstructionAxisThroughCylinderCommand	Axis Through Cylinder/Cone/Torus
+SOLID	CONSTRUCT	ConstructionAxisNormalToFaceCommand	Axis Perpendicular To Face
+SOLID	CONSTRUCT	ConstructionAxisFromTwoPlanesCommand	Axis Through Two Planes
+SOLID	CONSTRUCT	ConstructionAxisThroughTwoPointsCommand	Axis Through Two Points
+SOLID	CONSTRUCT	ConstructionAxisThroughEdgeCommand	Axis Through Edge
+SOLID	CONSTRUCT	ConstructionPointFromPointCommand	Point At Vertex
+SOLID	CONSTRUCT	ConstructionPointThroughTwoEdgesCommand	Point Through Two Edges
+SOLID	CONSTRUCT	ConstructionPointFromThreePlanesCommand	Point Through Three Planes
+SOLID	CONSTRUCT	ConstructionPointFromCircleOrSphereCommand	Point At Center Of Circle/Sphere/Torus
+SOLID	CONSTRUCT	ConstructionPointAtEdgeAndPlaneCommand	Point At Edge And Plane
+SOLID	CONSTRUCT	ConstructionPointAlongPathCommand	Point Along Path
+SOLID	INSPECT	MeasureCommand	Measure
+SOLID	INSPECT	InterferenceCheckCommand	Interference
+SOLID	INSPECT	FusionHalfSectionViewCommand	Section Analysis
+SOLID	INSPECT	FusionCurvatureCombAnalysisCommand	Curvature Comb Analysis
+SOLID	INSPECT	FusionCurvatureMapAnalysisCommand	Curvature Map Analysis
+SOLID	INSPECT	FusionDraftAnalysisCommand	Draft Analysis
+SOLID	INSPECT	FusionEnvironmentMapAnalysisCommand	Environment Map Analysis
+SOLID	INSPECT	FusionIsoCurveAnalysisCommand	Isocurve Analysis
+SOLID	INSPECT	FusionSurfaceValidateCommand	Validate
+SOLID	INSPECT	FusionZebraAnalysisCommand	Zebra Analysis
+SOLID	INSPECT	FusionAccessibilityAnalysisCommand	Accessibility Analysis
+SOLID	INSPECT	FusionCenterOfMassCommand	Center of Mass
+SOLID	INSPECT	FusionMinimumRadiusAnalysisCommand	Minimum Radius Analysis
+SOLID	INSPECT	FusionComponentConnectionAnalysisCommand	Component Connection Analysis
+SOLID	INSPECT	FusionDOFAnalysisCommand	DOF Analysis
+SOLID	INSPECT	FusionEditComponentConnectionAnalysisCommand	Edit Component Connection Analysis
+SOLID	INSPECT	FusionFastenerStackAnalysisCommand	Fastener Stack Analysis
+SOLID	INSPECT	SimilarPartsCommand	Find Similar Components
+SOLID	INSPECT	GraphViewCmd	Navigator
+SOLID	INSPECT	FusionViewColorCyclingToggleCmd	Display Component Colors
+SOLID	INSPECT	FacegroupsToggleCmd	Display Mesh Face Groups
+SOLID	INSPECT	FusionAssemblyStatisticsCommand	Assembly Statistics
+SOLID	INSPECT	ShowChangeAwarenessToolbarCmd	Change Summary
+SOLID	INSPECT	ShowHistoryToolbarCmd	History
+SOLID	INSPECT	GravityClimate_ManufacturingSustainabilityInsights_MainDialog	Sustainability Insights
+SOLID	INSERT	FusionAddEditDecalCommand	Decal
+SOLID	INSERT	FusionAddCanvasCommand	Canvas
+SOLID	INSERT	TSplineImportCommand	Insert T-Spline
+SOLID	INSERT	SketchImportSVG	Insert SVG
+SOLID	INSERT	ImportDxfFileCommand	Insert DXF
+SOLID	INSERT	ParaMeshInsertAlignCommand	Insert Mesh
+SOLID	INSERT	FusionFastenersCommand	Insert Fastener
+SOLID	INSERT	PullDeriveCommand	Insert Derive
+SOLID	INSERT	InsertMcMasterCarrComponentCommand	Insert McMaster-Carr Component
+SOLID	INSERT	cadenasparts4cad	Insert a manufacturer part
+SOLID	INSERT	traceparts_insert	Insert TraceParts Supplier Components
+SOLID	ASSEMBLE	NewAssemblyFromPartCommand	Add To Assembly
+SOLID	SELECT	SelectCommand	Select
+SOLID	SELECT	selectWindow	Window Selection
+SOLID	SELECT	selectFreeForm	Freeform Selection
+SOLID	SELECT	selectPaint	Paint Selection
+SOLID	SELECT	SelectByNameCommand	Select By Name
+SOLID	SELECT	SelectByBoundaryCommand	Select By Boundary
+SOLID	SELECT	FusionSelectBodiesBySizeCommand	Select By Size
+SOLID	SELECT	SelectByInvertCommand	Invert Selection
+SOLID	SELECT	FusionSelectSeedAndBoundaryFacesCommand	Seed And Boundary
+SOLID	SELECT	FusionDragCompControlsCmd	Component Drag
+SOLID	SELECT	SelectBodyPriorityCommand	Select Body Priority
+SOLID	SELECT	SelectFacePriorityCommand	Select Face Priority
+SOLID	SELECT	SelectEdgePriorityCommand	Select Edge Priority
+SOLID	SELECT	SelectComponentPriorityCommand	Select Component Priority
+SOLID	SELECT	SelectionFilterCommand	Selection Filters
+SOLID	POSITION	SnapshotCmd	Capture Position
+SOLID	POSITION	AsBuiltPositionsCmd	Revert Position
+SKETCH	CREATE	DrawPolyline	Line
+SKETCH	CREATE	SketchMidpointLine	Midpoint Line
+SKETCH	CREATE	SketchConstrainer	SketchConstrainer
+SKETCH	CREATE	ShapeRectangleTwoPoint	2-Point Rectangle
+SKETCH	CREATE	ShapeRectangleThreePoint	3-Point Rectangle
+SKETCH	CREATE	ShapeRectangleCenter	Center Rectangle
+SKETCH	CREATE	CircleCenterRadius	Center Diameter Circle
+SKETCH	CREATE	CircleTwoPoint	2-Point Circle
+SKETCH	CREATE	CircleThreePoint	3-Point Circle
+SKETCH	CREATE	CircleTanTanRadius	2-Tangent Circle
+SKETCH	CREATE	CircleThreeTangent	3-Tangent Circle
+SKETCH	CREATE	ArcThreePoint	3-Point Arc
+SKETCH	CREATE	ArcCenterTwoPoint	Center Point Arc
+SKETCH	CREATE	ArcTangent	Tangent Arc
+SKETCH	CREATE	ShapePolygonCircumscribed	Circumscribed Polygon
+SKETCH	CREATE	ShapePolygonInscribed	Inscribed Polygon
+SKETCH	CREATE	ShapePolygonEdge	Edge Polygon
+SKETCH	CREATE	CircleElipse	Ellipse
+SKETCH	CREATE	ShapeSlotCenterToCenter	Center to Center Slot
+SKETCH	CREATE	ShapeSlotOverall	Overall Slot
+SKETCH	CREATE	ShapeSlotCenterPoint	Center Point Slot
+SKETCH	CREATE	ShapeArcSlotThreePoint	Three Point Arc Slot
+SKETCH	CREATE	ShapeArcSlotCenterTwoPoint	Center Point Arc Slot
+SKETCH	CREATE	DrawSpline	Fit Point Spline
+SKETCH	CREATE	DrawCVMSpline3D	Control Point Spline
+SKETCH	CREATE	DrawCVMSpline5D	Control Point Spline
+SKETCH	CREATE	ConicCurveCmd	Conic Curve
+SKETCH	CREATE	DrawPoint	Point
+SKETCH	CREATE	MTextCmd	Text
+SKETCH	CREATE	FitCurvesToSectionCommand	Fit Curves to Mesh Section
+SKETCH	CREATE	MirrorSketchCommand	Mirror
+SKETCH	CREATE	CircularSketchPatternCommand	Circular Pattern
+SKETCH	CREATE	RectangularSketchPatternCommand	Rectangular Pattern
+SKETCH	CREATE	ProjectNewCmd	Project
+SKETCH	CREATE	IntersectCmd	Intersect
+SKETCH	CREATE	SpunProfileCmd	Spun Profile
+SKETCH	CREATE	Include3DGeometry	Include 3D Geometry
+SKETCH	CREATE	ProjectToSurface	Project To Surface
+SKETCH	CREATE	IntersectionCurve	Intersection Curve
+SKETCH	CREATE	SketchIsoparametricCurve	Isoparametric Curve
+SKETCH	CREATE	SketchDimension	Sketch Dimension
+SKETCH	MODIFY	FilletSketchCmd	Fillet
+SKETCH	MODIFY	ChamferSketchEqualDistance	Equal Distance Chamfer
+SKETCH	MODIFY	ChamferSketchDistanceAngle	Distance and Angle Chamfer
+SKETCH	MODIFY	ChamferSketchDistanceDistance	Two Distance Chamfer
+SKETCH	MODIFY	BlendG1CurveSketchCmd	Blend Curve
+SKETCH	MODIFY	Offset	Offset
+SKETCH	MODIFY	TrimSketchCmd	Trim
+SKETCH	MODIFY	ExtendSketchCmd	Extend
+SKETCH	MODIFY	BreakSketchCmd	Break
+SKETCH	MODIFY	SketchScaleCmd	Sketch Scale
+SKETCH	MODIFY	FusionMoveCommand	Move/Copy
+SKETCH	MODIFY	ChangeParameterCommand	Change Parameters
+SKETCH	CONSTRAINTS	SketchAutoConstraintAndDimCmd	AutoConstrain
+SKETCH	CONSTRAINTS	SketchAutoConstraintAndDimFromDatumCmd	AutoConstrain from datum
+SKETCH	CONSTRAINTS	ConstraintHorizontalVertical	Horizontal/Vertical
+SKETCH	CONSTRAINTS	ConstraintCoincident	Coincident
+SKETCH	CONSTRAINTS	ConstraintTangent	Tangent
+SKETCH	CONSTRAINTS	ConstraintEqual	Equal
+SKETCH	CONSTRAINTS	ConstraintParallel	Parallel
+SKETCH	CONSTRAINTS	ConstraintPerpendicular	Perpendicular
+SKETCH	CONSTRAINTS	ConstraintFix	Fix/UnFix
+SKETCH	CONSTRAINTS	ConstraintMidPoint	MidPoint
+SKETCH	CONSTRAINTS	ConstraintConcentric	Concentric
+SKETCH	CONSTRAINTS	ConstraintCollinear	Collinear
+SKETCH	CONSTRAINTS	ConstraintSymmetry	Symmetry
+SKETCH	CONSTRAINTS	ConstraintSmooth	Curvature
+SKETCH	CONSTRAINTS	SketchPolygonConstraintCmd	Polygon
+SKETCH	CONFIGURE	FusionStartDesignConfigModeCmd	Configure
+SKETCH	CONFIGURE	FusionShowDesignConfigPanelCmd	Display Configuration Table
+SKETCH	CONFIGURE	FusionConfigurationRulesCmd	Create Configuration Rules
+SKETCH	INSPECT	MeasureCommand	Measure
+SKETCH	INSPECT	InterferenceCheckCommand	Interference
+SKETCH	INSPECT	FusionHalfSectionViewCommand	Section Analysis
+SKETCH	INSPECT	FusionCurvatureCombAnalysisCommand	Curvature Comb Analysis
+SKETCH	INSPECT	FusionCurvatureMapAnalysisCommand	Curvature Map Analysis
+SKETCH	INSPECT	FusionDraftAnalysisCommand	Draft Analysis
+SKETCH	INSPECT	FusionEnvironmentMapAnalysisCommand	Environment Map Analysis
+SKETCH	INSPECT	FusionIsoCurveAnalysisCommand	Isocurve Analysis
+SKETCH	INSPECT	FusionSurfaceValidateCommand	Validate
+SKETCH	INSPECT	FusionZebraAnalysisCommand	Zebra Analysis
+SKETCH	INSPECT	FusionAccessibilityAnalysisCommand	Accessibility Analysis
+SKETCH	INSPECT	FusionCenterOfMassCommand	Center of Mass
+SKETCH	INSPECT	FusionMinimumRadiusAnalysisCommand	Minimum Radius Analysis
+SKETCH	INSPECT	FusionComponentConnectionAnalysisCommand	Component Connection Analysis
+SKETCH	INSPECT	FusionDOFAnalysisCommand	DOF Analysis
+SKETCH	INSPECT	FusionEditComponentConnectionAnalysisCommand	Edit Component Connection Analysis
+SKETCH	INSPECT	FusionFastenerStackAnalysisCommand	Fastener Stack Analysis
+SKETCH	INSPECT	SimilarPartsCommand	Find Similar Components
+SKETCH	INSPECT	GraphViewCmd	Navigator
+SKETCH	INSPECT	FusionViewColorCyclingToggleCmd	Display Component Colors
+SKETCH	INSPECT	FacegroupsToggleCmd	Display Mesh Face Groups
+SKETCH	INSPECT	FusionAssemblyStatisticsCommand	Assembly Statistics
+SKETCH	INSPECT	ShowChangeAwarenessToolbarCmd	Change Summary
+SKETCH	INSPECT	ShowHistoryToolbarCmd	History
+SKETCH	INSPECT	GravityClimate_ManufacturingSustainabilityInsights_MainDialog	Sustainability Insights
+SKETCH	INSERT	FusionAddEditDecalCommand	Decal
+SKETCH	INSERT	FusionAddCanvasCommand	Canvas
+SKETCH	INSERT	TSplineImportCommand	Insert T-Spline
+SKETCH	INSERT	SketchImportSVG	Insert SVG
+SKETCH	INSERT	ImportDxfFileCommand	Insert DXF
+SKETCH	INSERT	ParaMeshInsertAlignCommand	Insert Mesh
+SKETCH	INSERT	FusionImportCommandFromToolbar	Insert Component
+SKETCH	INSERT	FusionFastenersCommand	Insert Fastener
+SKETCH	INSERT	FusionDuplicateWithJointsCommand	Duplicate With Joints
+SKETCH	INSERT	PullDeriveCommand	Insert Derive
+SKETCH	INSERT	InsertMcMasterCarrComponentCommand	Insert McMaster-Carr Component
+SKETCH	INSERT	cadenasparts4cad	Insert a manufacturer part
+SKETCH	INSERT	traceparts_insert	Insert TraceParts Supplier Components
+SKETCH	ASSEMBLE	NewAssemblyFromPartCommand	Add To Assembly
+SKETCH	SELECT	SelectCommand	Select
+SKETCH	SELECT	selectWindow	Window Selection
+SKETCH	SELECT	selectFreeForm	Freeform Selection
+SKETCH	SELECT	selectPaint	Paint Selection
+SKETCH	SELECT	SelectByNameCommand	Select By Name
+SKETCH	SELECT	SelectByBoundaryCommand	Select By Boundary
+SKETCH	SELECT	FusionSelectBodiesBySizeCommand	Select By Size
+SKETCH	SELECT	SelectByInvertCommand	Invert Selection
+SKETCH	SELECT	FusionSelectSeedAndBoundaryFacesCommand	Seed And Boundary
+SKETCH	SELECT	FusionDragCompControlsCmd	Component Drag
+SKETCH	SELECT	SelectBodyPriorityCommand	Select Body Priority
+SKETCH	SELECT	SelectFacePriorityCommand	Select Face Priority
+SKETCH	SELECT	SelectEdgePriorityCommand	Select Edge Priority
+SKETCH	SELECT	SelectComponentPriorityCommand	Select Component Priority
+SKETCH	SELECT	SelectionFilterCommand	Selection Filters
+SKETCH	FINISH SKETCH	SketchStop	Finish Sketch
+SKETCH	FINISH SKETCH	SketchAutoConstrainAndFinish	Finish with AutoConstrain
+SURFACE	CREATE	FusionCreateNewComponentCommand	New Component
+SURFACE	CREATE	SketchCreate	Create Sketch
+SURFACE	CREATE	TSplineBaseFeatureCreationCommand	Create Form
+SURFACE	CREATE	PushDeriveCommand	Derive
+SURFACE	CREATE	SurfaceExtrude	Extrude
+SURFACE	CREATE	SurfaceRevolve	Revolve
+SURFACE	CREATE	SurfaceSweep	Sweep
+SURFACE	CREATE	SurfaceLoft	Loft
+SURFACE	CREATE	FusionSurfacePatchCommand	Patch
+SURFACE	CREATE	FusionSurfaceRuledCommand	Ruled
+SURFACE	CREATE	FusionSurfaceOffsetCommand	Offset
+SURFACE	CREATE	SurfPrimitiveBox	Box
+SURFACE	CREATE	SurfPrimitiveCylinder	Cylinder
+SURFACE	CREATE	SurfPrimitiveSphere	Sphere
+SURFACE	CREATE	SurfPrimitiveTorus	Torus
+SURFACE	CREATE	SurfPrimitiveCoil	Coil
+SURFACE	CREATE	SurfPrimitivePipe	Pipe
+SURFACE	CREATE	PatternRectangular	Rectangular Pattern
+SURFACE	CREATE	PatternCircular	Circular Pattern
+SURFACE	CREATE	PatternOnPath	Pattern on Path
+SURFACE	CREATE	FusionPatternGeometricCommand	Geometric Pattern
+SURFACE	CREATE	MirrorCommand	Mirror
+SURFACE	CREATE	FusionSurfaceThickenCommand	Thicken
+SURFACE	CREATE	SurfaceSculpt	Boundary Fill
+SURFACE	CREATE	JointOrigin	Joint Origin
+SURFACE	MODIFY	FusionPressPullCommand	Press Pull
+SURFACE	MODIFY	EditFaceCommand	Edit Face
+SURFACE	MODIFY	FusionFilletEdgesCommand	Fillet
+SURFACE	MODIFY	FusionChamferCommand	Chamfer
+SURFACE	MODIFY	FusionSurfaceTrimCommand	Trim
+SURFACE	MODIFY	FusionSurfaceUntrimCommand	Untrim
+SURFACE	MODIFY	FusionExtendCommand	Extend
+SURFACE	MODIFY	FusionSurfaceStitchCommand	Stitch
+SURFACE	MODIFY	FusionSurfaceUnStitchCommand	Unstitch
+SURFACE	MODIFY	FusionSurfaceMergeCommand	Merge
+SURFACE	MODIFY	FusionSurfaceReverseNormalCommand	Reverse Normal
+SURFACE	MODIFY	ModifyScale	Scale
+SURFACE	MODIFY	FusionSplitFaceCommand	Split Face
+SURFACE	MODIFY	FusionSplitBodyCommand	Split Body
+SURFACE	MODIFY	FusionMoveCommand	Move/Copy
+SURFACE	MODIFY	AlignCmd	Align
+SURFACE	MODIFY	FusionDeleteCommand	Delete
+SURFACE	MODIFY	SoftDeleteCommand	Remove
+SURFACE	MODIFY	TSpline2BRepCommand	Convert
+SURFACE	MODIFY	PhysicalMaterialCommand	Physical Material
+SURFACE	MODIFY	AppearanceCommand	Appearance
+SURFACE	MODIFY	MaterialCommand	Manage Materials
+SURFACE	MODIFY	ChangeParameterCommand	Change Parameters
+SURFACE	MODIFY	FusionComputeAllCommand	Compute All
+SURFACE	MODIFY	FusionComputeUnresolvedCommand	Compute Unresolved
+SURFACE	MODIFY	MaterializedBomHybridCmd	Bill of Materials
+SURFACE	ASSEMBLE	FusionImportCommandFromToolbar	Insert Component
+SURFACE	ASSEMBLE	FusionDuplicateWithJointsCommand	Duplicate With Joints
+SURFACE	ASSEMBLE	AssemblyMateCommand	Constrain Components
+SURFACE	ASSEMBLE	AlignConstraintCmd	Align Constraint
+SURFACE	ASSEMBLE	AngleConstraintCmd	Angle Constraint
+SURFACE	ASSEMBLE	MidplaneConstraintCmd	Center Constraint
+SURFACE	ASSEMBLE	TangentConstraintCmd	Tangent Constraint
+SURFACE	ASSEMBLE	JointConstraintCmd	Joint Constraint
+SURFACE	ASSEMBLE	JointAssembleCmdNew	Joint
+SURFACE	ASSEMBLE	JointAsBuiltCmd	As-Built Joint
+SURFACE	ASSEMBLE	AsBuiltConstraintCmd	As-Built Constraint
+SURFACE	ASSEMBLE	RigidGroupCmd	Rigid Group
+SURFACE	ASSEMBLE	FusionMoveJointsCommand	Drive Joints
+SURFACE	ASSEMBLE	FusionMotionRelationshipCommand	Motion Link
+SURFACE	ASSEMBLE	FusionMotionStudyCommand	Motion Study
+SURFACE	ASSEMBLE	EnableContactSetsCmd	Enable Contact Sets
+SURFACE	ASSEMBLE	EnableAllContactCmd	Enable All Contact
+SURFACE	ASSEMBLE	DisableAllContactCmd	Disable Contact
+SURFACE	ASSEMBLE	ContactSetCmd	New Contact Set
+SURFACE	CONFIGURE	FusionStartDesignConfigModeCmd	Configure
+SURFACE	CONFIGURE	FusionShowDesignConfigPanelCmd	Display Configuration Table
+SURFACE	CONFIGURE	FusionConfigurationRulesCmd	Create Configuration Rules
+SURFACE	CONSTRUCT	CoordinateSystemCommand	User Coordinate System (UCS)
+SURFACE	CONSTRUCT	ConstructionPlaneOffsetFromPlaneCommand	Offset Plane
+SURFACE	CONSTRUCT	ConstructionPlaneAtAngleCommand	Plane at Angle
+SURFACE	CONSTRUCT	ConstructionTangentPlaneCommand	Tangent Plane
+SURFACE	CONSTRUCT	ConstructionMidPlaneCommand	Midplane
+SURFACE	CONSTRUCT	ConstructionPlanePerpendicularToPlaneCommand	Perpendicular Plane
+SURFACE	CONSTRUCT	ConstructionPlaneFromTwoEdgesCommand	Plane Through Two Edges
+SURFACE	CONSTRUCT	ConstructionPlaneFromThreePointsCommand	Plane Through Three Points
+SURFACE	CONSTRUCT	ConstructionPlaneAlongPathCommand	Plane Along Path
+SURFACE	CONSTRUCT	ConstructionAxisThroughCylinderCommand	Axis Through Cylinder/Cone/Torus
+SURFACE	CONSTRUCT	ConstructionAxisNormalToFaceCommand	Axis Perpendicular To Face
+SURFACE	CONSTRUCT	ConstructionAxisFromTwoPlanesCommand	Axis Through Two Planes
+SURFACE	CONSTRUCT	ConstructionAxisThroughTwoPointsCommand	Axis Through Two Points
+SURFACE	CONSTRUCT	ConstructionAxisThroughEdgeCommand	Axis Through Edge
+SURFACE	CONSTRUCT	ConstructionPointFromPointCommand	Point At Vertex
+SURFACE	CONSTRUCT	ConstructionPointThroughTwoEdgesCommand	Point Through Two Edges
+SURFACE	CONSTRUCT	ConstructionPointFromThreePlanesCommand	Point Through Three Planes
+SURFACE	CONSTRUCT	ConstructionPointFromCircleOrSphereCommand	Point At Center Of Circle/Sphere/Torus
+SURFACE	CONSTRUCT	ConstructionPointAtEdgeAndPlaneCommand	Point At Edge And Plane
+SURFACE	CONSTRUCT	ConstructionPointAlongPathCommand	Point Along Path
+SURFACE	INSPECT	MeasureCommand	Measure
+SURFACE	INSPECT	InterferenceCheckCommand	Interference
+SURFACE	INSPECT	FusionHalfSectionViewCommand	Section Analysis
+SURFACE	INSPECT	FusionCurvatureCombAnalysisCommand	Curvature Comb Analysis
+SURFACE	INSPECT	FusionCurvatureMapAnalysisCommand	Curvature Map Analysis
+SURFACE	INSPECT	FusionDraftAnalysisCommand	Draft Analysis
+SURFACE	INSPECT	FusionEnvironmentMapAnalysisCommand	Environment Map Analysis
+SURFACE	INSPECT	FusionIsoCurveAnalysisCommand	Isocurve Analysis
+SURFACE	INSPECT	FusionSurfaceValidateCommand	Validate
+SURFACE	INSPECT	FusionZebraAnalysisCommand	Zebra Analysis
+SURFACE	INSPECT	FusionAccessibilityAnalysisCommand	Accessibility Analysis
+SURFACE	INSPECT	FusionCenterOfMassCommand	Center of Mass
+SURFACE	INSPECT	FusionMinimumRadiusAnalysisCommand	Minimum Radius Analysis
+SURFACE	INSPECT	FusionComponentConnectionAnalysisCommand	Component Connection Analysis
+SURFACE	INSPECT	FusionDOFAnalysisCommand	DOF Analysis
+SURFACE	INSPECT	FusionEditComponentConnectionAnalysisCommand	Edit Component Connection Analysis
+SURFACE	INSPECT	FusionFastenerStackAnalysisCommand	Fastener Stack Analysis
+SURFACE	INSPECT	SimilarPartsCommand	Find Similar Components
+SURFACE	INSPECT	GraphViewCmd	Navigator
+SURFACE	INSPECT	FusionViewColorCyclingToggleCmd	Display Component Colors
+SURFACE	INSPECT	FacegroupsToggleCmd	Display Mesh Face Groups
+SURFACE	INSPECT	FusionAssemblyStatisticsCommand	Assembly Statistics
+SURFACE	INSPECT	ShowChangeAwarenessToolbarCmd	Change Summary
+SURFACE	INSPECT	ShowHistoryToolbarCmd	History
+SURFACE	INSPECT	GravityClimate_ManufacturingSustainabilityInsights_MainDialog	Sustainability Insights
+SURFACE	INSERT	FusionAddEditDecalCommand	Decal
+SURFACE	INSERT	FusionAddCanvasCommand	Canvas
+SURFACE	INSERT	TSplineImportCommand	Insert T-Spline
+SURFACE	INSERT	SketchImportSVG	Insert SVG
+SURFACE	INSERT	ImportDxfFileCommand	Insert DXF
+SURFACE	INSERT	ParaMeshInsertAlignCommand	Insert Mesh
+SURFACE	INSERT	FusionFastenersCommand	Insert Fastener
+SURFACE	INSERT	PullDeriveCommand	Insert Derive
+SURFACE	INSERT	InsertMcMasterCarrComponentCommand	Insert McMaster-Carr Component
+SURFACE	INSERT	cadenasparts4cad	Insert a manufacturer part
+SURFACE	INSERT	traceparts_insert	Insert TraceParts Supplier Components
+SURFACE	ASSEMBLE	NewAssemblyFromPartCommand	Add To Assembly
+SURFACE	SELECT	SelectCommand	Select
+SURFACE	SELECT	selectWindow	Window Selection
+SURFACE	SELECT	selectFreeForm	Freeform Selection
+SURFACE	SELECT	selectPaint	Paint Selection
+SURFACE	SELECT	SelectByNameCommand	Select By Name
+SURFACE	SELECT	SelectByBoundaryCommand	Select By Boundary
+SURFACE	SELECT	FusionSelectBodiesBySizeCommand	Select By Size
+SURFACE	SELECT	SelectByInvertCommand	Invert Selection
+SURFACE	SELECT	FusionSelectSeedAndBoundaryFacesCommand	Seed And Boundary
+SURFACE	SELECT	FusionDragCompControlsCmd	Component Drag
+SURFACE	SELECT	SelectBodyPriorityCommand	Select Body Priority
+SURFACE	SELECT	SelectFacePriorityCommand	Select Face Priority
+SURFACE	SELECT	SelectEdgePriorityCommand	Select Edge Priority
+SURFACE	SELECT	SelectComponentPriorityCommand	Select Component Priority
+SURFACE	SELECT	SelectionFilterCommand	Selection Filters
+SURFACE	POSITION	SnapshotCmd	Capture Position
+SURFACE	POSITION	AsBuiltPositionsCmd	Revert Position
+MESH	CREATE	FusionCreateNewComponentCommand	New Component
+MESH	CREATE	ParaMeshInsertAlignCommand	Insert Mesh
+MESH	CREATE	ParaMeshTessellateCommand	Tessellate
+MESH	CREATE	ParaMeshPlanarSectionCommand	Create Mesh Section Sketch
+MESH	CREATE	ParaMeshEmptyBaseFeatureCommand	Create Base Mesh Feature
+MESH	PREPARE	ParaMeshRepairCommand	Repair
+MESH	PREPARE	ParaMeshCalculateFaceGroupsCommand	Generate Face Groups
+MESH	PREPARE	ParaMeshMergeFaceGroupsCommand	Combine Face Groups
+MESH	PREPARE	ParaMeshCreateFaceGroupCommand	Create Face Group
+MESH	MODIFY	ParaMeshBaseFeatureCreateCommand	Direct Edit
+MESH	MODIFY	ParaMeshRemeshCommand	Remesh
+MESH	MODIFY	ParaMeshReduceCommand	Reduce
+MESH	MODIFY	ParaMeshPlaneCutCommand	Plane Cut
+MESH	MODIFY	ParaMeshHollowCommand	Shell
+MESH	MODIFY	ParaMeshCombineCommand	Combine
+MESH	MODIFY	ParaMeshSmoothCommand	Smooth
+MESH	MODIFY	ParaMeshSmoothBoundaryCommand	Smooth Boundary
+MESH	MODIFY	ParaMeshReverseNormalsCommand	Reverse Normal
+MESH	MODIFY	ParaMeshCloseCracksCommand	Close Cracks
+MESH	MODIFY	ParaMeshEraseAndFillCommand	Erase And Fill
+MESH	MODIFY	ParaMeshBridgeCommand	Bridge
+MESH	MODIFY	ParaMeshAlignCommand	Mesh Align
+MESH	MODIFY	ParaMeshAttractToReferenceCommand	Attract to Reference
+MESH	MODIFY	ParaMeshTextureCommand	Texture Extrude
+MESH	MODIFY	ParaMeshExtractCommand	Separate
+MESH	MODIFY	FusionMoveCommand	Move/Copy
+MESH	MODIFY	ParaMeshScaleCommand	Scale Mesh
+MESH	MODIFY	FusionDeleteCommand	Delete
+MESH	MODIFY	ParaMeshRemoveCommand	Remove
+MESH	MODIFY	ParaMeshConvertCommand	Convert Mesh
+MESH	MODIFY	ParaMeshToQuadMeshCommand	Convert To Quad Mesh
+MESH	MODIFY	VolFieldCreateLatticeCommand	Volumetric Lattice
+MESH	MODIFY	VolFieldTextureCommand	Volumetric Texture
+MESH	MODIFY	VolFieldModifyModelCommand	VolFieldModifyModelCommand
+MESH	MODIFY	PhysicalMaterialCommand	Physical Material
+MESH	MODIFY	AppearanceCommand	Appearance
+MESH	MODIFY	ChangeParameterCommand	Change Parameters
+MESH	MODIFY	FusionComputeAllCommand	Compute All
+MESH	MODIFY	MaterializedBomHybridCmd	Bill of Materials
+MESH	ASSEMBLE	FusionImportCommandFromToolbar	Insert Component
+MESH	ASSEMBLE	FusionDuplicateWithJointsCommand	Duplicate With Joints
+MESH	ASSEMBLE	AssemblyMateCommand	Constrain Components
+MESH	ASSEMBLE	AlignConstraintCmd	Align Constraint
+MESH	ASSEMBLE	AngleConstraintCmd	Angle Constraint
+MESH	ASSEMBLE	MidplaneConstraintCmd	Center Constraint
+MESH	ASSEMBLE	TangentConstraintCmd	Tangent Constraint
+MESH	ASSEMBLE	JointConstraintCmd	Joint Constraint
+MESH	ASSEMBLE	JointAssembleCmdNew	Joint
+MESH	ASSEMBLE	JointAsBuiltCmd	As-Built Joint
+MESH	ASSEMBLE	AsBuiltConstraintCmd	As-Built Constraint
+MESH	ASSEMBLE	JointOrigin	Joint Origin
+MESH	ASSEMBLE	RigidGroupCmd	Rigid Group
+MESH	ASSEMBLE	FusionMoveJointsCommand	Drive Joints
+MESH	ASSEMBLE	FusionMotionRelationshipCommand	Motion Link
+MESH	ASSEMBLE	FusionMotionStudyCommand	Motion Study
+MESH	ASSEMBLE	EnableContactSetsCmd	Enable Contact Sets
+MESH	ASSEMBLE	EnableAllContactCmd	Enable All Contact
+MESH	ASSEMBLE	DisableAllContactCmd	Disable Contact
+MESH	ASSEMBLE	ContactSetCmd	New Contact Set
+MESH	CONFIGURE	FusionStartDesignConfigModeCmd	Configure
+MESH	CONFIGURE	FusionShowDesignConfigPanelCmd	Display Configuration Table
+MESH	CONFIGURE	FusionConfigurationRulesCmd	Create Configuration Rules
+MESH	CONSTRUCT	CoordinateSystemCommand	User Coordinate System (UCS)
+MESH	CONSTRUCT	ConstructionPlaneOffsetFromPlaneCommand	Offset Plane
+MESH	CONSTRUCT	ConstructionPlaneAtAngleCommand	Plane at Angle
+MESH	CONSTRUCT	ConstructionTangentPlaneCommand	Tangent Plane
+MESH	CONSTRUCT	ConstructionMidPlaneCommand	Midplane
+MESH	CONSTRUCT	ConstructionPlanePerpendicularToPlaneCommand	Perpendicular Plane
+MESH	CONSTRUCT	ConstructionPlaneFromTwoEdgesCommand	Plane Through Two Edges
+MESH	CONSTRUCT	ConstructionPlaneFromThreePointsCommand	Plane Through Three Points
+MESH	CONSTRUCT	ConstructionPlaneAlongPathCommand	Plane Along Path
+MESH	CONSTRUCT	ConstructionAxisThroughCylinderCommand	Axis Through Cylinder/Cone/Torus
+MESH	CONSTRUCT	ConstructionAxisNormalToFaceCommand	Axis Perpendicular To Face
+MESH	CONSTRUCT	ConstructionAxisFromTwoPlanesCommand	Axis Through Two Planes
+MESH	CONSTRUCT	ConstructionAxisThroughTwoPointsCommand	Axis Through Two Points
+MESH	CONSTRUCT	ConstructionAxisThroughEdgeCommand	Axis Through Edge
+MESH	CONSTRUCT	ConstructionPointFromPointCommand	Point At Vertex
+MESH	CONSTRUCT	ConstructionPointThroughTwoEdgesCommand	Point Through Two Edges
+MESH	CONSTRUCT	ConstructionPointFromThreePlanesCommand	Point Through Three Planes
+MESH	CONSTRUCT	ConstructionPointFromCircleOrSphereCommand	Point At Center Of Circle/Sphere/Torus
+MESH	CONSTRUCT	ConstructionPointAtEdgeAndPlaneCommand	Point At Edge And Plane
+MESH	CONSTRUCT	ConstructionPointAlongPathCommand	Point Along Path
+MESH	INSPECT	MeasureCommand	Measure
+MESH	INSPECT	InterferenceCheckCommand	Interference
+MESH	INSPECT	FusionHalfSectionViewCommand	Section Analysis
+MESH	INSPECT	FusionCurvatureCombAnalysisCommand	Curvature Comb Analysis
+MESH	INSPECT	FusionCurvatureMapAnalysisCommand	Curvature Map Analysis
+MESH	INSPECT	FusionDraftAnalysisCommand	Draft Analysis
+MESH	INSPECT	FusionEnvironmentMapAnalysisCommand	Environment Map Analysis
+MESH	INSPECT	FusionIsoCurveAnalysisCommand	Isocurve Analysis
+MESH	INSPECT	FusionSurfaceValidateCommand	Validate
+MESH	INSPECT	FusionZebraAnalysisCommand	Zebra Analysis
+MESH	INSPECT	FusionAccessibilityAnalysisCommand	Accessibility Analysis
+MESH	INSPECT	FusionCenterOfMassCommand	Center of Mass
+MESH	INSPECT	FusionMinimumRadiusAnalysisCommand	Minimum Radius Analysis
+MESH	INSPECT	FusionComponentConnectionAnalysisCommand	Component Connection Analysis
+MESH	INSPECT	FusionDOFAnalysisCommand	DOF Analysis
+MESH	INSPECT	FusionEditComponentConnectionAnalysisCommand	Edit Component Connection Analysis
+MESH	INSPECT	FusionFastenerStackAnalysisCommand	Fastener Stack Analysis
+MESH	INSPECT	SimilarPartsCommand	Find Similar Components
+MESH	INSPECT	GraphViewCmd	Navigator
+MESH	INSPECT	FusionViewColorCyclingToggleCmd	Display Component Colors
+MESH	INSPECT	FacegroupsToggleCmd	Display Mesh Face Groups
+MESH	INSPECT	FusionAssemblyStatisticsCommand	Assembly Statistics
+MESH	INSPECT	ShowChangeAwarenessToolbarCmd	Change Summary
+MESH	INSPECT	ShowHistoryToolbarCmd	History
+MESH	INSPECT	GravityClimate_ManufacturingSustainabilityInsights_MainDialog	Sustainability Insights
+MESH	INSERT	FusionAddEditDecalCommand	Decal
+MESH	INSERT	FusionAddCanvasCommand	Canvas
+MESH	INSERT	TSplineImportCommand	Insert T-Spline
+MESH	INSERT	SketchImportSVG	Insert SVG
+MESH	INSERT	ImportDxfFileCommand	Insert DXF
+MESH	INSERT	FusionFastenersCommand	Insert Fastener
+MESH	INSERT	PullDeriveCommand	Insert Derive
+MESH	INSERT	InsertMcMasterCarrComponentCommand	Insert McMaster-Carr Component
+MESH	INSERT	cadenasparts4cad	Insert a manufacturer part
+MESH	INSERT	traceparts_insert	Insert TraceParts Supplier Components
+MESH	ASSEMBLE	NewAssemblyFromPartCommand	Add To Assembly
+MESH	SELECT	SelectCommand	Select
+MESH	SELECT	selectWindow	Window Selection
+MESH	SELECT	selectFreeForm	Freeform Selection
+MESH	SELECT	selectPaint	Paint Selection
+MESH	SELECT	ParaMeshShowSelectionPanelCmd	Mesh Palette
+MESH	SELECT	SelectBodyPriorityCommand	Select Body Priority
+MESH	SELECT	SelectFacePriorityCommand	Select Face Priority
+MESH	SELECT	SelectEdgePriorityCommand	Select Edge Priority
+MESH	SELECT	SelectComponentPriorityCommand	Select Component Priority
+MESH	SELECT	SelectionFilterCommand	Selection Filters
+MESH	EXPORT	ThreeDprintCmdDef	3D Print
+MESH	POSITION	SnapshotCmd	Capture Position
+MESH	POSITION	AsBuiltPositionsCmd	Revert Position
+FORM	CREATE	FusionCreateNewComponentCommand	New Component
+FORM	CREATE	SketchCreate	Create Sketch
+FORM	CREATE	TSplinePrimitiveBoxCommand	Box
+FORM	CREATE	TSplinePrimitivePlaneCommand	Plane
+FORM	CREATE	TSplinePrimitiveCylinderCommand	Cylinder
+FORM	CREATE	TSplinePrimitiveSphereCommand	Sphere
+FORM	CREATE	TSplinePrimitiveTorusCommand	Torus
+FORM	CREATE	TSplinePrimitiveQuadBallCommand	Quadball
+FORM	CREATE	TSplinePrimitivePipe	Pipe
+FORM	CREATE	TSplineAppendFaceCommand	Face
+FORM	CREATE	TSplineExtrudeCommand	Extrude
+FORM	CREATE	TSplineRevolveCommand	Revolve
+FORM	CREATE	TSplineSweepCommand	Sweep
+FORM	CREATE	TSplineLoft	Loft
+FORM	MODIFY	TSplineEditCommand	Edit Form
+FORM	MODIFY	TSplineEditByCurveCmd	Edit By Curve
+FORM	MODIFY	TSplineInsertEdgeCommand	Insert Edge
+FORM	MODIFY	TSplineSubsetCmd	Subdivide
+FORM	MODIFY	TSplineInsertPointCommand	Insert Point
+FORM	MODIFY	TSplineMergeEdgeCmd	Merge Edge
+FORM	MODIFY	TSplineBridgeSubDCmd	Bridge
+FORM	MODIFY	TSplineFillHoleCmd	Fill Hole
+FORM	MODIFY	TSplineEraseAndFillCmd	Erase And Fill
+FORM	MODIFY	TSplineWeldCommand	Weld Vertices
+FORM	MODIFY	TSplineUnWeldCommand	UnWeld Edges
+FORM	MODIFY	TSplineCreasedEdgeCommand	Crease
+FORM	MODIFY	TSplineUnCreaseEdgeCmd	UnCrease
+FORM	MODIFY	TSplineBevelEdgeCommand	Bevel Edge
+FORM	MODIFY	TSplineSlideEdgeCommand	Slide Edge
+FORM	MODIFY	TSplineSmoothCmd	Smooth
+FORM	MODIFY	TSplineCylindrifyCmd	Cylindrify
+FORM	MODIFY	TSplinePullSubDCmd	Pull
+FORM	MODIFY	TSplineFlattenSubDCmd	Flatten
+FORM	MODIFY	TSplineStraightenCmd	Straighten
+FORM	MODIFY	TSplineMatchCmd	Match
+FORM	MODIFY	TSplineInterpolateSubDCmd	Interpolate
+FORM	MODIFY	TSplineThickenCommand	Thicken
+FORM	MODIFY	TSplineFreezeCmd	Freeze
+FORM	MODIFY	TSplineUnFreezeCmd	UnFreeze
+FORM	MODIFY	FusionMoveCommand	Move/Copy
+FORM	MODIFY	AlignCmd	Align
+FORM	MODIFY	FusionDeleteCommand	Delete
+FORM	MODIFY	PhysicalMaterialCommand	Physical Material
+FORM	MODIFY	AppearanceCommand	Appearance
+FORM	MODIFY	MaterialCommand	Manage Materials
+FORM	SYMMETRY	TSplineInternalMirrorSymmetryCmd	Mirror - Internal
+FORM	SYMMETRY	TSplineInternalCircularSymmetryCmd	Circular - Internal
+FORM	SYMMETRY	TSplineReflectionMirrorSymmetryCmd	Mirror - Duplicate
+FORM	SYMMETRY	TSplineReflectionCircularSymmetryCmd	Circular - Duplicate
+FORM	SYMMETRY	TSplineClearSymmetryCommand	Clear Symmetry
+FORM	SYMMETRY	TSplineIsolateSymmetryCmd	Isolate Symmetry
+FORM	UTILITIES	TSplineToggleTessModeCmd	Display Mode
+FORM	UTILITIES	TSplineRepairBodyCmd	Repair Body
+FORM	UTILITIES	TSplineMakeUniformCmd	Make Uniform
+FORM	UTILITIES	TSpline2BRepCommand	Convert
+FORM	UTILITIES	TSplineCapSettingCommand	Enable Better Performance
+FORM	CONSTRUCT	CoordinateSystemCommand	User Coordinate System (UCS)
+FORM	CONSTRUCT	ConstructionPlaneOffsetFromPlaneCommand	Offset Plane
+FORM	CONSTRUCT	ConstructionPlaneAtAngleCommand	Plane at Angle
+FORM	CONSTRUCT	ConstructionTangentPlaneCommand	Tangent Plane
+FORM	CONSTRUCT	ConstructionMidPlaneCommand	Midplane
+FORM	CONSTRUCT	ConstructionPlanePerpendicularToPlaneCommand	Perpendicular Plane
+FORM	CONSTRUCT	ConstructionPlaneFromTwoEdgesCommand	Plane Through Two Edges
+FORM	CONSTRUCT	ConstructionPlaneFromThreePointsCommand	Plane Through Three Points
+FORM	CONSTRUCT	ConstructionPlaneAlongPathCommand	Plane Along Path
+FORM	CONSTRUCT	ConstructionAxisThroughCylinderCommand	Axis Through Cylinder/Cone/Torus
+FORM	CONSTRUCT	ConstructionAxisNormalToFaceCommand	Axis Perpendicular To Face
+FORM	CONSTRUCT	ConstructionAxisFromTwoPlanesCommand	Axis Through Two Planes
+FORM	CONSTRUCT	ConstructionAxisThroughTwoPointsCommand	Axis Through Two Points
+FORM	CONSTRUCT	ConstructionAxisThroughEdgeCommand	Axis Through Edge
+FORM	CONSTRUCT	ConstructionPointFromPointCommand	Point At Vertex
+FORM	CONSTRUCT	ConstructionPointThroughTwoEdgesCommand	Point Through Two Edges
+FORM	CONSTRUCT	ConstructionPointFromThreePlanesCommand	Point Through Three Planes
+FORM	CONSTRUCT	ConstructionPointFromCircleOrSphereCommand	Point At Center Of Circle/Sphere/Torus
+FORM	CONSTRUCT	ConstructionPointAtEdgeAndPlaneCommand	Point At Edge And Plane
+FORM	CONSTRUCT	ConstructionPointAlongPathCommand	Point Along Path
+FORM	INSPECT	MeasureCommand	Measure
+FORM	INSPECT	InterferenceCheckCommand	Interference
+FORM	INSPECT	FusionHalfSectionViewCommand	Section Analysis
+FORM	INSPECT	FusionCurvatureCombAnalysisCommand	Curvature Comb Analysis
+FORM	INSPECT	FusionCurvatureMapAnalysisCommand	Curvature Map Analysis
+FORM	INSPECT	FusionDraftAnalysisCommand	Draft Analysis
+FORM	INSPECT	FusionEnvironmentMapAnalysisCommand	Environment Map Analysis
+FORM	INSPECT	FusionIsoCurveAnalysisCommand	Isocurve Analysis
+FORM	INSPECT	FusionSurfaceValidateCommand	Validate
+FORM	INSPECT	FusionZebraAnalysisCommand	Zebra Analysis
+FORM	INSPECT	FusionAccessibilityAnalysisCommand	Accessibility Analysis
+FORM	INSPECT	FusionCenterOfMassCommand	Center of Mass
+FORM	INSPECT	FusionMinimumRadiusAnalysisCommand	Minimum Radius Analysis
+FORM	INSPECT	FusionComponentConnectionAnalysisCommand	Component Connection Analysis
+FORM	INSPECT	FusionDOFAnalysisCommand	DOF Analysis
+FORM	INSPECT	FusionEditComponentConnectionAnalysisCommand	Edit Component Connection Analysis
+FORM	INSPECT	FusionFastenerStackAnalysisCommand	Fastener Stack Analysis
+FORM	INSPECT	SimilarPartsCommand	Find Similar Components
+FORM	INSPECT	GraphViewCmd	Navigator
+FORM	INSPECT	FusionViewColorCyclingToggleCmd	Display Component Colors
+FORM	INSPECT	FacegroupsToggleCmd	Display Mesh Face Groups
+FORM	INSPECT	FusionAssemblyStatisticsCommand	Assembly Statistics
+FORM	INSPECT	ShowChangeAwarenessToolbarCmd	Change Summary
+FORM	INSPECT	ShowHistoryToolbarCmd	History
+FORM	INSPECT	GravityClimate_ManufacturingSustainabilityInsights_MainDialog	Sustainability Insights
+FORM	INSERT	FusionAddEditDecalCommand	Decal
+FORM	INSERT	FusionAddCanvasCommand	Canvas
+FORM	INSERT	TSplineImportCommand	Insert T-Spline
+FORM	INSERT	SketchImportSVG	Insert SVG
+FORM	INSERT	ImportDxfFileCommand	Insert DXF
+FORM	INSERT	ParaMeshInsertAlignCommand	Insert Mesh
+FORM	INSERT	FusionImportCommandFromToolbar	Insert Component
+FORM	INSERT	FusionFastenersCommand	Insert Fastener
+FORM	INSERT	FusionDuplicateWithJointsCommand	Duplicate With Joints
+FORM	INSERT	PullDeriveCommand	Insert Derive
+FORM	INSERT	InsertMcMasterCarrComponentCommand	Insert McMaster-Carr Component
+FORM	INSERT	cadenasparts4cad	Insert a manufacturer part
+FORM	INSERT	traceparts_insert	Insert TraceParts Supplier Components
+FORM	ASSEMBLE	NewAssemblyFromPartCommand	Add To Assembly
+FORM	SELECT	SelectCommand	Select
+FORM	SELECT	selectWindow	Window Selection
+FORM	SELECT	selectFreeForm	Freeform Selection
+FORM	SELECT	selectPaint	Paint Selection
+FORM	SELECT	SelectByNameCommand	Select By Name
+FORM	SELECT	SelectByBoundaryCommand	Select By Boundary
+FORM	SELECT	FusionSelectBodiesBySizeCommand	Select By Size
+FORM	SELECT	SelectByInvertCommand	Invert Selection
+FORM	SELECT	FusionSelectSeedAndBoundaryFacesCommand	Seed And Boundary
+FORM	SELECT	FusionDragCompControlsCmd	Component Drag
+FORM	SELECT	SelectBodyPriorityCommand	Select Body Priority
+FORM	SELECT	SelectFacePriorityCommand	Select Face Priority
+FORM	SELECT	SelectEdgePriorityCommand	Select Edge Priority
+FORM	SELECT	SelectComponentPriorityCommand	Select Component Priority
+FORM	SELECT	SelectionFilterCommand	Selection Filters
+FORM	FINISH FORM	TSplineBaseFeatureStop	Finish Form
+SHEET METAL	CREATE	FusionCreateNewComponentCommand	New Component
+SHEET METAL	CREATE	SketchCreate	Create Sketch
+SHEET METAL	CREATE	FusionSheetMetalFlangeCommand	Flange (Base/Edge/Contour)
+SHEET METAL	CREATE	FusionSheetMetalHemFlangeCommand	Hem
+SHEET METAL	CREATE	FusionSheetMetalLoftCommand	Lofted Flange
+SHEET METAL	CREATE	SheetMetalFoldCmd	Fold
+SHEET METAL	CREATE	ConvertToSheetMetalCmd	Convert to Sheet Metal
+SHEET METAL	CREATE	DMConvertToSheetMetalCmd	Convert to Sheet Metal
+SHEET METAL	CREATE	PushDeriveCommand	Derive
+SHEET METAL	CREATE	Extrude	Extrude
+SHEET METAL	CREATE	FusionHoleCommand	Hole
+SHEET METAL	CREATE	FusionThreadCommand	Thread
+SHEET METAL	CREATE	PatternRectangular	Rectangular Pattern
+SHEET METAL	CREATE	PatternCircular	Circular Pattern
+SHEET METAL	CREATE	PatternOnPath	Pattern on Path
+SHEET METAL	CREATE	FusionPatternGeometricCommand	Geometric Pattern
+SHEET METAL	CREATE	MirrorCommand	Mirror
+SHEET METAL	CREATE	FusionSheetMetalFlatPatternCmd	Create Flat Pattern
+SHEET METAL	CREATE	JointOrigin	Joint Origin
+SHEET METAL	MODIFY	FusionSheetmetalUnfoldCommand	Unfold
+SHEET METAL	MODIFY	FusionSheetMetalRulesCommand	Sheet Metal Rules
+SHEET METAL	MODIFY	FusionSheetMetalRulesLibraryCommand	Sheet Metal Rules Library
+SHEET METAL	MODIFY	FusionSheetMetalCornerCommand	Corner Closure
+SHEET METAL	MODIFY	FusionJoinByBendCommand	Join by bend
+SHEET METAL	MODIFY	FusionSheetMetalRipCommand	Rip
+SHEET METAL	MODIFY	FusionSheetMetalFilletCommand	Sheet Metal Fillet
+SHEET METAL	MODIFY	FusionSheetMetalChamferCommand	Sheet Metal Chamfer
+SHEET METAL	MODIFY	FusionFilletEdgesCommand	Fillet
+SHEET METAL	MODIFY	FusionChamferCommand	Chamfer
+SHEET METAL	MODIFY	FusionMoveCommand	Move/Copy
+SHEET METAL	MODIFY	AlignCmd	Align
+SHEET METAL	MODIFY	FusionDeleteCommand	Delete
+SHEET METAL	MODIFY	SoftDeleteCommand	Remove
+SHEET METAL	MODIFY	PhysicalMaterialCommand	Physical Material
+SHEET METAL	MODIFY	AppearanceCommand	Appearance
+SHEET METAL	MODIFY	MaterialCommand	Manage Materials
+SHEET METAL	MODIFY	ChangeParameterCommand	Change Parameters
+SHEET METAL	MODIFY	FusionComputeAllCommand	Compute All
+SHEET METAL	MODIFY	FusionComputeUnresolvedCommand	Compute Unresolved
+SHEET METAL	MODIFY	MaterializedBomHybridCmd	Bill of Materials
+SHEET METAL	ASSEMBLE	FusionImportCommandFromToolbar	Insert Component
+SHEET METAL	ASSEMBLE	FusionDuplicateWithJointsCommand	Duplicate With Joints
+SHEET METAL	ASSEMBLE	AssemblyMateCommand	Constrain Components
+SHEET METAL	ASSEMBLE	AlignConstraintCmd	Align Constraint
+SHEET METAL	ASSEMBLE	AngleConstraintCmd	Angle Constraint
+SHEET METAL	ASSEMBLE	MidplaneConstraintCmd	Center Constraint
+SHEET METAL	ASSEMBLE	TangentConstraintCmd	Tangent Constraint
+SHEET METAL	ASSEMBLE	JointConstraintCmd	Joint Constraint
+SHEET METAL	ASSEMBLE	JointAssembleCmdNew	Joint
+SHEET METAL	ASSEMBLE	JointAsBuiltCmd	As-Built Joint
+SHEET METAL	ASSEMBLE	AsBuiltConstraintCmd	As-Built Constraint
+SHEET METAL	ASSEMBLE	RigidGroupCmd	Rigid Group
+SHEET METAL	ASSEMBLE	FusionMoveJointsCommand	Drive Joints
+SHEET METAL	ASSEMBLE	FusionMotionRelationshipCommand	Motion Link
+SHEET METAL	ASSEMBLE	FusionMotionStudyCommand	Motion Study
+SHEET METAL	ASSEMBLE	EnableContactSetsCmd	Enable Contact Sets
+SHEET METAL	ASSEMBLE	EnableAllContactCmd	Enable All Contact
+SHEET METAL	ASSEMBLE	DisableAllContactCmd	Disable Contact
+SHEET METAL	ASSEMBLE	ContactSetCmd	New Contact Set
+SHEET METAL	CONFIGURE	FusionStartDesignConfigModeCmd	Configure
+SHEET METAL	CONFIGURE	FusionShowDesignConfigPanelCmd	Display Configuration Table
+SHEET METAL	CONFIGURE	FusionConfigurationRulesCmd	Create Configuration Rules
+SHEET METAL	CONSTRUCT	CoordinateSystemCommand	User Coordinate System (UCS)
+SHEET METAL	CONSTRUCT	ConstructionPlaneOffsetFromPlaneCommand	Offset Plane
+SHEET METAL	CONSTRUCT	ConstructionPlaneAtAngleCommand	Plane at Angle
+SHEET METAL	CONSTRUCT	ConstructionTangentPlaneCommand	Tangent Plane
+SHEET METAL	CONSTRUCT	ConstructionMidPlaneCommand	Midplane
+SHEET METAL	CONSTRUCT	ConstructionPlanePerpendicularToPlaneCommand	Perpendicular Plane
+SHEET METAL	CONSTRUCT	ConstructionPlaneFromTwoEdgesCommand	Plane Through Two Edges
+SHEET METAL	CONSTRUCT	ConstructionPlaneFromThreePointsCommand	Plane Through Three Points
+SHEET METAL	CONSTRUCT	ConstructionPlaneAlongPathCommand	Plane Along Path
+SHEET METAL	CONSTRUCT	ConstructionAxisThroughCylinderCommand	Axis Through Cylinder/Cone/Torus
+SHEET METAL	CONSTRUCT	ConstructionAxisNormalToFaceCommand	Axis Perpendicular To Face
+SHEET METAL	CONSTRUCT	ConstructionAxisFromTwoPlanesCommand	Axis Through Two Planes
+SHEET METAL	CONSTRUCT	ConstructionAxisThroughTwoPointsCommand	Axis Through Two Points
+SHEET METAL	CONSTRUCT	ConstructionAxisThroughEdgeCommand	Axis Through Edge
+SHEET METAL	CONSTRUCT	ConstructionPointFromPointCommand	Point At Vertex
+SHEET METAL	CONSTRUCT	ConstructionPointThroughTwoEdgesCommand	Point Through Two Edges
+SHEET METAL	CONSTRUCT	ConstructionPointFromThreePlanesCommand	Point Through Three Planes
+SHEET METAL	CONSTRUCT	ConstructionPointFromCircleOrSphereCommand	Point At Center Of Circle/Sphere/Torus
+SHEET METAL	CONSTRUCT	ConstructionPointAtEdgeAndPlaneCommand	Point At Edge And Plane
+SHEET METAL	CONSTRUCT	ConstructionPointAlongPathCommand	Point Along Path
+SHEET METAL	INSPECT	MeasureCommand	Measure
+SHEET METAL	INSPECT	InterferenceCheckCommand	Interference
+SHEET METAL	INSPECT	FusionHalfSectionViewCommand	Section Analysis
+SHEET METAL	INSPECT	FusionCurvatureCombAnalysisCommand	Curvature Comb Analysis
+SHEET METAL	INSPECT	FusionCurvatureMapAnalysisCommand	Curvature Map Analysis
+SHEET METAL	INSPECT	FusionDraftAnalysisCommand	Draft Analysis
+SHEET METAL	INSPECT	FusionEnvironmentMapAnalysisCommand	Environment Map Analysis
+SHEET METAL	INSPECT	FusionIsoCurveAnalysisCommand	Isocurve Analysis
+SHEET METAL	INSPECT	FusionSurfaceValidateCommand	Validate
+SHEET METAL	INSPECT	FusionZebraAnalysisCommand	Zebra Analysis
+SHEET METAL	INSPECT	FusionAccessibilityAnalysisCommand	Accessibility Analysis
+SHEET METAL	INSPECT	FusionCenterOfMassCommand	Center of Mass
+SHEET METAL	INSPECT	FusionMinimumRadiusAnalysisCommand	Minimum Radius Analysis
+SHEET METAL	INSPECT	FusionComponentConnectionAnalysisCommand	Component Connection Analysis
+SHEET METAL	INSPECT	FusionDOFAnalysisCommand	DOF Analysis
+SHEET METAL	INSPECT	FusionEditComponentConnectionAnalysisCommand	Edit Component Connection Analysis
+SHEET METAL	INSPECT	FusionFastenerStackAnalysisCommand	Fastener Stack Analysis
+SHEET METAL	INSPECT	SimilarPartsCommand	Find Similar Components
+SHEET METAL	INSPECT	GraphViewCmd	Navigator
+SHEET METAL	INSPECT	FusionViewColorCyclingToggleCmd	Display Component Colors
+SHEET METAL	INSPECT	FacegroupsToggleCmd	Display Mesh Face Groups
+SHEET METAL	INSPECT	FusionAssemblyStatisticsCommand	Assembly Statistics
+SHEET METAL	INSPECT	ShowChangeAwarenessToolbarCmd	Change Summary
+SHEET METAL	INSPECT	ShowHistoryToolbarCmd	History
+SHEET METAL	INSPECT	GravityClimate_ManufacturingSustainabilityInsights_MainDialog	Sustainability Insights
+SHEET METAL	INSERT	FusionAddEditDecalCommand	Decal
+SHEET METAL	INSERT	FusionAddCanvasCommand	Canvas
+SHEET METAL	INSERT	TSplineImportCommand	Insert T-Spline
+SHEET METAL	INSERT	SketchImportSVG	Insert SVG
+SHEET METAL	INSERT	ImportDxfFileCommand	Insert DXF
+SHEET METAL	INSERT	ParaMeshInsertAlignCommand	Insert Mesh
+SHEET METAL	INSERT	FusionFastenersCommand	Insert Fastener
+SHEET METAL	INSERT	PullDeriveCommand	Insert Derive
+SHEET METAL	INSERT	InsertMcMasterCarrComponentCommand	Insert McMaster-Carr Component
+SHEET METAL	INSERT	cadenasparts4cad	Insert a manufacturer part
+SHEET METAL	INSERT	traceparts_insert	Insert TraceParts Supplier Components
+SHEET METAL	ASSEMBLE	NewAssemblyFromPartCommand	Add To Assembly
+SHEET METAL	SELECT	SelectCommand	Select
+SHEET METAL	SELECT	selectWindow	Window Selection
+SHEET METAL	SELECT	selectFreeForm	Freeform Selection
+SHEET METAL	SELECT	selectPaint	Paint Selection
+SHEET METAL	SELECT	SelectByNameCommand	Select By Name
+SHEET METAL	SELECT	SelectByBoundaryCommand	Select By Boundary
+SHEET METAL	SELECT	FusionSelectBodiesBySizeCommand	Select By Size
+SHEET METAL	SELECT	SelectByInvertCommand	Invert Selection
+SHEET METAL	SELECT	FusionSelectSeedAndBoundaryFacesCommand	Seed And Boundary
+SHEET METAL	SELECT	FusionDragCompControlsCmd	Component Drag
+SHEET METAL	SELECT	SelectBodyPriorityCommand	Select Body Priority
+SHEET METAL	SELECT	SelectFacePriorityCommand	Select Face Priority
+SHEET METAL	SELECT	SelectEdgePriorityCommand	Select Edge Priority
+SHEET METAL	SELECT	SelectComponentPriorityCommand	Select Component Priority
+SHEET METAL	SELECT	SelectionFilterCommand	Selection Filters
+SHEET METAL	REFOLD	FusionSheetmetalRefoldCommand	Refold
+SHEET METAL	POSITION	SnapshotCmd	Capture Position
+SHEET METAL	POSITION	AsBuiltPositionsCmd	Revert Position
+PLASTIC	SETUP	FusionAssignPlasticRuleCommand	Assign Plastic Rule
+PLASTIC	SETUP	FusionManagePlasticRuleCommand	Manage Plastic Rules
+PLASTIC	CREATE	FusionCreateNewComponentCommand	New Component
+PLASTIC	CREATE	SketchCreate	Create Sketch
+PLASTIC	CREATE	TSplineBaseFeatureCreationCommand	Create Form
+PLASTIC	CREATE	PushDeriveCommand	Derive
+PLASTIC	CREATE	Extrude	Extrude
+PLASTIC	CREATE	Revolve	Revolve
+PLASTIC	CREATE	Sweep	Sweep
+PLASTIC	CREATE	SolidLoft	Loft
+PLASTIC	CREATE	FusionRibCommand	Rib
+PLASTIC	CREATE	FusionWebCommand	Web
+PLASTIC	CREATE	EmbossCmd	Emboss
+PLASTIC	CREATE	FusionBossCommand	Boss
+PLASTIC	CREATE	FusionSnapFitCommand	Snap Fit
+PLASTIC	CREATE	FusionLipCommand	Lip
+PLASTIC	CREATE	FusionRestCommand	Rest
+PLASTIC	CREATE	FusionHoleCommand	Hole
+PLASTIC	CREATE	FusionThreadCommand	Thread
+PLASTIC	CREATE	PrimitiveBox	Box
+PLASTIC	CREATE	PrimitiveCylinder	Cylinder
+PLASTIC	CREATE	PrimitiveSphere	Sphere
+PLASTIC	CREATE	PrimitiveTorus	Torus
+PLASTIC	CREATE	PrimitiveCoil	Coil
+PLASTIC	CREATE	PrimitivePipe	Pipe
+PLASTIC	CREATE	PatternRectangular	Rectangular Pattern
+PLASTIC	CREATE	PatternCircular	Circular Pattern
+PLASTIC	CREATE	PatternOnPath	Pattern on Path
+PLASTIC	CREATE	FusionPatternGeometricCommand	Geometric Pattern
+PLASTIC	CREATE	MirrorCommand	Mirror
+PLASTIC	CREATE	FusionSurfaceThickenCommand	Thicken
+PLASTIC	CREATE	SurfaceSculpt	Boundary Fill
+PLASTIC	CREATE	BaseFeatureCreationCommand	Create Base Feature
+PLASTIC	CREATE	PCBExternalComponentCreationCmd	Create Linked PCB
+PLASTIC	CREATE	PCBDeriveCmd	Derive PCB
+PLASTIC	CREATE	PCBCreateCmd	Create Unlinked PCB
+PLASTIC	CREATE	JointOrigin	Joint Origin
+PLASTIC	MODIFY	FusionPressPullCommand	Press Pull
+PLASTIC	MODIFY	EditFaceCommand	Edit Face
+PLASTIC	MODIFY	FusionFilletEdgesCommand	Fillet
+PLASTIC	MODIFY	FusionChamferCommand	Chamfer
+PLASTIC	MODIFY	FusionShellBodyCommand	Shell
+PLASTIC	MODIFY	FusionDraftCommand	Draft
+PLASTIC	MODIFY	ModifyScale	Scale
+PLASTIC	MODIFY	FusionCombineCommand	Combine
+PLASTIC	MODIFY	FusionOffsetFacesCommand	Offset Face
+PLASTIC	MODIFY	FusionReplaceFaceCommand	Replace Face
+PLASTIC	MODIFY	FusionSplitFaceCommand	Split Face
+PLASTIC	MODIFY	FusionSplitBodyCommand	Split Body
+PLASTIC	MODIFY	FusionPartingLineSplitCmd	Silhouette Split
+PLASTIC	MODIFY	FusionMoveCommand	Move/Copy
+PLASTIC	MODIFY	AlignCmd	Align
+PLASTIC	MODIFY	FusionDeleteCommand	Delete
+PLASTIC	MODIFY	SoftDeleteCommand	Remove
+PLASTIC	MODIFY	ArrangeCommand	Arrange
+PLASTIC	MODIFY	FusionRemoveFeaturesCommand	Remove Features
+PLASTIC	MODIFY	FusionRemoveFacesCommand	Remove Faces
+PLASTIC	MODIFY	ReplaceWithPrimitivesCommand	Replace with Primitives
+PLASTIC	MODIFY	VolFieldCreateLatticeCommand	Volumetric Lattice
+PLASTIC	MODIFY	VolFieldTextureCommand	Volumetric Texture
+PLASTIC	MODIFY	VolFieldModifyModelCommand	VolFieldModifyModelCommand
+PLASTIC	MODIFY	PhysicalMaterialCommand	Physical Material
+PLASTIC	MODIFY	AppearanceCommand	Appearance
+PLASTIC	MODIFY	MaterialCommand	Manage Materials
+PLASTIC	MODIFY	ChangeParameterCommand	Change Parameters
+PLASTIC	MODIFY	FusionComputeAllCommand	Compute All
+PLASTIC	MODIFY	FusionComputeUnresolvedCommand	Compute Unresolved
+PLASTIC	MODIFY	TSpline2BRepCommand	Convert
+PLASTIC	MODIFY	MaterializedBomHybridCmd	Bill of Materials
+PLASTIC	ASSEMBLE	FusionImportCommandFromToolbar	Insert Component
+PLASTIC	ASSEMBLE	FusionDuplicateWithJointsCommand	Duplicate With Joints
+PLASTIC	ASSEMBLE	AssemblyMateCommand	Constrain Components
+PLASTIC	ASSEMBLE	AlignConstraintCmd	Align Constraint
+PLASTIC	ASSEMBLE	AngleConstraintCmd	Angle Constraint
+PLASTIC	ASSEMBLE	MidplaneConstraintCmd	Center Constraint
+PLASTIC	ASSEMBLE	TangentConstraintCmd	Tangent Constraint
+PLASTIC	ASSEMBLE	JointConstraintCmd	Joint Constraint
+PLASTIC	ASSEMBLE	JointAssembleCmdNew	Joint
+PLASTIC	ASSEMBLE	JointAsBuiltCmd	As-Built Joint
+PLASTIC	ASSEMBLE	AsBuiltConstraintCmd	As-Built Constraint
+PLASTIC	ASSEMBLE	RigidGroupCmd	Rigid Group
+PLASTIC	ASSEMBLE	FusionMoveJointsCommand	Drive Joints
+PLASTIC	ASSEMBLE	FusionMotionRelationshipCommand	Motion Link
+PLASTIC	ASSEMBLE	FusionMotionStudyCommand	Motion Study
+PLASTIC	ASSEMBLE	EnableContactSetsCmd	Enable Contact Sets
+PLASTIC	ASSEMBLE	EnableAllContactCmd	Enable All Contact
+PLASTIC	ASSEMBLE	DisableAllContactCmd	Disable Contact
+PLASTIC	ASSEMBLE	ContactSetCmd	New Contact Set
+PLASTIC	CONFIGURE	FusionStartDesignConfigModeCmd	Configure
+PLASTIC	CONFIGURE	FusionShowDesignConfigPanelCmd	Display Configuration Table
+PLASTIC	CONFIGURE	FusionConfigurationRulesCmd	Create Configuration Rules
+PLASTIC	CONSTRUCT	CoordinateSystemCommand	User Coordinate System (UCS)
+PLASTIC	CONSTRUCT	ConstructionPlaneOffsetFromPlaneCommand	Offset Plane
+PLASTIC	CONSTRUCT	ConstructionPlaneAtAngleCommand	Plane at Angle
+PLASTIC	CONSTRUCT	ConstructionTangentPlaneCommand	Tangent Plane
+PLASTIC	CONSTRUCT	ConstructionMidPlaneCommand	Midplane
+PLASTIC	CONSTRUCT	ConstructionPlanePerpendicularToPlaneCommand	Perpendicular Plane
+PLASTIC	CONSTRUCT	ConstructionPlaneFromTwoEdgesCommand	Plane Through Two Edges
+PLASTIC	CONSTRUCT	ConstructionPlaneFromThreePointsCommand	Plane Through Three Points
+PLASTIC	CONSTRUCT	ConstructionPlaneAlongPathCommand	Plane Along Path
+PLASTIC	CONSTRUCT	ConstructionAxisThroughCylinderCommand	Axis Through Cylinder/Cone/Torus
+PLASTIC	CONSTRUCT	ConstructionAxisNormalToFaceCommand	Axis Perpendicular To Face
+PLASTIC	CONSTRUCT	ConstructionAxisFromTwoPlanesCommand	Axis Through Two Planes
+PLASTIC	CONSTRUCT	ConstructionAxisThroughTwoPointsCommand	Axis Through Two Points
+PLASTIC	CONSTRUCT	ConstructionAxisThroughEdgeCommand	Axis Through Edge
+PLASTIC	CONSTRUCT	ConstructionPointFromPointCommand	Point At Vertex
+PLASTIC	CONSTRUCT	ConstructionPointThroughTwoEdgesCommand	Point Through Two Edges
+PLASTIC	CONSTRUCT	ConstructionPointFromThreePlanesCommand	Point Through Three Planes
+PLASTIC	CONSTRUCT	ConstructionPointFromCircleOrSphereCommand	Point At Center Of Circle/Sphere/Torus
+PLASTIC	CONSTRUCT	ConstructionPointAtEdgeAndPlaneCommand	Point At Edge And Plane
+PLASTIC	CONSTRUCT	ConstructionPointAlongPathCommand	Point Along Path
+PLASTIC	INSPECT	MeasureCommand	Measure
+PLASTIC	INSPECT	InterferenceCheckCommand	Interference
+PLASTIC	INSPECT	FusionHalfSectionViewCommand	Section Analysis
+PLASTIC	INSPECT	FusionCurvatureCombAnalysisCommand	Curvature Comb Analysis
+PLASTIC	INSPECT	FusionCurvatureMapAnalysisCommand	Curvature Map Analysis
+PLASTIC	INSPECT	FusionDraftAnalysisCommand	Draft Analysis
+PLASTIC	INSPECT	FusionEnvironmentMapAnalysisCommand	Environment Map Analysis
+PLASTIC	INSPECT	FusionIsoCurveAnalysisCommand	Isocurve Analysis
+PLASTIC	INSPECT	FusionSurfaceValidateCommand	Validate
+PLASTIC	INSPECT	FusionZebraAnalysisCommand	Zebra Analysis
+PLASTIC	INSPECT	FusionAccessibilityAnalysisCommand	Accessibility Analysis
+PLASTIC	INSPECT	FusionCenterOfMassCommand	Center of Mass
+PLASTIC	INSPECT	DesignAdviceCmd	Design Advice
+PLASTIC	INSPECT	FusionMinimumRadiusAnalysisCommand	Minimum Radius Analysis
+PLASTIC	INSPECT	FusionComponentConnectionAnalysisCommand	Component Connection Analysis
+PLASTIC	INSPECT	FusionDOFAnalysisCommand	DOF Analysis
+PLASTIC	INSPECT	FusionEditComponentConnectionAnalysisCommand	Edit Component Connection Analysis
+PLASTIC	INSPECT	FusionFastenerStackAnalysisCommand	Fastener Stack Analysis
+PLASTIC	INSPECT	SimilarPartsCommand	Find Similar Components
+PLASTIC	INSPECT	GraphViewCmd	Navigator
+PLASTIC	INSPECT	FusionViewColorCyclingToggleCmd	Display Component Colors
+PLASTIC	INSPECT	FacegroupsToggleCmd	Display Mesh Face Groups
+PLASTIC	INSPECT	FusionAssemblyStatisticsCommand	Assembly Statistics
+PLASTIC	INSPECT	ShowChangeAwarenessToolbarCmd	Change Summary
+PLASTIC	INSPECT	ShowHistoryToolbarCmd	History
+PLASTIC	INSPECT	GravityClimate_ManufacturingSustainabilityInsights_MainDialog	Sustainability Insights
+PLASTIC	INSERT	FusionAddEditDecalCommand	Decal
+PLASTIC	INSERT	FusionAddCanvasCommand	Canvas
+PLASTIC	INSERT	TSplineImportCommand	Insert T-Spline
+PLASTIC	INSERT	SketchImportSVG	Insert SVG
+PLASTIC	INSERT	ImportDxfFileCommand	Insert DXF
+PLASTIC	INSERT	ParaMeshInsertAlignCommand	Insert Mesh
+PLASTIC	INSERT	FusionFastenersCommand	Insert Fastener
+PLASTIC	INSERT	PullDeriveCommand	Insert Derive
+PLASTIC	INSERT	InsertMcMasterCarrComponentCommand	Insert McMaster-Carr Component
+PLASTIC	INSERT	cadenasparts4cad	Insert a manufacturer part
+PLASTIC	INSERT	traceparts_insert	Insert TraceParts Supplier Components
+PLASTIC	ASSEMBLE	NewAssemblyFromPartCommand	Add To Assembly
+PLASTIC	SELECT	SelectCommand	Select
+PLASTIC	SELECT	selectWindow	Window Selection
+PLASTIC	SELECT	selectFreeForm	Freeform Selection
+PLASTIC	SELECT	selectPaint	Paint Selection
+PLASTIC	SELECT	SelectByNameCommand	Select By Name
+PLASTIC	SELECT	SelectByBoundaryCommand	Select By Boundary
+PLASTIC	SELECT	FusionSelectBodiesBySizeCommand	Select By Size
+PLASTIC	SELECT	SelectByInvertCommand	Invert Selection
+PLASTIC	SELECT	FusionSelectSeedAndBoundaryFacesCommand	Seed And Boundary
+PLASTIC	SELECT	FusionDragCompControlsCmd	Component Drag
+PLASTIC	SELECT	SelectBodyPriorityCommand	Select Body Priority
+PLASTIC	SELECT	SelectFacePriorityCommand	Select Face Priority
+PLASTIC	SELECT	SelectEdgePriorityCommand	Select Edge Priority
+PLASTIC	SELECT	SelectComponentPriorityCommand	Select Component Priority
+PLASTIC	SELECT	SelectionFilterCommand	Selection Filters
+PLASTIC	POSITION	SnapshotCmd	Capture Position
+PLASTIC	POSITION	AsBuiltPositionsCmd	Revert Position
+ASSEMBLY	INSERT	FusionImportCommandFromToolbar	Insert Component
+ASSEMBLY	INSERT	FusionFastenersCommand	Insert Fastener
+ASSEMBLY	INSERT	FusionDuplicateWithJointsCommand	Duplicate With Joints
+ASSEMBLY	INSERT	PullDeriveCommand	Insert Derive
+ASSEMBLY	INSERT	FusionAddEditDecalCommand	Decal
+ASSEMBLY	INSERT	FusionAddCanvasCommand	Canvas
+ASSEMBLY	INSERT	NewAssemblyFromPartCommand	Add To Assembly
+ASSEMBLY	INSERT	InsertMcMasterCarrComponentCommand	Insert McMaster-Carr Component
+ASSEMBLY	CREATE	FusionCreateNewComponentCommand	New Component
+ASSEMBLY	CREATE	SketchCreate	Create Sketch
+ASSEMBLY	CREATE	PatternRectangular	Rectangular Pattern
+ASSEMBLY	CREATE	PatternCircular	Circular Pattern
+ASSEMBLY	CREATE	PatternOnPath	Pattern on Path
+ASSEMBLY	CREATE	FusionPatternGeometricCommand	Geometric Pattern
+ASSEMBLY	CREATE	PCBExternalComponentCreationCmd	Create Linked PCB
+ASSEMBLY	CREATE	PushDeriveCommand	Derive
+ASSEMBLY	RELATIONSHIPS	AssemblyMateCommand	Constrain Components
+ASSEMBLY	RELATIONSHIPS	AlignConstraintCmd	Align Constraint
+ASSEMBLY	RELATIONSHIPS	AngleConstraintCmd	Angle Constraint
+ASSEMBLY	RELATIONSHIPS	MidplaneConstraintCmd	Center Constraint
+ASSEMBLY	RELATIONSHIPS	TangentConstraintCmd	Tangent Constraint
+ASSEMBLY	RELATIONSHIPS	JointConstraintCmd	Joint Constraint
+ASSEMBLY	RELATIONSHIPS	JointAssembleCmdNew	Joint
+ASSEMBLY	RELATIONSHIPS	JointAsBuiltCmd	As-Built Joint
+ASSEMBLY	RELATIONSHIPS	AsBuiltConstraintCmd	As-Built Constraint
+ASSEMBLY	RELATIONSHIPS	JointOrigin	Joint Origin
+ASSEMBLY	RELATIONSHIPS	RigidGroupCmd	Rigid Group
+ASSEMBLY	MOTION	FusionMoveJointsCommand	Drive Joints
+ASSEMBLY	MOTION	FusionMotionRelationshipCommand	Motion Link
+ASSEMBLY	MOTION	FusionMotionStudyCommand	Motion Study
+ASSEMBLY	MODIFY	FusionMoveCommand	Move/Copy
+ASSEMBLY	MODIFY	AlignCmd	Align
+ASSEMBLY	MODIFY	FusionDeleteCommand	Delete
+ASSEMBLY	MODIFY	SoftDeleteCommand	Remove
+ASSEMBLY	MODIFY	ArrangeCommand	Arrange
+ASSEMBLY	MODIFY	MaterializedBomCmd	Bill of Materials
+ASSEMBLY	MODIFY	ChangeParameterCommand	Change Parameters
+ASSEMBLY	MODIFY	PhysicalMaterialCommand	Physical Material
+ASSEMBLY	MODIFY	AppearanceCommand	Appearance
+ASSEMBLY	MODIFY	MaterialCommand	Manage Materials
+ASSEMBLY	MODIFY	FusionComputeAllCommand	Compute All
+ASSEMBLY	CONTACT	EnableContactSetsCmd	Enable Contact Sets
+ASSEMBLY	CONTACT	EnableAllContactCmd	Enable All Contact
+ASSEMBLY	CONFIGURE	FusionStartDesignConfigModeCmd	Configure
+ASSEMBLY	CONFIGURE	FusionShowDesignConfigPanelCmd	Display Configuration Table
+ASSEMBLY	CONFIGURE	FusionConfigurationRulesCmd	Create Configuration Rules
+ASSEMBLY	CONSTRUCT	CoordinateSystemCommand	User Coordinate System (UCS)
+ASSEMBLY	CONSTRUCT	ConstructionPlaneOffsetFromPlaneCommand	Offset Plane
+ASSEMBLY	CONSTRUCT	ConstructionPlaneAtAngleCommand	Plane at Angle
+ASSEMBLY	CONSTRUCT	ConstructionTangentPlaneCommand	Tangent Plane
+ASSEMBLY	CONSTRUCT	ConstructionMidPlaneCommand	Midplane
+ASSEMBLY	CONSTRUCT	ConstructionPlanePerpendicularToPlaneCommand	Perpendicular Plane
+ASSEMBLY	CONSTRUCT	ConstructionPlaneFromTwoEdgesCommand	Plane Through Two Edges
+ASSEMBLY	CONSTRUCT	ConstructionPlaneFromThreePointsCommand	Plane Through Three Points
+ASSEMBLY	CONSTRUCT	ConstructionPlaneAlongPathCommand	Plane Along Path
+ASSEMBLY	CONSTRUCT	ConstructionAxisThroughCylinderCommand	Axis Through Cylinder/Cone/Torus
+ASSEMBLY	CONSTRUCT	ConstructionAxisNormalToFaceCommand	Axis Perpendicular To Face
+ASSEMBLY	CONSTRUCT	ConstructionAxisFromTwoPlanesCommand	Axis Through Two Planes
+ASSEMBLY	CONSTRUCT	ConstructionAxisThroughTwoPointsCommand	Axis Through Two Points
+ASSEMBLY	CONSTRUCT	ConstructionAxisThroughEdgeCommand	Axis Through Edge
+ASSEMBLY	CONSTRUCT	ConstructionPointFromPointCommand	Point At Vertex
+ASSEMBLY	CONSTRUCT	ConstructionPointThroughTwoEdgesCommand	Point Through Two Edges
+ASSEMBLY	CONSTRUCT	ConstructionPointFromThreePlanesCommand	Point Through Three Planes
+ASSEMBLY	CONSTRUCT	ConstructionPointFromCircleOrSphereCommand	Point At Center Of Circle/Sphere/Torus
+ASSEMBLY	CONSTRUCT	ConstructionPointAtEdgeAndPlaneCommand	Point At Edge And Plane
+ASSEMBLY	CONSTRUCT	ConstructionPointAlongPathCommand	Point Along Path
+ASSEMBLY	INSPECT	MeasureCommand	Measure
+ASSEMBLY	INSPECT	InterferenceCheckCommand	Interference
+ASSEMBLY	INSPECT	FusionHalfSectionViewCommand	Section Analysis
+ASSEMBLY	INSPECT	FusionCurvatureCombAnalysisCommand	Curvature Comb Analysis
+ASSEMBLY	INSPECT	FusionCurvatureMapAnalysisCommand	Curvature Map Analysis
+ASSEMBLY	INSPECT	FusionDraftAnalysisCommand	Draft Analysis
+ASSEMBLY	INSPECT	FusionEnvironmentMapAnalysisCommand	Environment Map Analysis
+ASSEMBLY	INSPECT	FusionIsoCurveAnalysisCommand	Isocurve Analysis
+ASSEMBLY	INSPECT	FusionSurfaceValidateCommand	Validate
+ASSEMBLY	INSPECT	FusionZebraAnalysisCommand	Zebra Analysis
+ASSEMBLY	INSPECT	FusionAccessibilityAnalysisCommand	Accessibility Analysis
+ASSEMBLY	INSPECT	FusionCenterOfMassCommand	Center of Mass
+ASSEMBLY	INSPECT	FusionMinimumRadiusAnalysisCommand	Minimum Radius Analysis
+ASSEMBLY	INSPECT	FusionComponentConnectionAnalysisCommand	Component Connection Analysis
+ASSEMBLY	INSPECT	FusionDOFAnalysisCommand	DOF Analysis
+ASSEMBLY	INSPECT	FusionEditComponentConnectionAnalysisCommand	Edit Component Connection Analysis
+ASSEMBLY	INSPECT	FusionFastenerStackAnalysisCommand	Fastener Stack Analysis
+ASSEMBLY	INSPECT	SimilarPartsCommand	Find Similar Components
+ASSEMBLY	INSPECT	GraphViewCmd	Navigator
+ASSEMBLY	INSPECT	FusionViewColorCyclingToggleCmd	Display Component Colors
+ASSEMBLY	INSPECT	FacegroupsToggleCmd	Display Mesh Face Groups
+ASSEMBLY	INSPECT	FusionAssemblyStatisticsCommand	Assembly Statistics
+ASSEMBLY	INSPECT	ShowChangeAwarenessToolbarCmd	Change Summary
+ASSEMBLY	INSPECT	ShowHistoryToolbarCmd	History
+ASSEMBLY	INSPECT	GravityClimate_ManufacturingSustainabilityInsights_MainDialog	Sustainability Insights
+ASSEMBLY	SELECT	SelectCommand	Select
+ASSEMBLY	SELECT	selectWindow	Window Selection
+ASSEMBLY	SELECT	selectFreeForm	Freeform Selection
+ASSEMBLY	SELECT	selectPaint	Paint Selection
+ASSEMBLY	SELECT	SelectByNameCommand	Select By Name
+ASSEMBLY	SELECT	SelectByBoundaryCommand	Select By Boundary
+ASSEMBLY	SELECT	FusionSelectBodiesBySizeCommand	Select By Size
+ASSEMBLY	SELECT	SelectByInvertCommand	Invert Selection
+ASSEMBLY	SELECT	FusionSelectSeedAndBoundaryFacesCommand	Seed And Boundary
+ASSEMBLY	SELECT	FusionDragCompControlsCmd	Component Drag
+ASSEMBLY	SELECT	SelectBodyPriorityCommand	Select Body Priority
+ASSEMBLY	SELECT	SelectFacePriorityCommand	Select Face Priority
+ASSEMBLY	SELECT	SelectEdgePriorityCommand	Select Edge Priority
+ASSEMBLY	SELECT	SelectComponentPriorityCommand	Select Component Priority
+ASSEMBLY	SELECT	SelectionFilterCommand	Selection Filters
+ASSEMBLY	POSITION	SnapshotCmd	Capture Position
+ASSEMBLY	POSITION	AsBuiltPositionsCmd	Revert Position
+MANAGE	ASSIGN	PIMAssignItemNumberCmd	Assign Item Number
+MANAGE	RELEASE	PIMQuickReleaseCmd	Quick Release
+MANAGE	RELEASE	PIMECOReleaseCmd	Release with Change Order
+MANAGE	BOM	MaterializedBomCmd	Bill of Materials
+MANAGE	BOM	MaterializedBomHybridCmd	Bill of Materials
+MANAGE	PROCESS MANAGEMENT	PIMGoToDashboardCmd	Dashboard
+MANAGE	PROCESS MANAGEMENT	PIMGoToItemDetailsCmd	Details
+MANAGE	PROCESS MANAGEMENT	PIMGoToChangeOrderCmd	Change Orders
+MANAGE	TASK MANAGEMENT	TaskManagementOpenTasksCmd	Open tasks in web
+MANAGE	TASK MANAGEMENT	TaskManagementCreateTaskCmd	Create new task
+MANAGE	TASK MANAGEMENT	TaskManagementRelatedTasksCmd	Related tasks
+UTILITIES	MODELING TOOLS	ModelingToggleCmdDef	Modeling Tools
+UTILITIES	MAKE	ThreeDprintCmdDef	3D Print
+UTILITIES	NEST	MSFNestAuthoringCmd	Nest Preparation
+UTILITIES	ADD-INS	ScriptsManagerCommand	Scripts and Add-Ins...
+UTILITIES	ADD-INS	ExchangeAppStoreCommand	Design and Make Marketplace
+UTILITIES	UTILITY	MaterialCommand	Manage Materials
+UTILITIES	UTILITY	FusionManageThreadsLibraryCommand	Manage Threads Library
+UTILITIES	UTILITY	FusionComputeAllCommand	Compute All
+UTILITIES	INSPECT	MeasureCommand	Measure
+UTILITIES	INSPECT	InterferenceCheckCommand	Interference
+UTILITIES	INSPECT	FusionHalfSectionViewCommand	Section Analysis
+UTILITIES	INSPECT	FusionCurvatureCombAnalysisCommand	Curvature Comb Analysis
+UTILITIES	INSPECT	FusionCurvatureMapAnalysisCommand	Curvature Map Analysis
+UTILITIES	INSPECT	FusionDraftAnalysisCommand	Draft Analysis
+UTILITIES	INSPECT	FusionIsoCurveAnalysisCommand	Isocurve Analysis
+UTILITIES	INSPECT	FusionSurfaceValidateCommand	Validate
+UTILITIES	INSPECT	FusionZebraAnalysisCommand	Zebra Analysis
+UTILITIES	INSPECT	FusionAccessibilityAnalysisCommand	Accessibility Analysis
+UTILITIES	INSPECT	FusionCenterOfMassCommand	Center of Mass
+UTILITIES	INSPECT	FusionMinimumRadiusAnalysisCommand	Minimum Radius Analysis
+UTILITIES	INSPECT	FusionComponentConnectionAnalysisCommand	Component Connection Analysis
+UTILITIES	INSPECT	FusionDOFAnalysisCommand	DOF Analysis
+UTILITIES	INSPECT	FusionEditComponentConnectionAnalysisCommand	Edit Component Connection Analysis
+UTILITIES	INSPECT	FusionFastenerStackAnalysisCommand	Fastener Stack Analysis
+UTILITIES	INSPECT	SimilarPartsCommand	Find Similar Components
+UTILITIES	INSPECT	GraphViewCmd	Navigator
+UTILITIES	INSPECT	FusionViewColorCyclingToggleCmd	Display Component Colors
+UTILITIES	INSPECT	FacegroupsToggleCmd	Display Mesh Face Groups
+UTILITIES	INSPECT	FusionAssemblyStatisticsCommand	Assembly Statistics
+UTILITIES	INSPECT	ShowChangeAwarenessToolbarCmd	Change Summary
+UTILITIES	INSPECT	ShowHistoryToolbarCmd	History
+UTILITIES	INSPECT	GravityClimate_ManufacturingSustainabilityInsights_MainDialog	Sustainability Insights
+UTILITIES	CREATE PMI	HoleThreadNoteCommand	Hole/Thread Note
+UTILITIES	CREATE PMI	LeaderLineNoteCommand	Note
+UTILITIES	CREATE PMI	DimensionNoteCommand	Sizes and Dimensions
+UTILITIES	CREATE PMI	GeometricToleranceNoteCommand	Geometric Tolerancing
+UTILITIES	SELECT	SelectCommand	Select
+UTILITIES	SELECT	selectWindow	Window Selection
+UTILITIES	SELECT	selectFreeForm	Freeform Selection
+UTILITIES	SELECT	selectPaint	Paint Selection
+UTILITIES	SELECT	SelectByNameCommand	Select By Name
+UTILITIES	SELECT	SelectByBoundaryCommand	Select By Boundary
+UTILITIES	SELECT	FusionSelectBodiesBySizeCommand	Select By Size
+UTILITIES	SELECT	SelectByInvertCommand	Invert Selection
+UTILITIES	SELECT	FusionSelectSeedAndBoundaryFacesCommand	Seed And Boundary
+UTILITIES	SELECT	FusionDragCompControlsCmd	Component Drag
+UTILITIES	SELECT	SelectBodyPriorityCommand	Select Body Priority
+UTILITIES	SELECT	SelectFacePriorityCommand	Select Face Priority
+UTILITIES	SELECT	SelectEdgePriorityCommand	Select Edge Priority
+UTILITIES	SELECT	SelectComponentPriorityCommand	Select Component Priority
+UTILITIES	SELECT	SelectionFilterCommand	Selection Filters
+UTILITIES	POSITION	SnapshotCmd	Capture Position
+UTILITIES	POSITION	AsBuiltPositionsCmd	Revert Position
