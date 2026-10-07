@@ -38,7 +38,7 @@ headline counts in-scope tabs only and lists the deferred ones separately.
 | # | Milestone | Status | Hours left |
 |---|---|---|---|
 | M0 | Vertical slice | done | — |
-| M1 | Sketch depth, oracle sketch cases (arcs, taper, two-sided, sketch modify tools) | in progress | 16 |
+| M1 | Sketch depth: done — projection/intersect/include as linked geometry (auto-project on faces, lost-reference warnings, break link), full SKETCH create/modify set (slots, polygons, tangent arcs/circles, ellipse, fit/control splines, conic, text, trim/extend/break, fillet/chamfer, offset, mirror, patterns, move/scale, blend curve, centerline), constraints incl. curvature and polygon with over-constraint refusal, driven/arc-length/linear-diameter dimensions, AutoConstrain, DXF/SVG insert. Left: 3D sketch curves (Project To Surface, Intersection Curve, Isoparametric Curve, Spun Profile), exact (non-faceted) free-form profiles | in progress | 8 |
 | M2 | Robust modelling: coplanar booleans in the kernel, holes (placed on faces and on sketch points), threads (cosmetic, then modelled), patterns, mirror, shell, draft, split, construction geometry | in progress | 16 |
 | M3 | General fillets and chamfers (curved edges, chains, vertex blends) | planned | 30 |
 | M4 | Files: STEP import (done: all 29 Fusion STEP files — [docs/step-import.md](docs/step-import.md)), 3MF export and 3MF/STL import as mesh bodies (done), DXF sketches, OBJ import | in progress | 6 |
@@ -66,7 +66,9 @@ headline counts in-scope tabs only and lists the deferred ones separately.
   product names, colours and assemblies; offset surfaces and pcurve-only edges are not read yet,
   and assembly components are flattened into bodies. Closed periodic faces (torus, B-spline
   bands) are split in two for meshing; measure() uses a finer tolerance for small radii.
-- No persistent naming (fillet edges are re-found by position).
+- No persistent naming (fillet edges are re-found by position; projected sketch geometry too).
+- Sketch free-form curves (ellipses, splines, conics, text) enter profiles as polylines, so
+  features built on them are faceted; sketches are planar (no 3D sketch curves yet).
 - Shell works on planar bodies (convex or not), draft on convex planar bodies; loft is ruled.
 
 ## Kernel
