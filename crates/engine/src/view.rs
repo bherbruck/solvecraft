@@ -106,7 +106,10 @@ pub fn scene(s: &Session, cam: &Camera) -> Scene {
         let selected = s.selection.iter().any(|x| matches!(x, Sel::Body { name } if *name == body.name));
         let mesh = body.mesh();
         sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color: if selected { colors::BODY_SELECTED } else { colors::BODY } });
-        for e in &mesh.edges {
+        for (i, e) in mesh.edges.iter().enumerate() {
+            if mesh.seams.get(i).copied().unwrap_or(false) {
+                continue;
+            }
             sc.lines.push(SceneLine { points: e.clone(), color: colors::EDGE, width: 1.2, on_top: false });
         }
     }

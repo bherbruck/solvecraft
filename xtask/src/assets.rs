@@ -3,7 +3,8 @@
 
 use std::path::Path;
 
-const ASSET_EXT: &[&str] = &["png", "jpg", "jpeg", "svg", "ico", "icns", "ttf", "otf", "woff", "woff2", "gif", "bmp", "webp", "wav", "mp3", "stl", "step", "stp", "obj"];
+const ASSET_EXT: &[&str] =
+    &["png", "jpg", "jpeg", "svg", "ico", "icns", "ttf", "otf", "woff", "woff2", "gif", "bmp", "webp", "wav", "mp3", "stl", "step", "stp", "obj"];
 const SKIP_DIRS: &[&str] = &["target", ".git", "plan", "dist"];
 
 fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) {

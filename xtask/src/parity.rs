@@ -93,7 +93,9 @@ pub fn run(root: &Path, refresh: bool) -> Result<(), String> {
         let s = std::fs::read_to_string(&mt).map_err(|e| format!("{}: {e}", mt.display()))?;
         let v: Value = serde_json::from_str(&s).map_err(|e| format!("menu-tree.json: {e}"))?;
         let entries = from_menu_tree(&v);
-        let mut out = String::from("# Fusion Design workspace toolbar: tab, panel, command id, command name (ids and names only).\n# Regenerate with `cargo xtask parity --refresh` (needs the local plan/fusion/menu-tree.json).\n");
+        let mut out = String::from(
+            "# Fusion Design workspace toolbar: tab, panel, command id, command name (ids and names only).\n# Regenerate with `cargo xtask parity --refresh` (needs the local plan/fusion/menu-tree.json).\n",
+        );
         for e in &entries {
             out += &format!("{}\t{}\t{}\t{}\n", e.tab, e.panel, e.id, e.name);
         }
@@ -109,7 +111,7 @@ pub fn run(root: &Path, refresh: bool) -> Result<(), String> {
         .map_err(|e| format!("solvecraft-cli: {e}"))?;
     let cmds: Value = serde_json::from_slice(&out.stdout).map_err(|e| format!("commands JSON: {e}"))?;
     let ids: Vec<String> = cmds.as_array().into_iter().flatten().filter_map(|c| c["id"].as_str().map(str::to_string)).collect();
-    let live = |e: &Entry| ids.iter().any(|i| *i == e.id);
+    let live = |e: &Entry| ids.contains(&e.id);
     let pct = |a: usize, b: usize| if b == 0 { 0.0 } else { 100.0 * a as f64 / b as f64 };
 
     let head: Vec<&Entry> = catalog.iter().filter(|e| HEADLINE.contains(&e.tab.as_str())).collect();
@@ -146,7 +148,12 @@ pub fn run(root: &Path, refresh: bool) -> Result<(), String> {
         md += &format!("- {} › {} › {} (`{}`)\n", e.tab, e.panel, e.name, e.id);
     }
     std::fs::write(root.join("docs/parity.md"), md).map_err(|e| format!("docs/parity.md: {e}"))?;
-    println!("parity: SOLID+SKETCH {head_live}/{} ({:.0}%), all tabs {all_live}/{} → docs/parity.md", head.len(), pct(head_live, head.len()), catalog.len());
+    println!(
+        "parity: SOLID+SKETCH {head_live}/{} ({:.0}%), all tabs {all_live}/{} → docs/parity.md",
+        head.len(),
+        pct(head_live, head.len()),
+        catalog.len()
+    );
     Ok(())
 }
 

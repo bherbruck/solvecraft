@@ -153,6 +153,13 @@ impl Body {
         })
     }
 
+    /// Display mesh: like [`Body::tessellate`], with seam edges flagged.
+    pub fn display_mesh(&self, tol: f64) -> Result<Mesh> {
+        let mut m = self.tessellate(tol)?;
+        m.seams = crate::topo::seam_flags(self, &m);
+        Ok(m)
+    }
+
     /// Edges with polylines (index = position in [`Body::tessellate`]'s `edges`).
     pub fn edges(&self, tol: f64) -> Result<Vec<EdgeInfo>> {
         let m = self.tessellate(tol)?;

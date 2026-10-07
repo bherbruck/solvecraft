@@ -303,7 +303,9 @@ fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
                             && (fp - f.centroid).dot(n).abs() < tol * 10.0
                             && b.body.tessellate(tol).map(|m| face_contains(&m, f.index, fp, tol * 10.0)).unwrap_or(false)
                         {
-                            found = Plane::from_normal(f.centroid + n * (fp - f.centroid).dot(n), n);
+                            // Sketch origin: the model origin projected onto the face plane.
+                            let d = (f.centroid + n * (fp - f.centroid).dot(n)).dot(n);
+                            found = Plane::from_normal(n * d, n);
                         }
                     }
                 }

@@ -295,8 +295,9 @@ pub struct Sketch {
     pub points: Vec<SPoint>,
     pub curves: Vec<Curve>,
     pub constraints: Vec<Constraint>,
+    /// Next number per id prefix (`l` → l1, l2…).
     #[serde(default)]
-    next_id: u64,
+    counters: std::collections::BTreeMap<String, u64>,
 }
 
 impl Default for Sketch {
@@ -307,14 +308,22 @@ impl Default for Sketch {
 
 impl Sketch {
     pub fn new() -> Self {
-        Sketch { points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true }], curves: Vec::new(), constraints: Vec::new(), next_id: 1 }
+        Sketch {
+            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true }],
+            curves: Vec::new(),
+            constraints: Vec::new(),
+            counters: Default::default(),
+        }
     }
 
     fn fresh(&mut self, prefix: &str) -> String {
+        let n = self.counters.entry(prefix.to_string()).or_insert(0);
         loop {
-            let id = format!("{prefix}{}", self.next_id);
-            self.next_id += 1;
-            if !self.id_taken(&id) {
+            *n += 1;
+            let id = format!("{prefix}{n}");
+            let taken =
+                self.points.iter().any(|p| p.id == id) || self.curves.iter().any(|c| c.id == id) || self.constraints.iter().any(|c| c.id == id);
+            if !taken {
                 return id;
             }
         }

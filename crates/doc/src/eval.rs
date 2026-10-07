@@ -31,7 +31,7 @@ impl ModelBody {
         self.mesh
             .get_or_init(|| {
                 let tol = (self.body.size() * 1e-3).max(1e-3);
-                Arc::new(self.body.tessellate(tol).unwrap_or_default())
+                Arc::new(self.body.display_mesh(tol).unwrap_or_default())
             })
             .clone()
     }

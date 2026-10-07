@@ -10,6 +10,7 @@
 
 pub mod cmd;
 pub mod params;
+pub mod sample;
 pub mod view;
 
 use std::sync::Arc;

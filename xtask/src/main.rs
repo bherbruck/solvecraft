@@ -127,7 +127,8 @@ fn cmd_oracle() -> Result<(), String> {
         cmd.arg(c);
     }
     let out = cmd.output().map_err(|e| format!("solvecraft-cli: {e}"))?;
-    let results: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|e| format!("oracle JSON: {e}\n{}", String::from_utf8_lossy(&out.stderr)))?;
+    let results: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("oracle JSON: {e}\n{}", String::from_utf8_lossy(&out.stderr)))?;
     let list = results.as_array().cloned().unwrap_or_default();
     let pass = list.iter().filter(|r| r["pass"].as_bool().unwrap_or(false)).count();
     let skipped = list.iter().filter(|r| r["skipped"].as_bool().unwrap_or(false)).count();

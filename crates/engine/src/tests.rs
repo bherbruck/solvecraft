@@ -299,3 +299,16 @@ fn registry_is_consistent() {
     let s = Session::default();
     assert!(!find_command("DrawPolyline").unwrap().info(&s).enabled);
 }
+
+#[test]
+fn sample_design_builds() {
+    let mut s = Session::default();
+    s.run_script(&crate::sample::script()).unwrap();
+    let m = run(&mut s, "MeasureCommand", json!({}));
+    assert_eq!(m["body_count"], 1, "{m}");
+    let plate = 80.0 * 50.0 * 8.0 - 4.0 * (36.0 - PI * 9.0) * 8.0 - 2.0 * PI * 16.0 * 8.0;
+    let boss = PI * 144.0 * 14.0;
+    let bore = PI * 36.0 * 22.0;
+    let v = m["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(v, plate + boss - bore) < 1e-3, "{v} vs {}", plate + boss - bore);
+}

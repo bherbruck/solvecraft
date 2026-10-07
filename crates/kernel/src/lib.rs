@@ -26,7 +26,7 @@ pub use build::{box_solid, cylinder, extrude, revolve, sphere, torus};
 pub use measure::{BodyMeasure, measure};
 pub use ops::{BoolOp, boolean, transform};
 pub use step::step_export;
-pub use topo::{TopoCounts, merged_topology};
+pub use topo::{TopoCounts, merged_topology, seam_flags};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum KernelError {

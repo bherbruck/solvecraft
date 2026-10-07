@@ -138,6 +138,54 @@ fn find(p: &mut [usize], mut i: usize) -> usize {
     i
 }
 
+/// Per edge (in `Body::edges` order): is it a seam between two pieces of the same surface?
+pub fn seam_flags(b: &Body, mesh: &Mesh) -> Vec<bool> {
+    let solid = &*b.solid;
+    let nf = solid.face_iter().count();
+    let tol = (b.size() * 1e-4).max(1e-6);
+    let surfs = classify_faces(mesh, nf, tol);
+    let mut faces_of: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for (fi, f) in solid.face_iter().enumerate() {
+        for e in f.edge_iter() {
+            let k = format!("{:?}", e.id());
+            let v = faces_of.entry(k.clone()).or_insert_with(|| {
+                order.push(k);
+                Vec::new()
+            });
+            if !v.contains(&fi) {
+                v.push(fi);
+            }
+        }
+    }
+    order
+        .iter()
+        .map(|k| match faces_of.get(k).map(Vec::as_slice) {
+            Some([a, b2]) => match (surfs.get(*a), surfs.get(*b2)) {
+                (Some(sa), Some(sb)) => !matches!(sa, Surf::Plane { .. }) && sa.same(sb, tol * 10.0),
+                _ => false,
+            },
+            _ => false,
+        })
+        .collect()
+}
+
+fn classify_faces(mesh: &Mesh, nf: usize, tol: f64) -> Vec<Surf> {
+    let mut pts: Vec<Vec<Vec3>> = vec![Vec::new(); nf];
+    let mut nrm: Vec<Vec<Vec3>> = vec![Vec::new(); nf];
+    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        for &k in t {
+            if let (Some(p), Some(n), Some(pv), Some(nv)) =
+                (mesh.positions.get(k as usize), mesh.normals.get(k as usize), pts.get_mut(*f as usize), nrm.get_mut(*f as usize))
+            {
+                pv.push(*p);
+                nv.push(*n);
+            }
+        }
+    }
+    (0..nf).map(|i| classify(pts.get(i).map(Vec::as_slice).unwrap_or(&[]), nrm.get(i).map(Vec::as_slice).unwrap_or(&[]), tol * 10.0, i)).collect()
+}
+
 /// Merged face/edge/vertex counts (see module docs). `mesh` must be `b.tessellate(..)`.
 pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     let solid = &*b.solid;

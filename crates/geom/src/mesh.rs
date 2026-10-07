@@ -61,6 +61,9 @@ pub struct Mesh {
     pub tri_face: Vec<u32>,
     /// B-rep edges as polylines.
     pub edges: Vec<Vec<Vec3>>,
+    /// Per edge: a seam between two pieces of the same smooth surface (not drawn).
+    #[serde(default)]
+    pub seams: Vec<bool>,
 }
 
 /// Mass properties of a closed mesh.
