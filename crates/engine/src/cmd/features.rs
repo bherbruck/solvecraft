@@ -597,7 +597,18 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
     if path.is_empty() {
         return Err(bad(cmd, "`path` must list curve ids"));
     }
-    add_feature(s, p, FeatureKind::Sweep { sketch, profiles: profiles(p, cmd)?, path_sketch, path, operation: operation(p, cmd)?, targets: string_list(p, "targets") })
+    add_feature(
+        s,
+        p,
+        FeatureKind::Sweep {
+            sketch,
+            profiles: profiles(p, cmd)?,
+            path_sketch,
+            path,
+            operation: operation(p, cmd)?,
+            targets: string_list(p, "targets"),
+        },
+    )
 }
 
 fn loft(s: &mut Session, p: &Value) -> Result<Value> {

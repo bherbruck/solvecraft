@@ -398,7 +398,8 @@ fn revolve_touching_axis(plane: &Plane, lp: &Loop2, axis_origin: Vec2, d: Vec2) 
 
 /// Close a ruled shell (side faces between matching wires) with planar caps into a body.
 fn cap_and_close(mut faces: Vec<mt::Face>, w0: &[mt::Wire], w1: &[mt::Wire]) -> Result<Body> {
-    let bottom = builder::try_attach_plane(&w0.iter().map(|w| w.inverse()).collect::<Vec<_>>()).map_err(|e| KernelError::Failed(format!("cap: {e}")))?;
+    let bottom =
+        builder::try_attach_plane(&w0.iter().map(|w| w.inverse()).collect::<Vec<_>>()).map_err(|e| KernelError::Failed(format!("cap: {e}")))?;
     let top = builder::try_attach_plane(w1).map_err(|e| KernelError::Failed(format!("cap: {e}")))?;
     let mut last = String::new();
     for (b, t) in [(bottom.clone(), top.clone()), (bottom.inverse(), top.inverse()), (bottom.clone(), top.inverse()), (bottom.inverse(), top)] {
@@ -450,9 +451,10 @@ fn resample(lp: &Loop2, n: usize, angles: &[f64]) -> Loop2 {
                 let m = a.lerp(b, 0.5);
                 (Seg2::Line { a, b: m }, Seg2::Line { a: m, b })
             }
-            Seg2::Arc { center, radius, start, sweep } => {
-                (Seg2::Arc { center, radius, start, sweep: sweep / 2.0 }, Seg2::Arc { center, radius, start: start + sweep / 2.0, sweep: sweep / 2.0 })
-            }
+            Seg2::Arc { center, radius, start, sweep } => (
+                Seg2::Arc { center, radius, start, sweep: sweep / 2.0 },
+                Seg2::Arc { center, radius, start: start + sweep / 2.0, sweep: sweep / 2.0 },
+            ),
         };
         segs.insert(k, q);
         segs.insert(k, p);
@@ -519,9 +521,17 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
 /// A 3D path segment for sweeps.
 #[derive(Clone, Copy, Debug)]
 pub enum PathSeg {
-    Line { a: Vec3, b: Vec3 },
+    Line {
+        a: Vec3,
+        b: Vec3,
+    },
     /// Arc around `center`, rotating by `angle` about `axis` (right hand) from `a`.
-    Arc { a: Vec3, center: Vec3, axis: Vec3, angle: f64 },
+    Arc {
+        a: Vec3,
+        center: Vec3,
+        axis: Vec3,
+        angle: f64,
+    },
 }
 
 /// Sweep a planar region (outer loop) along a chain of path segments, keeping the profile
@@ -543,7 +553,11 @@ pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> 
                     builder::rsweep(&cur, p3(center), v3(ax), mt::Rad(angle))
                 }
             };
-            let next = part.extract_boundaries().into_iter().find(|w| w.edge_iter().all(|e| !cur.edge_iter().any(|c| c.id() == e.id()))).ok_or_else(|| KernelError::Failed("sweep: lost the profile".into()))?;
+            let next = part
+                .extract_boundaries()
+                .into_iter()
+                .find(|w| w.edge_iter().all(|e| !cur.edge_iter().any(|c| c.id() == e.id())))
+                .ok_or_else(|| KernelError::Failed("sweep: lost the profile".into()))?;
             shell.append(&mut part);
             cur = next.inverse();
         }
@@ -567,7 +581,9 @@ fn cubic_basis(knots: &[f64], n_ctrl: usize, u: f64) -> Vec<f64> {
     }
     for k in 1..=p {
         for j in 0..m.saturating_sub(1 + k) {
-            let (Some(&tj), Some(&tjk), Some(&tj1), Some(&tjk1)) = (knots.get(j), knots.get(j + k), knots.get(j + 1), knots.get(j + k + 1)) else { continue };
+            let (Some(&tj), Some(&tjk), Some(&tj1), Some(&tjk1)) = (knots.get(j), knots.get(j + k), knots.get(j + 1), knots.get(j + k + 1)) else {
+                continue;
+            };
             let left = if tjk - tj > 0.0 { (u - tj) / (tjk - tj) * n.get(j).copied().unwrap_or(0.0) } else { 0.0 };
             let right = if tjk1 - tj1 > 0.0 { (tjk1 - u) / (tjk1 - tj1) * n.get(j + 1).copied().unwrap_or(0.0) } else { 0.0 };
             if let Some(v) = n.get_mut(j) {
@@ -609,9 +625,9 @@ fn interpolate_cubic(pts: &[Vec3]) -> Option<mt::BSplineCurve<mt::Point3>> {
             if f == 0.0 {
                 continue;
             }
-            for c in col..m {
-                let v = a[col][c];
-                a[r][c] -= f * v;
+            let prow = a[col].clone();
+            for (x, v) in a[r].iter_mut().zip(&prow).skip(col) {
+                *x -= f * v;
             }
             let qc = q[col];
             for k in 0..3 {

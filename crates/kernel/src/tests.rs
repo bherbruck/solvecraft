@@ -204,7 +204,12 @@ fn loft_and_sweep() {
     let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 3.0), holes: vec![] };
     let path = [
         PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 0.0, 30.0) },
-        PathSeg::Arc { a: Vec3::new(0.0, 0.0, 30.0), center: Vec3::new(20.0, 0.0, 30.0), axis: Vec3::new(0.0, 1.0, 0.0), angle: std::f64::consts::FRAC_PI_2 },
+        PathSeg::Arc {
+            a: Vec3::new(0.0, 0.0, 30.0),
+            center: Vec3::new(20.0, 0.0, 30.0),
+            axis: Vec3::new(0.0, 1.0, 0.0),
+            angle: std::f64::consts::FRAC_PI_2,
+        },
         PathSeg::Line { a: Vec3::new(20.0, 0.0, 50.0), b: Vec3::new(50.0, 0.0, 50.0) },
     ];
     let t = sweep(&Plane::XY, &disc, &path).unwrap();
@@ -214,6 +219,31 @@ fn loft_and_sweep() {
     let area = PI * 9.0;
     let expect = area * (30.0 + 30.0 + 20.0 * std::f64::consts::FRAC_PI_2);
     assert!(rel(measure(&t).unwrap().volume, expect) < 1e-3, "{} vs {expect}", measure(&t).unwrap().volume);
+}
+
+#[test]
+fn planar_booleans_with_coincident_faces() {
+    // L-bracket: a wall flush with three sides of its base.
+    let base = box_solid(Vec3::ZERO, Vec3::new(80.0, 50.0, 8.0)).unwrap();
+    let wall = box_solid(Vec3::new(0.0, 42.0, 8.0), Vec3::new(80.0, 50.0, 50.0)).unwrap();
+    let u = planar_boolean(&base, &wall, BoolOp::Union).unwrap().unwrap();
+    let m = measure(&u).unwrap();
+    assert!(rel(m.volume, 80.0 * 50.0 * 8.0 + 80.0 * 8.0 * 42.0) < 1e-9, "{}", m.volume);
+    assert_eq!(m.merged.faces, 8, "{:?}", m.merged);
+    // Through the public boolean (B-rep first, polygon fallback).
+    let u2 = boolean(&base, &wall, BoolOp::Union).unwrap().unwrap();
+    assert!(rel(measure(&u2).unwrap().volume, m.volume) < 1e-9);
+    // Two boxes sharing a face, and a cut flush with a side.
+    let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let b = box_solid(Vec3::new(10.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0)).unwrap();
+    let ab = boolean(&a, &b, BoolOp::Union).unwrap().unwrap();
+    assert!(rel(measure(&ab).unwrap().volume, 2000.0) < 1e-9);
+    assert_eq!(measure(&ab).unwrap().merged.faces, 6);
+    let notch = box_solid(Vec3::new(0.0, 0.0, 5.0), Vec3::new(5.0, 10.0, 10.0)).unwrap();
+    let c = boolean(&a, &notch, BoolOp::Cut).unwrap().unwrap();
+    assert!(rel(measure(&c).unwrap().volume, 1000.0 - 250.0) < 1e-9);
+    let i = boolean(&a, &notch, BoolOp::Intersect).unwrap().unwrap();
+    assert!(rel(measure(&i).unwrap().volume, 250.0) < 1e-9);
 }
 
 #[test]

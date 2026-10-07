@@ -136,6 +136,19 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
             return Ok(None);
         }
     }
+    // Coincident faces defeat the B-rep boolean; bodies with only planar faces have an exact
+    // polygon fallback.
+    match crate::polybool::planar_boolean(a, b, op) {
+        Ok(Some(body)) => {
+            let v = volume(&body);
+            if v > 0.0 && plausible(v, &body) {
+                return Ok(Some(body));
+            }
+            last = format!("planar fallback gave an implausible volume {v:.4}");
+        }
+        Ok(None) => return Ok(None),
+        Err(e) => last = format!("{last}; {e}"),
+    }
     Err(KernelError::Failed(format!("boolean {op:?}: {last}")))
 }
 

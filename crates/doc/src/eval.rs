@@ -616,7 +616,9 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
         FeatureKind::Loft { sections, .. } => {
             let mut secs = Vec::new();
             for sec in sections {
-                let ss = st.sketch(sec.sketch).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))?;
+                let ss = st
+                    .sketch(sec.sketch)
+                    .ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))?;
                 let regions = solvecraft_sketch::merge_regions(&select_profiles(ss, &sec.profiles)?);
                 let [r] = &regions[..] else { return Err(DocError::Invalid("each loft section must be one profile".into())) };
                 secs.push((ss.plane, r.outer.clone()));
@@ -625,7 +627,8 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
         }
         FeatureKind::Sweep { sketch, profiles, path_sketch, path, .. } => {
             let ss = st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
-            let ps = st.sketch(*path_sketch).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
+            let ps =
+                st.sketch(*path_sketch).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
             let regions = solvecraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
             let start = regions.first().map(|r| ss.plane.to_world(r.centroid())).unwrap_or_default();
             let segs = path_segments(ps, path, start)?;
@@ -729,7 +732,7 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
     // Orient the chain: the first segment starts at the end nearest `start`, each next one
     // starts where the previous ended.
     let w = |p: Vec2| ps.plane.to_world(p);
-    if let (Some(f), true) = (segs.first().copied(), segs.len() > 0)
+    if let (Some(f), true) = (segs.first().copied(), !segs.is_empty())
         && w(f.end()).dist(start) < w(f.start()).dist(start)
         && (segs.len() == 1 || segs.get(1).is_some_and(|n| n.start().dist(f.start()) < 1e-6 || n.end().dist(f.start()) < 1e-6))
     {
@@ -749,7 +752,9 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
         .iter()
         .map(|s| match *s {
             solvecraft_geom::Seg2::Line { a, b } => kernel::PathSeg::Line { a: w(a), b: w(b) },
-            solvecraft_geom::Seg2::Arc { center, sweep, .. } => kernel::PathSeg::Arc { a: w(s.start()), center: w(center), axis: n * sweep.signum(), angle: sweep.abs() },
+            solvecraft_geom::Seg2::Arc { center, sweep, .. } => {
+                kernel::PathSeg::Arc { a: w(s.start()), center: w(center), axis: n * sweep.signum(), angle: sweep.abs() }
+            }
         })
         .collect())
 }
