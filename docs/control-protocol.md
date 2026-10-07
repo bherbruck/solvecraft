@@ -35,6 +35,11 @@ Commands never open dialogs when run this way. `solvecraft-cli commands` prints 
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | — | |
 
+## MCP
+
+`solvecraft-cli mcp --connect 127.0.0.1:PORT` bridges an MCP client (an AI agent) to this
+channel; see [mcp.md](mcp.md).
+
 ## Example
 
 ```text

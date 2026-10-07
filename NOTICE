@@ -10,7 +10,7 @@ Software dependencies are listed in Cargo.lock. The geometry kernel builds on th
 dependencies, https://github.com/ricosjp/truck), licensed under the Apache License 2.0 and used
 unmodified as libraries.
 
-Some code is adapted from sibling projects in the storytold family (CADCraft), which are
+Some code is adapted from sibling projects in the storytold family (CADCraft, GridCraft), which are
 licensed MIT OR Apache-2.0; ATTRIBUTION.md lists the files.
 
 None of the bundled assets come from third parties: every icon is drawn in code. The per-file

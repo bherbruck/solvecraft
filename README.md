@@ -35,6 +35,8 @@ storytold "craft" family.
   control channel so agents and tests can drive it.
 - **Headless CLI** `solvecraft-cli`: run command scripts, measure (volume, area, centre of mass,
   face/edge/vertex counts), export, render PNG snapshots, replay Fusion oracle recipes.
+- **MCP server** `solvecraft-cli mcp`: AI agents model, measure and look at parts headless or
+  in the running app (see below).
 
 ## Build and run
 
@@ -61,6 +63,16 @@ A script is a JSON list of commands, the same ones the UI runs:
 ]}
 ```
 
+## AI agents (MCP)
+
+`solvecraft-cli mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on
+stdio. Headless it runs its own design session; with `--connect 127.0.0.1:PORT` it drives the app
+started with `solvecraft --control PORT`, so you can watch the agent model. Tools:
+`list_commands`, `execute`, `batch`, `inspect_design`, `measure`, `body_topology`,
+`set_parameter`, `screenshot` (returns the image), `export`, `undo`, `redo`, `new_design`, `open`,
+`save`. Claude Code: `claude mcp add solvecraft -- solvecraft-cli mcp`. Details, client
+configuration and an example session: [docs/mcp.md](docs/mcp.md).
+
 ## Architecture
 
 | Layer | Crates | Role |
@@ -70,7 +82,7 @@ A script is a JSON list of commands, the same ones the UI runs:
 | L2 | `doc` | parameters, expressions, the feature timeline and its incremental evaluation |
 | L3 | `io` | design files, STL/OBJ/STEP export |
 | L4 | `engine` | the session and the command registry (everything is a command) |
-| L5 | `ui-egui` | the swappable desktop front end |
+| L5 | `ui-egui`, `mcp` | the swappable desktop front end; the MCP server (headless or bridged to the app) |
 | apps | `solvecraft`, `solvecraft-cli` | desktop app, headless CLI |
 
 ## Licence
