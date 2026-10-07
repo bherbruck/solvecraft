@@ -78,7 +78,15 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if file {
             app.ui.palette_open = false;
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_file_menu"), true));
+            let ctx = ui.ctx().clone();
+            let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_file_menu")).unwrap_or(false));
+            let pass = ctx.cumulative_pass_nr();
+            // The folder button toggles the menu. Remember the pass it opened on so the same
+            // click isn't also treated as a click outside the menu (which would close it at once).
+            ctx.data_mut(|d| {
+                d.insert_temp(egui::Id::new("sc_file_menu"), !open);
+                d.insert_temp(egui::Id::new("sc_file_menu_opened"), pass);
+            });
         }
         // Document tab.
         let name = format!("{}{}", app.session.doc.name, if app.session.is_dirty() { " •" } else { "" });
@@ -147,7 +155,8 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     });
-    if close || resp.response.clicked_elsewhere() {
+    let just_opened = ctx.data(|d| d.get_temp::<u64>(egui::Id::new("sc_file_menu_opened"))) == Some(ctx.cumulative_pass_nr());
+    if close || (!just_opened && resp.response.clicked_elsewhere()) {
         ctx.data_mut(|d| d.insert_temp(id, false));
     }
 }
