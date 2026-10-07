@@ -8,6 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod curves;
 mod linalg;
 mod link;
 mod model;
@@ -15,6 +16,7 @@ mod profiles;
 mod shape;
 mod solver;
 
+pub use curves::{MAX_SPLINE_POINTS, conic_point, ellipse_point, spline_end_tangent, spline_polyline};
 pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES};
 pub use model::{Constraint, ConstraintKind, Curve, CurveKind, SPoint, Sketch, SketchError};
 pub use profiles::{Profile, find_drawn_profiles, find_profiles, merge_regions};

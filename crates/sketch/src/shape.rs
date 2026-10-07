@@ -161,6 +161,7 @@ impl Sketch {
                 Seg2::Arc { center, radius, start, sweep } => Some(Shape::Round { c: center, r: radius, start, sweep }),
                 Seg2::Line { .. } => None,
             },
+            _ => None,
         }
     }
 }

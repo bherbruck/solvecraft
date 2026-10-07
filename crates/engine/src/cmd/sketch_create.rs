@@ -45,7 +45,132 @@ pub static COMMANDS: &[CommandSpec] =
             .icon("arc_slot")
             .enabled(in_sketch)
             .params("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise), width"),
+        CommandSpec::new("CircleElipse", "Ellipse", ellipse)
+            .at("SKETCH", "CREATE")
+            .icon("ellipse")
+            .enabled(in_sketch)
+            .params("center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius"),
+        CommandSpec::new("DrawSpline", "Fit Point Spline", spline_fit)
+            .at("SKETCH", "CREATE")
+            .icon("spline")
+            .enabled(in_sketch)
+            .params("points: [[x,y] or point refs…] (2…500): the spline passes through them"),
+        CommandSpec::new("DrawCVMSpline3D", "Control Point Spline", spline_cv3)
+            .at("SKETCH", "CREATE")
+            .icon("spline_cv")
+            .enabled(in_sketch)
+            .params("points: control points (2…500), cubic"),
+        CommandSpec::new("DrawCVMSpline5D", "Control Point Spline (Degree 5)", spline_cv5)
+            .at("SKETCH", "CREATE")
+            .icon("spline_cv")
+            .enabled(in_sketch)
+            .params("points: control points (2…500), degree 5"),
+        CommandSpec::new("ConicCurveCmd", "Conic Curve", conic)
+            .at("SKETCH", "CREATE")
+            .icon("conic")
+            .enabled(in_sketch)
+            .params("start, end, apex: [x,y] or point refs; rho?: 0…1 (default 0.5: parabola)"),
     ];
+
+fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "CircleElipse";
+    let (c, m) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "major")?);
+    let u = (m - c).normalized().ok_or_else(|| bad(cmd, "the major axis end must differ from the centre"))?;
+    let a = c.dist(m);
+    let r = match (num(p, "minor_radius"), p.get("minor").and_then(crate::params::vec2)) {
+        (Some(r), _) => r,
+        (None, Some(q)) => {
+            // Minor radius so the ellipse passes through q.
+            let d = q - c;
+            let (x, y) = (d.dot(u), d.cross(u).abs());
+            let k = 1.0 - (x / a).powi(2);
+            if k <= 1e-12 {
+                return Err(bad(cmd, "the minor point must lie within the major axis span"));
+            }
+            y / k.sqrt()
+        }
+        _ => return Err(bad(cmd, "needs `minor` [x,y] or `minor_radius`")),
+    };
+    if !(r > 1e-9 && r < 1e8) {
+        return Err(bad(cmd, "the minor radius must be positive"));
+    }
+    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+        let ci = sk.add_point(c, None)?;
+        let mi = sk.add_point(m, None)?;
+        let e = sk.add_curve(CurveKind::Ellipse { c: ci, m: mi, r }, None)?;
+        mark_construction(sk, &[e], p);
+        Ok((ids_of(sk, &[e]), Vec::new()))
+    })?;
+    Ok(result(out, info))
+}
+
+fn point_list(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<Vec<usize>> {
+    let list = p.get("points").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`points` must be a list"))?;
+    if list.len() < 2 || list.len() > solvecraft_sketch::MAX_SPLINE_POINTS {
+        return Err(bad(cmd, "a spline needs 2 to 500 points"));
+    }
+    let mut out = Vec::new();
+    for v in list {
+        let a = super::sketch::parg(sk, v, cmd)?;
+        let i = match a.idx() {
+            Some(i) => i,
+            None => sk.add_point(a.pos(), None)?,
+        };
+        if out.last() == Some(&i) || out.last().and_then(|l| sk.point(*l)).is_some_and(|q| q.dist(a.pos()) < 1e-9) {
+            return Err(bad(cmd, "consecutive points must differ"));
+        }
+        out.push(i);
+    }
+    Ok(out)
+}
+
+fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> Result<Value> {
+    let p = &super::sketch_project::snap_points(s, p, cmd)?;
+    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+        let pts = point_list(sk, p, cmd)?;
+        let c = sk.add_curve(CurveKind::Spline { pts, control, degree }, None)?;
+        mark_construction(sk, &[c], p);
+        Ok((ids_of(sk, &[c]), Vec::new()))
+    })?;
+    Ok(result(out, info))
+}
+
+fn spline_fit(s: &mut Session, p: &Value) -> Result<Value> {
+    spline(s, p, "DrawSpline", false, 3)
+}
+fn spline_cv3(s: &mut Session, p: &Value) -> Result<Value> {
+    spline(s, p, "DrawCVMSpline3D", true, 3)
+}
+fn spline_cv5(s: &mut Session, p: &Value) -> Result<Value> {
+    spline(s, p, "DrawCVMSpline5D", true, 5)
+}
+
+fn conic(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ConicCurveCmd";
+    let rho = num(p, "rho").unwrap_or(0.5);
+    if !(rho > 1e-6 && rho < 1.0 - 1e-6) {
+        return Err(bad(cmd, "`rho` must be between 0 and 1"));
+    }
+    let p = &super::sketch_project::snap_points(s, p, cmd)?;
+    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+        let mut idx = Vec::new();
+        for k in ["start", "end", "apex"] {
+            let a = req_parg(sk, p, k, cmd)?;
+            idx.push(match a.idx() {
+                Some(i) => i,
+                None => sk.add_point(a.pos(), None)?,
+            });
+        }
+        let (a, b, x) = (idx[0], idx[1], idx[2]);
+        if a == b || a == x || b == x {
+            return Err(bad(cmd, "start, end and apex must differ"));
+        }
+        let c = sk.add_curve(CurveKind::Conic { a, b, apex: x, rho }, None)?;
+        mark_construction(sk, &[c], p);
+        Ok((ids_of(sk, &[c]), Vec::new()))
+    })?;
+    Ok(result(out, info))
+}
 
 fn midpoint_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "SketchMidpointLine";
@@ -92,7 +217,27 @@ fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
                 None
             }
         }
-        CurveKind::Circle { .. } => None,
+        CurveKind::Spline { ref pts, control, .. } => {
+            let q: Vec<Vec2> = pts.iter().filter_map(|i| sk.point(*i)).collect();
+            if pts.last() == Some(&pi) {
+                solvecraft_sketch::spline_end_tangent(&q, control, true)
+            } else if pts.first() == Some(&pi) {
+                solvecraft_sketch::spline_end_tangent(&q, control, false).map(|t| -t)
+            } else {
+                None
+            }
+        }
+        CurveKind::Conic { a, b, apex, .. } => {
+            let x = sk.point(apex)?;
+            if pi == b {
+                (sk.point(b)? - x).normalized()
+            } else if pi == a {
+                (sk.point(a)? - x).normalized()
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
 

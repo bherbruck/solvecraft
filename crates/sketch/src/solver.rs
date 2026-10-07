@@ -86,7 +86,7 @@ fn layout(sk: &Sketch) -> Layout {
         .curves
         .iter()
         .map(|c| match c.kind {
-            CurveKind::Circle { .. } if c.link.is_none() => {
+            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } if c.link.is_none() => {
                 n += 1;
                 Some(n - 1)
             }
@@ -136,6 +136,53 @@ impl State<'_> {
     fn is_line(&self, c: usize) -> bool {
         matches!(self.sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }))
     }
+    fn is_freeform(&self, c: usize) -> bool {
+        self.sk.curves.get(c).is_some_and(|c| c.kind.is_freeform())
+    }
+    /// Polyline of a free-form curve with trial values.
+    fn poly(&self, c: usize) -> Vec<Vec2> {
+        match self.sk.curves.get(c).map(|c| &c.kind) {
+            Some(CurveKind::Ellipse { c: ci, m, r }) => {
+                let r = match self.lay.rvar.get(c).copied().flatten() {
+                    Some(v) => self.x.get(v).copied().unwrap_or(*r),
+                    None => *r,
+                };
+                crate::curves::ellipse_polyline(self.p(*ci), self.p(*m), r)
+            }
+            Some(CurveKind::Spline { pts, control, degree }) => {
+                let p: Vec<Vec2> = pts.iter().map(|q| self.p(*q)).collect();
+                crate::curves::spline_polyline(&p, *control, *degree)
+            }
+            Some(CurveKind::Conic { a, b, apex, rho }) => crate::curves::conic_polyline(self.p(*a), self.p(*apex), self.p(*b), *rho),
+            _ => Vec::new(),
+        }
+    }
+    /// Unit tangent of any curve at its point `p` (an end point for open free-form curves).
+    fn tangent_at(&self, c: usize, p: usize) -> Option<Vec2> {
+        match self.sk.curves.get(c).map(|c| &c.kind)? {
+            CurveKind::Line { a, b } => (self.p(*b) - self.p(*a)).normalized(),
+            CurveKind::Circle { .. } | CurveKind::Arc { .. } => (self.p(p) - self.round(c).0).perp().normalized(),
+            CurveKind::Spline { pts, control, .. } => {
+                let q: Vec<Vec2> = pts.iter().map(|i| self.p(*i)).collect();
+                crate::curves::spline_end_tangent(&q, *control, pts.last() == Some(&p) && pts.first() != Some(&p))
+            }
+            CurveKind::Conic { a, b, apex, .. } => {
+                if p == *a {
+                    (self.p(*apex) - self.p(*a)).normalized()
+                } else if p == *b {
+                    (self.p(*b) - self.p(*apex)).normalized()
+                } else {
+                    None
+                }
+            }
+            CurveKind::Ellipse { .. } => {
+                let poly = self.poly(c);
+                let q = self.p(p);
+                let k = (0..poly.len().saturating_sub(1)).min_by(|i, j| poly[*i].dist(q).total_cmp(&poly[*j].dist(q)))?;
+                (*poly.get(k + 1)? - *poly.get(k)?).normalized()
+            }
+        }
+    }
 }
 
 fn wrap_angle(a: f64) -> f64 {
@@ -166,7 +213,9 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         }
         PointOnCurve { p, c } => {
             let pp = s.p(p);
-            if s.is_line(c) {
+            if s.is_freeform(c) {
+                out.push(crate::curves::polyline_dist(&s.poly(c), pp));
+            } else if s.is_line(c) {
                 let (a, b) = s.line(c);
                 out.push(line_dist(pp, a, b));
             } else {
@@ -200,7 +249,22 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         }
         Tangent { a, b } => {
             let (la, lb) = (s.is_line(a), s.is_line(b));
-            if la || lb {
+            if s.is_freeform(a) || s.is_freeform(b) {
+                // Without a shared end point: the curves touch (closest approach zero).
+                let (f, o) = if s.is_freeform(a) { (a, b) } else { (b, a) };
+                let poly = s.poly(f);
+                let d = if s.is_line(o) {
+                    let (p0, p1) = s.line(o);
+                    poly.iter().map(|q| line_dist(*q, p0, p1).abs()).fold(f64::INFINITY, f64::min)
+                } else if s.is_freeform(o) {
+                    let other = s.poly(o);
+                    poly.iter().map(|q| crate::curves::polyline_dist(&other, *q)).fold(f64::INFINITY, f64::min)
+                } else {
+                    let (cc, r) = s.round(o);
+                    poly.iter().map(|q| (q.dist(cc) - r).abs()).fold(f64::INFINITY, f64::min)
+                };
+                out.push(if d.is_finite() { d } else { 0.0 });
+            } else if la || lb {
                 let (l, c) = if la { (a, b) } else { (b, a) };
                 let (p0, p1) = s.line(l);
                 let (cc, r) = s.round(c);
@@ -284,7 +348,13 @@ fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
         Block::TangentAt(_, k, p) => {
             let ConstraintKind::Tangent { a, b } = **k else { return };
             let pt = s.p(*p);
-            if s.is_line(a) || s.is_line(b) {
+            if s.is_freeform(a) || s.is_freeform(b) {
+                // Directions at the shared end parallel.
+                match (s.tangent_at(a, *p), s.tangent_at(b, *p)) {
+                    (Some(u), Some(v)) => out.push(u.cross(v) * 10.0),
+                    _ => out.push(0.0),
+                }
+            } else if s.is_line(a) || s.is_line(b) {
                 let (l, c) = if s.is_line(a) { (a, b) } else { (b, a) };
                 let (p0, p1) = s.line(l);
                 let (cc, _) = s.round(c);
@@ -308,8 +378,8 @@ fn touch_point(sk: &Sketch, k: &ConstraintKind) -> Option<usize> {
     let ConstraintKind::Tangent { a, b } = *k else { return None };
     let ends = |c: usize| -> Vec<usize> {
         match sk.curves.get(c).map(|c| &c.kind) {
-            Some(CurveKind::Line { a, b }) | Some(CurveKind::Arc { a, b, .. }) => vec![*a, *b],
-            _ => Vec::new(),
+            Some(k) => k.ends().map(|(a, b)| vec![a, b]).unwrap_or_default(),
+            None => Vec::new(),
         }
     };
     let (ea, eb) = (ends(a), ends(b));
@@ -328,23 +398,15 @@ fn block_vars(sk: &Sketch, lay: &Layout, b: &Block) -> Vec<usize> {
             v.extend([x, x + 1]);
         }
     };
-    let curve = |v: &mut Vec<usize>, c: usize| match sk.curves.get(c).map(|c| &c.kind) {
-        Some(CurveKind::Line { a, b }) => {
-            pt(v, *a);
-            pt(v, *b);
-        }
-        Some(CurveKind::Circle { c: ci, .. }) => {
-            pt(v, *ci);
+    let curve = |v: &mut Vec<usize>, c: usize| {
+        if let Some(k) = sk.curves.get(c).map(|c| &c.kind) {
+            for q in k.point_ids() {
+                pt(v, q);
+            }
             if let Some(r) = lay.rvar.get(c).copied().flatten() {
                 v.push(r);
             }
         }
-        Some(CurveKind::Arc { c, a, b }) => {
-            pt(v, *c);
-            pt(v, *a);
-            pt(v, *b);
-        }
-        None => {}
     };
     use ConstraintKind::*;
     match b {
@@ -546,7 +608,7 @@ pub fn solve(sk: &mut Sketch) -> SolveReport {
         }
     }
     for (i, c) in sk.curves.iter().enumerate() {
-        if let (CurveKind::Circle { r, .. }, Some(v)) = (&c.kind, lay.rvar.get(i).copied().flatten())
+        if let (CurveKind::Circle { r, .. } | CurveKind::Ellipse { r, .. }, Some(v)) = (&c.kind, lay.rvar.get(i).copied().flatten())
             && let Some(s) = x.get_mut(v)
         {
             *s = *r;
@@ -654,7 +716,7 @@ pub fn solve(sk: &mut Sketch) -> SolveReport {
         }
     }
     for (i, c) in sk.curves.iter_mut().enumerate() {
-        if let (CurveKind::Circle { r, .. }, Some(v)) = (&mut c.kind, lay.rvar.get(i).copied().flatten()) {
+        if let (CurveKind::Circle { r, .. } | CurveKind::Ellipse { r, .. }, Some(v)) = (&mut c.kind, lay.rvar.get(i).copied().flatten()) {
             *r = use_x.get(v).copied().unwrap_or(*r).abs().max(1e-9);
         }
     }
@@ -664,16 +726,8 @@ pub fn solve(sk: &mut Sketch) -> SolveReport {
         None => true,
     };
     let point_determined: Vec<bool> = (0..sk.points.len()).map(pdet).collect();
-    let curve_determined = sk
-        .curves
-        .iter()
-        .enumerate()
-        .map(|(i, c)| match c.kind {
-            CurveKind::Line { a, b } => pdet(a) && pdet(b),
-            CurveKind::Circle { c, .. } => pdet(c) && vdet(lay.rvar.get(i).copied().flatten()),
-            CurveKind::Arc { c, a, b } => pdet(c) && pdet(a) && pdet(b),
-        })
-        .collect();
+    let curve_determined =
+        sk.curves.iter().enumerate().map(|(i, c)| c.kind.point_ids().into_iter().all(pdet) && vdet(lay.rvar.get(i).copied().flatten())).collect();
     SolveReport {
         status,
         dof: lay.n.saturating_sub(rank),

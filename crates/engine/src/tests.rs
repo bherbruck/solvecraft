@@ -276,6 +276,11 @@ fn hostile_params_never_panic() {
         "chain",
         "at",
         "curve",
+        "major",
+        "minor",
+        "minor_radius",
+        "apex",
+        "rho",
     ];
     let mut internal = Vec::new();
     for spec in command_specs() {

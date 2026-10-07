@@ -274,7 +274,7 @@ impl Sketch {
                 Some(CurveKind::Line { a, b }) => Some(LCurve::Line(local(*a)?, local(*b)?)),
                 Some(CurveKind::Circle { c, r }) => Some(LCurve::Circle(local(*c)?, *r)),
                 Some(CurveKind::Arc { c, a, b }) => Some(LCurve::Arc(local(*c)?, local(*a)?, local(*b)?)),
-                None => None,
+                _ => None,
             })
             .collect();
         // The new layout numbers points in first-use order: curves first, then lone points,

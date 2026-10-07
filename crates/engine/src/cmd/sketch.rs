@@ -897,7 +897,7 @@ fn c_symmetry(s: &mut Session, p: &Value) -> Result<Value> {
 fn round_center(sk: &Sketch, c: usize) -> Option<usize> {
     match sk.curves.get(c)?.kind {
         CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
-        CurveKind::Line { .. } => None,
+        _ => None,
     }
 }
 
@@ -910,12 +910,7 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
             vec![i]
         } else {
             let c = sk.curve_index(r).ok_or_else(|| bad(cmd, format!("unknown entity `{r}`")))?;
-            match sk.curves.get(c).map(|c| c.kind.clone()) {
-                Some(CurveKind::Line { a, b }) => vec![a, b],
-                Some(CurveKind::Circle { c, .. }) => vec![c],
-                Some(CurveKind::Arc { c, a, b }) => vec![c, a, b],
-                None => vec![],
-            }
+            sk.curves.get(c).map(|c| c.kind.point_ids()).unwrap_or_default()
         };
         let is_fixed = |sk: &Sketch, q: usize| sk.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: q });
         let all_fixed = pts.iter().all(|q| is_fixed(sk, *q));

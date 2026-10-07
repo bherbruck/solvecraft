@@ -43,6 +43,82 @@ pub enum CurveKind {
     /// Counter-clockwise arc around `c` from `a` to `b` (radius = |a − c|; the solver keeps
     /// |b − c| equal to it).
     Arc { c: usize, a: usize, b: usize },
+    /// Ellipse: centre `c`, end of the major axis `m`, minor radius `r`.
+    Ellipse { c: usize, m: usize, r: f64 },
+    /// Spline through its points (fit points) or, with `control`, a clamped B-spline of
+    /// `degree` over them (control points).
+    Spline {
+        pts: Vec<usize>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        control: bool,
+        #[serde(default = "three")]
+        degree: u8,
+    },
+    /// Conic from `a` to `b` shaped by the `apex` point and `rho` in (0, 1) (0.5 parabola,
+    /// less elliptical, more hyperbolic).
+    Conic { a: usize, b: usize, apex: usize, rho: f64 },
+}
+
+fn three() -> u8 {
+    3
+}
+
+impl CurveKind {
+    /// Every point the curve uses.
+    pub fn point_ids(&self) -> Vec<usize> {
+        match self {
+            CurveKind::Line { a, b } => vec![*a, *b],
+            CurveKind::Circle { c, .. } => vec![*c],
+            CurveKind::Arc { c, a, b } => vec![*c, *a, *b],
+            CurveKind::Ellipse { c, m, .. } => vec![*c, *m],
+            CurveKind::Spline { pts, .. } => pts.clone(),
+            CurveKind::Conic { a, b, apex, .. } => vec![*a, *b, *apex],
+        }
+    }
+    pub fn uses(&self, p: usize) -> bool {
+        self.point_ids().contains(&p)
+    }
+    /// Renumber the points the curve uses.
+    pub fn map_points(&mut self, f: &dyn Fn(usize) -> usize) {
+        match self {
+            CurveKind::Line { a, b } => {
+                *a = f(*a);
+                *b = f(*b);
+            }
+            CurveKind::Circle { c, .. } => *c = f(*c),
+            CurveKind::Arc { c, a, b } => {
+                *c = f(*c);
+                *a = f(*a);
+                *b = f(*b);
+            }
+            CurveKind::Ellipse { c, m, .. } => {
+                *c = f(*c);
+                *m = f(*m);
+            }
+            CurveKind::Spline { pts, .. } => {
+                for q in pts.iter_mut() {
+                    *q = f(*q);
+                }
+            }
+            CurveKind::Conic { a, b, apex, .. } => {
+                *a = f(*a);
+                *b = f(*b);
+                *apex = f(*apex);
+            }
+        }
+    }
+    /// Start and end points of an open curve.
+    pub fn ends(&self) -> Option<(usize, usize)> {
+        match self {
+            CurveKind::Line { a, b } | CurveKind::Arc { a, b, .. } | CurveKind::Conic { a, b, .. } => Some((*a, *b)),
+            CurveKind::Spline { pts, .. } => Some((*pts.first()?, *pts.last()?)),
+            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } => None,
+        }
+    }
+    /// Free-form curves (drawn and profiled as polylines).
+    pub fn is_freeform(&self) -> bool {
+        matches!(self, CurveKind::Ellipse { .. } | CurveKind::Spline { .. } | CurveKind::Conic { .. })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -384,7 +460,7 @@ impl Sketch {
         Ok(self.points.len() - 1)
     }
 
-    fn curve_id(&mut self, id: Option<&str>, prefix: &str) -> Result<String> {
+    pub(crate) fn curve_id(&mut self, id: Option<&str>, prefix: &str) -> Result<String> {
         match id {
             Some(i) if self.id_taken(i) => Err(SketchError::Duplicate(i.into())),
             Some("") => Err(SketchError::Invalid("empty id".into())),
@@ -510,7 +586,8 @@ impl Sketch {
                 need_round(b)?;
             }
             Tangent { a, b } => {
-                if !(is_round(a) || is_round(b)) {
+                let free = |i: usize| self.curves.get(i).is_some_and(|c| c.kind.is_freeform());
+                if !(is_round(a) || is_round(b) || free(a) || free(b)) {
                     return Err(SketchError::WrongKind(name(a), "tangent needs a circle or arc".into()));
                 }
             }
@@ -535,19 +612,23 @@ impl Sketch {
         match self.curves.get(ci)?.kind {
             CurveKind::Circle { r, .. } => Some(r),
             CurveKind::Arc { c, a, .. } => Some(self.point(c)?.dist(self.point(a)?)),
-            CurveKind::Line { .. } => None,
+            _ => None,
         }
     }
     pub fn center(&self, ci: usize) -> Option<Vec2> {
         match self.curves.get(ci)?.kind {
-            CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => self.point(c),
-            CurveKind::Line { .. } => None,
+            CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } | CurveKind::Ellipse { c, .. } => self.point(c),
+            _ => None,
         }
     }
 
     /// Boundary segments of a curve (a circle gives two half arcs).
     pub fn segs(&self, ci: usize) -> Vec<Seg2> {
         let Some(cu) = self.curves.get(ci) else { return Vec::new() };
+        if cu.kind.is_freeform() {
+            let poly = self.polyline(ci);
+            return poly.windows(2).filter(|w| w[0].dist(w[1]) > 1e-12).map(|w| Seg2::Line { a: w[0], b: w[1] }).collect();
+        }
         match cu.kind {
             CurveKind::Line { a, b } => match (self.point(a), self.point(b)) {
                 (Some(a), Some(b)) => vec![Seg2::Line { a, b }],
@@ -568,7 +649,74 @@ impl Sketch {
                 }
                 _ => Vec::new(),
             },
+            _ => Vec::new(),
         }
+    }
+
+    /// Polyline of a free-form curve (ellipse, spline, conic); other curves: their segments'
+    /// polylines.
+    pub fn polyline(&self, ci: usize) -> Vec<Vec2> {
+        let Some(cu) = self.curves.get(ci) else { return Vec::new() };
+        let pt = |i: &usize| self.point(*i);
+        match &cu.kind {
+            CurveKind::Ellipse { c, m, r } => match (pt(c), pt(m)) {
+                (Some(c), Some(m)) => crate::curves::ellipse_polyline(c, m, *r),
+                _ => Vec::new(),
+            },
+            CurveKind::Spline { pts, control, degree } => {
+                let p: Option<Vec<Vec2>> = pts.iter().map(pt).collect();
+                p.map(|p| crate::curves::spline_polyline(&p, *control, *degree)).unwrap_or_default()
+            }
+            CurveKind::Conic { a, b, apex, rho } => match (pt(a), pt(apex), pt(b)) {
+                (Some(a), Some(x), Some(b)) => crate::curves::conic_polyline(a, x, b, *rho),
+                _ => Vec::new(),
+            },
+            _ => {
+                let mut out: Vec<Vec2> = Vec::new();
+                for s in self.segs(ci) {
+                    for q in s.polyline(1e-3) {
+                        if out.last().is_none_or(|l| l.dist(q) > 1e-12) {
+                            out.push(q);
+                        }
+                    }
+                }
+                out
+            }
+        }
+    }
+
+    /// Add a curve of any kind over existing points.
+    pub fn add_curve(&mut self, kind: CurveKind, id: Option<&str>) -> Result<usize> {
+        let ids = kind.point_ids();
+        if ids.iter().any(|p| *p >= self.points.len()) {
+            return Err(SketchError::Invalid("curve point out of range".into()));
+        }
+        let prefix = match &kind {
+            CurveKind::Line { .. } => "l",
+            CurveKind::Circle { .. } => "c",
+            CurveKind::Arc { .. } => "a",
+            CurveKind::Ellipse { m, c, r } => {
+                if m == c || !(r.is_finite() && *r > 1e-9 && *r < 1e9) {
+                    return Err(SketchError::Invalid("degenerate ellipse".into()));
+                }
+                "e"
+            }
+            CurveKind::Spline { pts, degree, .. } => {
+                if pts.len() < 2 || pts.len() > crate::curves::MAX_SPLINE_POINTS || !(1..=7).contains(degree) {
+                    return Err(SketchError::Invalid("a spline needs 2 to 500 points and degree 1 to 7".into()));
+                }
+                "s"
+            }
+            CurveKind::Conic { rho, .. } => {
+                if !(rho.is_finite() && *rho > 1e-6 && *rho < 1.0 - 1e-6) {
+                    return Err(SketchError::Invalid("rho must be between 0 and 1".into()));
+                }
+                "k"
+            }
+        };
+        let id = self.curve_id(id, prefix)?;
+        self.curves.push(Curve { id, kind, construction: false, reversed: false, link: None });
+        Ok(self.curves.len() - 1)
     }
 
     /// Remove curves (by index) and then any points no longer used by a curve (except the
@@ -577,11 +725,7 @@ impl Sketch {
         let mut owned: Vec<usize> = Vec::new();
         for (i, c) in self.curves.iter().enumerate() {
             if which.contains(&i) {
-                match c.kind {
-                    CurveKind::Line { a, b } => owned.extend([a, b]),
-                    CurveKind::Circle { c, .. } => owned.push(c),
-                    CurveKind::Arc { c, a, b } => owned.extend([c, a, b]),
-                }
+                owned.extend(c.kind.point_ids());
             }
         }
         self.drop_curves(which);
@@ -593,11 +737,7 @@ impl Sketch {
     }
 
     fn point_used_by_curve(&self, p: usize) -> bool {
-        self.curves.iter().any(|c| match c.kind {
-            CurveKind::Line { a, b } => a == p || b == p,
-            CurveKind::Circle { c, .. } => c == p,
-            CurveKind::Arc { c, a, b } => c == p || a == p || b == p,
-        })
+        self.curves.iter().any(|c| c.kind.uses(p))
     }
 
     /// Remove curves only (points stay), remapping constraints.
@@ -627,17 +767,8 @@ impl Sketch {
             return;
         }
         let gone = |p: usize| p != 0 && which.contains(&p);
-        let dead_curves: Vec<usize> = self
-            .curves
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| match c.kind {
-                CurveKind::Line { a, b } => gone(a) || gone(b),
-                CurveKind::Circle { c, .. } => gone(c),
-                CurveKind::Arc { c, a, b } => gone(c) || gone(a) || gone(b),
-            })
-            .map(|(i, _)| i)
-            .collect();
+        let dead_curves: Vec<usize> =
+            self.curves.iter().enumerate().filter(|(_, c)| c.kind.point_ids().into_iter().any(gone)).map(|(i, _)| i).collect();
         self.drop_curves(&dead_curves);
         let mut pmap = vec![None; self.points.len()];
         let mut n = 0;
@@ -649,18 +780,7 @@ impl Sketch {
         }
         let pm = |i: usize| pmap.get(i).copied().flatten();
         for c in &mut self.curves {
-            match &mut c.kind {
-                CurveKind::Line { a, b } => {
-                    *a = pm(*a).unwrap_or(0);
-                    *b = pm(*b).unwrap_or(0);
-                }
-                CurveKind::Circle { c, .. } => *c = pm(*c).unwrap_or(0),
-                CurveKind::Arc { c, a, b } => {
-                    *c = pm(*c).unwrap_or(0);
-                    *a = pm(*a).unwrap_or(0);
-                    *b = pm(*b).unwrap_or(0);
-                }
-            }
+            c.kind.map_points(&|i| pm(i).unwrap_or(0));
         }
         let cm = |i: usize| Some(i);
         self.constraints.retain_mut(|c| c.kind.remap(&pm, &cm));
@@ -686,9 +806,11 @@ impl Sketch {
             (r, _) => r,
         };
         match (&c.kind, role) {
-            (CurveKind::Line { a, .. }, "start") | (CurveKind::Arc { a, .. }, "start") => Some(*a),
-            (CurveKind::Line { b, .. }, "end") | (CurveKind::Arc { b, .. }, "end") => Some(*b),
-            (CurveKind::Circle { c, .. }, "center") | (CurveKind::Arc { c, .. }, "center") => Some(*c),
+            (CurveKind::Circle { c, .. }, "center") | (CurveKind::Arc { c, .. }, "center") | (CurveKind::Ellipse { c, .. }, "center") => Some(*c),
+            (CurveKind::Ellipse { m, .. }, "major") => Some(*m),
+            (CurveKind::Conic { apex, .. }, "apex") => Some(*apex),
+            (k, "start") => k.ends().map(|e| e.0),
+            (k, "end") => k.ends().map(|e| e.1),
             _ => None,
         }
     }

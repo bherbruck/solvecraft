@@ -205,3 +205,58 @@ fn new_creation_tools() {
     assert!(a.iter().any(|x| close(*x, pi * 10.0 * 2.0 + pi)), "{a:?}");
     assert!(a.iter().any(|x| close(*x, pi * 5.0 * 2.0 + pi)), "{a:?}");
 }
+
+#[test]
+fn ellipse_splines_conic() {
+    let pi = std::f64::consts::PI;
+    let mut s = new_sketch();
+    let e = run(&mut s, "CircleElipse", json!({"center": [0, 0], "major": [10, 0], "minor": [0, 4]}));
+    let eid = ids(&e["curves"])[0].clone();
+    let a = profiles(&s);
+    assert!((a[0] - pi * 40.0).abs() / (pi * 40.0) < 2e-3, "{a:?}");
+    // A point constrained onto the ellipse lands on it.
+    run(&mut s, "DrawPoint", json!({"point": [3, 5], "id": "q"}));
+    run(&mut s, "ConstraintCoincident", json!({"a": "q", "b": eid}));
+    let sk = sketch(&s);
+    let q = sk.point(sk.point_index("q").unwrap()).unwrap();
+    let poly = sk.polyline(sk.curve_index(&eid).unwrap());
+    let d = poly.windows(2).map(|w| {
+        let (a, b) = (w[0], w[1]);
+        let t = ((q - a).dot(b - a) / (b - a).len2()).clamp(0.0, 1.0);
+        q.dist(a + (b - a) * t)
+    });
+    assert!(d.fold(f64::INFINITY, f64::min) < 1e-6, "{q:?}");
+    // Fit spline closed by a line: one profile.
+    let sp = run(&mut s, "DrawSpline", json!({"points": [[100, 0], [110, 8], [120, 3], [130, 0]]}));
+    let sid = ids(&sp["curves"])[0].clone();
+    run(&mut s, "DrawPolyline", json!({"points": [format!("{sid}.end"), format!("{sid}.start")]}));
+    assert_eq!(profiles(&s).len(), 2);
+    // Moving a fit point reshapes the spline (it is a sketch point).
+    let sk = sketch(&s);
+    let si = sk.curve_index(&sid).unwrap();
+    let pts = sk.curves[si].kind.point_ids();
+    let pid = sk.points[pts[1]].id.clone();
+    run(&mut s, "sketch.move_point", json!({"point": pid, "to": [110, 12]}));
+    let sk = sketch(&s);
+    assert!(sk.polyline(si).iter().any(|q| q.dist(Vec2::new(110.0, 12.0)) < 1e-9));
+    // Control point splines (degree 3 and 5) and a conic.
+    run(&mut s, "DrawCVMSpline3D", json!({"points": [[0, 50], [0, 60], [10, 60], [10, 50]]}));
+    run(&mut s, "DrawCVMSpline5D", json!({"points": [[20, 50], [20, 60], [25, 65], [30, 60], [35, 62], [40, 50]]}));
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let k = run(&mut s, "ConicCurveCmd", json!({"start": [210, 0], "end": [200, 10], "apex": [210, 10], "rho": w / (1.0 + w)}));
+    let kid = ids(&k["curves"])[0].clone();
+    // A line tangent to the conic at its end: the tangent arc tool continues it.
+    let r = run(&mut s, "ArcTangent", json!({"start": format!("{kid}.end"), "end": [190, 0]}));
+    let aid = ids(&r["curves"])[0].clone();
+    let sk = sketch(&s);
+    // The conic is a quarter circle about (200, 0) leaving (200, 10) heading -x: the tangent
+    // arc from there to (190, 0) continues the same circle.
+    let ai = sk.curve_index(&aid).unwrap();
+    assert!(sk.center(ai).unwrap().dist(Vec2::new(200.0, 0.0)) < 1e-6, "{:?}", sk.center(ai));
+    assert!(s.execute("DrawSpline", &json!({"points": [[0, 0]]})).is_err());
+    assert!(s.execute("ConicCurveCmd", &json!({"start": [0, 0], "end": [1, 0], "apex": [0, 1], "rho": 1.5})).is_err());
+    // Mirror and pattern copy free-form curves too.
+    let m = ids(&run(&mut s, "DrawPolyline", json!({"points": [[-50, -50], [-50, 50]]}))["curves"])[0].clone();
+    let r = run(&mut s, "MirrorSketchCommand", json!({"entities": [eid, sid], "line": m}));
+    assert_eq!(ids(&r["curves"]).len(), 2);
+}

@@ -128,6 +128,14 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
                     shapes.push((ci, Shape::Round { c: center, r: radius, start, sweep }));
                 }
             }
+            // Free-form curves take part as their polylines.
+            _ => {
+                for s in sk.segs(ci) {
+                    if let Seg2::Line { a, b } = s {
+                        shapes.push((ci, Shape::Line { a, b }));
+                    }
+                }
+            }
         }
         if shapes.len() > MAX_EDGES {
             break;

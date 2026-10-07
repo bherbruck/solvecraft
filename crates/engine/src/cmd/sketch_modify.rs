@@ -212,6 +212,7 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64]) -> Result<(Vec<usize>, Vec<u
                 push(sk, CurveKind::Arc { c, a: w[0], b: w[1] }, "a")?;
             }
         }
+        _ => return Err(bad("split", "not supported yet for ellipses, splines and conics")),
     }
     Ok((pieces, pts))
 }
@@ -400,11 +401,7 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn uses(c: &Curve, p: usize) -> bool {
-    match c.kind {
-        CurveKind::Line { a, b } => a == p || b == p,
-        CurveKind::Circle { c, .. } => c == p,
-        CurveKind::Arc { c, a, b } => c == p || a == p || b == p,
-    }
+    c.kind.uses(p)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -631,7 +628,7 @@ fn offset_piece(sk: &Sketch, c: usize, forward: bool, d: f64) -> Option<Piece> {
             let (s, e) = if forward { (at(pa), at(pb)) } else { (at(pb), at(pa)) };
             Some(Piece::Arc(ci, cc, nr, s, e, forward))
         }
-        CurveKind::Circle { .. } => None,
+        _ => None,
     }
 }
 
@@ -771,11 +768,8 @@ fn entities(sk: &Sketch, p: &Value, cmd: &str) -> Result<(Vec<usize>, Vec<usize>
 fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
     let mut v: Vec<usize> = Vec::new();
     for c in cs {
-        match sk.curves.get(*c).map(|c| &c.kind) {
-            Some(CurveKind::Line { a, b }) => v.extend([*a, *b]),
-            Some(CurveKind::Circle { c, .. }) => v.push(*c),
-            Some(CurveKind::Arc { c, a, b }) => v.extend([*c, *a, *b]),
-            None => {}
+        if let Some(k) = sk.curves.get(*c).map(|c| &c.kind) {
+            v.extend(k.point_ids());
         }
     }
     v.extend(ps);
@@ -811,7 +805,17 @@ fn copy_through(
     let mut made = Vec::new();
     for c in cs {
         let Some(cu) = sk.curves.get(*c).cloned() else { continue };
+        let mut kind = cu.kind.clone();
+        kind.map_points(&m);
         let (kind, prefix) = match cu.kind {
+            CurveKind::Ellipse { r, .. } => {
+                if let CurveKind::Ellipse { r: slot, .. } = &mut kind {
+                    *slot = r * scale_r;
+                }
+                (kind, "e")
+            }
+            CurveKind::Spline { .. } => (kind, "s"),
+            CurveKind::Conic { .. } => (kind, "k"),
             CurveKind::Line { a, b } => (CurveKind::Line { a: m(a), b: m(b) }, "l"),
             CurveKind::Circle { c, r } => (CurveKind::Circle { c: m(c), r: r * scale_r }, "c"),
             CurveKind::Arc { c, a, b } => {
@@ -948,7 +952,7 @@ fn transform_in_place(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Ve
         }
     }
     for c in cs {
-        if let Some(Curve { kind: CurveKind::Circle { r, .. }, .. }) = sk.curves.get_mut(*c) {
+        if let Some(Curve { kind: CurveKind::Circle { r, .. } | CurveKind::Ellipse { r, .. }, .. }) = sk.curves.get_mut(*c) {
             *r *= k;
         }
     }
