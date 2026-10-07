@@ -64,6 +64,9 @@ pub struct Mesh {
     /// Per edge: a seam between two pieces of the same smooth surface (not drawn).
     #[serde(default)]
     pub seams: Vec<bool>,
+    /// Per edge: the B-rep faces it bounds (one or two).
+    #[serde(default)]
+    pub edge_faces: Vec<Vec<u32>>,
 }
 
 /// Mass properties of a closed mesh.
@@ -75,6 +78,53 @@ pub struct MeshMeasure {
 }
 
 impl Mesh {
+    /// Edges bounding face `f`.
+    pub fn face_edges(&self, f: u32) -> Vec<usize> {
+        self.edge_faces.iter().enumerate().filter(|(_, fs)| fs.contains(&f)).map(|(i, _)| i).collect()
+    }
+    /// The edges reached from `e` through vertices where the next edge continues smoothly
+    /// (angle between the end tangents below `max_angle`), including `e` itself.
+    pub fn tangent_chain(&self, e: usize, max_angle: f64) -> Vec<usize> {
+        // (end point, direction leaving the edge there). A polyline's end chord leans inward
+        // on a curve by half the turn to the next chord; extrapolating the two end chords
+        // recovers the curve's end tangent.
+        let end_dir = |p0: Vec3, p1: Vec3, p2: Option<Vec3>| -> Option<Vec3> {
+            let u1 = (p0 - p1).normalized()?;
+            match p2.and_then(|p2| (p1 - p2).normalized()) {
+                Some(u2) => (u1 * 1.5 - u2 * 0.5).normalized(),
+                None => Some(u1),
+            }
+        };
+        let ends = |i: usize| -> Option<[(Vec3, Vec3); 2]> {
+            let p = self.edges.get(i)?;
+            let n = p.len();
+            let (a, a1, a2) = (*p.first()?, *p.get(1)?, p.get(2).copied().filter(|_| n > 2));
+            let (b, b1) = (*p.last()?, *p.get(n.checked_sub(2)?)?);
+            let b2 = n.checked_sub(3).and_then(|k| p.get(k)).copied();
+            Some([(a, end_dir(a, a1, a2)?), (b, end_dir(b, b1, b2)?)])
+        };
+        let size = self.bounds().diagonal().max(1e-9);
+        let tol = size * 1e-7;
+        let cos = max_angle.cos();
+        let mut chain = vec![e];
+        let mut todo = vec![e];
+        while let Some(cur) = todo.pop() {
+            let Some(ce) = ends(cur) else { continue };
+            for (i, _) in self.edges.iter().enumerate() {
+                if chain.contains(&i) || self.seams.get(i).copied().unwrap_or(false) {
+                    continue;
+                }
+                let Some(ne) = ends(i) else { continue };
+                // Smooth: leaving `cur` at a shared end continues into `i` (opposite directions).
+                let smooth = ce.iter().any(|(p, d)| ne.iter().any(|(q, dn)| p.dist(*q) < tol && d.dot(-*dn) > cos));
+                if smooth && chain.len() < 10_000 {
+                    chain.push(i);
+                    todo.push(i);
+                }
+            }
+        }
+        chain
+    }
     pub fn tri(&self, t: &[u32; 3]) -> Option<[Vec3; 3]> {
         Some([*self.positions.get(t[0] as usize)?, *self.positions.get(t[1] as usize)?, *self.positions.get(t[2] as usize)?])
     }

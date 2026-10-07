@@ -14,6 +14,7 @@ pub mod dialogs;
 pub mod gpu;
 pub mod icons;
 pub mod palette;
+pub mod selection;
 pub mod theme;
 pub mod timeline;
 pub mod toolbar;
@@ -41,6 +42,8 @@ pub struct UiState {
     pub show_origin: bool,
     pub perspective: bool,
     pub hidden_bodies: Vec<String>,
+    /// Origin items (O, X, Y, Z, XY, XZ, YZ) and construction planes hidden one by one.
+    pub hidden_origin: Vec<String>,
     pub show_sketches: bool,
     pub palette_open: bool,
 }
@@ -55,6 +58,7 @@ impl Default for UiState {
             show_origin: true,
             perspective: false,
             hidden_bodies: Vec::new(),
+            hidden_origin: Vec::new(),
             show_sketches: true,
             palette_open: false,
         }
@@ -76,6 +80,8 @@ pub struct SolveApp {
     pub cam_anim: Option<CameraAnim>,
     /// Seconds since start, as of this frame.
     pub now: f64,
+    /// The view before the current sketch started (Finish Sketch returns to it).
+    pub pre_sketch_cam: Option<Camera>,
     pub services: Services,
     pub viewport: viewport::ViewportState,
     pub tool: Option<tools::Tool>,
@@ -101,6 +107,7 @@ impl SolveApp {
             cam: Camera::default(),
             cam_anim: None,
             now: 0.0,
+            pre_sketch_cam: None,
             services,
             viewport: viewport::ViewportState::default(),
             tool: None,
@@ -159,16 +166,43 @@ impl SolveApp {
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
         self.tool = None;
+        if id == "SketchStop" {
+            let r = self.run(id, json!({}));
+            if r.is_ok()
+                && let Some(c) = self.pre_sketch_cam.take()
+            {
+                self.animate_to(c);
+            }
+            return;
+        }
         if let Some(t) = tools::Tool::for_command(id) {
             self.tool = Some(t);
             self.set_status(tools::hint(id), false);
             return;
         }
         if let Some(d) = dialogs::Dialog::for_command(self, id) {
+            // The pre-selection now belongs to the dialog's inputs.
+            if d.wants_picks() && !self.session.selection.is_empty() {
+                let _ = self.session.execute("select.clear", &json!({}));
+            }
             self.dialog = Some(d);
             return;
         }
         let _ = self.run(id, json!({}));
+    }
+
+    /// Everything shown as selected: the selection plus the open dialog's inputs.
+    pub fn highlighted(&self) -> Vec<solvecraft_engine::Sel> {
+        let mut v = self.session.selection.clone();
+        if let Some(d) = &self.dialog {
+            v.extend(d.items());
+        }
+        v
+    }
+
+    /// Is the origin widget shown (always while picking a sketch plane)?
+    pub fn origin_visible(&self) -> bool {
+        self.ui.show_origin || self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::Sketch))
     }
 
     pub fn set_status(&mut self, s: impl Into<String>, error: bool) {
@@ -278,6 +312,14 @@ impl SolveApp {
         };
         if let Some(egui::Event::PointerMoved(p) | egui::Event::PointerButton { pos: p, .. }) = self.synthetic.first() {
             raw.events.push(egui::Event::PointerMoved(*p));
+        }
+        // egui keeps the modifier keys as input state, changed by their own event.
+        match self.synthetic.first() {
+            Some(egui::Event::PointerButton { modifiers, .. } | egui::Event::Key { modifiers, .. }) => {
+                raw.events.push(egui::Event::ModifiersChanged(*modifiers))
+            }
+            Some(egui::Event::PointerMoved(_)) => raw.events.push(egui::Event::ModifiersChanged(egui::Modifiers::default())),
+            _ => {}
         }
         let n = n.min(self.synthetic.len());
         raw.events.extend(self.synthetic.drain(..n));

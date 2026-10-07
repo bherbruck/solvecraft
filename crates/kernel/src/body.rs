@@ -141,13 +141,26 @@ impl Body {
                     }
                 }
             }
-            let mut seen = std::collections::HashSet::new();
+            let mut seen = std::collections::HashMap::new();
             for e in meshed.edge_iter() {
-                if !seen.insert(e.id()) {
+                if seen.contains_key(&e.id()) {
                     continue;
                 }
+                seen.insert(e.id(), out.edges.len());
                 let c = e.oriented_curve();
                 out.edges.push(c.0.iter().map(|p| Vec3::new(p.x, p.y, p.z)).collect());
+            }
+            // Which faces each edge bounds.
+            out.edge_faces = vec![Vec::new(); out.edges.len()];
+            for (fi, face) in meshed.face_iter().enumerate() {
+                for e in face.edge_iter() {
+                    if let Some(slot) = seen.get(&e.id()).and_then(|i| out.edge_faces.get_mut(*i)) {
+                        let f = u32::try_from(fi).unwrap_or(u32::MAX);
+                        if !slot.contains(&f) {
+                            slot.push(f);
+                        }
+                    }
+                }
             }
             Ok(out)
         })

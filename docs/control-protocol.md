@@ -25,8 +25,10 @@ Commands never open dialogs when run this way. `solvecraft-cli commands` prints 
 | `ui.set` | any `UiState` field (`tab`, `perspective`, `showGrid`, `hiddenBodies`, …) | |
 | `ui.view` | `view`: `front`, `back`, `top`, `bottom`, `left`, `right`, `iso`, `home`, `fit`; `animate` (bool, default false: snap) | |
 | `ui.start` | `command` | like a toolbar click: starts the sketch tool or dialog for the command |
-| `ui.click` | `x`, `y` (screen points), `button?`: left/right/middle, `shift?` | real pointer input |
+| `ui.click` | `x`, `y` (screen points), `button?`: left/right/middle, `shift?`, `ctrl?` | real pointer input |
 | `ui.move` | `x`, `y` | |
+| `ui.drag` | `x0`, `y0`, `x1`, `y1`, `button?`, `shift?`, `ctrl?`, `steps?` | press, move, release; a left drag on the model is a box selection (left to right: window, right to left: crossing) |
+| `ui.selection` | | the selection, the open dialog's inputs and the hovered item |
 | `ui.scroll` | `x`, `y`, `delta?` | wheel zoom at the cursor |
 | `ui.key` | `key` (egui key name, `Enter`, `Escape`…), `cmd?`, `shift?` | |
 | `ui.text` | `text` | typed text |

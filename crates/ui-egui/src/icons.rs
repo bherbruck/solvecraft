@@ -402,6 +402,10 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.arrow((6.0, 18.0), (15.0, 9.0), Color32::from_rgb(60, 160, 60));
         }
         "plane" => pen.poly(&[(3.0, 15.0), (12.0, 8.0), (21.0, 11.0), (12.0, 18.0)], Color32::from_rgb(244, 214, 150), ink),
+        "axis" => {
+            pen.line(&[(4.0, 20.0), (20.0, 4.0)], ink);
+            pen.circle(4.0, 20.0, 2.0, ink, ink);
+        }
         "settings" => {
             pen.circle(12.0, 12.0, 6.5, pen.fill, ink);
             pen.circle(12.0, 12.0, 2.5, Color32::WHITE, ink);

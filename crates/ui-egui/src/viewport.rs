@@ -11,6 +11,7 @@ use solvecraft_engine::view::{colors, grid_step, sketch_consumed, sketch_lines};
 use std::hash::{Hash, Hasher};
 
 use crate::gpu::{GpuScene, GpuTarget, SceneSlot, ViewportCallback};
+use crate::selection::{BoxSel, origin_quads, origin_size, ray_quad};
 use crate::theme::Tokens;
 use crate::{SolveApp, icons};
 
@@ -27,21 +28,59 @@ pub struct ViewportState {
     pub gpu: Option<GpuTarget>,
     slot: SceneSlot,
     key: u64,
+    hl_slot: SceneSlot,
+    hl_key: u64,
     cpu: Option<(u64, egui::TextureHandle)>,
     pub nav: Option<NavMode>,
+    /// What a click would pick now (after the active command's filter).
     pub hover: Option<Hit>,
     pub mouse: Option<Pos2>,
+    /// Box selection being dragged.
+    pub boxsel: Option<BoxSel>,
     pub build_ms: f64,
 }
 
 /// Something under the cursor.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Hit {
-    SketchPoint { sketch: u64, id: String, at: Vec2 },
-    SketchCurve { sketch: u64, id: String },
-    Edge { body: String, index: usize, mid: Vec3 },
-    Profile { sketch: u64, index: usize },
-    Face { body: String, index: usize, point: Vec3 },
+    SketchPoint {
+        sketch: u64,
+        id: String,
+        at: Vec2,
+    },
+    /// A sketch curve; `straight` for lines (usable as an axis).
+    SketchCurve {
+        sketch: u64,
+        id: String,
+        straight: bool,
+    },
+    Vertex {
+        body: String,
+        point: Vec3,
+    },
+    Edge {
+        body: String,
+        index: usize,
+        mid: Vec3,
+    },
+    Profile {
+        sketch: u64,
+        index: usize,
+    },
+    Face {
+        body: String,
+        index: usize,
+        point: Vec3,
+    },
+    /// An origin plane (XY, XZ, YZ) or a construction plane (by name).
+    Plane {
+        name: String,
+        point: Vec3,
+    },
+    /// An origin axis (X, Y, Z).
+    Axis {
+        name: String,
+    },
 }
 
 /// World ↔ screen mapping for the current frame.
@@ -99,16 +138,14 @@ fn visible_sketches(app: &SolveApp) -> Vec<u64> {
 fn scene_key(app: &SolveApp) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     app.session.revision.hash(&mut h);
-    serde_json::to_string(&app.session.selection).unwrap_or_default().hash(&mut h);
-    serde_json::to_string(&app.ui).unwrap_or_default().hash(&mut h);
+    app.ui.show_grid.hash(&mut h);
+    app.ui.show_sketches.hash(&mut h);
+    app.ui.hidden_bodies.hash(&mut h);
     app.session.active_sketch.hash(&mut h);
     let (minor, _) = grid_step(app.cam.half_height());
     minor.to_bits().hash(&mut h);
     ((app.cam.target.x / (minor * 5.0)).round() as i64).hash(&mut h);
     ((app.cam.target.y / (minor * 5.0)).round() as i64).hash(&mut h);
-    if let Some(d) = &app.dialog {
-        d.highlight_key().hash(&mut h);
-    }
     h.finish()
 }
 
@@ -130,19 +167,11 @@ fn build_scene(app: &SolveApp) -> GpuScene {
             sc.line((c + Vec3::new(-ext, t, 0.0)).to_f32(), (c + Vec3::new(ext, t, 0.0)).to_f32(), col, w, false);
         }
     }
-    if app.ui.show_origin {
-        let a = app.cam.half_height() * 0.3;
-        for (d, col) in [(Vec3::X, colors::AXIS_X), (Vec3::Y, colors::AXIS_Y), (Vec3::Z, colors::AXIS_Z)] {
-            sc.line([0.0; 3], (d * a).to_f32(), rgba(col), 2.0, false);
-        }
-    }
-    let dialog_edges: Vec<Vec3> = app.dialog.as_ref().map(|d| d.edges()).unwrap_or_default();
     for b in &st.bodies {
         if app.ui.hidden_bodies.contains(&b.name) {
             continue;
         }
-        let selected = s.selection.iter().any(|x| matches!(x, Sel::Body { name } if *name == b.name));
-        let col = rgba(if selected { colors::BODY_SELECTED } else { colors::BODY });
+        let col = rgba(colors::BODY);
         let m = b.mesh();
         for t in &m.triangles {
             for k in t {
@@ -156,18 +185,11 @@ fn build_scene(app: &SolveApp) -> GpuScene {
             if m.seams.get(ei).copied().unwrap_or(false) {
                 continue;
             }
-            let sel = s.selection.iter().any(|x| matches!(x, Sel::Edge { body, index, .. } if *body == b.name && *index == ei))
-                || dialog_edges.iter().any(|p| e.windows(2).any(|w| p.dist_to_segment(w[0], w[1]) < 1e-6 * b.body.size().max(1.0) + 1e-6));
             for w in e.windows(2) {
-                if sel {
-                    sc.line(w[0].to_f32(), w[1].to_f32(), [30, 120, 230, 255], 3.5, true);
-                } else {
-                    sc.line(w[0].to_f32(), w[1].to_f32(), rgba(colors::EDGE), 1.3, false);
-                }
+                sc.line(w[0].to_f32(), w[1].to_f32(), rgba(colors::EDGE), 1.3, false);
             }
         }
     }
-    let dialog_profiles = app.dialog.as_ref().map(|d| d.profiles()).unwrap_or_default();
     for sid in visible_sketches(app) {
         let Some(ss) = st.sketch(sid) else { continue };
         let active = s.active_sketch == Some(sid);
@@ -176,34 +198,55 @@ fn build_scene(app: &SolveApp) -> GpuScene {
                 sc.line(w[0].to_f32(), w[1].to_f32(), rgba(col), if cons { 1.2 } else { 2.0 }, active);
             }
         }
-        // Selected profiles: outline.
-        for (pi, p) in ss.profiles.iter().enumerate() {
-            let picked = dialog_profiles.contains(&(sid, pi))
-                || s.selection.iter().any(|x| matches!(x, Sel::Profile { sketch, index } if *sketch == sid && *index == pi));
-            if !picked {
-                continue;
-            }
-            for lp in std::iter::once(&p.region.outer).chain(&p.region.holes) {
-                let poly = lp.polyline(0.02);
-                let n = poly.len();
-                for i in 0..n {
-                    if let (Some(a), Some(b)) = (poly.get(i), poly.get((i + 1) % n)) {
-                        sc.line(ss.plane.to_world(*a).to_f32(), ss.plane.to_world(*b).to_f32(), rgba(colors::PROFILE), 4.0, true);
-                    }
-                }
-            }
-        }
     }
     sc
 }
 
-/// Pick what is under `pos`, most specific first.
+/// Colour as straight (unpremultiplied) sRGBA bytes for the GPU.
+fn c4(c: Color32) -> [u8; 4] {
+    c.to_srgba_unmultiplied()
+}
+
+/// Origin planes and axes currently shown, sized for the view: (name, normal, quad).
+pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
+    if !app.origin_visible() {
+        return Vec::new();
+    }
+    let creating = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Sketch));
+    origin_quads(origin_size(app.cam.half_height()))
+        .into_iter()
+        .filter(|(n, _, _)| creating || !app.ui.hidden_origin.iter().any(|h| h == n))
+        .collect()
+}
+
+pub fn origin_axes(app: &SolveApp) -> Vec<(&'static str, Vec3)> {
+    if !app.origin_visible() {
+        return Vec::new();
+    }
+    [("X", Vec3::X), ("Y", Vec3::Y), ("Z", Vec3::Z)].into_iter().filter(|(n, _)| !app.ui.hidden_origin.iter().any(|h| h == n)).collect()
+}
+
+/// Construction planes drawn as squares around their origin: (name, normal, quad).
+pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
+    let h = origin_size(app.cam.half_height()) * 1.2;
+    solvecraft_engine::view::construction_planes(&app.session)
+        .into_iter()
+        .filter(|(_, n, _)| !app.ui.hidden_origin.contains(n))
+        .map(|(_, name, pl)| {
+            let (o, x, y) = (pl.origin, pl.x * h, pl.y * h);
+            (name, pl.normal(), [o - x - y, o + x - y, o + x + y, o - x + y])
+        })
+        .collect()
+}
+
+/// Pick what is under `pos`: sketch points, sketch curves, vertices, edges and axes first, then
+/// the surfaces along the ray (profiles, faces, planes) nearest first.
 pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     let s = &app.session;
     let st = s.model.state();
     let mut hits = Vec::new();
     let (o, d) = proj.ray(pos);
-    // Sketch points and curves of the active sketch.
+    // Sketch points of the active sketch.
     if let Some(sid) = s.active_sketch
         && let Some(ss) = st.sketch(sid)
     {
@@ -219,43 +262,29 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
         if let Some((_, h)) = best {
             hits.push(h);
         }
-        let mut bestc: Option<(f32, Hit)> = None;
+    }
+    // Sketch curves (the active sketch wins ties).
+    let mut bestc: Option<(f32, Hit)> = None;
+    for sid in visible_sketches(app) {
+        let Some(ss) = st.sketch(sid) else { continue };
+        let bonus = if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
         for (i, c) in ss.sketch.curves.iter().enumerate() {
+            let straight = matches!(c.kind, CurveKind::Line { .. });
             for seg in ss.sketch.segs(i) {
                 let pts: Vec<Pos2> = seg.polyline(0.05).iter().filter_map(|q| proj.to_screen(ss.plane.to_world(*q))).collect();
                 for w in pts.windows(2) {
-                    let dd = seg_dist(pos, w[0], w[1]);
+                    let dd = seg_dist(pos, w[0], w[1]) - bonus;
                     if dd < 6.0 && bestc.as_ref().is_none_or(|(b, _)| dd < *b) {
-                        bestc = Some((dd, Hit::SketchCurve { sketch: sid, id: c.id.clone() }));
+                        bestc = Some((dd, Hit::SketchCurve { sketch: sid, id: c.id.clone(), straight }));
                     }
                 }
             }
         }
-        if let Some((_, h)) = bestc {
-            hits.push(h);
-        }
     }
-    // Edges.
-    let mut beste: Option<(f32, Hit)> = None;
-    for b in &st.bodies {
-        if app.ui.hidden_bodies.contains(&b.name) {
-            continue;
-        }
-        let m = b.mesh();
-        for (ei, e) in m.edges.iter().enumerate() {
-            if m.seams.get(ei).copied().unwrap_or(false) {
-                continue;
-            }
-            let pts: Vec<Pos2> = e.iter().filter_map(|q| proj.to_screen(*q)).collect();
-            for w in pts.windows(2) {
-                let dd = seg_dist(pos, w[0], w[1]);
-                if dd < 6.0 && beste.as_ref().is_none_or(|(bd, _)| dd < *bd) {
-                    beste = Some((dd, Hit::Edge { body: b.name.clone(), index: ei, mid: polyline_mid(e) }));
-                }
-            }
-        }
+    if let Some((_, h)) = bestc {
+        hits.push(h);
     }
-    // Faces (nearest along the ray), used to reject edges hidden behind faces.
+    // Nearest face along the ray (hides what is behind it).
     let mut bestf: Option<(f64, Hit)> = None;
     for b in &st.bodies {
         if app.ui.hidden_bodies.contains(&b.name) {
@@ -269,35 +298,340 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
             bestf = Some((t, Hit::Face { body: b.name.clone(), index: fi, point: o + d * t }));
         }
     }
-    if let Some((_, h)) = beste {
-        // An edge counts only when it is not hidden behind the first face along the ray.
-        let visible = match (&h, &bestf) {
-            (Hit::Edge { mid, .. }, Some((t, _))) => (*mid - o).dot(d) <= *t + scene_radius(app) * 0.05,
-            _ => true,
-        };
-        if visible {
-            hits.push(h);
+    let slack = scene_radius(app) * 0.02;
+    let visible = |p: Vec3| bestf.as_ref().is_none_or(|(t, _)| (p - o).dot(d) <= *t + slack);
+    // Vertices (edge end points) and edges.
+    let mut bestv: Option<(f32, Hit)> = None;
+    let mut beste: Option<(f32, Hit)> = None;
+    for b in &st.bodies {
+        if app.ui.hidden_bodies.contains(&b.name) {
+            continue;
         }
-    }
-    // Profiles of visible sketches.
-    let mut bestp: Option<(f64, Hit)> = None;
-    for sid in visible_sketches(app) {
-        let Some(ss) = st.sketch(sid) else { continue };
-        let Some(w) = ss.plane.intersect_ray(o, d) else { continue };
-        let lp = ss.plane.to_local(w);
-        for (pi, p) in ss.profiles.iter().enumerate() {
-            if p.region.contains(lp) && bestp.as_ref().is_none_or(|(a, _)| p.area < *a) {
-                bestp = Some((p.area, Hit::Profile { sketch: sid, index: pi }));
+        let m = b.mesh();
+        for (ei, e) in m.edges.iter().enumerate() {
+            if m.seams.get(ei).copied().unwrap_or(false) {
+                continue;
+            }
+            for v in [e.first(), e.last()].into_iter().flatten() {
+                if let Some(sp) = proj.to_screen(*v) {
+                    let dd = sp.distance(pos);
+                    if dd < 7.0 && visible(*v) && bestv.as_ref().is_none_or(|(bd, _)| dd < *bd) {
+                        bestv = Some((dd, Hit::Vertex { body: b.name.clone(), point: *v }));
+                    }
+                }
+            }
+            let pts: Vec<Pos2> = e.iter().filter_map(|q| proj.to_screen(*q)).collect();
+            for (k, w) in pts.windows(2).enumerate() {
+                let dd = seg_dist(pos, w[0], w[1]);
+                if dd < 6.0 && beste.as_ref().is_none_or(|(bd, _)| dd < *bd) {
+                    let mid = polyline_mid(e);
+                    // Visible where the cursor is (not just at the middle).
+                    let at = e.get(k).copied().unwrap_or(mid);
+                    if visible(at) || visible(mid) {
+                        beste = Some((dd, Hit::Edge { body: b.name.clone(), index: ei, mid }));
+                    }
+                }
             }
         }
     }
-    if let Some((_, h)) = bestp {
-        hits.push(h);
+    hits.extend(bestv.map(|x| x.1));
+    hits.extend(beste.map(|x| x.1));
+    // Origin axes.
+    let size = origin_size(app.cam.half_height());
+    let mut besta: Option<(f32, Hit)> = None;
+    for (name, dir) in origin_axes(app) {
+        if let (Some(a), Some(b)) = (proj.to_screen(Vec3::ZERO), proj.to_screen(dir * (size * AXIS_LEN))) {
+            let dd = seg_dist(pos, a, b);
+            if dd < 5.0 && besta.as_ref().is_none_or(|(bd, _)| dd < *bd) {
+                besta = Some((dd, Hit::Axis { name: name.into() }));
+            }
+        }
     }
-    if let Some((_, h)) = bestf {
-        hits.push(h);
+    hits.extend(besta.map(|x| x.1));
+    // Surfaces by depth: profiles (slightly preferred over a face they lie on), faces, planes.
+    let mut surf: Vec<(f64, Hit)> = Vec::new();
+    let mut bestp: Option<(f64, f64, Hit)> = None;
+    for sid in visible_sketches(app) {
+        let Some(ss) = st.sketch(sid) else { continue };
+        let n = ss.plane.normal();
+        let den = n.dot(d);
+        if den.abs() < 1e-12 {
+            continue;
+        }
+        let t = n.dot(ss.plane.origin - o) / den;
+        if t < 0.0 {
+            continue;
+        }
+        let lp = ss.plane.to_local(o + d * t);
+        for (pi, p) in ss.profiles.iter().enumerate() {
+            if p.region.contains(lp) && bestp.as_ref().is_none_or(|(_, a, _)| p.area < *a) {
+                bestp = Some((t, p.area, Hit::Profile { sketch: sid, index: pi }));
+            }
+        }
     }
+    if let Some((t, _, h)) = bestp {
+        surf.push((t - slack, h));
+    }
+    if let Some(f) = bestf {
+        surf.push(f);
+    }
+    for (name, _, q) in origin_planes(app) {
+        if let Some(t) = ray_quad(o, d, &q) {
+            surf.push((t, Hit::Plane { name: name.into(), point: o + d * t }));
+        }
+    }
+    for (name, _, q) in construction_quads(app) {
+        if let Some(t) = ray_quad(o, d, &q) {
+            surf.push((t, Hit::Plane { name, point: o + d * t }));
+        }
+    }
+    surf.sort_by(|a, b| a.0.total_cmp(&b.0));
+    hits.extend(surf.into_iter().map(|x| x.1));
     hits
+}
+
+/// Axis length as a multiple of the origin plane size (solid part 1, dashed beyond).
+const AXIS_LEN: f64 = 1.8;
+
+/// The hit as a plain selection (no command filter).
+pub fn hit_sel(h: &Hit) -> Option<Sel> {
+    Some(match h {
+        Hit::SketchPoint { id, .. } => Sel::SketchPoint { id: id.clone() },
+        Hit::SketchCurve { id, .. } => Sel::SketchCurve { id: id.clone() },
+        Hit::Vertex { body, point } => Sel::Vertex { body: body.clone(), point: *point },
+        Hit::Edge { body, index, mid } => Sel::Edge { body: body.clone(), index: *index, point: *mid },
+        Hit::Profile { sketch, index } => Sel::Profile { sketch: *sketch, index: *index },
+        Hit::Face { body, index, point } => Sel::Face { body: body.clone(), index: *index, point: *point },
+        Hit::Plane { name, .. } => Sel::Plane { name: name.clone() },
+        Hit::Axis { name } => Sel::Axis { name: name.clone() },
+    })
+}
+
+/// What a click would pick: the first hit the open dialog's active input accepts, or with no
+/// dialog the first hit (sketch entities only belong to the active sketch).
+pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
+    if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
+        return hits.iter().find_map(|h| d.candidate(&app.session, h).map(|s| (h.clone(), s)));
+    }
+    hits.iter()
+        .filter(|h| match h {
+            Hit::SketchCurve { sketch, .. } => app.session.active_sketch == Some(*sketch),
+            _ => true,
+        })
+        .find_map(|h| hit_sel(h).map(|s| (h.clone(), s)))
+}
+
+/// The edge a selection refers to now: by index if it still passes through the stored point,
+/// otherwise the edge nearest the point.
+fn edge_of(m: &solvecraft_engine::geom::Mesh, index: usize, point: Vec3) -> Option<&Vec<Vec3>> {
+    let tol = m.bounds().diagonal().max(1.0) * 1e-6;
+    let near = |e: &Vec<Vec3>| e.windows(2).map(|w| point.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
+    if let Some(e) = m.edges.get(index)
+        && near(e) < tol
+    {
+        return Some(e);
+    }
+    m.edges.iter().min_by(|a, b| near(a).total_cmp(&near(b))).filter(|e| near(e) < tol * 1e3)
+}
+
+fn face_tris(sc: &mut GpuScene, m: &solvecraft_engine::geom::Mesh, face: usize, col: [u8; 4], lit: bool) {
+    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+        if *f as usize != face {
+            continue;
+        }
+        for k in t {
+            let i = *k as usize;
+            if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
+                sc.tri(p.to_f32(), if lit { n.to_f32() } else { [0.0; 3] }, col);
+            }
+        }
+    }
+}
+
+fn edge_lines(sc: &mut GpuScene, e: &[Vec3], core: Color32, halo: Color32, w: f32) {
+    for (col, width) in [(halo, w + 3.0), (core, w)] {
+        for p in e.windows(2) {
+            sc.line(p[0].to_f32(), p[1].to_f32(), c4(col), width, false);
+        }
+    }
+}
+
+fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index: usize, fill: Color32, edge: Color32) {
+    let st = app.session.model.state();
+    let Some(ss) = st.sketch(sketch) else { return };
+    let Some(p) = ss.profiles.get(index) else { return };
+    // Lift toward the eye so a profile on a face shows over it.
+    let lift = app.cam.back() * (app.cam.half_height() * 0.002);
+    let w = |q: solvecraft_engine::geom::Vec2| (ss.plane.to_world(q) + lift).to_f32();
+    let col = c4(fill);
+    // In the translucent pass (after the grid and edges) so it covers them.
+    for [a, b, c] in p.region.triangulate(0.02) {
+        sc.trans_tri(w(a), [0.0; 3], col);
+        sc.trans_tri(w(b), [0.0; 3], col);
+        sc.trans_tri(w(c), [0.0; 3], col);
+    }
+    for lp in std::iter::once(&p.region.outer).chain(&p.region.holes) {
+        let poly = lp.polyline(0.02);
+        let n = poly.len();
+        for i in 0..n {
+            if let (Some(a), Some(b)) = (poly.get(i), poly.get((i + 1) % n)) {
+                sc.line(w(*a), w(*b), c4(edge), 2.0, false);
+            }
+        }
+    }
+}
+
+fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32) {
+    let col = c4(fill);
+    for i in [0, 1, 2, 0, 2, 3] {
+        if let Some(p) = q.get(i) {
+            sc.trans_tri(p.to_f32(), [0.0; 3], col);
+        }
+    }
+    for i in 0..4 {
+        sc.line(q[i].to_f32(), q[(i + 1) % 4].to_f32(), c4(edge), 1.2, false);
+    }
+}
+
+fn highlight_key(app: &SolveApp) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    app.session.revision.hash(&mut h);
+    serde_json::to_string(&app.highlighted()).unwrap_or_default().hash(&mut h);
+    format!("{:?}", app.viewport.hover).hash(&mut h);
+    app.origin_visible().hash(&mut h);
+    app.ui.hidden_origin.hash(&mut h);
+    app.ui.hidden_bodies.hash(&mut h);
+    app.cam.half_height().to_bits().hash(&mut h);
+    app.cam.back().x.to_bits().hash(&mut h);
+    h.finish()
+}
+
+/// The highlight scene: origin widget, construction planes, selection and hover.
+fn build_highlight(app: &SolveApp) -> GpuScene {
+    let t = Tokens::get();
+    let mut sc = GpuScene::default();
+    let st = app.session.model.state();
+    let sel = app.highlighted();
+    let hover = app.viewport.hover.as_ref();
+    let size = origin_size(app.cam.half_height());
+    // Origin planes and construction planes.
+    let plane_state = |name: &str| {
+        let selected = sel.iter().any(|x| matches!(x, Sel::Plane { name: n } if n == name));
+        let hovered = matches!(hover, Some(Hit::Plane { name: n, .. }) if n == name);
+        (selected, hovered)
+    };
+    let mut planes: Vec<(String, [Vec3; 4], Color32)> = origin_planes(app).into_iter().map(|(n, _, q)| (n.to_string(), q, t.origin_plane)).collect();
+    planes.extend(construction_quads(app).into_iter().map(|(n, _, q)| (n, q, t.construction_plane)));
+    for (name, q, base) in &planes {
+        let (selected, hovered) = plane_state(name);
+        let fill = if hovered {
+            t.origin_plane_hover
+        } else if selected {
+            Color32::from_rgba_unmultiplied(t.sel_face.r(), t.sel_face.g(), t.sel_face.b(), 150)
+        } else {
+            *base
+        };
+        quad(&mut sc, q, fill, if selected { t.sel_edge } else { t.origin_plane_edge });
+    }
+    // Origin axes: solid near the origin, dashed beyond.
+    for (name, dir) in origin_axes(app) {
+        let col = match name {
+            "X" => t.axis_x,
+            "Y" => t.axis_y,
+            _ => t.axis_z,
+        };
+        let on = sel.iter().any(|x| matches!(x, Sel::Axis { name: n } if n == name)) || matches!(hover, Some(Hit::Axis { name: n }) if n == name);
+        let w = if on { 4.0 } else { 2.0 };
+        sc.line([0.0; 3], (dir * size).to_f32(), c4(col), w, false);
+        let dash = size * 0.08;
+        let mut a = size + dash;
+        while a < size * AXIS_LEN {
+            sc.line((dir * a).to_f32(), (dir * (a + dash)).to_f32(), c4(col), w * 0.75, false);
+            a += dash * 2.0;
+        }
+    }
+    // Selected things.
+    for x in &sel {
+        match x {
+            Sel::Face { body, index, .. } => {
+                if let Some(b) = st.body(body) {
+                    face_tris(&mut sc, &b.mesh(), *index, c4(t.sel_face), false);
+                }
+            }
+            Sel::Body { name } => {
+                if let Some(b) = st.body(name)
+                    && !app.ui.hidden_bodies.contains(name)
+                {
+                    let m = b.mesh();
+                    for f in 0..b.body.face_count() {
+                        face_tris(
+                            &mut sc,
+                            &m,
+                            f,
+                            c4(Color32::from_rgb(colors::BODY_SELECTED.0, colors::BODY_SELECTED.1, colors::BODY_SELECTED.2)),
+                            true,
+                        );
+                    }
+                }
+            }
+            Sel::Edge { body, index, point } => {
+                if let Some(b) = st.body(body)
+                    && let Some(e) = edge_of(&b.mesh(), *index, *point)
+                {
+                    edge_lines(&mut sc, e, t.sel_edge, t.sel_edge_rim, 3.0);
+                }
+            }
+            Sel::Profile { sketch, index } => profile_fill(&mut sc, app, *sketch, *index, t.sel_profile, t.sel_profile_edge),
+            Sel::SketchCurve { id } => {
+                if let Some(ss) = app.session.active_sketch.and_then(|sid| st.sketch(sid))
+                    && let Some(ci) = ss.sketch.curve_index(id)
+                {
+                    for seg in ss.sketch.segs(ci) {
+                        let pts = seg.polyline(0.02);
+                        for w in pts.windows(2) {
+                            sc.line(ss.plane.to_world(w[0]).to_f32(), ss.plane.to_world(w[1]).to_f32(), c4(t.sel_edge), 3.5, true);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    // Hover (pre-highlight).
+    match hover {
+        Some(Hit::Face { body, index, .. }) if !sel.iter().any(|x| matches!(x, Sel::Face { body: b, index: i, .. } if b == body && i == index)) => {
+            if let Some(b) = st.body(body) {
+                let k = t.hover_face_lift;
+                let c = colors::BODY;
+                face_tris(&mut sc, &b.mesh(), *index, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
+                let m = b.mesh();
+                for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
+                    if let Some(p) = m.edges.get(e)
+                        && !m.seams.get(e).copied().unwrap_or(false)
+                    {
+                        edge_lines(&mut sc, p, t.hover_edge, t.hover_edge_halo, 1.5);
+                    }
+                }
+            }
+        }
+        Some(Hit::Edge { body, index, mid }) => {
+            if let Some(b) = st.body(body)
+                && let Some(e) = edge_of(&b.mesh(), *index, *mid)
+            {
+                let selected = sel.iter().any(|x| matches!(x, Sel::Edge { point, .. } if point.dist(*mid) < 1e-9));
+                if !selected {
+                    edge_lines(&mut sc, e, t.hover_edge, t.hover_edge_halo, 2.0);
+                }
+            }
+        }
+        Some(Hit::Profile { sketch, index })
+            if !sel.iter().any(|x| matches!(x, Sel::Profile { sketch: s2, index: i2 } if s2 == sketch && i2 == index)) =>
+        {
+            profile_fill(&mut sc, app, *sketch, *index, t.hover_profile, t.hover_profile_edge);
+        }
+        _ => {}
+    }
+    sc
 }
 
 fn polyline_mid(pts: &[Vec3]) -> Vec3 {
@@ -451,10 +785,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.viewport.key = key;
             app.viewport.build_ms = crate::now_ms() - t0;
         }
+        let hk = highlight_key(app);
+        if hk != app.viewport.hl_key {
+            let hl = build_highlight(app);
+            if let Ok(mut slot) = app.viewport.hl_slot.lock() {
+                *slot = Some(hl);
+            }
+            app.viewport.hl_key = hk;
+        }
         let ppp = ui.ctx().pixels_per_point();
         let cb = ViewportCallback {
             key: app.viewport.key,
             slot: app.viewport.slot.clone(),
+            hl_key: app.viewport.hl_key,
+            hl_slot: app.viewport.hl_slot.clone(),
             view_proj: proj.vp.to_f32(),
             back: proj.cam.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],
@@ -465,8 +809,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 
     // ---- interaction ----
-    let hits = hover.filter(|_| inside).map(|p| pick(app, &proj, p)).unwrap_or_default();
-    app.viewport.hover = hits.first().cloned();
+    let hits = hover.filter(|_| inside && app.viewport.boxsel.is_none()).map(|p| pick(app, &proj, p)).unwrap_or_default();
+    let cand = if app.tool.is_some() { hits.first().cloned().map(|h| (h, None)) } else { candidate(app, &hits).map(|(h, s)| (h, Some(s))) };
+    app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
+    let add = mods.shift || mods.command || mods.ctrl;
     if let Some(p) = hover.filter(|_| inside) {
         if app.tool.is_some() {
             crate::tools::on_hover(app, &proj, p);
@@ -475,19 +821,53 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
-                if let Some(d) = app.dialog.as_mut() {
-                    d.on_pick(&hits);
+                if let Some(sel) = cand.and_then(|c| c.1)
+                    && let Some(mut d) = app.dialog.take()
+                {
+                    d.pick(&app.session, sel);
+                    app.dialog = Some(d);
                 }
             } else {
-                select(app, &hits, mods.shift || mods.command);
+                select(app, cand.and_then(|c| c.1), add);
             }
         }
         if resp.secondary_clicked() && delta == egui::Vec2::ZERO && app.tool.is_some() {
             crate::tools::finish(app);
         }
     }
+    // Box selection: a primary drag on the model when no navigation mode is on.
+    if app.tool.is_none() && app.viewport.nav.is_none() {
+        let origin = ui.input(|i| i.pointer.press_origin());
+        if resp.dragged_by(egui::PointerButton::Primary)
+            && let (Some(a), Some(b)) = (origin, hover)
+            && rect.contains(a)
+            && !cube.contains(a)
+        {
+            app.viewport.boxsel = Some(BoxSel::from_drag(a, b));
+        }
+        if resp.drag_stopped()
+            && let Some(bx) = app.viewport.boxsel.take()
+        {
+            box_select(app, &proj, bx, add);
+        }
+    } else {
+        app.viewport.boxsel = None;
+    }
     overlays(app, ui, &painter, &proj);
     hover_highlight(app, &painter, &proj);
+    points_2d(app, &painter, &proj);
+    if let Some(bx) = app.viewport.boxsel {
+        let col = if bx.crossing { t.box_crossing } else { t.box_window };
+        painter.rect_filled(bx.rect, 0.0, col.gamma_multiply(0.12));
+        if bx.crossing {
+            let c = [bx.rect.left_top(), bx.rect.right_top(), bx.rect.right_bottom(), bx.rect.left_bottom()];
+            for i in 0..4 {
+                painter.add(Shape::dashed_line(&[c[i], c[(i + 1) % 4]], Stroke::new(1.2, col), 6.0, 4.0));
+            }
+        } else {
+            painter.rect_stroke(bx.rect, 0.0, Stroke::new(1.2, col), egui::StrokeKind::Inside);
+        }
+    }
     if let Some(tl) = app.tool.as_ref() {
         crate::tools::preview(app, tl, &painter, &proj);
     }
@@ -508,37 +888,137 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
-fn select(app: &mut SolveApp, hits: &[Hit], add: bool) {
-    let item = hits.first().map(|h| match h {
-        Hit::SketchPoint { id, .. } => json!({"type": "sketch_point", "id": id}),
-        Hit::SketchCurve { id, .. } => json!({"type": "sketch_curve", "id": id}),
-        Hit::Edge { body, index, mid } => json!({"type": "edge", "body": body, "index": index, "point": mid}),
-        Hit::Profile { sketch, index } => json!({"type": "profile", "sketch": sketch, "index": index}),
-        Hit::Face { body, .. } => json!({"type": "body", "name": body}),
-    });
-    match item {
-        Some(i) => {
-            let _ = app.run("select.set", json!({"items": [i], "add": add}));
+/// A click without a command: select the candidate (replacing the selection, or toggling it
+/// in with Shift/Ctrl); a click on nothing clears.
+fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool) {
+    match sel {
+        Some(x) => {
+            let item = serde_json::to_value(&x).unwrap_or_default();
+            if add && app.session.selection.contains(&x) {
+                let rest: Vec<Sel> = app.session.selection.iter().filter(|y| **y != x).cloned().collect();
+                let _ = app.run("select.set", json!({ "items": rest }));
+            } else {
+                let _ = app.run("select.set", json!({"items": [item], "add": add}));
+            }
         }
-        None => {
+        None if !add => {
             let _ = app.run("select.clear", json!({}));
         }
+        None => {}
     }
 }
 
-fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    let col = Color32::from_rgb(40, 140, 255);
+/// What a box selects: sketch entities while sketching, otherwise what the open dialog's
+/// active input takes (edges, faces or bodies), otherwise bodies.
+fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
+    use crate::selection::{BODIES, EDGES, FACES, PROFILES};
     let st = app.session.model.state();
-    match &app.viewport.hover {
-        Some(Hit::Edge { body, index, .. }) => {
-            if let Some(b) = st.body(body)
-                && let Some(e) = b.mesh().edges.get(*index)
-            {
-                let pts: Vec<Pos2> = e.iter().filter_map(|q| proj.to_screen(*q)).collect();
-                painter.add(Shape::line(pts, Stroke::new(3.0, col)));
+    let mut out: Vec<Sel> = Vec::new();
+    let to2 = |pts: &[Vec3]| -> Vec<Pos2> { pts.iter().filter_map(|p| proj.to_screen(*p)).collect() };
+    if app.dialog.is_none()
+        && let Some(ss) = app.session.active_sketch.and_then(|sid| st.sketch(sid))
+    {
+        for (i, c) in ss.sketch.curves.iter().enumerate() {
+            let pts: Vec<Vec3> = ss.sketch.segs(i).iter().flat_map(|sg| sg.polyline(0.05)).map(|q| ss.plane.to_world(q)).collect();
+            if bx.takes(&to2(&pts)) {
+                out.push(Sel::SketchCurve { id: c.id.clone() });
             }
         }
-        Some(Hit::SketchCurve { sketch, id }) => {
+        for p in &ss.sketch.points {
+            if bx.takes(&to2(&[ss.plane.to_world(p.pos)])) {
+                out.push(Sel::SketchPoint { id: p.id.clone() });
+            }
+        }
+    } else {
+        let accept = app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).unwrap_or(BODIES);
+        for b in &st.bodies {
+            if app.ui.hidden_bodies.contains(&b.name) {
+                continue;
+            }
+            let m = b.mesh();
+            if accept & EDGES != 0 {
+                for (ei, e) in m.edges.iter().enumerate() {
+                    if !m.seams.get(ei).copied().unwrap_or(false) && bx.takes(&to2(e)) {
+                        out.push(Sel::Edge { body: b.name.clone(), index: ei, point: polyline_mid(e) });
+                    }
+                }
+            } else if accept & FACES != 0 {
+                for f in 0..b.body.face_count() {
+                    let mut pts: Vec<Vec3> = Vec::new();
+                    for e in m.face_edges(u32::try_from(f).unwrap_or(u32::MAX)) {
+                        pts.extend(m.edges.get(e).into_iter().flatten().copied());
+                    }
+                    let point = m
+                        .triangles
+                        .iter()
+                        .zip(&m.tri_face)
+                        .find(|(_, tf)| **tf as usize == f)
+                        .and_then(|(t, _)| m.tri(t))
+                        .map(|[a, bb, c]| (a + bb + c) / 3.0);
+                    if let Some(point) = point
+                        && bx.takes(&to2(&pts))
+                    {
+                        out.push(Sel::Face { body: b.name.clone(), index: f, point });
+                    }
+                }
+            } else if accept & BODIES != 0 {
+                let crossing_hit = m.edges.iter().any(|e| bx.takes(&to2(e)));
+                let all_in = m.edges.iter().all(|e| bx.takes(&to2(e)));
+                if (bx.crossing && crossing_hit) || (!bx.crossing && all_in && !m.edges.is_empty()) {
+                    out.push(Sel::Body { name: b.name.clone() });
+                }
+            } else if accept & PROFILES != 0 {
+                for sid in visible_sketches(app) {
+                    let Some(ss) = st.sketch(sid) else { continue };
+                    for (pi, p) in ss.profiles.iter().enumerate() {
+                        let pts: Vec<Vec3> = p.region.outer.polyline(0.05).into_iter().map(|q| ss.plane.to_world(q)).collect();
+                        if bx.takes(&to2(&pts)) {
+                            out.push(Sel::Profile { sketch: sid, index: pi });
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+    if let Some(mut d) = app.dialog.take() {
+        d.take_box(out, add);
+        app.dialog = Some(d);
+        return;
+    }
+    let items = serde_json::to_value(&out).unwrap_or_default();
+    let _ = app.run("select.set", json!({"items": items, "add": add}));
+}
+
+/// Screen-space dots: the origin point, and hovered or selected body vertices.
+fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    let t = Tokens::get();
+    if app.origin_visible()
+        && !app.ui.hidden_origin.iter().any(|h| h == "O")
+        && let Some(o) = proj.to_screen(Vec3::ZERO)
+    {
+        painter.circle(o, 4.5, t.origin_point, Stroke::new(1.0, Color32::from_gray(110)));
+    }
+    for x in app.highlighted() {
+        if let Sel::Vertex { point, .. } = x
+            && let Some(p) = proj.to_screen(point)
+        {
+            painter.circle(p, 4.0, t.sel_vertex, Stroke::new(1.5, t.sel_edge));
+        }
+    }
+    if let Some(Hit::Vertex { point, .. }) = &app.viewport.hover
+        && let Some(p) = proj.to_screen(*point)
+    {
+        painter.circle(p, 4.5, t.hover_edge_halo, Stroke::new(1.5, t.hover_edge));
+    }
+}
+
+/// Hover feedback for the active sketch's points and curves (drawn on top of everything).
+fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    let col = Tokens::get().hover_profile_edge;
+    let st = app.session.model.state();
+    match &app.viewport.hover {
+        Some(Hit::SketchCurve { sketch, id, .. }) => {
             if let Some(ss) = st.sketch(*sketch)
                 && let Some(ci) = ss.sketch.curve_index(id)
             {
@@ -553,14 +1033,6 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 && let Some(p) = proj.to_screen(ss.plane.to_world(*at))
             {
                 painter.circle_stroke(p, 6.0, Stroke::new(2.0, col));
-            }
-        }
-        Some(Hit::Profile { sketch, index }) if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) => {
-            if let Some(ss) = st.sketch(*sketch)
-                && let Some(p) = ss.profiles.get(*index)
-            {
-                let pts: Vec<Pos2> = p.region.outer.polyline(0.05).iter().filter_map(|q| proj.to_screen(ss.plane.to_world(*q))).collect();
-                painter.add(Shape::closed_line(pts, Stroke::new(2.0, Color32::from_rgb(255, 170, 60))));
             }
         }
         _ => {}

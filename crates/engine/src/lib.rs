@@ -99,6 +99,19 @@ pub enum Sel {
         sketch: u64,
         index: usize,
     },
+    /// An origin plane (XY, XZ, YZ) or a construction plane (by feature name).
+    Plane {
+        name: String,
+    },
+    /// An origin axis (X, Y, Z).
+    Axis {
+        name: String,
+    },
+    /// A body vertex at a point.
+    Vertex {
+        body: String,
+        point: Vec3,
+    },
 }
 
 /// One undo step.

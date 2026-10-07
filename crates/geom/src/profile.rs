@@ -233,6 +233,44 @@ impl Region2 {
     pub fn contains(&self, p: Vec2) -> bool {
         self.outer.contains(p) && !self.holes.iter().any(|h| h.contains(p))
     }
+    /// Triangles covering the region (for filled display), by slabs between the vertex
+    /// heights: inside each slab the boundary edges don't cross, so consecutive crossings pair
+    /// up into trapezoids.
+    pub fn triangulate(&self, tol: f64) -> Vec<[Vec2; 3]> {
+        let mut edges: Vec<(Vec2, Vec2)> = Vec::new();
+        for l in std::iter::once(&self.outer).chain(&self.holes) {
+            let pl = l.polyline(tol);
+            let n = pl.len();
+            for i in 0..n {
+                let (Some(a), Some(b)) = (pl.get(i), pl.get((i + 1) % n)) else { continue };
+                if (a.y - b.y).abs() > 1e-12 {
+                    edges.push(if a.y < b.y { (*a, *b) } else { (*b, *a) });
+                }
+            }
+        }
+        if edges.len() > 20_000 {
+            return Vec::new();
+        }
+        let mut ys: Vec<f64> = edges.iter().flat_map(|(a, b)| [a.y, b.y]).collect();
+        ys.sort_by(f64::total_cmp);
+        ys.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
+        let x_at = |e: &(Vec2, Vec2), y: f64| e.0.x + (y - e.0.y) / (e.1.y - e.0.y) * (e.1.x - e.0.x);
+        let mut out = Vec::new();
+        for w in ys.windows(2) {
+            let (y0, y1) = (w[0], w[1]);
+            let ym = (y0 + y1) * 0.5;
+            let mut span: Vec<&(Vec2, Vec2)> = edges.iter().filter(|e| e.0.y <= ym && e.1.y >= ym).collect();
+            span.sort_by(|a, b| x_at(a, ym).total_cmp(&x_at(b, ym)));
+            for pair in span.chunks(2) {
+                let [l, r] = pair else { continue };
+                let (a, b) = (Vec2::new(x_at(l, y0), y0), Vec2::new(x_at(r, y0), y0));
+                let (c, d) = (Vec2::new(x_at(r, y1), y1), Vec2::new(x_at(l, y1), y1));
+                out.push([a, b, c]);
+                out.push([a, c, d]);
+            }
+        }
+        out
+    }
     pub fn centroid(&self) -> Vec2 {
         let ao = self.outer.signed_area().abs();
         let mut c = self.outer.centroid() * ao;
@@ -249,6 +287,20 @@ impl Region2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn triangulated_area() {
+        let sq = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 8.0), Vec2::new(5.0, 3.0), Vec2::new(0.0, 8.0)]);
+        let r = Region2 { outer: sq, holes: vec![Loop2::circle(Vec2::new(3.0, 1.5), 1.0).reversed()] };
+        let tris = r.triangulate(1e-3);
+        let a: f64 = tris.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).abs() * 0.5).sum();
+        // The circle is a polyline within the tolerance, so the areas agree to about that.
+        assert!((a - r.area()).abs() < 1e-3 * r.area(), "{a} vs {}", r.area());
+        for [a, b, c] in &tris {
+            let m = (*a + *b + *c) / 3.0;
+            assert!((*b - *a).cross(*c - *a).abs() < 1e-12 || r.contains(m), "{m:?}");
+        }
+    }
 
     #[test]
     fn areas() {

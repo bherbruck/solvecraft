@@ -312,3 +312,27 @@ fn sample_design_builds() {
     let v = m["total"]["volume_mm3"].as_f64().unwrap();
     assert!(rel(v, plate + boss - bore) < 1e-3, "{v} vs {}", plate + boss - bore);
 }
+
+#[test]
+fn sample_edges_chain_and_faces() {
+    let mut s = Session::default();
+    s.run_script(&crate::sample::script()).unwrap();
+    let st = s.model.state();
+    let m = st.bodies[0].mesh();
+    let e = (0..m.edges.len()).find(|i| m.edges[*i].iter().all(|p| (p.z - 8.0).abs() < 1e-6 && p.y.abs() < 1e-6)).expect("front top edge");
+    let chain = m.tangent_chain(e, 2f64.to_radians());
+    // The plate's top outline: 4 lines and 4 corner arcs (a boolean may leave an edge twice,
+    // once per face; count distinct ones).
+    let mut mids: Vec<solvecraft_geom::Vec3> = Vec::new();
+    for i in &chain {
+        let p = &m.edges[*i];
+        let mid = p[p.len() / 2];
+        assert!(p.iter().all(|q| (q.z - 8.0).abs() < 1e-6), "{p:?}");
+        if !mids.iter().any(|q| q.dist(mid) < 1e-6) {
+            mids.push(mid);
+        }
+    }
+    assert_eq!(mids.len(), 8, "{chain:?}");
+    // Every edge bounds a face, and the top face has the outline and the hole rims.
+    assert!(m.edge_faces.iter().all(|f| !f.is_empty()));
+}

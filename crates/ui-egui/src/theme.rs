@@ -22,6 +22,38 @@ pub struct Tokens {
     pub icon_fill: Color32,
     pub timeline: Color32,
     pub hover: Color32,
+    // ---- viewport selection feedback ----
+    /// Selected face (flat fill).
+    pub sel_face: Color32,
+    /// Selected edge core and its lighter rim.
+    pub sel_edge: Color32,
+    pub sel_edge_rim: Color32,
+    /// Hovered edge: dark core with a light halo.
+    pub hover_edge: Color32,
+    pub hover_edge_halo: Color32,
+    /// How much lighter a hovered face is (grey levels).
+    pub hover_face_lift: u8,
+    /// Selected profile fill and outline.
+    pub sel_profile: Color32,
+    pub sel_profile_edge: Color32,
+    /// Hovered profile: faint tint and a bright outline.
+    pub hover_profile: Color32,
+    pub hover_profile_edge: Color32,
+    /// Selected vertex dot.
+    pub sel_vertex: Color32,
+    // ---- origin ----
+    pub origin_plane: Color32,
+    pub origin_plane_edge: Color32,
+    pub origin_plane_hover: Color32,
+    pub origin_point: Color32,
+    pub axis_x: Color32,
+    pub axis_y: Color32,
+    pub axis_z: Color32,
+    /// Construction planes.
+    pub construction_plane: Color32,
+    // ---- box selection ----
+    pub box_window: Color32,
+    pub box_crossing: Color32,
 }
 
 impl Tokens {
@@ -44,6 +76,27 @@ impl Tokens {
             icon_fill: Color32::from_rgb(178, 196, 222),
             timeline: Color32::from_rgb(232, 235, 240),
             hover: Color32::from_rgb(226, 234, 246),
+            sel_face: Color32::from_rgb(76, 127, 203),
+            sel_edge: Color32::from_rgb(0, 127, 255),
+            sel_edge_rim: Color32::from_rgb(127, 191, 255),
+            hover_edge: Color32::from_rgb(0, 0, 0),
+            hover_edge_halo: Color32::from_rgb(203, 203, 203),
+            hover_face_lift: 40,
+            sel_profile: Color32::from_rgb(26, 84, 167),
+            sel_profile_edge: Color32::from_rgb(47, 109, 198),
+            hover_profile: Color32::from_rgba_unmultiplied_const(75, 129, 253, 48),
+            hover_profile_edge: Color32::from_rgb(75, 129, 253),
+            sel_vertex: Color32::from_rgb(70, 110, 170),
+            origin_plane: Color32::from_rgba_unmultiplied_const(249, 184, 134, 94),
+            origin_plane_edge: Color32::from_rgba_unmultiplied_const(214, 140, 84, 200),
+            origin_plane_hover: Color32::from_rgba_unmultiplied_const(120, 130, 230, 150),
+            origin_point: Color32::from_rgb(214, 215, 218),
+            axis_x: Color32::from_rgb(255, 0, 0),
+            axis_y: Color32::from_rgb(0, 255, 0),
+            axis_z: Color32::from_rgb(2, 2, 248),
+            construction_plane: Color32::from_rgba_unmultiplied_const(249, 184, 134, 70),
+            box_window: Color32::from_rgb(38, 120, 218),
+            box_crossing: Color32::from_rgb(40, 160, 80),
         }
     }
 }

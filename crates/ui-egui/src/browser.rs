@@ -29,6 +29,24 @@ fn eye(ui: &mut egui::Ui, visible: bool) -> bool {
     resp.on_hover_text(if visible { "Hide" } else { "Show" }).clicked()
 }
 
+/// A browser click on a plane or axis: it goes to the open dialog's input if that takes it,
+/// otherwise it becomes the selection.
+fn pick_from_browser(app: &mut SolveApp, x: Sel) {
+    let hit = match &x {
+        Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solvecraft_engine::geom::Vec3::ZERO },
+        Sel::Axis { name } => crate::viewport::Hit::Axis { name: name.clone() },
+        _ => return,
+    };
+    if let Some(mut d) = app.dialog.take() {
+        if let Some(sel) = d.candidate(&app.session, &hit) {
+            d.pick(&app.session, sel);
+        }
+        app.dialog = Some(d);
+        return;
+    }
+    let _ = app.run("select.set", json!({ "items": [x] }));
+}
+
 pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     egui::Panel::left("sc_browser")
@@ -53,16 +71,38 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
                             app.start("ChangeParameterCommand");
                         }
                     });
-                    egui::CollapsingHeader::new("Origin").default_open(false).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            if eye(ui, app.ui.show_origin) {
-                                app.ui.show_origin = !app.ui.show_origin;
-                            }
-                            ui.label("O, X, Y, Z");
-                        });
-                        for p in ["XY", "XZ", "YZ"] {
-                            row(ui, "plane", p, None, false);
+                    ui.horizontal(|ui| {
+                        if eye(ui, app.ui.show_origin) {
+                            app.ui.show_origin = !app.ui.show_origin;
                         }
+                        egui::CollapsingHeader::new("Origin").default_open(false).show(ui, |ui| {
+                            let items = [("O", "point", "Origin point"), ("X", "axis", "X axis"), ("Y", "axis", "Y axis"), ("Z", "axis", "Z axis")]
+                                .into_iter()
+                                .chain([("XY", "plane", "XY"), ("XZ", "plane", "XZ"), ("YZ", "plane", "YZ")]);
+                            for (key, icon, label) in items {
+                                let visible = !app.ui.hidden_origin.iter().any(|h| h == key);
+                                let sel = match icon {
+                                    "plane" => Some(Sel::Plane { name: key.into() }),
+                                    "axis" => Some(Sel::Axis { name: key.into() }),
+                                    _ => None,
+                                };
+                                let selected = sel.as_ref().is_some_and(|x| app.session.selection.contains(x));
+                                ui.horizontal(|ui| {
+                                    if eye(ui, visible) {
+                                        if visible {
+                                            app.ui.hidden_origin.push(key.into());
+                                        } else {
+                                            app.ui.hidden_origin.retain(|h| h != key);
+                                        }
+                                    }
+                                    if row(ui, icon, label, None, selected).clicked()
+                                        && let Some(x) = &sel
+                                    {
+                                        pick_from_browser(app, x.clone());
+                                    }
+                                });
+                            }
+                        });
                     });
                     egui::CollapsingHeader::new(format!("Bodies ({})", st.bodies.len())).default_open(true).show(ui, |ui| {
                         for b in &st.bodies {

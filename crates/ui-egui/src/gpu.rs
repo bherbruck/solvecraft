@@ -13,10 +13,15 @@ pub const TRI_SIZE: usize = 28;
 pub const LINE_SIZE: usize = 32;
 const UNIFORM_SIZE: u64 = 112;
 
-/// CPU-side geometry waiting to be uploaded.
+/// CPU-side geometry waiting to be uploaded. The model scene changes with the design; the
+/// highlight scene (hover, selection, the origin widget) changes often and is small.
 #[derive(Default, Clone)]
 pub struct GpuScene {
+    /// Opaque triangles. A zero normal draws the colour flat (unlit).
     pub tris: Vec<u8>,
+    /// Translucent triangles (alpha from the colour), drawn after the opaque ones without
+    /// writing depth.
+    pub trans: Vec<u8>,
     /// Depth-tested lines.
     pub lines: Vec<u8>,
     /// Lines drawn over everything (active sketch, highlights).
@@ -29,6 +34,12 @@ impl GpuScene {
             self.tris.extend_from_slice(&v.to_le_bytes());
         }
         self.tris.extend_from_slice(&c);
+    }
+    pub fn trans_tri(&mut self, p: [f32; 3], n: [f32; 3], c: [u8; 4]) {
+        for v in p.iter().chain(&n) {
+            self.trans.extend_from_slice(&v.to_le_bytes());
+        }
+        self.trans.extend_from_slice(&c);
     }
     pub fn line(&mut self, a: [f32; 3], b: [f32; 3], c: [u8; 4], width: f32, on_top: bool) {
         let out = if on_top { &mut self.overlay } else { &mut self.lines };
@@ -46,6 +57,9 @@ pub type SceneSlot = Arc<Mutex<Option<GpuScene>>>;
 pub struct ViewportCallback {
     pub key: u64,
     pub slot: SceneSlot,
+    /// The highlight scene and its key.
+    pub hl_key: u64,
+    pub hl_slot: SceneSlot,
     /// Column-major view-projection.
     pub view_proj: [[f32; 4]; 4],
     /// Direction toward the eye (for lighting).
@@ -59,17 +73,42 @@ struct Batch {
     count: u32,
 }
 
+#[derive(Default)]
+struct Batches {
+    key: Option<u64>,
+    tris: Option<Batch>,
+    trans: Option<Batch>,
+    lines: Option<Batch>,
+    overlays: Option<Batch>,
+}
+
+impl Batches {
+    fn take(&mut self, device: &wgpu::Device, key: u64, slot: &SceneSlot) {
+        if self.key == Some(key) {
+            return;
+        }
+        if let Some(sc) = slot.lock().ok().and_then(|mut s| s.take()) {
+            self.tris = upload(device, "sc_tris", &sc.tris, TRI_SIZE);
+            self.trans = upload(device, "sc_trans", &sc.trans, TRI_SIZE);
+            self.lines = upload(device, "sc_lines", &sc.lines, LINE_SIZE);
+            self.overlays = upload(device, "sc_overlay", &sc.overlay, LINE_SIZE);
+            self.key = Some(key);
+        }
+    }
+}
+
 struct Resources {
     tri: wgpu::RenderPipeline,
+    /// Highlight triangles over the model (depth test ≤, no depth write).
+    tri_hl: wgpu::RenderPipeline,
+    trans: wgpu::RenderPipeline,
     line: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     bind: wgpu::BindGroup,
     linear_out: bool,
-    key: Option<u64>,
-    tris: Option<Batch>,
-    lines: Option<Batch>,
-    overlays: Option<Batch>,
+    model: Batches,
+    highlight: Batches,
 }
 
 const SHADER: &str = r#"
@@ -108,6 +147,10 @@ fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: 
 
 @fragment
 fn fs_tri(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    // A zero normal marks flat colour (selection fills, translucent planes).
+    if (length(i.n) < 0.5) {
+        return out_color(i.c);
+    }
     let v = normalize(u.back.xyz);
     var n = normalize(i.n);
     if (dot(n, v) < 0.0) { n = -n; }
@@ -117,7 +160,7 @@ fn fs_tri(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32>
     let h = normalize(key + v);
     let spec = pow(max(dot(n, h), 0.0), 40.0) * 0.25;
     let k = 0.42 + 0.38 * diff + 0.25 * fill;
-    return out_color(vec4<f32>(min(i.c.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), 1.0));
+    return out_color(vec4<f32>(min(i.c.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), i.c.a));
 }
 
 struct LOut {
@@ -202,7 +245,7 @@ impl Resources {
             layout: &bgl,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
         });
-        let depth = |compare: wgpu::CompareFunction, write: bool| {
+        let depth = |compare: wgpu::CompareFunction, write: bool| -> Option<wgpu::DepthStencilState> {
             t.depth.map(|format| wgpu::DepthStencilState {
                 format,
                 depth_write_enabled: Some(write),
@@ -237,15 +280,15 @@ impl Resources {
         let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
         Resources {
             tri: pipeline("sc_tris", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Less, true), None),
+            tri_hl: pipeline("sc_tris_hl", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+            trans: pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             line: pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             overlay: pipeline("sc_overlay", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             uniform,
             bind,
             linear_out: t.format.is_srgb(),
-            key: None,
-            tris: None,
-            lines: None,
-            overlays: None,
+            model: Batches::default(),
+            highlight: Batches::default(),
         }
     }
 }
@@ -282,14 +325,8 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let Some(res) = resources.get_mut::<Resources>() else { return Vec::new() };
-        if res.key != Some(self.key)
-            && let Some(sc) = self.slot.lock().ok().and_then(|mut s| s.take())
-        {
-            res.tris = upload(device, "sc_tris", &sc.tris, TRI_SIZE);
-            res.lines = upload(device, "sc_lines", &sc.lines, LINE_SIZE);
-            res.overlays = upload(device, "sc_overlay", &sc.overlay, LINE_SIZE);
-            res.key = Some(self.key);
-        }
+        res.model.take(device, self.key, &self.slot);
+        res.highlight.take(device, self.hl_key, &self.hl_slot);
         queue.write_buffer(&res.uniform, 0, &uniform_bytes(self, self.size_px[0], self.size_px[1], res.linear_out));
         Vec::new()
     }
@@ -302,21 +339,29 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         }
         pass.set_viewport(vp.left_px as f32, vp.top_px as f32, vp.width_px as f32, vp.height_px as f32, 0.0, 1.0);
         pass.set_bind_group(0, &res.bind, &[]);
-        if let Some(b) = &res.tris {
-            pass.set_pipeline(&res.tri);
-            pass.set_vertex_buffer(0, b.buffer.slice(..));
-            pass.draw(0..b.count, 0..1);
-        }
-        if let Some(b) = &res.lines {
-            pass.set_pipeline(&res.line);
-            pass.set_vertex_buffer(0, b.buffer.slice(..));
-            pass.draw(0..6, 0..b.count);
-        }
-        if let Some(b) = &res.overlays {
-            pass.set_pipeline(&res.overlay);
-            pass.set_vertex_buffer(0, b.buffer.slice(..));
-            pass.draw(0..6, 0..b.count);
-        }
+        let tris = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, b: &Option<Batch>| {
+            if let Some(b) = b {
+                pass.set_pipeline(p);
+                pass.set_vertex_buffer(0, b.buffer.slice(..));
+                pass.draw(0..b.count, 0..1);
+            }
+        };
+        let lines = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, b: &Option<Batch>| {
+            if let Some(b) = b {
+                pass.set_pipeline(p);
+                pass.set_vertex_buffer(0, b.buffer.slice(..));
+                pass.draw(0..6, 0..b.count);
+            }
+        };
+        let (m, h) = (&res.model, &res.highlight);
+        tris(pass, &res.tri, &m.tris);
+        tris(pass, &res.tri_hl, &h.tris);
+        lines(pass, &res.line, &m.lines);
+        lines(pass, &res.line, &h.lines);
+        tris(pass, &res.trans, &m.trans);
+        tris(pass, &res.trans, &h.trans);
+        lines(pass, &res.overlay, &m.overlays);
+        lines(pass, &res.overlay, &h.overlays);
     }
 }
 

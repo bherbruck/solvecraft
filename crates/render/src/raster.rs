@@ -220,6 +220,7 @@ mod tests {
             tri_face: vec![0],
             edges: vec![],
             seams: vec![],
+            edge_faces: vec![],
         };
         let scene =
             Scene { meshes: vec![SceneMesh { mesh: Arc::new(mesh), color: Rgb(200, 30, 30) }], lines: vec![], background: None, radius: 20.0 };

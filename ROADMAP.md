@@ -7,10 +7,10 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 
 | Question | Answer |
 |---|---|
-| Where are we? | **M0 (vertical slice) done.** Sketch with solver, extrude/revolve/fillet/chamfer/cut, parameters that rebuild the timeline, STEP/STL export, desktop app, CLI, oracle harness. |
-| Command parity (SOLID + SKETCH toolbar) | **46 / 291 (16%)** — [docs/parity.md](docs/parity.md) |
-| Fusion oracle | **2 / 29 parts match** Fusion's measurements (16 need features not built yet) — [docs/oracle.md](docs/oracle.md) |
-| Tests | 60 (solver, profiles, kernel booleans/blends/measures, expressions, timeline, file formats, camera, engine end-to-end, hostile-input fuzz over every command) |
+| Where are we? | **M0 done; M1/M2 in progress.** Sketch with solver, extrude (taper, two-sided, through all), revolve, fillet/chamfer, holes, patterns, mirror, shell, draft, loft, sweep, split, construction planes, parameters that rebuild the timeline, STEP/STL export, desktop app with Fusion-style selection (hover/selected highlights, origin planes, click-to-pick sketch planes, multi-select, window/crossing box selection, animated view cube), CLI, MCP server, oracle harness. |
+| Command parity (SOLID + SKETCH toolbar) | **57 / 291 (20%)** — [docs/parity.md](docs/parity.md) |
+| Fusion oracle | **23 / 29 parts match** Fusion's measurements — [docs/oracle.md](docs/oracle.md) |
+| Tests | 84 (solver, profiles, kernel booleans/blends/measures, expressions, timeline, file formats, camera, engine end-to-end, hostile-input fuzz over every command) |
 | Gates | `cargo xtask ci`: fmt, clippy -D warnings, tests, asset attribution, layering — green |
 | Weighted parity estimate | **≈ 5%** of Fusion's Design workspace by importance (sketch + basic solids are the core, but surfaces, assemblies, sheet metal, CAM, drawings are untouched) |
 | Time to a useful alpha (M0–M6) | ≈ **150 agent hours** remain |
@@ -21,11 +21,11 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 |---|---|---|---|
 | M0 | Vertical slice | done | — |
 | M1 | Sketch depth, oracle sketch cases (arcs, taper, two-sided, sketch modify tools) | in progress | 16 |
-| M2 | Robust modelling: coplanar booleans in the kernel, holes, patterns, mirror, shell, draft, split, construction geometry | planned | 24 |
+| M2 | Robust modelling: coplanar booleans in the kernel, holes (placed on faces and on sketch points), threads (cosmetic, then modelled), patterns, mirror, shell, draft, split, construction geometry | in progress | 16 |
 | M3 | General fillets and chamfers (curved edges, chains, vertex blends) | planned | 30 |
 | M4 | Files: STEP import, mesh import, DXF sketches, 3MF | planned | 16 |
 | M5 | Persistent naming of faces and edges | planned | 20 |
-| M6 | UI depth: profile shading, selection filters, measure tool, section view, edit dialogs, drag-solve | planned | 24 |
+| M6 | UI depth: selection feedback and origin (done), timeline editing (edit feature, rollback marker, reorder, suppress, re-resolved references), live previews, measure tool, section view, drag-solve | in progress | 24 |
 | M7 | Sweep, loft, rib, web, emboss, thread, coil, pipe | planned | 24 |
 | M8 | Surface workspace | planned | 30 |
 | M9 | Assemblies and joints | planned | 40 |
@@ -41,6 +41,8 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
   extended automatically); fully internal voids are not supported.
 - Mass properties come from fine tessellation (curved faces within ~1e-4 relative).
 - No STEP import yet; no persistent naming (fillet edges are re-found by position).
+- Shell and draft work on convex bodies with planar faces; loft is ruled (no tangency end conditions).
+- Dialogs have no live preview of the result yet.
 
 ## Kernel
 

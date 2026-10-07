@@ -6,6 +6,8 @@
 //! - `engine.commands`: every command with tab, panel, params and enablement
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
+//! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?}` (box selection, navigation);
+//!   `ui.selection` (selection, dialog inputs, hover)
 //! - `ui.set {...UiState fields}`; `ui.view {view: front|back|top|bottom|left|right|iso|home|fit, animate?: bool}` (snaps unless animate)
 //! - `ui.start {command}`: like clicking the toolbar button (starts tools/dialogs)
 //! - `ui.click {x, y, button?, shift?}`, `ui.move {x, y}`, `ui.scroll {x, y, delta}`: real
@@ -147,12 +149,35 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                     Some("middle") => egui::PointerButton::Middle,
                     _ => egui::PointerButton::Primary,
                 };
-                let modifiers = egui::Modifiers { shift: b("shift"), ..Default::default() };
+                let modifiers = egui::Modifiers { shift: b("shift"), ctrl: b("ctrl"), command: b("ctrl"), ..Default::default() };
                 app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers });
                 app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers });
             }
             ok(Value::Null)
         }
+        "ui.drag" => {
+            let (Some(x0), Some(y0), Some(x1), Some(y1)) = (f("x0"), f("y0"), f("x1"), f("y1")) else { return err("missing x0/y0/x1/y1") };
+            let button = match s("button") {
+                Some("right") => egui::PointerButton::Secondary,
+                Some("middle") => egui::PointerButton::Middle,
+                _ => egui::PointerButton::Primary,
+            };
+            let modifiers = egui::Modifiers { shift: b("shift"), ctrl: b("ctrl"), command: b("ctrl"), ..Default::default() };
+            let (a, z) = (egui::pos2(x0 as f32, y0 as f32), egui::pos2(x1 as f32, y1 as f32));
+            app.synthetic.push(egui::Event::PointerMoved(a));
+            app.synthetic.push(egui::Event::PointerButton { pos: a, button, pressed: true, modifiers });
+            let steps = f("steps").unwrap_or(10.0).clamp(1.0, 200.0) as usize;
+            for k in 1..=steps {
+                app.synthetic.push(egui::Event::PointerMoved(a + (z - a) * (k as f32 / steps as f32)));
+            }
+            app.synthetic.push(egui::Event::PointerButton { pos: z, button, pressed: false, modifiers });
+            ok(Value::Null)
+        }
+        "ui.selection" => ok(json!({
+            "selection": app.session.selection,
+            "dialog": app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| json!({"label": i.label, "items": i.items})).collect::<Vec<_>>()),
+            "hover": app.viewport.hover.as_ref().map(|h| format!("{h:?}")),
+        })),
         "ui.scroll" => {
             let (Some(x), Some(y)) = (f("x"), f("y")) else { return err("missing x/y") };
             app.synthetic.push(egui::Event::PointerMoved(egui::pos2(x as f32, y as f32)));

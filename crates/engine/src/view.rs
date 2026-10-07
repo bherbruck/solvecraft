@@ -143,3 +143,17 @@ pub fn home_camera(s: &Session) -> Camera {
     }
     c
 }
+
+/// Construction planes of the timeline: (feature id, name, plane).
+pub fn construction_planes(s: &Session) -> Vec<(u64, String, Plane)> {
+    use solvecraft_doc::FeatureKind;
+    let (vals, _) = s.doc.param_values();
+    s.doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            FeatureKind::ConstructionPlane { plane } if !f.suppressed => s.doc.resolve_plane(&vals, plane, 0).ok().map(|p| (f.id, f.name.clone(), p)),
+            _ => None,
+        })
+        .collect()
+}

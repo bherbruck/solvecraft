@@ -6,7 +6,7 @@ fn cube_mesh(s: f64) -> Mesh {
     let triangles =
         vec![[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]];
     let n = triangles.len();
-    Mesh { normals: vec![Vec3::Z; 8], positions, triangles, tri_face: vec![0; n], edges: vec![], seams: vec![] }
+    Mesh { normals: vec![Vec3::Z; 8], positions, triangles, tri_face: vec![0; n], edges: vec![], seams: vec![], edge_faces: vec![] }
 }
 
 #[test]
@@ -61,4 +61,25 @@ fn aabb() {
     b.add(Vec3::new(f64::NAN, 0.0, 0.0));
     b.add(Vec3::new(-1.0, 0.0, 0.0));
     assert_eq!(b.size(), Vec3::new(2.0, 2.0, 3.0));
+}
+
+#[test]
+fn tangent_chains_follow_smooth_edges() {
+    // A line, then an arc leaving it tangentially, then a sharp corner.
+    let mut m = Mesh { positions: vec![Vec3::ZERO, Vec3::new(30.0, 30.0, 0.0)], ..Default::default() };
+    m.edges.push(vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0)]);
+    let arc: Vec<Vec3> = (0..=16)
+        .map(|k| {
+            let a = -std::f64::consts::FRAC_PI_2 + std::f64::consts::FRAC_PI_2 * k as f64 / 16.0;
+            Vec3::new(10.0 + 5.0 * a.cos(), 5.0 + 5.0 * a.sin(), 0.0)
+        })
+        .collect();
+    m.edges.push(arc);
+    m.edges.push(vec![Vec3::new(15.0, 5.0, 0.0), Vec3::new(5.0, 5.0, 0.0)]);
+    m.edge_faces = vec![vec![0], vec![0, 1], vec![1]];
+    let mut c = m.tangent_chain(0, 5f64.to_radians());
+    c.sort();
+    assert_eq!(c, vec![0, 1]);
+    assert_eq!(m.tangent_chain(2, 5f64.to_radians()), vec![2]);
+    assert_eq!(m.face_edges(1), vec![1, 2]);
 }
