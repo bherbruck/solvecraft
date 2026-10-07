@@ -78,6 +78,12 @@ pub enum Kind {
     Sweep {
         operation: usize,
     },
+    /// Measure one or two picked items (vertices, edges, faces): the result of the last
+    /// measurement and the items it was for.
+    Measure {
+        result: Option<Value>,
+        of: Vec<Sel>,
+    },
     /// Move bodies by a distance along X, Y and Z.
     Move {
         x: String,
@@ -190,6 +196,9 @@ impl Dialog {
             ),
             "MirrorCommand" => {
                 Dialog::new(Kind::Mirror, vec![SelInput::new("Bodies", BODIES, true), SelInput::new("Mirror plane", PLANES | PLANAR_FACES, false)])
+            }
+            "MeasureCommand" => {
+                Dialog::new(Kind::Measure { result: None, of: Vec::new() }, vec![SelInput::new("Items", FACES | EDGES | selection::VERTICES, true)])
             }
             "PatternRectangular" => Dialog::new(
                 Kind::PatternRect { count: "3".into(), spacing: "20 mm".into(), count2: "1".into(), spacing2: "20 mm".into() },
@@ -373,6 +382,11 @@ impl Dialog {
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
         inp.toggle(picked);
         self.focus = true;
+        // A measurement is between two items: a third pick starts over from the last one.
+        if matches!(self.kind, Kind::Measure { .. }) && inp.items.len() > 2 {
+            let keep = inp.items.split_off(inp.items.len() - 1);
+            inp.items = keep;
+        }
         if !inp.multi && !inp.items.is_empty() && self.active + 1 < self.inputs.len() {
             self.advance();
         }
@@ -465,6 +479,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Shell { .. } => "SHELL",
         Kind::Draft { .. } => "DRAFT",
         Kind::Mirror => "MIRROR",
+        Kind::Measure { .. } => "MEASURE",
         Kind::PatternRect { .. } => "RECTANGULAR PATTERN",
         Kind::PatternCirc { .. } => "CIRCULAR PATTERN",
         Kind::Loft { .. } => "LOFT",
@@ -550,6 +565,68 @@ const DIALOG_MAX_W: f32 = 380.0;
 /// Width of value fields and choice boxes in a dialog.
 const FIELD_W: f32 = 140.0;
 
+/// Measure again when the picked items changed.
+fn update_measure(app: &SolveApp, d: &mut Dialog) {
+    let items: Vec<Sel> = sels(d, 0).to_vec();
+    if let Kind::Measure { result, of } = &mut d.kind
+        && *of != items
+    {
+        *result = if items.is_empty() { None } else { Some(app.session.measure_items(&items)) };
+        *of = items;
+    }
+}
+
+fn fmt_mm(v: &Value) -> String {
+    v.as_f64().map(|x| format!("{x:.3} mm")).unwrap_or_default()
+}
+
+/// The measurement in the dialog.
+fn measure_rows(ui: &mut egui::Ui, r: Option<&Value>) {
+    let t = Tokens::get();
+    let Some(r) = r else {
+        ui.label("");
+        ui.label(RichText::new("pick one or two vertices, edges or faces").color(t.text_dim));
+        ui.end_row();
+        return;
+    };
+    if let Some(e) = r.get("error").and_then(Value::as_str) {
+        ui.label("");
+        ui.label(RichText::new(e).color(t.error));
+        ui.end_row();
+        return;
+    }
+    for (i, it) in r["items"].as_array().into_iter().flatten().enumerate() {
+        let what = match it["type"].as_str() {
+            Some("edge") => format!("Length  {}", fmt_mm(&it["length_mm"])),
+            Some("face") => format!("Area  {:.3} mm²", it["area_mm2"].as_f64().unwrap_or(0.0)),
+            Some("vertex") => {
+                let p = &it["position"];
+                format!("At  {:.3}, {:.3}, {:.3}", p[0].as_f64().unwrap_or(0.0), p[1].as_f64().unwrap_or(0.0), p[2].as_f64().unwrap_or(0.0))
+            }
+            _ => String::new(),
+        };
+        ui.label(format!("Item {}", i + 1));
+        ui.label(what);
+        ui.end_row();
+    }
+    if r.get("distance_mm").is_some() {
+        ui.label(RichText::new("Distance").strong());
+        ui.label(RichText::new(fmt_mm(&r["distance_mm"])).strong());
+        ui.end_row();
+        let d = &r["delta"];
+        for (k, l) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
+            ui.label(*l);
+            ui.label(format!("{:.3} mm", d[k].as_f64().unwrap_or(0.0).abs()));
+            ui.end_row();
+        }
+    }
+    if let Some(a) = r["angle_deg"].as_f64() {
+        ui.label(RichText::new("Angle").strong());
+        ui.label(RichText::new(format!("{a:.3}°")).strong());
+        ui.end_row();
+    }
+}
+
 /// Keep an automatic extrude operation in step with the geometry.
 fn auto_operation(app: &SolveApp, d: &mut Dialog) {
     if !matches!(d.kind, Kind::Extrude { auto_op: true, .. }) {
@@ -572,6 +649,7 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.dialog.take() else { return };
     auto_operation(app, &mut d);
+    update_measure(app, &mut d);
     let t = Tokens::get();
     let vp = app.viewport.rect.unwrap_or_else(|| ctx.content_rect());
     let anchor = egui::pos2(vp.right(), vp.top() + crate::viewport::VIEW_CUBE_CLEARANCE);
@@ -660,6 +738,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                     Kind::Mirror => {}
+                    Kind::Measure { result, .. } => measure_rows(ui, result.as_ref()),
                     Kind::PatternRect { count, spacing, count2, spacing2 } => {
                         for (l, v) in [("Quantity", count), ("Spacing", spacing), ("Quantity 2", count2), ("Spacing 2", spacing2)] {
                             ui.label(l);
@@ -779,7 +858,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if !matches!(d.kind, Kind::Sketch | Kind::Params { .. })
+                if !matches!(d.kind, Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. })
                     && ui
                         .add(
                             egui::Button::new(
@@ -792,7 +871,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 {
                     ok = true;
                 }
-                let close = if matches!(d.kind, Kind::Params { .. }) { "Close" } else { "Cancel" };
+                let close = if matches!(d.kind, Kind::Params { .. } | Kind::Measure { .. }) { "Close" } else { "Cancel" };
                 if ui.add(egui::Button::new(close).min_size(vec2(70.0, 24.0))).clicked() {
                     cancel = true;
                 }
@@ -1165,7 +1244,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::EditParam { name, expr } => ("ChangeParameterCommand", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("FusionRenameTimelineEntryCommand", json!({"feature": feature, "name": name})),
         Kind::ConfirmDelete { feature, .. } => ("FusionDeleteCommand", json!({ "features": [feature.to_string()] })),
-        Kind::Sketch | Kind::Params { .. } => return Ok(Vec::new()),
+        Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } => return Ok(Vec::new()),
     };
     let mut params = params;
     if let Value::Object(m) = &mut params {
@@ -1302,7 +1381,10 @@ fn op_index(o: &Operation) -> usize {
 
 /// The origin axis a unit direction runs along (either way), if any.
 fn world_axis(d: Vec3) -> Option<String> {
-    [("X", Vec3::X), ("Y", Vec3::Y), ("Z", Vec3::Z)].into_iter().find(|(_, a)| d.cross(*a).len() < 1e-9 && d.dot(*a) > 0.0).map(|(n, _)| n.to_string())
+    [("X", Vec3::X), ("Y", Vec3::Y), ("Z", Vec3::Z)]
+        .into_iter()
+        .find(|(_, a)| d.cross(*a).len() < 1e-9 && d.dot(*a) > 0.0)
+        .map(|(n, _)| n.to_string())
 }
 
 fn pt3(v: Vec3) -> Value {

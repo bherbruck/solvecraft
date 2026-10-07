@@ -13,7 +13,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("measure")
         .key("I")
         .noundo()
-        .params("bodies?: [names] (default all)"),
+        .params("bodies?: [names] (default all); or items: [1-2 selections] → length/area/volume, minimum distance (from, to) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", inspect).noundo().params("measure?: bool (include body measurements)"),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", sketch_inspect).noundo().params("sketch?: id|name (default active)"),
     CommandSpec::new("model.edges", "List Edges", model_edges).noundo().params("body: name"),
@@ -46,6 +46,9 @@ pub fn measure_json(b: &solvecraft_doc::ModelBody) -> Value {
 }
 
 fn measure(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(items) = p.get("items") {
+        return super::measure_sel::measure_items(s, items);
+    }
     let want = string_list(p, "bodies");
     let st = s.world_state();
     let mut bodies: Vec<Value> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).map(measure_json).collect();

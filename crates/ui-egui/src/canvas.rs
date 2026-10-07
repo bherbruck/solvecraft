@@ -64,6 +64,11 @@ fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
     let Some(mut d) = app.dialog.take() else { return };
+    if let Kind::Measure { result: Some(r), .. } = &d.kind {
+        measure_line(painter, proj, r);
+        app.dialog = Some(d);
+        return;
+    }
     if let Some((base, dir)) = anchor(app, &d)
         && let Some(bs) = proj.to_screen(base)
     {
@@ -200,6 +205,26 @@ fn drag_arrow(
         *value = format_len(v);
     }
     Some(ts)
+}
+
+/// The measured distance: a line between the closest points with its length.
+fn measure_line(painter: &egui::Painter, proj: &Proj, r: &serde_json::Value) {
+    let t = Tokens::get();
+    let p = |k: &str| -> Option<Vec3> {
+        let a = r.get(k)?.as_array()?;
+        Some(Vec3::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?))
+    };
+    let (Some(a), Some(b), Some(d)) = (p("from"), p("to"), r.get("distance_mm").and_then(|v| v.as_f64())) else { return };
+    let (Some(sa), Some(sb)) = (proj.to_screen(a), proj.to_screen(b)) else { return };
+    painter.line_segment([sa, sb], Stroke::new(2.0, t.manipulator));
+    for s in [sa, sb] {
+        painter.circle(s, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
+    }
+    let mid = sa + (sb - sa) * 0.5 + vec2(10.0, -14.0);
+    let galley = painter.layout_no_wrap(format!("{d:.3} mm"), egui::FontId::proportional(12.5), t.text);
+    let rect = egui::Rect::from_min_size(mid, galley.size() + vec2(10.0, 6.0));
+    painter.rect(rect, 3.0, t.overlay, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    painter.galley(rect.min + vec2(5.0, 3.0), galley, t.text);
 }
 
 /// The revolve axis (a point on it and its unit direction).

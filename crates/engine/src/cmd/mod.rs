@@ -9,6 +9,8 @@ mod features;
 pub use features::auto_operation;
 mod file;
 mod inspect;
+mod measure_sel;
+pub(crate) use measure_sel::measure_items;
 mod sketch;
 mod sketch_constraints;
 mod sketch_create;

@@ -342,6 +342,13 @@ impl Session {
         Ok(self.model.state())
     }
 
+    /// Measure one or two selections (see `MeasureCommand` with `items`); errors come back as
+    /// `{"error": …}`.
+    pub fn measure_items(&self, items: &[Sel]) -> Value {
+        let v = serde_json::to_value(items).unwrap_or(Value::Null);
+        cmd::measure_items(self, &v).unwrap_or_else(|e| serde_json::json!({ "error": e.to_string() }))
+    }
+
     /// Run a script: a JSON array of `{"command": id, "params": {...}}` (or an object with a
     /// `commands` array). Stops at the first error. Returns each command's result.
     pub fn run_script(&mut self, script: &Value) -> Result<Vec<Value>> {

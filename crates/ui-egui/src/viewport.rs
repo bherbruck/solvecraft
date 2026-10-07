@@ -152,7 +152,7 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.ui.show_sketches.hash(&mut h);
     app.ui.hidden_bodies.hash(&mut h);
     app.preview.replaced.hash(&mut h);
-    app.ui.dark.hash(&mut h);
+    crate::theme::is_dark().hash(&mut h);
     app.session.active_sketch.hash(&mut h);
     let (minor, _) = grid_step(app.cam.half_height());
     minor.to_bits().hash(&mut h);
@@ -535,7 +535,7 @@ fn highlight_key(app: &SolveApp) -> u64 {
     serde_json::to_string(&app.highlighted()).unwrap_or_default().hash(&mut h);
     format!("{:?}", app.viewport.hover).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
-    app.ui.dark.hash(&mut h);
+    crate::theme::is_dark().hash(&mut h);
     app.preview.replaced.hash(&mut h);
     app.origin_visible().hash(&mut h);
     app.ui.hidden_origin.hash(&mut h);

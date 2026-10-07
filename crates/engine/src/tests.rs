@@ -582,6 +582,40 @@ fn extrude_auto_operation() {
     assert!(rel(volume(&mut s), 40.0 * 30.0 * 15.0 - 100.0 * 8.0) < 1e-6);
 }
 
+/// Measuring picked geometry: distance between faces, angle, edge length.
+#[test]
+fn measure_items() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    let st = s.model.state();
+    let m = st.body("Body1").unwrap().mesh();
+    // Find the faces by their centroid: top (z = 20), bottom (z = 0), front (y = 0).
+    let face_at = |z: Option<f64>, y: Option<f64>| -> usize {
+        (0..6)
+            .find(|f| {
+                let tris: Vec<_> = m.triangles.iter().zip(&m.tri_face).filter(|(_, tf)| **tf as usize == *f).filter_map(|(t, _)| m.tri(t)).collect();
+                tris.iter().all(|t| t.iter().all(|p| z.is_none_or(|z| (p.z - z).abs() < 1e-9) && y.is_none_or(|y| (p.y - y).abs() < 1e-9)))
+            })
+            .unwrap()
+    };
+    let (ft, fb, ff) = (face_at(Some(20.0), None), face_at(Some(0.0), None), face_at(None, Some(0.0)));
+    let face = |i: usize, p: [f64; 3]| json!({"type": "face", "body": "Body1", "index": i, "point": p});
+    let r = run(&mut s, "MeasureCommand", json!({"items": [face(ft, [20.0, 15.0, 20.0]), face(fb, [20.0, 15.0, 0.0])]}));
+    assert!((r["distance_mm"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{r}");
+    assert!((r["angle_deg"].as_f64().unwrap() - 180.0).abs() < 1e-6, "{r}");
+    let r = run(&mut s, "MeasureCommand", json!({"items": [face(ft, [20.0, 15.0, 20.0]), face(ff, [20.0, 0.0, 10.0])]}));
+    assert!(r["distance_mm"].as_f64().unwrap() < 1e-9);
+    assert!((r["angle_deg"].as_f64().unwrap() - 90.0).abs() < 1e-6);
+    let r = run(&mut s, "MeasureCommand", json!({"items": [face(ft, [20.0, 15.0, 20.0])]}));
+    assert!((r["items"][0]["area_mm2"].as_f64().unwrap() - 1200.0).abs() < 1e-6, "{r}");
+    let v = json!({"type": "vertex", "body": "Body1", "point": [0, 0, 0]});
+    let w = json!({"type": "vertex", "body": "Body1", "point": [40, 30, 20]});
+    let r = run(&mut s, "MeasureCommand", json!({"items": [v, w]}));
+    assert!((r["distance_mm"].as_f64().unwrap() - (1600.0f64 + 900.0 + 400.0).sqrt()).abs() < 1e-9);
+    assert!(s.execute("MeasureCommand", &json!({"items": []})).is_err());
+    assert!(s.execute("MeasureCommand", &json!({"items": [{"type": "nonsense"}]})).is_err());
+}
+
 /// Press Pull: positive pulls a face out, negative pushes it in (a cut), edges get a fillet.
 #[test]
 fn press_pull() {
