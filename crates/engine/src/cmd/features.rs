@@ -18,6 +18,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("revolve")
         .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world); angle?: expr (default 360 deg); sketch?, profiles?, operation?, targets?, name?, body_name?"),
+    CommandSpec::new("Sweep", "Sweep", sweep)
+        .at("SOLID", "CREATE")
+        .icon("sweep")
+        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; operation?"),
+    CommandSpec::new("SolidLoft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?}] (2 or more, in order); operation?"),
     CommandSpec::new("PrimitiveBox", "Box", prim_box).at("SOLID", "CREATE").icon("box").params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z]; operation?"),
     CommandSpec::new("PrimitiveCylinder", "Cylinder", prim_cylinder).at("SOLID", "CREATE").icon("cylinder").params("radius | diameter, height: expr; base?: [x,y,z]; axis?: [x,y,z]; operation?"),
     CommandSpec::new("PrimitiveSphere", "Sphere", prim_sphere).at("SOLID", "CREATE").icon("sphere").params("radius | diameter: expr; center?: [x,y,z]; operation?"),
@@ -570,4 +575,41 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     let pl = s.doc.resolve_plane(&vals, &neutral, 0)?;
     let pull = p.get("pull").and_then(vec3).unwrap_or_else(|| pl.normal());
     add_feature(s, p, FeatureKind::Draft { faces, angle, neutral, pull, body: str_(p, "body").map(str::to_string) })
+}
+
+fn sketch_id(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<u64> {
+    let key = match v {
+        Some(Value::Number(n)) => n.to_string(),
+        Some(Value::String(x)) => x.clone(),
+        _ => return Err(bad(cmd, format!("`{what}` must be a sketch id or name"))),
+    };
+    match s.doc.find_feature(&key) {
+        Some(f) if matches!(f.kind, FeatureKind::Sketch { .. }) => Ok(f.id),
+        _ => Err(bad(cmd, format!("no sketch `{key}`"))),
+    }
+}
+
+fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "Sweep";
+    let sketch = feature_sketch(s, p, cmd)?;
+    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
+    let path = string_list(p, "path");
+    if path.is_empty() {
+        return Err(bad(cmd, "`path` must list curve ids"));
+    }
+    add_feature(s, p, FeatureKind::Sweep { sketch, profiles: profiles(p, cmd)?, path_sketch, path, operation: operation(p, cmd)?, targets: string_list(p, "targets") })
+}
+
+fn loft(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "SolidLoft";
+    let list = p.get("sections").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`sections` must be a list"))?;
+    if list.len() < 2 || list.len() > 50 {
+        return Err(bad(cmd, "a loft needs 2…50 sections"));
+    }
+    let mut sections = Vec::new();
+    for sec in list {
+        let sketch = sketch_id(s, sec.get("sketch"), cmd, "sections[].sketch")?;
+        sections.push(solvecraft_doc::LoftSection { sketch, profiles: profiles(sec, cmd)? });
+    }
+    add_feature(s, p, FeatureKind::Loft { sections, operation: operation(p, cmd)?, targets: string_list(p, "targets") })
 }

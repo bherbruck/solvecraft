@@ -224,6 +224,22 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
                 let axis = f.get("axis").map(|a| json!({"origin": a.get("origin").cloned().unwrap_or(json!([0, 0, 0])), "dir": a.get("dir")})).unwrap_or(Value::Null);
                 out.push(json!({"command": "PatternCircular", "params": {"features": f.get("features"), "axis": axis, "count": f.get("count"), "angle": f.get("total_angle").cloned().unwrap_or(json!(360)), "name": name}}));
             }
+            Some("loft") => {
+                let sections: Vec<Value> = f
+                    .get("sections")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(|sec| json!({"sketch": sec.get("sketch"), "profiles": [sec]}))
+                    .collect();
+                out.push(json!({"command": "SolidLoft", "params": {"sections": sections, "operation": op(f), "name": name, "body_names": bodies}}));
+            }
+            Some("sweep") => {
+                let path = f.get("path").cloned().unwrap_or(Value::Null);
+                out.push(json!({"command": "Sweep", "params": {
+                    "sketch": profile_sketch(f), "profiles": profiles_of(f), "path_sketch": path.get("sketch"), "path": path.get("curves"),
+                    "operation": op(f), "name": name, "body_names": bodies}}));
+            }
             Some("shell") => {
                 let faces: Vec<Value> = f.get("faces_removed").and_then(Value::as_array).into_iter().flatten().filter_map(|x| x.get("point").cloned()).collect();
                 out.push(json!({"command": "FusionShellBodyCommand", "params": {"faces": faces, "thickness": f.get("inside_thickness"), "name": name}}));

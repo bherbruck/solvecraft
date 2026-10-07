@@ -228,6 +228,25 @@ pub enum FeatureKind {
         #[serde(default)]
         hole: HoleKind,
     },
+    /// Ruled loft through profiles of several sketches, in order.
+    Loft {
+        sections: Vec<LoftSection>,
+        #[serde(default)]
+        operation: Operation,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<String>,
+    },
+    /// Sweep profiles along a chain of sketch curves.
+    Sweep {
+        sketch: u64,
+        profiles: ProfileSel,
+        path_sketch: u64,
+        path: Vec<String>,
+        #[serde(default)]
+        operation: Operation,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<String>,
+    },
     /// Hollow a body leaving walls of `thickness`, removing the faces at the given points.
     Shell {
         faces: Vec<Vec3>,
@@ -261,6 +280,13 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         angle: Option<String>,
     },
+}
+
+/// One loft section: profiles of a sketch.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LoftSection {
+    pub sketch: u64,
+    pub profiles: ProfileSel,
 }
 
 /// Hole shapes.
@@ -347,6 +373,8 @@ impl FeatureKind {
             FeatureKind::Mirror { .. } => "MirrorFeature",
             FeatureKind::ConstructionPlane { .. } => "ConstructionPlane",
             FeatureKind::Hole { .. } => "HoleFeature",
+            FeatureKind::Loft { .. } => "LoftFeature",
+            FeatureKind::Sweep { .. } => "SweepFeature",
             FeatureKind::Shell { .. } => "ShellFeature",
             FeatureKind::Draft { .. } => "DraftFeature",
             FeatureKind::Split { .. } => "SplitBodyFeature",
@@ -371,6 +399,8 @@ impl FeatureKind {
             FeatureKind::Mirror { .. } => "Mirror",
             FeatureKind::ConstructionPlane { .. } => "Plane",
             FeatureKind::Hole { .. } => "Hole",
+            FeatureKind::Loft { .. } => "Loft",
+            FeatureKind::Sweep { .. } => "Sweep",
             FeatureKind::Shell { .. } => "Shell",
             FeatureKind::Draft { .. } => "Draft",
             FeatureKind::Split { .. } => "Split",
@@ -414,6 +444,7 @@ impl FeatureKind {
             },
             FeatureKind::Mirror { plane, .. } => plane_exprs(plane, &mut v),
             FeatureKind::Shell { thickness, .. } => v.push(thickness),
+            FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } => {}
             FeatureKind::Draft { angle, neutral, .. } => {
                 v.push(angle);
                 plane_exprs(neutral, &mut v);
@@ -565,6 +596,8 @@ impl Document {
         for f in &self.features {
             match &f.kind {
                 FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } if *sketch == id => gone.push(f.id),
+                FeatureKind::Sweep { sketch, path_sketch, .. } if *sketch == id || *path_sketch == id => gone.push(f.id),
+                FeatureKind::Loft { sections, .. } if sections.iter().any(|s| s.sketch == id) => gone.push(f.id),
                 _ => {}
             }
         }

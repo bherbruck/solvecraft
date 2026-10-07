@@ -24,6 +24,8 @@ fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Mirror { .. } => "mirror",
         FeatureKind::ConstructionPlane { .. } => "plane",
         FeatureKind::Hole { .. } => "hole",
+        FeatureKind::Loft { .. } => "loft",
+        FeatureKind::Sweep { .. } => "sweep",
         FeatureKind::Shell { .. } => "shell",
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",

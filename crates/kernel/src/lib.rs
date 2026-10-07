@@ -23,7 +23,7 @@ mod topo;
 
 pub use blend::{chamfer, fillet};
 pub use body::{Body, EdgeInfo, FaceInfo};
-pub use build::{box_solid, cylinder, extrude, extrude_tapered, revolve, sphere, torus};
+pub use build::{PathSeg, box_solid, cylinder, extrude, extrude_tapered, loft, revolve, sphere, sweep, torus};
 pub use measure::{BodyMeasure, measure};
 pub use ops::{BoolOp, boolean, split_by_plane, transform, transform_matrix};
 pub use polyhedron::{HalfSpace, convex_polyhedron, draft, shell};

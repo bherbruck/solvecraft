@@ -613,6 +613,24 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
             let regions: Vec<Region2> = regions.iter().map(|r| grow_profile_for_coplanar(st, r, operation, &targets, &probe)).collect();
             Ok(kernel::revolve(&ss.plane, &regions, o, d, ang)?)
         }
+        FeatureKind::Loft { sections, .. } => {
+            let mut secs = Vec::new();
+            for sec in sections {
+                let ss = st.sketch(sec.sketch).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))?;
+                let regions = solvecraft_sketch::merge_regions(&select_profiles(ss, &sec.profiles)?);
+                let [r] = &regions[..] else { return Err(DocError::Invalid("each loft section must be one profile".into())) };
+                secs.push((ss.plane, r.outer.clone()));
+            }
+            Ok(vec![kernel::loft(&secs)?])
+        }
+        FeatureKind::Sweep { sketch, profiles, path_sketch, path, .. } => {
+            let ss = st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
+            let ps = st.sketch(*path_sketch).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
+            let regions = solvecraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
+            let start = regions.first().map(|r| ss.plane.to_world(r.centroid())).unwrap_or_default();
+            let segs = path_segments(ps, path, start)?;
+            regions.iter().map(|r| kernel::sweep(&ss.plane, r, &segs).map_err(DocError::from)).collect()
+        }
         FeatureKind::Box { corner, length, width, height, .. } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
             Ok(vec![kernel::box_solid(*corner, *corner + s)?])
@@ -698,6 +716,44 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
     }
 }
 
+/// A chain of sketch curves as 3D path segments, starting at the end nearest `start`.
+fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
+    if ids.is_empty() || ids.len() > 1000 {
+        return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
+    }
+    let mut segs: Vec<solvecraft_geom::Seg2> = Vec::new();
+    for id in ids {
+        let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
+        segs.extend(ps.sketch.segs(ci));
+    }
+    // Orient the chain: the first segment starts at the end nearest `start`, each next one
+    // starts where the previous ended.
+    let w = |p: Vec2| ps.plane.to_world(p);
+    if let (Some(f), true) = (segs.first().copied(), segs.len() > 0)
+        && w(f.end()).dist(start) < w(f.start()).dist(start)
+        && (segs.len() == 1 || segs.get(1).is_some_and(|n| n.start().dist(f.start()) < 1e-6 || n.end().dist(f.start()) < 1e-6))
+    {
+        segs[0] = f.reversed();
+    }
+    for i in 1..segs.len() {
+        let prev_end = segs[i - 1].end();
+        if segs[i].end().dist(prev_end) < segs[i].start().dist(prev_end) {
+            segs[i] = segs[i].reversed();
+        }
+        if segs[i].start().dist(prev_end) > 1e-5 {
+            return Err(DocError::Invalid("the path curves are not connected end to end".into()));
+        }
+    }
+    let n = ps.plane.normal();
+    Ok(segs
+        .iter()
+        .map(|s| match *s {
+            solvecraft_geom::Seg2::Line { a, b } => kernel::PathSeg::Line { a: w(a), b: w(b) },
+            solvecraft_geom::Seg2::Arc { center, sweep, .. } => kernel::PathSeg::Arc { a: w(s.start()), center: w(center), axis: n * sweep.signum(), angle: sweep.abs() },
+        })
+        .collect())
+}
+
 /// Operation and targets of a feature that makes tools.
 fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
     match &f.kind {
@@ -707,6 +763,7 @@ fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
         | FeatureKind::Sphere { operation, .. }
         | FeatureKind::Torus { operation, .. } => (*operation, Vec::new()),
         FeatureKind::Hole { .. } => (Operation::Cut, Vec::new()),
+        FeatureKind::Loft { operation, targets, .. } | FeatureKind::Sweep { operation, targets, .. } => (*operation, targets.clone()),
         _ => (Operation::NewBody, Vec::new()),
     }
 }
@@ -842,7 +899,10 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             st.sketches.push(SolvedSketch { feature: f.id, name: f.name.clone(), plane, sketch: sk, report, profiles });
             Ok(())
         }
-        FeatureKind::Extrude { operation, targets, .. } | FeatureKind::Revolve { operation, targets, .. } => {
+        FeatureKind::Extrude { operation, targets, .. }
+        | FeatureKind::Revolve { operation, targets, .. }
+        | FeatureKind::Loft { operation, targets, .. }
+        | FeatureKind::Sweep { operation, targets, .. } => {
             let tools = feature_tools(vals, f, st)?;
             apply_op(st, f, tools, *operation, targets)
         }

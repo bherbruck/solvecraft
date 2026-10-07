@@ -40,13 +40,21 @@ fn face_sums(m: &Mesh, nf: usize) -> Vec<(f64, f64, Vec3)> {
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
     let size = b.size();
     let fine = b.tessellate((size * 5e-5).max(1e-4))?;
+    let medium = b.tessellate((size * 2.5e-4).max(2e-4))?;
     let coarse = b.tessellate((size * 1e-3).max(1e-3))?;
     let nf = b.face_count();
-    let (sf, sc) = (face_sums(&fine, nf), face_sums(&coarse, nf));
+    let (sf, sm, sc) = (face_sums(&fine, nf), face_sums(&medium, nf), face_sums(&coarse, nf));
+    let close = |x: f64, y: f64| (x - y).abs() <= 0.01 * x.abs().max(y.abs()) + 1e-9;
     let (mut area, mut v6, mut mom) = (0.0, 0.0, Vec3::ZERO);
-    for (f, c) in sf.iter().zip(&sc) {
-        let bad = (f.0 - c.0).abs() > 0.01 * c.0.max(f.0) + 1e-9;
-        let pick = if bad { c } else { f };
+    for ((f, m), c) in sf.iter().zip(&sm).zip(&sc) {
+        // Trust the finest tessellation that agrees with the next coarser one.
+        let pick = if close(f.0, m.0) {
+            f
+        } else if close(m.0, c.0) {
+            m
+        } else {
+            f
+        };
         area += pick.0;
         v6 += pick.1;
         mom += pick.2;

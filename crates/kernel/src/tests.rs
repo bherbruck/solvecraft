@@ -193,6 +193,30 @@ fn polyhedra_shell_and_draft() {
 }
 
 #[test]
+fn loft_and_sweep() {
+    let sq = Loop2::polygon(&[Vec2::new(-20.0, -20.0), Vec2::new(20.0, -20.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)]);
+    let top = Plane::XY.offset(40.0);
+    let l = loft(&[(Plane::XY, sq), (top, Loop2::circle(Vec2::ZERO, 10.0))]).unwrap();
+    let m = measure(&l).unwrap();
+    println!("loft volume {} faces {:?}", m.volume, m.merged);
+    assert!(m.volume > 314.0 * 40.0 && m.volume < 1600.0 * 40.0);
+    // A tube: up 30, quarter bend of radius 20, across 30.
+    let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 3.0), holes: vec![] };
+    let path = [
+        PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 0.0, 30.0) },
+        PathSeg::Arc { a: Vec3::new(0.0, 0.0, 30.0), center: Vec3::new(20.0, 0.0, 30.0), axis: Vec3::new(0.0, 1.0, 0.0), angle: std::f64::consts::FRAC_PI_2 },
+        PathSeg::Line { a: Vec3::new(20.0, 0.0, 50.0), b: Vec3::new(50.0, 0.0, 50.0) },
+    ];
+    let t = sweep(&Plane::XY, &disc, &path).unwrap();
+    for tol in [0.1, 0.01, 0.003, 0.001] {
+        println!("tube tess {tol}: {}", t.tessellate(tol).unwrap().measure().volume);
+    }
+    let area = PI * 9.0;
+    let expect = area * (30.0 + 30.0 + 20.0 * std::f64::consts::FRAC_PI_2);
+    assert!(rel(measure(&t).unwrap().volume, expect) < 1e-3, "{} vs {expect}", measure(&t).unwrap().volume);
+}
+
+#[test]
 #[ignore]
 fn debug_convergence() {
     let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 15.0), holes: vec![] }], 0.0, 50.0).unwrap().pop().unwrap();

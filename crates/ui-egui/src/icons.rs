@@ -155,6 +155,17 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.line(&[(7.0, 8.0), (7.0, 16.0)], a);
             pen.line(&[(17.0, 8.0), (17.0, 16.0)], a);
         }
+        "sweep" => {
+            pen.arc(20.0, 20.0, 14.0, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, ink);
+            pen.circle(6.0, 20.0, 3.0, pen.fill, a);
+            pen.circle(20.0, 6.0, 3.0, pen.fill, a);
+        }
+        "loft" => {
+            pen.poly(&[(3.0, 20.0), (15.0, 20.0), (21.0, 15.0), (9.0, 15.0)], pen.fill, ink);
+            pen.circle(12.0, 6.0, 3.5, Color32::TRANSPARENT, a);
+            pen.line(&[(3.0, 20.0), (8.5, 6.0)], a);
+            pen.line(&[(21.0, 15.0), (15.5, 6.0)], a);
+        }
         "shell" => {
             pen.iso_box(3.0, 9.0, 10.0, 8.0, 9.0);
             pen.poly(&[(6.0, 9.0), (13.0, 5.5), (18.0, 8.0), (11.0, 11.5)], Color32::WHITE, a);
