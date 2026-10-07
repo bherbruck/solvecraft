@@ -22,6 +22,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("features: [id or name] (a sketch takes its dependent features with it)"),
     CommandSpec::new("FusionRenameTimelineEntryCommand", "Rename", rename).params("feature: id|name, name"),
     CommandSpec::new("timeline.rollback", "Move Timeline Marker", rollback).params("position: number of features to keep active (omit = end)"),
+    CommandSpec::new("timeline.rollTo", "Roll History Marker", rollback)
+        .params("position: number of features to keep active (omit = end) | feature: id|name (the marker goes right after it)"),
+    CommandSpec::new("timeline.reorder", "Reorder Feature", reorder)
+        .params("feature: id|name, position: its new index; refused when a feature that worked would fail"),
+    CommandSpec::new("timeline.redefine", "Edit Feature", redefine)
+        .params("feature: id|name, command: the feature's command id, params: its parameters (the feature is rebuilt in place)"),
+    CommandSpec::new("timeline.dependents", "Feature Dependents", dependents)
+        .noundo()
+        .params("feature: id|name → features deleted with it, and features that would fail without it"),
     CommandSpec::new("timeline.suppress", "Suppress Feature", suppress).params("feature: id|name, suppressed?: bool (default toggles)"),
     CommandSpec::new("timeline.edit", "Edit Feature", edit_feature)
         .params("feature: id|name, set: {fields to change, e.g. {\"extent\": {\"distance\": \"30\"}}}"),
@@ -141,7 +150,13 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn rollback(s: &mut Session, p: &Value) -> Result<Value> {
     let n = s.doc.features.len();
-    let pos = num(p, "position").map(|x| x.max(0.0) as usize);
+    let pos = match p.get("feature") {
+        Some(f) => {
+            let id = feature_id(s, Some(f), "timeline.rollTo")?;
+            s.doc.feature_index(id).map(|i| i + 1)
+        }
+        None => num(p, "position").map(|x| x.max(0.0) as usize),
+    };
     s.doc_mut().marker = match pos {
         Some(k) if k < n => Some(k),
         _ => None,
@@ -230,4 +245,91 @@ fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
     s.revision += 1;
     Ok(json!({"selected": 0}))
+}
+
+/// Features that worked in `before` and fail in `after`: (name, error).
+fn newly_broken(before: &solvecraft_doc::Model, after: &solvecraft_doc::Model) -> Vec<(String, String)> {
+    after
+        .results
+        .iter()
+        .filter_map(|r| {
+            let e = r.error.clone()?;
+            let was_ok = before.result(r.id).is_some_and(|b| b.error.is_none() && !b.skipped);
+            was_ok.then(|| (r.name.clone(), e))
+        })
+        .collect()
+}
+
+fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "timeline.reorder";
+    let id = feature_id(s, p.get("feature"), cmd)?;
+    let n = s.doc.features.len();
+    let to = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?.min(n.saturating_sub(1));
+    let from = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
+    if from == to {
+        return Ok(json!({"feature": id, "position": to}));
+    }
+    let mut next = (*s.doc).clone();
+    let f = next.features.remove(from);
+    let name = f.name.clone();
+    next.features.insert(to, f);
+    // Everything that evaluated before must still evaluate.
+    let mut after = solvecraft_doc::Model::new();
+    after.evaluate(&next);
+    let broken = newly_broken(&s.model, &after);
+    if !broken.is_empty() {
+        let list: Vec<String> = broken.iter().map(|(n, e)| format!("{n} ({e})")).collect();
+        return Err(bad(cmd, format!("moving {name} there breaks {}", list.join("; "))));
+    }
+    *s.doc_mut() = next;
+    Ok(json!({"feature": id, "position": to}))
+}
+
+fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "timeline.redefine";
+    let id = feature_id(s, p.get("feature"), cmd)?;
+    let cid = str_(p, "command").ok_or_else(|| bad(cmd, "`command` must name the feature's command"))?;
+    let spec = super::find_command(cid).ok_or_else(|| bad(cmd, format!("no command `{cid}`")))?;
+    if cid.starts_with("timeline.") || cid.starts_with("select.") || cid.starts_with("Sketch") {
+        return Err(bad(cmd, format!("`{cid}` does not make a feature")));
+    }
+    let params = p.get("params").cloned().unwrap_or_else(|| json!({}));
+    let idx = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
+    let old = s.doc.feature(id).cloned().ok_or_else(|| bad(cmd, "feature"))?;
+    let marker = s.doc.marker;
+    // Build the new definition where the feature sits, against the model before it.
+    s.doc_mut().marker = Some(idx);
+    s.refresh();
+    let r = (spec.run)(s, &params);
+    let made = r.as_ref().ok().and_then(|v| v.get("feature")).and_then(Value::as_u64);
+    let new = made.and_then(|nid| s.doc.feature(nid).cloned());
+    if let Some(nid) = made {
+        s.doc_mut().features.retain(|f| f.id != nid);
+    }
+    s.doc_mut().marker = marker;
+    r?;
+    let new = new.ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
+    if std::mem::discriminant(&new.kind) != std::mem::discriminant(&old.kind) {
+        return Err(bad(cmd, format!("{} is not a {} feature", old.name, cid)));
+    }
+    if let Some(slot) = s.doc_mut().feature_mut(id) {
+        slot.kind = new.kind;
+    }
+    s.refresh();
+    if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
+        return Err(EngineError::Other(e));
+    }
+    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed}))
+}
+
+fn dependents(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "timeline.dependents";
+    let id = feature_id(s, p.get("feature"), cmd)?;
+    let mut next = (*s.doc).clone();
+    let gone = next.delete_feature(id)?;
+    let mut after = solvecraft_doc::Model::new();
+    after.evaluate(&next);
+    let names = |ids: &[u64]| -> Vec<String> { ids.iter().filter(|x| **x != id).filter_map(|x| s.doc.feature(*x).map(|f| f.name.clone())).collect() };
+    let broken: Vec<String> = newly_broken(&s.model, &after).into_iter().map(|(n, _)| n).collect();
+    Ok(json!({"deleted_with_it": names(&gone), "would_fail": broken}))
 }

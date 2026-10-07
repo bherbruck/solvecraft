@@ -29,6 +29,7 @@ Commands never open dialogs when run this way. `solvecraft-cli commands` prints 
 | `ui.move` | `x`, `y` | |
 | `ui.drag` | `x0`, `y0`, `x1`, `y1`, `button?`, `shift?`, `ctrl?`, `steps?` | press, move, release; a left drag on the model is a box selection (left to right: window, right to left: crossing) |
 | `ui.selection` | | the selection, the open dialog's inputs and the hovered item |
+| `ui.editFeature` | `feature` (id or name) | what double-clicking a timeline item does: rolls back to it and opens its dialog filled in (sketches open in sketch mode) |
 | `ui.scroll` | `x`, `y`, `delta?` | wheel zoom at the cursor |
 | `ui.key` | `key` (egui key name, `Enter`, `Escape`…), `cmd?`, `shift?` | |
 | `ui.text` | `text` | typed text |

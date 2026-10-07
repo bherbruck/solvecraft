@@ -8,6 +8,7 @@ use egui::{Color32, RichText, vec2};
 use serde_json::{Value, json};
 use solvecraft_engine::Sel;
 use solvecraft_engine::Session;
+use solvecraft_engine::doc::{AxisRef, Direction, FeatureKind, HoleKind, Operation, PlaneRef, ProfileSel};
 use solvecraft_engine::geom::Vec3;
 
 use crate::SolveApp;
@@ -51,6 +52,10 @@ pub enum Kind {
         diameter: String,
         depth: String,
         kind: usize,
+        cb_diameter: String,
+        cb_depth: String,
+        cs_diameter: String,
+        cs_angle: String,
     },
     Primitive {
         cmd: &'static str,
@@ -69,6 +74,16 @@ pub enum Kind {
         name: String,
         expr: String,
     },
+    Rename {
+        feature: u64,
+        name: String,
+    },
+    /// Delete a feature that others depend on.
+    ConfirmDelete {
+        feature: u64,
+        with: Vec<String>,
+        fail: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -78,6 +93,10 @@ pub struct Dialog {
     pub inputs: Vec<SelInput>,
     pub active: usize,
     pub error: Option<String>,
+    /// Editing an existing feature (its id, and the timeline marker to restore afterwards).
+    pub editing: Option<(u64, Option<usize>)>,
+    /// Parameters the dialog doesn't show but the command needs (kept when editing).
+    pub extra: serde_json::Map<String, Value>,
 }
 
 /// Can a selection go into an input that accepts `a`? (Planar-ness is checked when picking.)
@@ -96,7 +115,7 @@ fn fits(a: Accept, s: &Sel) -> bool {
 
 impl Dialog {
     fn new(kind: Kind, inputs: Vec<SelInput>) -> Dialog {
-        Dialog { kind, inputs, active: 0, error: None }
+        Dialog { kind, inputs, active: 0, error: None, editing: None, extra: serde_json::Map::new() }
     }
 
     pub fn for_command(app: &SolveApp, id: &str) -> Option<Dialog> {
@@ -126,9 +145,7 @@ impl Dialog {
             "MirrorCommand" => {
                 Dialog::new(Kind::Mirror, vec![SelInput::new("Bodies", BODIES, true), SelInput::new("Mirror plane", PLANES | PLANAR_FACES, false)])
             }
-            "FusionHoleCommand" => {
-                Dialog::new(Kind::Hole { diameter: "5 mm".into(), depth: String::new(), kind: 0 }, vec![SelInput::new("Position", FACES, true)])
-            }
+            "FusionHoleCommand" => Dialog::new(hole_defaults(), vec![SelInput::new("Position", FACES, true)]),
             "PrimitiveBox" => Dialog::new(
                 Kind::Primitive {
                     cmd: "PrimitiveBox",
@@ -170,6 +187,14 @@ impl Dialog {
         }
         d.advance();
         Some(d)
+    }
+
+    pub fn rename(feature: u64, name: &str) -> Dialog {
+        Dialog::new(Kind::Rename { feature, name: name.to_string() }, vec![])
+    }
+
+    pub fn confirm_delete(feature: u64, with: Vec<String>, fail: Vec<String>) -> Dialog {
+        Dialog::new(Kind::ConfirmDelete { feature, with, fail }, vec![])
     }
 
     pub fn edit_param(s: &Session, name: &str) -> Dialog {
@@ -256,7 +281,6 @@ impl Dialog {
 
 /// Profiles of the sketch a feature would use (active, else the last), when there is just one.
 fn default_profiles(s: &Session) -> Vec<Sel> {
-    use solvecraft_engine::doc::FeatureKind;
     let st = s.model.state();
     let sid = s.active_sketch.or_else(|| s.doc.features.iter().rev().find(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id));
     match sid.and_then(|id| st.sketch(id).map(|ss| (id, ss.profiles.len()))) {
@@ -331,6 +355,8 @@ fn title(k: &Kind) -> &'static str {
         Kind::Combine { .. } => "COMBINE",
         Kind::Params { .. } => "PARAMETERS",
         Kind::EditParam { .. } => "EDIT DIMENSION",
+        Kind::Rename { .. } => "RENAME",
+        Kind::ConfirmDelete { .. } => "DELETE FEATURE",
     }
 }
 
@@ -396,7 +422,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut ok = false;
     let mut cancel = false;
     let wide = matches!(d.kind, Kind::Params { .. });
-    egui::Window::new(RichText::new(title(&d.kind)).strong().size(13.0))
+    let heading = if d.editing.is_some() { format!("EDIT {}", title(&d.kind)) } else { title(&d.kind).to_string() };
+    egui::Window::new(RichText::new(heading).strong().size(13.0))
         .id(egui::Id::new("sc_dialog"))
         .default_pos(if wide { egui::pos2(pos.x - 260.0, pos.y - 60.0) } else { pos })
         .resizable(false)
@@ -446,7 +473,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                     Kind::Mirror => {}
-                    Kind::Hole { diameter, depth, kind } => {
+                    Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle } => {
                         ui.label("Type");
                         combo(ui, "hole_kind", &HOLE_LABELS, kind);
                         ui.end_row();
@@ -456,6 +483,22 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.label("Depth");
                         ui.add(egui::TextEdit::singleline(depth).hint_text("through all"));
                         ui.end_row();
+                        if *kind == 1 {
+                            ui.label("Counterbore Ø");
+                            ui.text_edit_singleline(cb_diameter);
+                            ui.end_row();
+                            ui.label("Counterbore depth");
+                            ui.text_edit_singleline(cb_depth);
+                            ui.end_row();
+                        }
+                        if *kind == 2 {
+                            ui.label("Countersink Ø");
+                            ui.text_edit_singleline(cs_diameter);
+                            ui.end_row();
+                            ui.label("Countersink angle");
+                            ui.text_edit_singleline(cs_angle);
+                            ui.end_row();
+                        }
                     }
                     Kind::Primitive { fields, operation, .. } => {
                         for (k, v) in fields.iter_mut() {
@@ -487,6 +530,27 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         r.request_focus();
                         ui.end_row();
                     }
+                    Kind::Rename { name, .. } => {
+                        ui.label("Name");
+                        let r = ui.text_edit_singleline(name);
+                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            ok = true;
+                        }
+                        r.request_focus();
+                        ui.end_row();
+                    }
+                    Kind::ConfirmDelete { with, fail, .. } => {
+                        if !with.is_empty() {
+                            ui.label("Also deletes");
+                            ui.label(with.join(", "));
+                            ui.end_row();
+                        }
+                        if !fail.is_empty() {
+                            ui.label("Will fail");
+                            ui.label(RichText::new(fail.join(", ")).color(t.warning));
+                            ui.end_row();
+                        }
+                    }
                 }
                 if let Some(e) = &d.error {
                     ui.label("");
@@ -497,7 +561,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if !matches!(d.kind, Kind::Sketch | Kind::Params { .. })
-                    && ui.add(egui::Button::new(RichText::new("OK").color(Color32::WHITE)).fill(t.accent).min_size(vec2(70.0, 24.0))).clicked()
+                    && ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(if matches!(d.kind, Kind::ConfirmDelete { .. }) { "Delete" } else { "OK" }).color(Color32::WHITE),
+                            )
+                            .fill(t.accent)
+                            .min_size(vec2(70.0, 24.0)),
+                        )
+                        .clicked()
                 {
                     ok = true;
                 }
@@ -522,6 +594,21 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     if keep && !cancel {
         app.dialog = Some(d);
+    } else if let Some((_, marker)) = d.editing {
+        // Editing done: put the timeline marker back where it was.
+        let _ = app.run("timeline.rollTo", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
+    }
+}
+
+fn hole_defaults() -> Kind {
+    Kind::Hole {
+        diameter: "5 mm".into(),
+        depth: String::new(),
+        kind: 0,
+        cb_diameter: "9 mm".into(),
+        cb_depth: "3 mm".into(),
+        cs_diameter: "10 mm".into(),
+        cs_angle: "90 deg".into(),
     }
 }
 
@@ -602,6 +689,19 @@ fn sels(d: &Dialog, i: usize) -> &[Sel] {
 }
 
 fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
+    let cmds = dialog_commands(app, d)?;
+    if let Some((id, _)) = d.editing {
+        let (cmd, params) = cmds.into_iter().next().ok_or("nothing to apply")?;
+        return app.run("timeline.redefine", json!({"feature": id, "command": cmd, "params": params})).map(drop);
+    }
+    for (cmd, params) in cmds {
+        app.run(&cmd, params)?;
+    }
+    Ok(())
+}
+
+/// The commands (id, parameters) a dialog's OK runs.
+fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let need = |i: usize, what: &str| -> Result<(), String> { if sels(d, i).is_empty() { Err(format!("select {what} first")) } else { Ok(()) } };
     let profiles = || -> (Value, Value) {
@@ -698,18 +798,30 @@ fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
             let plane = plane_value(s, sels(d, 1).first()).ok_or("the mirror plane must be a plane or a planar face")?;
             ("MirrorCommand", json!({"features": features, "plane": plane}))
         }
-        Kind::Hole { diameter, depth, kind } => {
+        Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle } => {
             need(0, "a face position")?;
             let ty = HOLE_TYPES.get(*kind).copied().unwrap_or("simple");
             // One hole per picked position.
+            let mut out = Vec::new();
             for p in face_points(0) {
                 let mut params = json!({"position": p, "diameter": diameter, "type": ty});
                 if !depth.trim().is_empty() {
                     params["depth"] = json!(depth);
                 }
-                app.run("FusionHoleCommand", params)?;
+                match *kind {
+                    1 => {
+                        params["cb_diameter"] = json!(cb_diameter);
+                        params["cb_depth"] = json!(cb_depth);
+                    }
+                    2 => {
+                        params["cs_diameter"] = json!(cs_diameter);
+                        params["cs_angle"] = json!(cs_angle);
+                    }
+                    _ => {}
+                }
+                out.push(("FusionHoleCommand".to_string(), params));
             }
-            return Ok(());
+            return Ok(out);
         }
         Kind::Primitive { cmd, fields, operation } => {
             let mut p = serde_json::Map::new();
@@ -730,7 +842,282 @@ fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
             )
         }
         Kind::EditParam { name, expr } => ("ChangeParameterCommand", json!({"name": name, "expression": expr})),
-        Kind::Sketch | Kind::Params { .. } => return Ok(()),
+        Kind::Rename { feature, name } => ("FusionRenameTimelineEntryCommand", json!({"feature": feature, "name": name})),
+        Kind::ConfirmDelete { feature, .. } => ("FusionDeleteCommand", json!({ "features": [feature.to_string()] })),
+        Kind::Sketch | Kind::Params { .. } => return Ok(Vec::new()),
     };
-    app.run(cmd, params).map(drop)
+    let mut params = params;
+    if let Value::Object(m) = &mut params {
+        for (k, v) in &d.extra {
+            m.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+    Ok(vec![(cmd.to_string(), params)])
+}
+
+/// Which profiles of a sketch a profile selection means.
+fn profile_indices(ss: &solvecraft_engine::doc::SolvedSketch, sel: &ProfileSel) -> Vec<usize> {
+    let ps = &ss.profiles;
+    match sel {
+        ProfileSel::All => (0..ps.len()).collect(),
+        ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
+        ProfileSel::Curves { loops } => loops
+            .iter()
+            .filter_map(|l| {
+                let mut want: Vec<&String> = l.iter().collect();
+                want.sort();
+                ps.iter().position(|p| {
+                    let mut have: Vec<&String> = p.outer_curves.iter().collect();
+                    have.sort();
+                    have == want
+                })
+            })
+            .collect(),
+        ProfileSel::Points { points } => points.iter().filter_map(|q| ps.iter().position(|p| p.region.contains(*q))).collect(),
+    }
+}
+
+/// The edge of a visible body through (or nearest) a point.
+fn edge_sel(s: &Session, p: Vec3) -> Option<Sel> {
+    let st = s.model.state();
+    let mut best: Option<(f64, Sel)> = None;
+    for b in &st.bodies {
+        let m = b.mesh();
+        for (i, e) in m.edges.iter().enumerate() {
+            let d = e.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
+            if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                best = Some((d, Sel::Edge { body: b.name.clone(), index: i, point: p }));
+            }
+        }
+    }
+    best.map(|x| x.1)
+}
+
+/// The body face containing a point (nearest triangle).
+fn face_sel(s: &Session, p: Vec3) -> Option<Sel> {
+    let st = s.model.state();
+    let mut best: Option<(f64, Sel)> = None;
+    for b in &st.bodies {
+        let m = b.mesh();
+        for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+            let Some([a, bb, c]) = m.tri(t) else { continue };
+            let d = point_triangle_dist(p, a, bb, c);
+            if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                best = Some((d, Sel::Face { body: b.name.clone(), index: *f as usize, point: p }));
+            }
+        }
+    }
+    best.filter(|(d, _)| *d < 1e-3 + 1e-6 * p.len()).map(|x| x.1)
+}
+
+fn point_triangle_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
+    let n = (b - a).cross(c - a);
+    let Some(nn) = n.normalized() else { return f64::INFINITY };
+    let h = (p - a).dot(nn);
+    let q = p - nn * h;
+    let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-12);
+    if inside { h.abs() } else { [(a, b), (b, c), (c, a)].iter().map(|(u, v)| p.dist_to_segment(*u, *v)).fold(f64::INFINITY, f64::min) }
+}
+
+fn plane_sel(s: &Session, pl: &PlaneRef) -> Option<Sel> {
+    match pl {
+        PlaneRef::Origin { name } | PlaneRef::Construction { name } => Some(Sel::Plane { name: name.clone() }),
+        PlaneRef::Custom { plane } => face_sel(s, plane.origin),
+        _ => None,
+    }
+}
+
+fn op_index(o: &Operation) -> usize {
+    match o {
+        Operation::NewBody => 0,
+        Operation::Join => 1,
+        Operation::Cut => 2,
+        Operation::Intersect => 3,
+    }
+}
+
+fn pt3(v: Vec3) -> Value {
+    json!([v.x, v.y, v.z])
+}
+
+/// A dialog that edits an existing feature, filled from it. The timeline is rolled back to just
+/// before the feature, so its references show on the geometry they refer to.
+pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dialog> {
+    let s = &app.session;
+    let f = s.doc.feature(id)?.clone();
+    let st = s.model.state();
+    let start = |cmd: &str| Dialog::for_command(app, cmd);
+    let mut d = match &f.kind {
+        FeatureKind::Extrude { sketch, profiles, extent, operation, targets } => {
+            let mut d = start("Extrude")?;
+            d.kind = Kind::Extrude {
+                distance: extent.distance.clone(),
+                direction: match extent.direction {
+                    Direction::Positive => 0,
+                    Direction::Negative => 1,
+                    Direction::Symmetric => 2,
+                },
+                operation: op_index(operation),
+            };
+            let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = items.into_iter().map(|index| Sel::Profile { sketch: *sketch, index }).collect();
+            }
+            for (k, v) in [
+                ("distance2", extent.distance2.as_ref().map(|x| json!(x))),
+                ("start_offset", extent.start_offset.as_ref().map(|x| json!(x))),
+                ("taper", extent.taper.as_ref().map(|x| json!(x))),
+                ("through_all", extent.through_all.then_some(json!(true))),
+                ("targets", (!targets.is_empty()).then(|| json!(targets))),
+            ] {
+                if let Some(v) = v {
+                    d.extra.insert(k.into(), v);
+                }
+            }
+            d
+        }
+        FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets } => {
+            let mut d = start("Revolve")?;
+            d.kind = Kind::Revolve { angle: angle.clone(), operation: op_index(operation) };
+            let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
+            if let Some(inp) = d.inputs.get_mut(0) {
+                inp.items = items.into_iter().map(|index| Sel::Profile { sketch: *sketch, index }).collect();
+            }
+            let ax = match axis {
+                AxisRef::World { axis } => Some(Sel::Axis { name: axis.to_ascii_uppercase() }),
+                AxisRef::SketchLine { curve } => Some(Sel::SketchCurve { id: curve.clone() }),
+                _ => None,
+            };
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = ax.into_iter().collect();
+            }
+            if !targets.is_empty() {
+                d.extra.insert("targets".into(), json!(targets));
+            }
+            d
+        }
+        FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } => {
+            let chamfer = matches!(f.kind, FeatureKind::Chamfer { .. });
+            let mut d = start(if chamfer { "FusionChamferCommand" } else { "FusionFilletEdgesCommand" })?;
+            d.kind = Kind::Fillet { radius: radius.clone(), chamfer, chain: false };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = edges.iter().filter_map(|p| edge_sel(s, *p)).collect();
+            }
+            d
+        }
+        FeatureKind::Shell { faces, thickness, .. } => {
+            let mut d = start("FusionShellBodyCommand")?;
+            d.kind = Kind::Shell { thickness: thickness.clone() };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = faces.iter().filter_map(|p| face_sel(s, *p)).collect();
+            }
+            d
+        }
+        FeatureKind::Draft { faces, angle, neutral, pull, .. } => {
+            let mut d = start("FusionDraftCommand")?;
+            d.kind = Kind::Draft { angle: angle.clone() };
+            if let Some(inp) = d.inputs.get_mut(0) {
+                inp.items = faces.iter().filter_map(|p| face_sel(s, *p)).collect();
+            }
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = plane_sel(s, neutral).into_iter().collect();
+            }
+            d.extra.insert("pull".into(), pt3(*pull));
+            d
+        }
+        FeatureKind::Hole { position, direction, diameter, depth, hole } => {
+            let mut d = start("FusionHoleCommand")?;
+            let mut k = hole_defaults();
+            if let Kind::Hole { diameter: dia, depth: dep, kind, cb_diameter, cb_depth, cs_diameter, cs_angle } = &mut k {
+                *dia = diameter.clone();
+                *dep = depth.clone().unwrap_or_default();
+                match hole {
+                    HoleKind::Counterbore { cb_diameter: a, cb_depth: b } => {
+                        *kind = 1;
+                        *cb_diameter = a.clone();
+                        *cb_depth = b.clone();
+                    }
+                    HoleKind::Countersink { cs_diameter: a, cs_angle: b } => {
+                        *kind = 2;
+                        *cs_diameter = a.clone();
+                        *cs_angle = b.clone();
+                    }
+                    HoleKind::Drilled { tip_angle } => {
+                        d.extra.insert("tip_angle".into(), json!(tip_angle));
+                    }
+                    HoleKind::Simple => {}
+                }
+            }
+            d.kind = k;
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = vec![face_sel(s, *position).unwrap_or(Sel::Face { body: String::new(), index: 0, point: *position })];
+            }
+            d.extra.insert("direction".into(), pt3(*direction));
+            d
+        }
+        FeatureKind::Box { corner, length, width, height, operation } => {
+            let mut d = start("PrimitiveBox")?;
+            d.kind = Kind::Primitive {
+                cmd: "PrimitiveBox",
+                fields: vec![("length", length.clone()), ("width", width.clone()), ("height", height.clone())],
+                operation: op_index(operation),
+            };
+            d.extra.insert("corner".into(), pt3(*corner));
+            d
+        }
+        FeatureKind::Cylinder { base, axis, radius, height, operation } => {
+            let mut d = start("PrimitiveCylinder")?;
+            d.kind = Kind::Primitive {
+                cmd: "PrimitiveCylinder",
+                fields: vec![("radius", radius.clone()), ("height", height.clone())],
+                operation: op_index(operation),
+            };
+            d.extra.insert("base".into(), pt3(*base));
+            d.extra.insert("axis".into(), pt3(*axis));
+            d
+        }
+        FeatureKind::Sphere { center, radius, operation } => {
+            let mut d = start("PrimitiveSphere")?;
+            d.kind = Kind::Primitive { cmd: "PrimitiveSphere", fields: vec![("radius", radius.clone())], operation: op_index(operation) };
+            d.extra.insert("center".into(), pt3(*center));
+            d
+        }
+        FeatureKind::Torus { center, major, minor, operation } => {
+            let mut d = start("PrimitiveTorus")?;
+            d.kind = Kind::Primitive {
+                cmd: "PrimitiveTorus",
+                fields: vec![("major", major.clone()), ("minor", minor.clone())],
+                operation: op_index(operation),
+            };
+            d.extra.insert("center".into(), pt3(*center));
+            d
+        }
+        FeatureKind::Combine { target, tools, operation, keep_tools } => {
+            let mut d = start("FusionCombineCommand")?;
+            d.kind = Kind::Combine { operation: op_index(operation).max(1), keep_tools: *keep_tools };
+            if let Some(inp) = d.inputs.get_mut(0) {
+                inp.items = vec![Sel::Body { name: target.clone() }];
+            }
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = tools.iter().map(|n| Sel::Body { name: n.clone() }).collect();
+            }
+            d
+        }
+        FeatureKind::Mirror { features, plane } => {
+            let mut d = start("MirrorCommand")?;
+            let ids: Vec<u64> = features.iter().filter_map(|n| s.doc.find_feature(n).map(|f| f.id)).collect();
+            if let Some(inp) = d.inputs.get_mut(0) {
+                inp.items = st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect();
+            }
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = plane_sel(s, plane).into_iter().collect();
+            }
+            d
+        }
+        _ => return None,
+    };
+    d.editing = Some((id, marker));
+    d.active = 0;
+    d.error = None;
+    Some(d)
 }

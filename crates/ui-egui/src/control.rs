@@ -7,7 +7,7 @@
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
 //! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?}` (box selection, navigation);
-//!   `ui.selection` (selection, dialog inputs, hover)
+//!   `ui.selection` (selection, dialog inputs, hover); `ui.editFeature {feature}` (edit dialog)
 //! - `ui.set {...UiState fields}`; `ui.view {view: front|back|top|bottom|left|right|iso|home|fit, animate?: bool}` (snaps unless animate)
 //! - `ui.start {command}`: like clicking the toolbar button (starts tools/dialogs)
 //! - `ui.click {x, y, button?, shift?}`, `ui.move {x, y}`, `ui.scroll {x, y, delta}`: real
@@ -172,6 +172,16 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             }
             app.synthetic.push(egui::Event::PointerButton { pos: z, button, pressed: false, modifiers });
             ok(Value::Null)
+        }
+        "ui.editFeature" => {
+            let key = match p.get("feature") {
+                Some(Value::Number(n)) => n.to_string(),
+                Some(Value::String(x)) => x.clone(),
+                _ => return err("`feature` must be an id or name"),
+            };
+            let Some(id) = app.session.doc.find_feature(&key).map(|f| f.id) else { return err(format!("no feature `{key}`")) };
+            app.edit_feature(id);
+            ok(json!({"dialog": app.dialog.as_ref().map(|d| format!("{d:?}")), "marker": app.session.doc.marker}))
         }
         "ui.selection" => ok(json!({
             "selection": app.session.selection,

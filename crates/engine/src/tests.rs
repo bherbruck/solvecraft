@@ -336,3 +336,48 @@ fn sample_edges_chain_and_faces() {
     // Every edge bounds a face, and the top face has the outline and the hole rims.
     assert!(m.edge_faces.iter().all(|f| !f.is_empty()));
 }
+
+#[test]
+fn timeline_edits_reresolve_references() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20, "name": "Base"}));
+    run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [[20, 0, 20]], "radius": 3, "name": "Round"}));
+    run(&mut s, "FusionHoleCommand", json!({"position": [20, 15, 20], "diameter": 6, "name": "Bore"}));
+    let fillet = |l: f64| (9.0 - 9.0 * PI / 4.0) * l;
+    let expect = |l: f64, h: f64| l * 30.0 * h - fillet(l) - PI * 9.0 * h;
+    assert!(rel(volume(&mut s), expect(40.0, 20.0)) < 1e-3);
+    // Taller box: the fillet's edge point is now 5 mm below the edge (re-found, with a warning)
+    // and the hole moves up with the top face.
+    run(&mut s, "timeline.edit", json!({"feature": "Base", "set": {"height": "25"}}));
+    assert!(rel(volume(&mut s), expect(40.0, 25.0)) < 1e-3, "{}", volume(&mut s));
+    let round = s.doc.find_feature("Round").map(|f| f.id).unwrap();
+    assert!(s.model.result(round).and_then(|r| r.warning.clone()).is_some_and(|w| w.contains("re-found")));
+    // Longer box: the point still lies on the (longer) edge.
+    run(&mut s, "timeline.edit", json!({"feature": "Base", "set": {"length": "60"}}));
+    assert!(rel(volume(&mut s), expect(60.0, 25.0)) < 1e-3, "{}", volume(&mut s));
+    // Reorder: the fillet can't go before the box; the hole can go before the fillet.
+    let e = s.execute("timeline.reorder", &json!({"feature": "Round", "position": 0})).unwrap_err().to_string();
+    assert!(e.contains("breaks"), "{e}");
+    run(&mut s, "timeline.reorder", json!({"feature": "Bore", "position": 1}));
+    let names: Vec<&str> = s.doc.features.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["Base", "Bore", "Round"]);
+    assert!(rel(volume(&mut s), expect(60.0, 25.0)) < 1e-3);
+    // Redefine the fillet in place with a new radius; it keeps its name and position.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "Round", "command": "FusionFilletEdgesCommand", "params": {"edges": [[30, 0, 25]], "radius": 4}}),
+    );
+    let f4 = (16.0 - 16.0 * PI / 4.0) * 60.0;
+    assert!(rel(volume(&mut s), 60.0 * 30.0 * 25.0 - f4 - PI * 9.0 * 25.0) < 1e-3);
+    assert_eq!(s.doc.features.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Base", "Bore", "Round"]);
+    // Dependents and roll back.
+    let d = run(&mut s, "timeline.dependents", json!({"feature": "Base"}));
+    assert_eq!(d["would_fail"].as_array().map(|a| a.len()), Some(2), "{d}");
+    run(&mut s, "timeline.rollTo", json!({"feature": "Base"}));
+    assert!(rel(volume(&mut s), 60.0 * 30.0 * 25.0) < 1e-6);
+    run(&mut s, "timeline.rollTo", json!({}));
+    run(&mut s, "UndoCommand", json!({}));
+    run(&mut s, "UndoCommand", json!({}));
+    assert!(rel(volume(&mut s), 60.0 * 30.0 * 25.0 - f4 - PI * 9.0 * 25.0) < 1e-3);
+}

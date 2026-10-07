@@ -191,6 +191,31 @@ impl SolveApp {
         let _ = self.run(id, json!({}));
     }
 
+    /// Edit a feature the way Fusion does: sketches open in sketch mode; other features roll the
+    /// timeline back to just before themselves and reopen their dialog, filled in.
+    pub fn edit_feature(&mut self, id: u64) {
+        use solvecraft_engine::doc::FeatureKind;
+        let Some(f) = self.session.doc.feature(id) else { return };
+        if matches!(f.kind, FeatureKind::Sketch { .. }) {
+            let _ = self.run("SketchActivate", json!({ "sketch": id }));
+            return;
+        }
+        let Some(idx) = self.session.doc.feature_index(id) else { return };
+        let marker = self.session.doc.marker;
+        self.tool = None;
+        if self.run("timeline.rollTo", json!({ "position": idx })).is_err() {
+            return;
+        }
+        match dialogs::for_feature(self, id, marker) {
+            Some(d) => self.dialog = Some(d),
+            None => {
+                let _ = self.run("timeline.rollTo", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
+                self.palette.text = format!("timeline.edit {{\"feature\": {id}, \"set\": {{}}}}");
+                self.ui.palette_open = true;
+            }
+        }
+    }
+
     /// Everything shown as selected: the selection plus the open dialog's inputs.
     pub fn highlighted(&self) -> Vec<solvecraft_engine::Sel> {
         let mut v = self.session.selection.clone();

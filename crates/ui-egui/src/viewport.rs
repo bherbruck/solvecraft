@@ -37,6 +37,8 @@ pub struct ViewportState {
     pub mouse: Option<Pos2>,
     /// Box selection being dragged.
     pub boxsel: Option<BoxSel>,
+    /// Timeline item under the cursor: its bodies are highlighted.
+    pub hover_feature: Option<u64>,
     pub build_ms: f64,
 }
 
@@ -498,6 +500,7 @@ fn highlight_key(app: &SolveApp) -> u64 {
     app.session.revision.hash(&mut h);
     serde_json::to_string(&app.highlighted()).unwrap_or_default().hash(&mut h);
     format!("{:?}", app.viewport.hover).hash(&mut h);
+    app.viewport.hover_feature.hash(&mut h);
     app.origin_visible().hash(&mut h);
     app.ui.hidden_origin.hash(&mut h);
     app.ui.hidden_bodies.hash(&mut h);
@@ -595,6 +598,22 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
                 }
             }
             _ => {}
+        }
+    }
+    // Bodies made by the timeline item under the cursor.
+    if let Some(fid) = app.viewport.hover_feature {
+        let k = t.hover_face_lift;
+        let c = colors::BODY;
+        for b in st.bodies.iter().filter(|b| b.feature == fid && !app.ui.hidden_bodies.contains(&b.name)) {
+            let m = b.mesh();
+            for f in 0..b.body.face_count() {
+                face_tris(&mut sc, &m, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
+            }
+            for (ei, e) in m.edges.iter().enumerate() {
+                if !m.seams.get(ei).copied().unwrap_or(false) {
+                    edge_lines(&mut sc, e, t.hover_edge, t.hover_edge_halo, 1.5);
+                }
+            }
         }
     }
     // Hover (pre-highlight).

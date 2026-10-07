@@ -492,6 +492,68 @@ fn body_at(st: &ModelState, body: &Option<String>, points: &[Vec3]) -> Result<us
         .ok_or_else(|| DocError::Invalid("there is no body".into()))
 }
 
+/// A hole stays on its face when the model changes: a position now inside a body moves back
+/// against the drilling direction to the surface, one now above it moves down onto it.
+fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3) -> Vec3 {
+    let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
+    let eps = size * 1e-6;
+    let mut best: Option<Vec3> = None;
+    for b in &st.bodies {
+        let m = b.mesh();
+        // Already on the surface: the drill enters right here.
+        if let Some((t, _)) = m.raycast(p - dir * eps, dir)
+            && t < eps * 4.0
+        {
+            return p;
+        }
+        let q = if m.contains(p) { m.raycast(p, -dir).map(|(t, _)| p - dir * t) } else { m.raycast(p, dir).map(|(t, _)| p + dir * t) };
+        if let Some(q) = q
+            && best.is_none_or(|bq| q.dist(p) < bq.dist(p))
+        {
+            best = Some(q);
+        }
+    }
+    best.unwrap_or(p)
+}
+
+/// Edge reference points re-found on the body: points on an edge stay; a point that moved off
+/// (an upstream edit) goes to the nearest edge with a warning; points with no edge near are
+/// dropped with a warning.
+fn resolve_edges(b: &Body, pts: &[Vec3], warning: &mut Option<String>) -> Result<Vec<Vec3>> {
+    let size = b.size();
+    let edges = b.edges((size * 1e-3).max(1e-3))?;
+    let tight = (size * 2e-3).max(1e-3);
+    let (mut out, mut moved, mut lost) = (Vec::new(), 0, 0);
+    for p in pts {
+        let best = edges
+            .iter()
+            .map(|e| (e.points.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min), e.mid))
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        match best {
+            Some((d, _)) if d <= tight => out.push(*p),
+            Some((d, mid)) if d <= size * 0.25 => {
+                out.push(mid);
+                moved += 1;
+            }
+            _ => lost += 1,
+        }
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("none of the selected edges exist any more".into()));
+    }
+    if moved + lost > 0 {
+        let mut w = Vec::new();
+        if moved > 0 {
+            w.push(format!("{moved} edge reference(s) re-found on the nearest edge"));
+        }
+        if lost > 0 {
+            w.push(format!("{lost} edge reference(s) no longer found and skipped"));
+        }
+        *warning = Some(w.join("; "));
+    }
+    Ok(out)
+}
+
 /// The body a fillet/chamfer applies to: by name, or the one closest to the first edge point.
 fn blend_target(state: &ModelState, body: &Option<String>, edges: &[Vec3]) -> Result<usize> {
     if let Some(n) = body {
@@ -647,6 +709,7 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
         }
         FeatureKind::Hole { position, direction, diameter, depth, hole } => {
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
+            let position = &hole_on_surface(st, *position, dir);
             let r = val(vals, diameter, Kind::Length)? / 2.0;
             if !(r > 1e-6) {
                 return Err(DocError::Invalid("hole diameter must be positive".into()));
@@ -973,8 +1036,12 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let r = val(vals, radius, Kind::Length)?;
             let ti = blend_target(st, body, edges)?;
             let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
-            let nb =
-                if matches!(f.kind, FeatureKind::Fillet { .. }) { kernel::fillet(&mb.body, edges, r)? } else { kernel::chamfer(&mb.body, edges, r)? };
+            let edges = resolve_edges(&mb.body, edges, warning)?;
+            let nb = if matches!(f.kind, FeatureKind::Fillet { .. }) {
+                kernel::fillet(&mb.body, &edges, r)?
+            } else {
+                kernel::chamfer(&mb.body, &edges, r)?
+            };
             let (name, feat) = (mb.name.clone(), mb.feature);
             if let Some(slot) = st.bodies.get_mut(ti) {
                 *slot = ModelBody::new(name, nb, feat);
