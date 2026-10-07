@@ -113,6 +113,11 @@ impl Loop2 {
             ],
         }
     }
+    /// Full circle starting (and split) at angle `start`.
+    pub fn circle_from(center: Vec2, radius: f64, start: f64) -> Loop2 {
+        use std::f64::consts::PI;
+        Loop2 { segs: vec![Seg2::Arc { center, radius, start, sweep: PI }, Seg2::Arc { center, radius, start: start + PI, sweep: PI }] }
+    }
     pub fn polygon(pts: &[Vec2]) -> Loop2 {
         let n = pts.len();
         Loop2 { segs: (0..n).filter_map(|i| Some(Seg2::Line { a: *pts.get(i)?, b: *pts.get((i + 1) % n)? })).collect() }

@@ -26,6 +26,7 @@ enum Surf {
     Plane { n: Vec3, d: f64 },
     Cylinder { axis: Vec3, p: Vec3, r: f64 },
     Sphere { c: Vec3, r: f64 },
+    Cone { axis: Vec3, apex: Vec3, cos: f64 },
     Other(usize),
 }
 
@@ -35,6 +36,7 @@ impl Surf {
             Surf::Plane { .. } => "plane",
             Surf::Cylinder { .. } => "cylinder",
             Surf::Sphere { .. } => "sphere",
+            Surf::Cone { .. } => "cone",
             Surf::Other(_) => "other",
         }
     }
@@ -46,6 +48,9 @@ impl Surf {
                 axis.dot(a2).abs() > 1.0 - 1e-6 && (r - r2).abs() < tol && (off - axis * off.dot(axis)).len() < tol
             }
             (Surf::Sphere { c, r }, Surf::Sphere { c: c2, r: r2 }) => c.dist(c2) < tol && (r - r2).abs() < tol,
+            (Surf::Cone { axis, apex, cos }, Surf::Cone { axis: a2, apex: p2, cos: c2 }) => {
+                axis.dot(a2) > 1.0 - 1e-5 && (cos - c2).abs() < 1e-4 && apex.dist(p2) < tol * 10.0
+            }
             _ => false,
         }
     }
@@ -103,6 +108,31 @@ fn classify(pts: &[Vec3], nrm: &[Vec3], tol: f64, id: usize) -> Surf {
         {
             let axis = if axis.x + axis.y * 1e-3 + axis.z * 1e-6 < 0.0 { -axis } else { axis };
             return Surf::Cylinder { axis, p: u * cu + v * cv, r };
+        }
+    }
+    // Cone: normals at a constant angle to one axis; the apex lies on every tangent plane.
+    if let Some((axis, cos)) = cone_signature(&pts.iter().copied().zip(nrm.iter().copied()).collect::<Vec<_>>())
+        && cos.abs() > 1e-3
+        && cos.abs() < 1.0 - 1e-3
+    {
+        // Least squares: n_i · v = n_i · p_i.
+        let mut m = [[0.0f64; 3]; 3];
+        let mut r = [0.0f64; 3];
+        for (p, n) in pts.iter().zip(nrm) {
+            let nv = [n.x, n.y, n.z];
+            let k = n.dot(*p);
+            for i in 0..3 {
+                for j in 0..3 {
+                    m[i][j] += nv[i] * nv[j];
+                }
+                r[i] += nv[i] * k;
+            }
+        }
+        if let Some(v) = solve3(m, r) {
+            let apex = Vec3::new(v[0], v[1], v[2]);
+            if pts.iter().zip(nrm).all(|(p, n)| (*p - apex).dot(*n).abs() < tol.max(1e-6) * 10.0) {
+                return Surf::Cone { axis, apex, cos };
+            }
         }
     }
     // Sphere: points equidistant from the point where normals meet.
@@ -182,6 +212,27 @@ fn same_surface(surfs: &[Surf], verts: &[Vec<(Vec3, Vec3)>], edge: Option<&Vec<V
         (None, None) => true,
         _ => false,
     }
+}
+
+/// Solve a 3×3 system (Cramer's rule).
+fn solve3(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
+    let det = |a: [[f64; 3]; 3]| {
+        a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+            + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0])
+    };
+    let d = det(m);
+    if d.abs() < 1e-12 {
+        return None;
+    }
+    let mut out = [0.0; 3];
+    for (k, o) in out.iter_mut().enumerate() {
+        let mut mk = m;
+        for (row, rv) in mk.iter_mut().zip(r) {
+            row[k] = rv;
+        }
+        *o = det(mk) / d;
+    }
+    Some(out)
 }
 
 fn find(p: &mut [usize], mut i: usize) -> usize {
@@ -365,5 +416,18 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     let real_vertices = deg.keys().filter(|v| !merge_vertex.contains(v)).count();
     let closed_loops = edge_groups.values().filter(|r| !**r).count();
     let _ = vpos;
-    Ok(TopoCounts { faces: groups.len(), edges: edge_groups.len(), vertices: real_vertices + closed_loops, face_types })
+    // A cone that reaches its apex has a degenerate edge and a vertex there (as other kernels
+    // count them).
+    let mut apexes = 0;
+    for (root, f) in &groups {
+        if let Some(Surf::Cone { apex, .. }) = surfs.get(*f) {
+            let reaches = (0..nf)
+                .filter(|g| find(&mut fp.clone(), *g) == *root)
+                .any(|g| verts.get(g).is_some_and(|v| v.iter().any(|(p, _)| p.dist(*apex) < tol * 10.0)));
+            if reaches {
+                apexes += 1;
+            }
+        }
+    }
+    Ok(TopoCounts { faces: groups.len(), edges: edge_groups.len() + apexes, vertices: real_vertices + closed_loops + apexes, face_types })
 }

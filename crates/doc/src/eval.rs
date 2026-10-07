@@ -10,7 +10,7 @@ use solvecraft_kernel::{self as kernel, Body, BoolOp};
 use solvecraft_sketch::{CurveKind, Profile, SolveReport, find_profiles, solve};
 
 use crate::expr::{self, Kind, Value};
-use crate::{AxisRef, DocError, Document, Feature, FeatureKind, Operation, ProfileSel, Result};
+use crate::{AxisRef, DocError, Document, Feature, FeatureKind, HoleKind, Operation, ProfileSel, Result};
 
 /// A body in the evaluated model.
 #[derive(Clone, Debug)]
@@ -604,6 +604,76 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
         FeatureKind::Torus { center, major, minor, .. } => {
             Ok(vec![kernel::torus(*center, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?])
         }
+        FeatureKind::Hole { position, direction, diameter, depth, hole } => {
+            let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
+            let r = val(vals, diameter, Kind::Length)? / 2.0;
+            if !(r > 1e-6) {
+                return Err(DocError::Invalid("hole diameter must be positive".into()));
+            }
+            let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
+            let top = (size * 0.01).max(0.1);
+            let bottom = match depth {
+                Some(d) => -val(vals, d, Kind::Length)?,
+                None => -(size * 2.0 + 1.0),
+            };
+            if bottom >= 0.0 {
+                return Err(DocError::Invalid("hole depth must be positive".into()));
+            }
+            // Tools are cylinders and cones made by (tapered) extrudes along the axis, cut one
+            // after another, widest first.
+            let plane = Plane::from_normal(*position, -dir).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+            // Each tool's circle seam at its own angle, so seams don't line up between tools.
+            let seam = std::cell::Cell::new(0.0);
+            let disc = |rad: f64| {
+                seam.set(seam.get() + 0.613);
+                Region2 { outer: solvecraft_geom::Loop2::circle_from(Vec2::ZERO, rad, seam.get()), holes: vec![] }
+            };
+            let cyl = |rad: f64, lo: f64, hi: f64| -> Result<Body> {
+                kernel::extrude(&plane, &[disc(rad)], lo, hi)?.pop().ok_or_else(|| DocError::Invalid("hole tool".into()))
+            };
+            let mut tools = Vec::new();
+            match hole {
+                HoleKind::Simple => tools.push(cyl(r, bottom, top)?),
+                HoleKind::Drilled { tip_angle } => {
+                    let half = val(vals, tip_angle, Kind::Angle)? / 2.0;
+                    if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 {
+                        // One revolved tool (cylinder with a drill point).
+                        let tip = r / half.tan();
+                        let up = -dir;
+                        let side = up.any_perp();
+                        let rp = Plane::new(*position, side, up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+                        let pts = [Vec2::new(0.0, top), Vec2::new(r, top), Vec2::new(r, bottom), Vec2::new(0.0, bottom - tip)];
+                        let region = Region2 { outer: solvecraft_geom::Loop2::polygon(&pts), holes: vec![] };
+                        tools.extend(kernel::revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?);
+                    } else {
+                        tools.push(cyl(r, bottom, top)?);
+                    }
+                }
+                HoleKind::Counterbore { cb_diameter, cb_depth } => {
+                    let (rc, dc) = (val(vals, cb_diameter, Kind::Length)? / 2.0, val(vals, cb_depth, Kind::Length)?);
+                    if !(rc > r && dc > 0.0 && -dc > bottom) {
+                        return Err(DocError::Invalid("the counterbore must be wider than the hole and shallower than it".into()));
+                    }
+                    // Wide and shallow first: the narrow hole then crosses the pocket floor.
+                    tools.push(cyl(rc, -dc, top)?);
+                    tools.push(cyl(r, bottom, top)?);
+                }
+                HoleKind::Countersink { cs_diameter, cs_angle } => {
+                    let (rc, half) = (val(vals, cs_diameter, Kind::Length)? / 2.0, val(vals, cs_angle, Kind::Angle)? / 2.0);
+                    if !(rc > r && half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
+                        return Err(DocError::Invalid("the countersink must be wider than the hole".into()));
+                    }
+                    // Cone from above the face to just inside the hole radius, then the hole.
+                    let r_top = rc + top * half.tan();
+                    let r_end = r * 0.9;
+                    let len = (r_top - r_end) / half.tan();
+                    let top_plane = plane.offset(top);
+                    tools.push(kernel::extrude_tapered(&top_plane, &disc(r_top), len, -1.0, -half)?);
+                    tools.push(cyl(r, bottom, top)?);
+                }
+            }
+            Ok(tools)
+        }
         _ => Err(DocError::Invalid(format!("{} cannot be patterned or mirrored yet", f.name))),
     }
 }
@@ -616,6 +686,7 @@ fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
         | FeatureKind::Cylinder { operation, .. }
         | FeatureKind::Sphere { operation, .. }
         | FeatureKind::Torus { operation, .. } => (*operation, Vec::new()),
+        FeatureKind::Hole { .. } => (Operation::Cut, Vec::new()),
         _ => (Operation::NewBody, Vec::new()),
     }
 }
@@ -754,6 +825,10 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         FeatureKind::Extrude { operation, targets, .. } | FeatureKind::Revolve { operation, targets, .. } => {
             let tools = feature_tools(vals, f, st)?;
             apply_op(st, f, tools, *operation, targets)
+        }
+        FeatureKind::Hole { .. } => {
+            let tools = feature_tools(vals, f, st)?;
+            apply_op(st, f, tools, Operation::Cut, &[])
         }
         FeatureKind::ConstructionPlane { plane } => {
             doc.resolve_plane(vals, plane, 0)?;

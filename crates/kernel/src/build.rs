@@ -338,24 +338,59 @@ fn revolve_touching_axis(plane: &Plane, lp: &Loop2, axis_origin: Vec2, d: Vec2) 
     let shift = plane.to_world(axis_origin);
     let local = Plane { origin: plane.origin - shift, ..*plane };
     let plane = &local;
+    // Radial lines at the ends become planar caps (no degenerate disc centres).
+    let radial = |sg: &Seg2| matches!(*sg, Seg2::Line { a, b } if (b - a).normalized().is_some_and(|u| u.dot(d).abs() < 1e-9));
+    let mut mid: &[Seg2] = &chain;
+    if mid.first().is_some_and(|f| radial(f) && on_axis(f.start())) {
+        mid = mid.get(1..).unwrap_or(&[]);
+    }
+    if mid.last().is_some_and(|l| radial(l) && on_axis(l.end())) {
+        mid = mid.get(..mid.len().saturating_sub(1)).unwrap_or(&[]);
+    }
+    if mid.is_empty() {
+        return Ok(None);
+    }
+    let apex_start = mid.first().is_some_and(|f| on_axis(f.start()));
+    let apex_end = mid.last().is_some_and(|l| on_axis(l.end()));
     guard("revolve", || {
-        let verts: Vec<mt::Vertex> = chain
+        let verts: Vec<mt::Vertex> = mid
             .iter()
             .map(|s| builder::vertex(p3(plane.to_world(s.start()))))
-            .chain(chain.last().map(|s| builder::vertex(p3(plane.to_world(s.end())))))
+            .chain(mid.last().map(|s| builder::vertex(p3(plane.to_world(s.end())))))
             .collect();
         let mut edges: Vec<mt::Edge> = Vec::new();
-        for (i, s) in chain.iter().enumerate() {
+        for (i, s) in mid.iter().enumerate() {
             let (Some(a), Some(b)) = (verts.get(i), verts.get(i + 1)) else { continue };
             edges.push(match *s {
                 Seg2::Line { .. } => builder::line(a, b),
                 Seg2::Arc { .. } => builder::circle_arc(a, b, p3(plane.to_world(s.mid()))),
             });
         }
-        let w: mt::Wire = edges.into();
+        let mut w: mt::Wire = edges.into();
         let axis = plane.dir_to_world(d);
-        let shell = builder::cone(&w, v3(axis), mt::Rad(std::f64::consts::TAU));
-        let solid = Solid::try_new(vec![shell]).map_err(|e| KernelError::Failed(format!("revolve: {e}")))?;
+        let mut shell = if apex_start || apex_end {
+            if !apex_start {
+                // builder::cone wants the apex first.
+                w = w.inverse();
+            }
+            builder::cone(&w, v3(axis), mt::Rad(std::f64::consts::TAU))
+        } else {
+            builder::rsweep(&w, p3(plane.to_world(axis_origin)), v3(axis), mt::Rad(std::f64::consts::TAU))
+        };
+        let sides = shell.len();
+        for b in shell.extract_boundaries() {
+            let cap = builder::try_attach_plane(&[b]).map_err(|e| KernelError::Failed(format!("revolve cap: {e}")))?;
+            shell.push(cap);
+        }
+        let solid = Solid::try_new(vec![shell.clone()]).or_else(|_| {
+            // Caps may come out facing inwards: flip them.
+            let mut s2 = shell.clone();
+            for f in s2.face_iter_mut().skip(sides) {
+                f.invert();
+            }
+            Solid::try_new(vec![s2])
+        });
+        let solid = solid.map_err(|e| KernelError::Failed(format!("revolve: {e}")))?;
         let solid = if shift.len() > 0.0 { builder::translated(&solid, v3(shift)) } else { solid };
         Body::new(solid).map(Some)
     })

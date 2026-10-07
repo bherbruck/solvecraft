@@ -147,6 +147,14 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
                 );
             }
         }
+        "hole" => {
+            pen.poly(&[(3.0, 8.0), (21.0, 8.0), (21.0, 20.0), (3.0, 20.0)], pen.fill, ink);
+            let pts: Vec<Pos2> =
+                (0..32).map(|i| i as f32 / 32.0 * std::f32::consts::TAU).map(|t| pen.at(12.0 + 5.0 * t.cos(), 8.0 + 2.0 * t.sin())).collect();
+            p.add(Shape::convex_polygon(pts, Color32::WHITE, Stroke::new(pen.w, a)));
+            pen.line(&[(7.0, 8.0), (7.0, 16.0)], a);
+            pen.line(&[(17.0, 8.0), (17.0, 16.0)], a);
+        }
         "split" => {
             pen.poly(&[(3.0, 6.0), (21.0, 6.0), (21.0, 18.0), (3.0, 18.0)], pen.fill, ink);
             pen.line(&[(8.0, 2.0), (16.0, 22.0)], a);

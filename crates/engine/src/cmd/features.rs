@@ -38,6 +38,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("pattern_circ")
         .params("features: [names]; axis: X|Y|Z | {origin, dir}; count; angle? (default 360 deg)"),
     CommandSpec::new("MirrorCommand", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names]; plane: XY|XZ|YZ | {origin, x_dir, y_dir}"),
+    CommandSpec::new("FusionHoleCommand", "Hole", hole)
+        .at("SOLID", "CREATE")
+        .icon("hole")
+        .key("H")
+        .params("position: [x,y,z] on a face; direction?: [x,y,z] (default: into the face); diameter; depth? (default through all); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?"),
     CommandSpec::new("ConstructionPlaneOffsetFromPlaneCommand", "Offset Plane", plane_offset)
         .at("SOLID", "CONSTRUCT")
         .icon("plane")
@@ -481,4 +486,52 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let plane = plane_param(s, p.get("plane"), cmd)?;
     add_feature(s, p, FeatureKind::Split { body, plane })
+}
+
+fn hole(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionHoleCommand";
+    let position = p.get("position").and_then(vec3).ok_or_else(|| bad(cmd, "`position` must be [x, y, z]"))?;
+    let direction = match p.get("direction").and_then(vec3) {
+        Some(d) => d.normalized().ok_or_else(|| bad(cmd, "`direction` must be non-zero"))?,
+        None => {
+            // Into the planar face the position lies on.
+            let st = s.model.state();
+            let mut found = None;
+            for b in &st.bodies {
+                let tol = (b.body.size() * 1e-3).max(1e-3);
+                for f in b.body.faces(tol).unwrap_or_default() {
+                    if let Some(n) = f.plane_normal
+                        && (position - f.centroid).dot(n).abs() < tol * 10.0
+                    {
+                        found = Some(-n);
+                    }
+                }
+            }
+            found.ok_or_else(|| bad(cmd, "no planar face at `position`; give `direction`"))?
+        }
+    };
+    let diameter = req_expr(cmd, p, "diameter")?;
+    check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
+    let depth = expr(p, "depth");
+    if let Some(d) = &depth {
+        check_expr(s, d, Kind::Length, cmd, "depth")?;
+    }
+    let get = |k: &str| -> Result<String> {
+        let e = req_expr(cmd, p, k)?;
+        Ok(e)
+    };
+    let kind = match str_(p, "type").unwrap_or("simple") {
+        "simple" => match expr(p, "tip_angle") {
+            Some(t) if depth.is_some() => solvecraft_doc::HoleKind::Drilled { tip_angle: t },
+            _ => solvecraft_doc::HoleKind::Simple,
+        },
+        "drilled" => solvecraft_doc::HoleKind::Drilled { tip_angle: expr(p, "tip_angle").unwrap_or_else(|| "118 deg".into()) },
+        "counterbore" => solvecraft_doc::HoleKind::Counterbore { cb_diameter: get("cb_diameter")?, cb_depth: get("cb_depth")? },
+        "countersink" => solvecraft_doc::HoleKind::Countersink {
+            cs_diameter: get("cs_diameter")?,
+            cs_angle: expr(p, "cs_angle").unwrap_or_else(|| "90 deg".into()),
+        },
+        other => return Err(bad(cmd, format!("unknown hole type `{other}`"))),
+    };
+    add_feature(s, p, FeatureKind::Hole { position, direction, diameter, depth, hole: kind })
 }

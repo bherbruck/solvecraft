@@ -216,6 +216,18 @@ pub enum FeatureKind {
         features: Vec<String>,
         plane: PlaneRef,
     },
+    /// A drilled hole (simple, counterbore or countersink) at a point, into the material.
+    Hole {
+        position: Vec3,
+        /// Drilling direction (into the material).
+        direction: Vec3,
+        diameter: String,
+        /// Depth to the shoulder; `None` = through all.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        depth: Option<String>,
+        #[serde(default)]
+        hole: HoleKind,
+    },
     /// A construction plane (sketch placement, split tool).
     ConstructionPlane {
         plane: PlaneRef,
@@ -232,6 +244,26 @@ pub enum FeatureKind {
         rotate_axis: Option<Vec3>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         angle: Option<String>,
+    },
+}
+
+/// Hole shapes.
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum HoleKind {
+    /// Plain hole; blind holes get a drill point when `tip_angle` is set.
+    #[default]
+    Simple,
+    Drilled {
+        tip_angle: String,
+    },
+    Counterbore {
+        cb_diameter: String,
+        cb_depth: String,
+    },
+    Countersink {
+        cs_diameter: String,
+        cs_angle: String,
     },
 }
 
@@ -298,6 +330,7 @@ impl FeatureKind {
             FeatureKind::Pattern { .. } => "CircularPatternFeature",
             FeatureKind::Mirror { .. } => "MirrorFeature",
             FeatureKind::ConstructionPlane { .. } => "ConstructionPlane",
+            FeatureKind::Hole { .. } => "HoleFeature",
             FeatureKind::Split { .. } => "SplitBodyFeature",
             FeatureKind::Move { .. } => "MoveFeature",
         }
@@ -319,6 +352,7 @@ impl FeatureKind {
             FeatureKind::Pattern { .. } => "CircularPattern",
             FeatureKind::Mirror { .. } => "Mirror",
             FeatureKind::ConstructionPlane { .. } => "Plane",
+            FeatureKind::Hole { .. } => "Hole",
             FeatureKind::Split { .. } => "Split",
             FeatureKind::Move { .. } => "Move",
         }
@@ -359,6 +393,16 @@ impl FeatureKind {
                 PatternKind::Circular { count, angle, .. } => v.extend([count.as_str(), angle]),
             },
             FeatureKind::Mirror { plane, .. } => plane_exprs(plane, &mut v),
+            FeatureKind::Hole { diameter, depth, hole, .. } => {
+                v.push(diameter);
+                v.extend(depth.iter().map(String::as_str));
+                match hole {
+                    HoleKind::Simple => {}
+                    HoleKind::Drilled { tip_angle } => v.push(tip_angle),
+                    HoleKind::Counterbore { cb_diameter, cb_depth } => v.extend([cb_diameter.as_str(), cb_depth]),
+                    HoleKind::Countersink { cs_diameter, cs_angle } => v.extend([cs_diameter.as_str(), cs_angle]),
+                }
+            }
             FeatureKind::Move { translate, angle, .. } => {
                 v.extend(translate.iter().map(String::as_str));
                 if let Some(a) = angle {

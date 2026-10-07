@@ -330,3 +330,52 @@ fn debug_sphere() {
         println!("{name} and {:?}", boolean(&b, &sp, BoolOp::Intersect).map(|o| o.map(|x| measure(&x).unwrap().volume)));
     }
 }
+
+#[test]
+#[ignore]
+fn debug_countersink() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(60.0, 40.0, 15.0)).unwrap();
+    for (name, pts) in [
+        ("csink", vec![Vec2::new(0.0, 0.6), Vec2::new(6.6, 0.6), Vec2::new(3.0, -3.0), Vec2::new(3.0, -31.0), Vec2::new(0.0, -31.0)]),
+        ("csink-thru-top", vec![Vec2::new(0.0, 0.6), Vec2::new(6.6, 0.6), Vec2::new(3.0, -3.0), Vec2::new(3.0, -16.3), Vec2::new(0.0, -16.3)]),
+        (
+            "cbore",
+            vec![Vec2::new(0.0, 0.6), Vec2::new(7.0, 0.6), Vec2::new(7.0, -5.0), Vec2::new(4.0, -5.0), Vec2::new(4.0, -31.0), Vec2::new(0.0, -31.0)],
+        ),
+    ] {
+        for (pn, pl) in [
+            ("xz@top", Plane::new(Vec3::new(35.0, 20.0, 15.0), Vec3::X, Vec3::Z).unwrap()),
+            ("yz@top", Plane::new(Vec3::new(35.0, 20.0, 15.0), Vec3::Y, Vec3::Z).unwrap()),
+            ("diag", Plane::new(Vec3::new(35.0, 20.0, 15.0), Vec3::new(0.6, 0.8, 0.0), Vec3::Z).unwrap()),
+        ] {
+            let tool = revolve(&pl, &[Region2 { outer: Loop2::polygon(&pts), holes: vec![] }], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)
+                .unwrap()
+                .pop()
+                .unwrap();
+            println!(
+                "{name} {pn}: tool {} cut {:?}",
+                measure(&tool).unwrap().volume,
+                boolean(&b, &tool, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume))
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_cbore_seq() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(60.0, 40.0, 15.0)).unwrap();
+    let pl = Plane::from_normal(Vec3::new(15.0, 20.0, 15.0), Vec3::Z).unwrap();
+    for (s1, s2, r2top) in [(0.0, 0.0, 0.6), (0.613, 1.226, 0.6), (0.3, 0.9, 2.37)] {
+        let t1 = extrude(&pl, &[Region2 { outer: Loop2::circle_from(Vec2::ZERO, 4.0, s1), holes: vec![] }], -31.0, 0.6).unwrap().pop().unwrap();
+        let c1 = boolean(&b, &t1, BoolOp::Cut).unwrap().unwrap();
+        let t2 = extrude(&pl, &[Region2 { outer: Loop2::circle_from(Vec2::ZERO, 7.0, s2), holes: vec![] }], -5.0, r2top).unwrap().pop().unwrap();
+        println!(
+            "seams {s1} {s2}: first {} second {:?}",
+            measure(&c1).unwrap().volume,
+            boolean(&c1, &t2, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume))
+        );
+        let c2 = boolean(&b, &t2, BoolOp::Cut).unwrap().unwrap();
+        println!("  swapped: {:?}", boolean(&c2, &t1, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume)));
+    }
+}

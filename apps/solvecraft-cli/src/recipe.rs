@@ -224,6 +224,27 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
                 let axis = f.get("axis").map(|a| json!({"origin": a.get("origin").cloned().unwrap_or(json!([0, 0, 0])), "dir": a.get("dir")})).unwrap_or(Value::Null);
                 out.push(json!({"command": "PatternCircular", "params": {"features": f.get("features"), "axis": axis, "count": f.get("count"), "angle": f.get("total_angle").cloned().unwrap_or(json!(360)), "name": name}}));
             }
+            Some("hole") => {
+                let n = f.get("face").and_then(|fc| fc.get("plane_normal_outward").or(fc.get("normal_at_point_on_face"))).cloned();
+                let dir = n.and_then(|n| n.as_array().map(|a| a.iter().map(|x| -x.as_f64().unwrap_or(0.0)).collect::<Vec<f64>>()));
+                let ty = f.get("hole_type").and_then(Value::as_str).unwrap_or("simple");
+                let mut p = json!({"position": f.get("position"), "diameter": f.get("diameter"), "type": ty, "name": name});
+                if let Some(d) = dir {
+                    p["direction"] = json!(d);
+                }
+                if f.get("extent").and_then(Value::as_str) != Some("through_all") {
+                    p["depth"] = f.get("depth").cloned().unwrap_or(Value::Null);
+                    if let Some(t) = f.get("tip_angle") {
+                        p["tip_angle"] = t.clone();
+                    }
+                }
+                for (k, src) in [("cb_diameter", "counterbore_diameter"), ("cb_depth", "counterbore_depth"), ("cs_diameter", "countersink_diameter"), ("cs_angle", "countersink_angle")] {
+                    if let Some(v) = f.get(src) {
+                        p[k] = v.clone();
+                    }
+                }
+                out.push(json!({"command": "FusionHoleCommand", "params": p}));
+            }
             Some("construction_plane") => match f.get("method").and_then(Value::as_str) {
                 Some("offset") => out.push(json!({"command": "ConstructionPlaneOffsetFromPlaneCommand", "params": {"base": f.get("base"), "offset": f.get("offset"), "name": name}})),
                 _ => {
