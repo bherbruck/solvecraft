@@ -328,7 +328,7 @@ fn plane_value(s: &Session, sel: Option<&Sel>) -> Option<Value> {
 }
 
 fn combo(ui: &mut egui::Ui, id: &str, labels: &[&str], sel: &mut usize) {
-    egui::ComboBox::from_id_salt(id).selected_text(labels.get(*sel).copied().unwrap_or("")).width(150.0).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt(id).selected_text(labels.get(*sel).copied().unwrap_or("")).width(FIELD_W).show_ui(ui, |ui| {
         for (i, l) in labels.iter().enumerate() {
             ui.selectable_value(sel, i, *l);
         }
@@ -392,7 +392,7 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
             } else {
                 RichText::new(format!("{} selected", inp.items.len())).color(t.text)
             };
-            let b = egui::Button::new(text).fill(if active { t.accent_soft } else { Color32::TRANSPARENT }).min_size(vec2(170.0, 22.0));
+            let b = egui::Button::new(text).fill(if active { t.accent_soft } else { Color32::TRANSPARENT }).min_size(vec2(FIELD_W, 22.0));
             if ui.add(b).on_hover_text("Click to make this the input that viewport picks go to").clicked() {
                 activate = Some(i);
             }
@@ -413,24 +413,46 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
     }
 }
 
-/// Show the active dialog (if any).
+/// Width limits of a docked dialog: shrink-wrapped to its content within these.
+const DIALOG_MIN_W: f32 = 260.0;
+const DIALOG_MAX_W: f32 = 380.0;
+/// Width of value fields and choice boxes in a dialog.
+const FIELD_W: f32 = 140.0;
+
+/// Show the active dialog (if any), docked flush to the right edge of the viewport just below
+/// the view cube, sized to its content.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.dialog.take() else { return };
     let t = Tokens::get();
-    let pos = app.viewport.rect.map(|r| egui::pos2(r.right() - 330.0, r.top() + 150.0)).unwrap_or(egui::pos2(900.0, 200.0));
+    let vp = app.viewport.rect.unwrap_or_else(|| ctx.content_rect());
+    let anchor = egui::pos2(vp.right(), vp.top() + crate::viewport::VIEW_CUBE_CLEARANCE);
     let mut keep = true;
     let mut ok = false;
     let mut cancel = false;
     let wide = matches!(d.kind, Kind::Params { .. });
     let heading = if d.editing.is_some() { format!("EDIT {}", title(&d.kind)) } else { title(&d.kind).to_string() };
+    let frame = egui::Frame::window(&ctx.global_style()).corner_radius(egui::CornerRadius { nw: 6, sw: 6, ne: 0, se: 0 }).shadow(egui::Shadow {
+        offset: [-2, 2],
+        blur: 8,
+        spread: 0,
+        color: Color32::from_black_alpha(40),
+    });
     egui::Window::new(RichText::new(heading).strong().size(13.0))
         .id(egui::Id::new("sc_dialog"))
-        .default_pos(if wide { egui::pos2(pos.x - 260.0, pos.y - 60.0) } else { pos })
-        .resizable(false)
+        .frame(frame)
+        .pivot(egui::Align2::RIGHT_TOP)
+        .fixed_pos(anchor)
+        .constrain(false)
+        .auto_sized()
+        .scroll([false, true])
         .collapsible(false)
+        .max_height((vp.bottom() - anchor.y - 8.0).max(120.0))
         .open(&mut keep)
         .show(ctx, |ui| {
-            ui.set_min_width(if wide { 520.0 } else { 280.0 });
+            ui.spacing_mut().text_edit_width = FIELD_W;
+            let margin = 2.0 * ui.style().spacing.window_margin.leftf();
+            ui.set_min_width(if wide { 480.0 } else { DIALOG_MIN_W } - margin);
+            ui.set_max_width(if wide { 560.0 } else { DIALOG_MAX_W } - margin);
             egui::Grid::new("sc_dialog_grid").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
                 input_rows(&mut d, ui);
                 match &mut d.kind {
@@ -596,6 +618,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.dialog = Some(d);
     } else if let Some((_, marker)) = d.editing {
         // Editing done: put the timeline marker back where it was.
+        let _ = app.run("timeline.rollTo", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
+    }
+}
+
+/// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
+pub fn cancel(app: &mut SolveApp) {
+    if let Some(d) = app.dialog.take()
+        && let Some((_, marker)) = d.editing
+    {
         let _ = app.run("timeline.rollTo", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
     }
 }

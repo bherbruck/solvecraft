@@ -365,7 +365,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 if app.tool.is_some() {
                     app.tool = None;
                 } else if app.dialog.is_some() {
-                    app.dialog = None;
+                    crate::dialogs::cancel(app);
                 } else {
                     let _ = app.run("select.clear", json!({}));
                 }

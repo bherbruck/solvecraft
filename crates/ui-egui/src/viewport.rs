@@ -392,6 +392,9 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     hits
 }
 
+/// Space kept free at the top right of the viewport for the view cube (docked dialogs start below).
+pub const VIEW_CUBE_CLEARANCE: f32 = 168.0;
+
 /// Axis length as a multiple of the origin plane size (solid part 1, dashed beyond).
 const AXIS_LEN: f64 = 1.8;
 
