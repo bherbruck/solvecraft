@@ -20,6 +20,7 @@ solvecraft-doc = { path = "crates/doc" }
 solvecraft-io = { path = "crates/io" }
 solvecraft-engine = { path = "crates/engine" }
 solvecraft-ui-egui = { path = "crates/ui-egui" }
+solvecraft-mcp = { path = "crates/mcp" }
 
 # foundation
 thiserror = "2"

@@ -3070,6 +3070,7 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "solvecraft-engine",
+ "solvecraft-mcp",
 ]
 
 [[package]]
@@ -3132,6 +3133,14 @@ dependencies = [
  "truck-shapeops",
  "truck-stepio",
  "truck-topology",
+]
+
+[[package]]
+name = "solvecraft-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "solvecraft-engine",
 ]
 
 [[package]]

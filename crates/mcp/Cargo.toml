@@ -1,0 +1,13 @@
+[package]
+name = "solvecraft-mcp"
+description = "SolveCraft MCP server: JSON-RPC 2.0 over stdio, driving a headless session or the running app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solvecraft-engine = { workspace = true }
+serde_json = { workspace = true }

@@ -43,6 +43,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("io", Class::Layer(3)),
     ("engine", Class::Layer(4)),
     ("ui-egui", Class::Layer(5)),
+    ("mcp", Class::Layer(5)),
     ("testkit", Class::Testkit),
     // apps and tooling
     ("solvecraft", Class::Exempt),
