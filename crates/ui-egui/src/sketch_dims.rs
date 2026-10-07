@@ -225,8 +225,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         egui::Area::new(egui::Id::new(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
             let fill = if b.locked { tk.accent_soft } else { tk.panel };
             egui::Frame::popup(ui.style()).fill(fill).inner_margin(egui::Margin::symmetric(3, 1)).show(ui, |ui| {
-                let r =
-                    ui.add(egui::TextEdit::singleline(&mut b.value).id(id).desired_width(62.0).font(egui::TextStyle::Small)).on_hover_text(b.label);
+                let r = ui.add(egui::TextEdit::singleline(&mut b.value).id(id).desired_width(66.0)).on_hover_text(b.label);
                 if r.changed() {
                     b.locked = true;
                 }

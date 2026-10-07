@@ -10,6 +10,7 @@
 
 pub mod browser;
 pub mod canvas;
+pub mod context_menu;
 pub mod control;
 pub mod dialogs;
 pub mod gpu;
@@ -99,6 +100,8 @@ pub struct SolveApp {
     pub dialog: Option<dialogs::Dialog>,
     pub palette: palette::Palette,
     pub preview: preview::PreviewState,
+    /// The last command started interactively (id, label), for Repeat.
+    pub last_command: Option<(String, String)>,
     pub status: Option<(String, f64, bool)>,
     pub quit_requested: bool,
     pub frame_ms: f64,
@@ -127,6 +130,7 @@ impl SolveApp {
             dialog: None,
             palette: palette::Palette::default(),
             preview: preview::PreviewState::default(),
+            last_command: None,
             status: None,
             quit_requested: false,
             frame_ms: 0.0,
@@ -221,6 +225,12 @@ impl SolveApp {
                 let _ = self.run(id, json!({ "curves": curves }));
                 return;
             }
+        }
+        if let Some(spec) = solvecraft_engine::find_command(id)
+            && (tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some())
+            && id != "SketchCreate"
+        {
+            self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
         }
         if let Some(t) = tools::Tool::for_command(id) {
             self.tool = Some(t);
@@ -486,6 +496,7 @@ impl SolveApp {
             viewport::show(self, ui);
         });
         dialogs::show(self, ui.ctx());
+        context_menu::show(self, ui.ctx());
         palette::popup(self, ui.ctx());
         self.frame_ms = now_ms() - t0;
     }

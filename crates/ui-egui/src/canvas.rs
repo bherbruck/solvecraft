@@ -115,9 +115,15 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let signed = matches!(d.kind, Kind::Extrude { .. } | Kind::Move { .. });
     let focus = std::mem::take(&mut d.focus);
     let half_height = app.cam.half_height();
+    let axis = revolve_axis(app, d);
     let Some((label, kind, value)) = d.primary() else { return };
     let len = app.session.doc.eval(value, kind).ok().filter(|v| v.is_finite());
     let mut box_at = bs + vec2(16.0, -30.0);
+    if let (Some(axis), Some(angle)) = (axis, len.filter(|_| kind == ValueKind::Angle))
+        && let Some(at) = rotator(ui, painter, proj, base, axis, angle, value)
+    {
+        box_at = at + vec2(14.0, -12.0);
+    }
     if let (Some(n), Some(l)) = (dir, len.filter(|_| kind == ValueKind::Length)) {
         let n = n * sign;
         // A short arrow still shows (and can be grabbed) when the value is near zero.
@@ -169,6 +175,83 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             });
         });
     });
+}
+
+/// The revolve axis (a point on it and its unit direction).
+fn revolve_axis(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
+    if !matches!(d.kind, Kind::Revolve { .. }) {
+        return None;
+    }
+    match d.inputs.get(1)?.items.first()? {
+        Sel::Axis { name } => Some((
+            Vec3::ZERO,
+            match name.as_str() {
+                "X" => Vec3::X,
+                "Y" => Vec3::Y,
+                _ => Vec3::Z,
+            },
+        )),
+        Sel::SketchCurve { id } => {
+            let st = app.session.model.state();
+            let sketch = d.inputs.first()?.items.iter().find_map(|x| if let Sel::Profile { sketch, .. } = x { Some(*sketch) } else { None })?;
+            let ss = st.sketch(sketch)?;
+            let c = ss.sketch.curves.get(ss.sketch.curve_index(id)?)?;
+            let solvecraft_engine::sketch::CurveKind::Line { a, b } = c.kind else { return None };
+            let (pa, pb) = (ss.plane.to_world(ss.sketch.point(a)?), ss.plane.to_world(ss.sketch.point(b)?));
+            Some((pa, (pb - pa).normalized()?))
+        }
+        _ => None,
+    }
+}
+
+/// The revolve angle rotator: an arc from the profile around the axis with a handle at its end
+/// that drags the angle (5° steps; Alt or Ctrl: free). Returns the handle's screen position.
+#[allow(clippy::too_many_arguments)]
+fn rotator(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, p0: Vec3, (o, a): (Vec3, Vec3), angle: f64, value: &mut String) -> Option<Pos2> {
+    let t = Tokens::get();
+    let c = o + a * (p0 - o).dot(a);
+    let r = (p0 - c).len();
+    if r < 1e-9 {
+        return None;
+    }
+    let e1 = (p0 - c) / r;
+    let e2 = a.cross(e1);
+    let at = |th: f64| c + (e1 * th.cos() + e2 * th.sin()) * r;
+    let n = 48;
+    let pts: Vec<Pos2> = (0..=n).filter_map(|i| proj.to_screen(at(angle * i as f64 / n as f64))).collect();
+    let end = proj.to_screen(at(angle))?;
+    let handle = egui::Rect::from_center_size(end, vec2(20.0, 20.0));
+    let resp = ui.interact(handle, egui::Id::new("sc_rotator"), egui::Sense::drag());
+    let hot = resp.hovered() || resp.dragged();
+    let col = if hot { t.accent } else { t.manipulator };
+    painter.add(egui::Shape::line(pts, Stroke::new(2.0, col)));
+    if let (Some(cs), Some(ps)) = (proj.to_screen(c), proj.to_screen(p0)) {
+        painter.add(egui::Shape::dashed_line(&[cs, ps], Stroke::new(1.0, col), 4.0, 3.0));
+    }
+    painter.circle(end, if hot { 7.0 } else { 5.5 }, col, Stroke::new(1.5, Color32::WHITE));
+    if hot {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    if resp.dragged()
+        && let Some(p) = resp.interact_pointer_pos()
+    {
+        let (ro, rd) = proj.ray(p);
+        let den = rd.dot(a);
+        if den.abs() > 1e-9 {
+            let q = ro + rd * ((c - ro).dot(a) / den) - c;
+            let mut th = q.dot(e2).atan2(q.dot(e1)).to_degrees().rem_euclid(360.0);
+            let free = ui.input(|i| i.modifiers.alt || i.modifiers.ctrl || i.modifiers.command);
+            if !free {
+                th = (th / 5.0).round() * 5.0;
+            }
+            if th < 0.5 {
+                th = 360.0;
+            }
+            let s = format!("{th:.1}");
+            *value = format!("{} deg", s.trim_end_matches('0').trim_end_matches('.'));
+        }
+    }
+    Some(end)
 }
 
 fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {

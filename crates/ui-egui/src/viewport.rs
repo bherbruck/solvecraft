@@ -40,6 +40,8 @@ pub struct ViewportState {
     /// Timeline item under the cursor: its bodies are highlighted.
     pub hover_feature: Option<u64>,
     pub build_ms: f64,
+    /// The right-click menu, open at this screen position.
+    pub context_menu: Option<Pos2>,
 }
 
 /// Something under the cursor.
@@ -868,8 +870,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 select(app, cand.and_then(|c| c.1), add);
             }
         }
-        if resp.secondary_clicked() && delta == egui::Vec2::ZERO && app.tool.is_some() {
-            crate::tools::finish(app);
+        if resp.secondary_clicked() && delta == egui::Vec2::ZERO {
+            if app.tool.is_some() {
+                crate::tools::finish(app);
+            } else if app.dialog.is_none() {
+                crate::context_menu::open(app, p);
+            }
         }
     }
     // Box selection: a primary drag on the model when no navigation mode is on.
