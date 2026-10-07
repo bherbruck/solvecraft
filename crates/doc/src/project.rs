@@ -136,6 +136,7 @@ pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, 
                 _ => vec![LinkGeom::Point(o)],
             }
         }
+        LinkSource::Text { text, at, height, angle } => solvecraft_sketch::text_geometry(text, *at, *height, *angle)?,
         LinkSource::Plane { name } => {
             let pr =
                 if Plane::named(name).is_some() { PlaneRef::Origin { name: name.clone() } } else { PlaneRef::Construction { name: name.clone() } };

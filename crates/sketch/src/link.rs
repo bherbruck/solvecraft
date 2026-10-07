@@ -27,6 +27,8 @@ pub enum LinkKind {
     Include,
     /// Section curves of a body or face with the sketch plane.
     Intersect,
+    /// Text outlines (drawn like normal geometry; edit the text to change them).
+    Text,
 }
 
 /// What a link refers to. Model geometry is referenced by a point on it plus the body name and
@@ -53,6 +55,14 @@ pub enum LinkSource {
     /// An origin plane (`XY`, `XZ`, `YZ`) or a construction plane (by name): its trace on the
     /// sketch plane.
     Plane { name: String },
+    /// Text: baseline start `at` (sketch coordinates), capital height and angle (radians).
+    Text {
+        text: String,
+        at: Vec2,
+        height: f64,
+        #[serde(default)]
+        angle: f64,
+    },
 }
 
 impl LinkSource {
@@ -68,6 +78,7 @@ impl LinkSource {
             LinkSource::Origin => "origin".into(),
             LinkSource::Axis { name } => format!("{name} axis"),
             LinkSource::Plane { name } => format!("{name} plane"),
+            LinkSource::Text { text, .. } => format!("text \"{}\"", text.chars().take(20).collect::<String>()),
         }
     }
 }
@@ -96,6 +107,13 @@ pub enum LinkGeom {
         a: Vec2,
         b: Vec2,
     },
+    /// Conic from `a` to `b` with control `apex` (rho 0.5: a quadratic Bézier).
+    Conic {
+        a: Vec2,
+        apex: Vec2,
+        b: Vec2,
+        rho: f64,
+    },
 }
 
 impl LinkGeom {
@@ -106,6 +124,7 @@ impl LinkGeom {
             LinkGeom::Line(a, b) => ok(a) && ok(b) && a.dist(*b) > MERGE_TOL,
             LinkGeom::Circle(c, r) => ok(c) && r.is_finite() && *r > 1e-9 && *r < 1e9,
             LinkGeom::Arc { c, a, b } => ok(c) && ok(a) && ok(b) && c.dist(*a) > 1e-9 && a.dist(*b) > MERGE_TOL,
+            LinkGeom::Conic { a, apex, b, rho } => ok(a) && ok(apex) && ok(b) && a.dist(*b) > MERGE_TOL && *rho > 1e-6 && *rho < 1.0 - 1e-6,
         }
     }
 }
@@ -123,6 +142,7 @@ enum LCurve {
     Line(usize, usize),
     Circle(usize, f64),
     Arc(usize, usize, usize),
+    Conic(usize, usize, usize, f64),
 }
 
 fn layout(geom: &[LinkGeom]) -> Result<Layout> {
@@ -163,6 +183,12 @@ fn layout(geom: &[LinkGeom]) -> Result<Layout> {
                     l.curves.push(LCurve::Arc(c, a, b));
                 }
             }
+            LinkGeom::Conic { a, apex, b, rho } => {
+                let (a, b, x) = (pt(&mut l.pts, a), pt(&mut l.pts, b), pt(&mut l.pts, apex));
+                if a != b && x != a && x != b {
+                    l.curves.push(LCurve::Conic(a, b, x, rho));
+                }
+            }
         }
     }
     // Lone points that a curve also uses are not lone.
@@ -171,6 +197,7 @@ fn layout(geom: &[LinkGeom]) -> Result<Layout> {
             LCurve::Line(a, b) => a == i || b == i,
             LCurve::Circle(c, _) => c == i,
             LCurve::Arc(c, a, b) => c == i || a == i || b == i,
+            LCurve::Conic(a, b, x, _) => a == i || b == i || x == i,
         })
     };
     let curves = l.curves.clone();
@@ -179,7 +206,13 @@ fn layout(geom: &[LinkGeom]) -> Result<Layout> {
 }
 
 fn same_shape(a: &LCurve, b: &LCurve) -> bool {
-    matches!((a, b), (LCurve::Line(..), LCurve::Line(..)) | (LCurve::Circle(..), LCurve::Circle(..)) | (LCurve::Arc(..), LCurve::Arc(..)))
+    matches!(
+        (a, b),
+        (LCurve::Line(..), LCurve::Line(..))
+            | (LCurve::Circle(..), LCurve::Circle(..))
+            | (LCurve::Arc(..), LCurve::Arc(..))
+            | (LCurve::Conic(..), LCurve::Conic(..))
+    )
 }
 
 impl Sketch {
@@ -200,6 +233,11 @@ impl Sketch {
     /// Is this curve linked reference geometry?
     pub fn is_linked_curve(&self, ci: usize) -> bool {
         self.curves.get(ci).is_some_and(|c| c.link.is_some())
+    }
+
+    /// Is this curve text outline (linked, but drawn like normal geometry)?
+    pub fn is_text_curve(&self, ci: usize) -> bool {
+        self.curves.get(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.kind == LinkKind::Text)
     }
 
     /// Is the curve's link lost (its reference no longer found)?
@@ -245,6 +283,7 @@ impl Sketch {
                 LCurve::Line(a, b) => (CurveKind::Line { a: point(self, a)?, b: point(self, b)? }, "l"),
                 LCurve::Circle(c, r) => (CurveKind::Circle { c: point(self, c)?, r }, "c"),
                 LCurve::Arc(c, a, b) => (CurveKind::Arc { c: point(self, c)?, a: point(self, a)?, b: point(self, b)? }, "a"),
+                LCurve::Conic(a, b, x, rho) => (CurveKind::Conic { a: point(self, a)?, b: point(self, b)?, apex: point(self, x)?, rho }, "k"),
             };
             let cid = self.fresh(prefix);
             self.curves.push(Curve { id: cid, kind, construction: false, reversed: false, link: Some(id.to_string()) });
@@ -274,6 +313,7 @@ impl Sketch {
                 Some(CurveKind::Line { a, b }) => Some(LCurve::Line(local(*a)?, local(*b)?)),
                 Some(CurveKind::Circle { c, r }) => Some(LCurve::Circle(local(*c)?, *r)),
                 Some(CurveKind::Arc { c, a, b }) => Some(LCurve::Arc(local(*c)?, local(*a)?, local(*b)?)),
+                Some(CurveKind::Conic { a, b, apex, rho }) => Some(LCurve::Conic(local(*a)?, local(*b)?, local(*apex)?, *rho)),
                 _ => None,
             })
             .collect();
@@ -297,6 +337,11 @@ impl Sketch {
                     visit(a);
                     visit(b);
                 }
+                LCurve::Conic(a, b, x, _) => {
+                    visit(a);
+                    visit(b);
+                    visit(x);
+                }
             }
         }
         for i in &lay.lone {
@@ -310,6 +355,7 @@ impl Sketch {
                 LCurve::Line(a, b) => LCurve::Line(renum(a), renum(b)),
                 LCurve::Circle(c, r) => LCurve::Circle(renum(c), r),
                 LCurve::Arc(c, a, b) => LCurve::Arc(renum(c), renum(a), renum(b)),
+                LCurve::Conic(a, b, x, r) => LCurve::Conic(renum(a), renum(b), renum(x), r),
             })
             .collect();
         let same = match &cur {
@@ -322,6 +368,7 @@ impl Sketch {
                                 (LCurve::Line(a0, a1), LCurve::Line(b0, b1)) => a0 == b0 && a1 == b1,
                                 (LCurve::Circle(a0, _), LCurve::Circle(b0, _)) => a0 == b0,
                                 (LCurve::Arc(a0, a1, a2), LCurve::Arc(b0, b1, b2)) => a0 == b0 && a1 == b1 && a2 == b2,
+                                (LCurve::Conic(a0, a1, a2, _), LCurve::Conic(b0, b1, b2, _)) => a0 == b0 && a1 == b1 && a2 == b2,
                                 _ => false,
                             }
                     })
@@ -341,6 +388,9 @@ impl Sketch {
             for (ci, c) in curves.iter().zip(&new) {
                 if let (LCurve::Circle(_, r), Some(Curve { kind: CurveKind::Circle { r: slot, .. }, .. })) = (c, self.curves.get_mut(*ci)) {
                     *slot = *r;
+                }
+                if let (LCurve::Conic(.., r), Some(Curve { kind: CurveKind::Conic { rho, .. }, .. })) = (c, self.curves.get_mut(*ci)) {
+                    *rho = *r;
                 }
             }
             return Ok(false);

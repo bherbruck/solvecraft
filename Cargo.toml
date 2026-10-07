@@ -41,6 +41,9 @@ truck-topology = "0.6"
 zip = { version = "3", default-features = false, features = ["deflate"] }
 quick-xml = "0.38"
 
+# fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
+
 # images
 image = { version = "0.25", default-features = false, features = ["png"] }
 

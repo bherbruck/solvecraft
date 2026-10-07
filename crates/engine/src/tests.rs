@@ -281,6 +281,7 @@ fn hostile_params_never_panic() {
         "minor_radius",
         "apex",
         "rho",
+        "text",
     ];
     let mut internal = Vec::new();
     for spec in command_specs() {

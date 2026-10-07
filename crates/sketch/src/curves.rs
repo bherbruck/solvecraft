@@ -34,7 +34,10 @@ pub fn conic_point(a: Vec2, apex: Vec2, b: Vec2, rho: f64, t: f64) -> Vec2 {
 }
 
 pub fn conic_polyline(a: Vec2, apex: Vec2, b: Vec2, rho: f64) -> Vec<Vec2> {
-    let n = SPAN_SAMPLES * 2;
+    // Samples by how far the curve bows from its chord (small text curves need few).
+    let chord = b - a;
+    let bow = chord.cross(apex - a).abs() / chord.len().max(1e-12);
+    let n = ((bow / 2e-3).sqrt().ceil() as usize).clamp(2, SPAN_SAMPLES * 2);
     (0..=n).map(|i| conic_point(a, apex, b, rho, i as f64 / n as f64)).collect()
 }
 

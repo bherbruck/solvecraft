@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use solvecraft_geom::Vec2;
-use solvecraft_sketch::{ConstraintKind, CurveKind, Sketch};
+use solvecraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg, result, slot};
 use super::{CommandSpec, in_sketch};
@@ -70,7 +70,74 @@ pub static COMMANDS: &[CommandSpec] =
             .icon("conic")
             .enabled(in_sketch)
             .params("start, end, apex: [x,y] or point refs; rho?: 0…1 (default 0.5: parabola)"),
+        CommandSpec::new("MTextCmd", "Text", text)
+            .at("SKETCH", "CREATE")
+            .icon("text")
+            .enabled(in_sketch)
+            .params("text: string (\\n breaks lines), at: baseline start [x,y], height?: capital height mm (default 5), angle?: deg"),
+        CommandSpec::new("sketch.edit_text", "Edit Text", edit_text)
+            .enabled(in_sketch)
+            .params("link: the text's link id (or entity: one of its curves), text?, at?, height?, angle?: deg"),
     ];
+
+fn text_source(p: &Value, cmd: &str, old: Option<(String, Vec2, f64, f64)>) -> Result<LinkSource> {
+    let (t0, at0, h0, a0) = old.unwrap_or((String::new(), Vec2::ZERO, 5.0, 0.0));
+    let text = str_(p, "text").map(str::to_string).unwrap_or(t0);
+    if text.trim().is_empty() {
+        return Err(bad(cmd, "`text` must not be empty"));
+    }
+    if text.chars().count() > solvecraft_sketch::MAX_TEXT_CHARS {
+        return Err(bad(cmd, "text too long"));
+    }
+    let at = p.get("at").and_then(crate::params::vec2).unwrap_or(at0);
+    let height = num(p, "height").unwrap_or(h0);
+    if !(height > 1e-6 && height < 1e5) {
+        return Err(bad(cmd, "`height` must be positive"));
+    }
+    let angle = num(p, "angle").map(f64::to_radians).unwrap_or(a0);
+    Ok(LinkSource::Text { text, at, height, angle })
+}
+
+fn text(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "MTextCmd";
+    if p.get("at").is_none() {
+        return Err(bad(cmd, "`at` must be the baseline start [x, y]"));
+    }
+    let src = text_source(p, cmd, None)?;
+    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let mut doc = (*s.doc).clone();
+    let mut sk = doc.sketch(id)?.clone();
+    let l = super::sketch_project::add_link(s, &doc, id, &mut sk, LinkKind::Text, src)?;
+    let curves = ids_of(&sk, &sk.link_curves(&l));
+    *doc.sketch_mut(id)? = sk;
+    *s.doc_mut() = doc;
+    Ok(json!({"link": l, "curves": curves}))
+}
+
+fn edit_text(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.edit_text";
+    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let mut doc = (*s.doc).clone();
+    let mut sk = doc.sketch(id)?.clone();
+    let l = match (str_(p, "link"), str_(p, "entity")) {
+        (Some(l), _) => l.to_string(),
+        (None, Some(e)) => sk.curves.iter().find(|c| c.id == e).and_then(|c| c.link.clone()).ok_or_else(|| bad(cmd, format!("`{e}` is not text")))?,
+        _ => return Err(bad(cmd, "give `link` or `entity`")),
+    };
+    let old = match sk.link(&l).map(|x| (x.kind, x.source.clone())) {
+        Some((LinkKind::Text, LinkSource::Text { text, at, height, angle })) => (text, at, height, angle),
+        _ => return Err(bad(cmd, format!("`{l}` is not text"))),
+    };
+    let src = text_source(p, cmd, Some(old))?;
+    let LinkSource::Text { text, at, height, angle } = &src else { return Err(bad(cmd, "text")) };
+    let geom = solvecraft_sketch::text_geometry(text, *at, *height, *angle)?;
+    sk.set_link_source(&l, src.clone());
+    sk.update_link(&l, &geom)?;
+    let curves = ids_of(&sk, &sk.link_curves(&l));
+    *doc.sketch_mut(id)? = sk;
+    *s.doc_mut() = doc;
+    Ok(json!({"link": l, "curves": curves}))
+}
 
 fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "CircleElipse";

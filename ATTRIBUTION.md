@@ -18,6 +18,7 @@ Generated-in-code assets are original and have no file to list:
 | File | Author | Source | Licence |
 |---|---|---|---|
 | docs/screenshots/sample-plate.png | SolveCraft contributors | screenshot of SolveCraft itself (`solvecraft --sample`) | MIT OR Apache-2.0 |
+| crates/sketch/fonts/LiberationSans-Regular.ttf | Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google) | https://github.com/liberationfonts (Debian fonts-liberation), unmodified; licence text in crates/sketch/fonts/OFL.txt; used for sketch Text outlines | SIL OFL 1.1 |
 
 ## Code adapted from sibling projects
 

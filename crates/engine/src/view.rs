@@ -69,7 +69,7 @@ pub fn grid_step(half_height: f64) -> (f64, f64) {
 pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool]) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
-        let col = if c.link.is_some() {
+        let col = if c.link.is_some() && !sk.is_text_curve(i) {
             if sk.is_lost_curve(i) { colors::SKETCH_LOST } else { colors::SKETCH_PROJECTED }
         } else if c.construction {
             colors::SKETCH_CONSTRUCTION

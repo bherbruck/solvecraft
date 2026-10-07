@@ -260,3 +260,27 @@ fn ellipse_splines_conic() {
     let r = run(&mut s, "MirrorSketchCommand", json!({"entities": [eid, sid], "line": m}));
     assert_eq!(ids(&r["curves"]).len(), 2);
 }
+
+#[test]
+fn text_makes_profiles_that_extrude_and_edit() {
+    let mut s = new_sketch();
+    let r = run(&mut s, "MTextCmd", json!({"text": "SO", "at": [0, 0], "height": 10}));
+    let link = r["link"].as_str().unwrap().to_string();
+    let a = profiles(&s);
+    // S (one region) + O (ring = outer with a hole, plus the counter as its own region).
+    assert!(a.len() >= 2, "{a:?}");
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert_eq!(si["dof"], 0);
+    // Edit the text: the outlines change, the link stays.
+    let r2 = run(&mut s, "sketch.edit_text", json!({"link": link, "text": "I", "height": 20}));
+    assert_eq!(r2["link"], json!(link));
+    let a = profiles(&s);
+    assert_eq!(a.len(), 1, "{a:?}");
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Extrude", json!({"distance": 2}));
+    let m = run(&mut s, "MeasureCommand", json!({}));
+    let v = m["total"]["volume_mm3"].as_f64().unwrap();
+    // An "I" 20 mm tall is a bar a couple of mm wide.
+    assert!(v > 40.0 && v < 200.0, "{v}");
+    assert!(s.execute("MTextCmd", &json!({"text": "", "at": [0, 0]})).is_err());
+}
