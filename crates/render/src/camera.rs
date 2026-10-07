@@ -72,6 +72,109 @@ impl StandardView {
     }
 }
 
+/// Smooth ease-in-out on [0, 1] (cubic).
+pub fn ease_in_out(t: f64) -> f64 {
+    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 1.0 };
+    if t < 0.5 { 4.0 * t * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(3) / 2.0 }
+}
+
+/// A unit quaternion (w, x, y, z).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Quat {
+    pub w: f64,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+impl Quat {
+    /// From an orthonormal right-handed basis (the columns of a rotation matrix).
+    pub fn from_basis(c0: Vec3, c1: Vec3, c2: Vec3) -> Quat {
+        let (m00, m11, m22) = (c0.x, c1.y, c2.z);
+        let tr = m00 + m11 + m22;
+        let q = if tr > 0.0 {
+            let s = (tr + 1.0).sqrt() * 2.0;
+            Quat { w: 0.25 * s, x: (c1.z - c2.y) / s, y: (c2.x - c0.z) / s, z: (c0.y - c1.x) / s }
+        } else if m00 > m11 && m00 > m22 {
+            let s = (1.0 + m00 - m11 - m22).sqrt() * 2.0;
+            Quat { w: (c1.z - c2.y) / s, x: 0.25 * s, y: (c1.x + c0.y) / s, z: (c2.x + c0.z) / s }
+        } else if m11 > m22 {
+            let s = (1.0 + m11 - m00 - m22).sqrt() * 2.0;
+            Quat { w: (c2.x - c0.z) / s, x: (c1.x + c0.y) / s, y: 0.25 * s, z: (c2.y + c1.z) / s }
+        } else {
+            let s = (1.0 + m22 - m00 - m11).sqrt() * 2.0;
+            Quat { w: (c0.y - c1.x) / s, x: (c2.x + c0.z) / s, y: (c2.y + c1.z) / s, z: 0.25 * s }
+        };
+        q.normalized()
+    }
+    pub fn dot(self, o: Quat) -> f64 {
+        self.w * o.w + self.x * o.x + self.y * o.y + self.z * o.z
+    }
+    pub fn len(self) -> f64 {
+        self.dot(self).sqrt()
+    }
+    fn scale(self, k: f64) -> Quat {
+        Quat { w: self.w * k, x: self.x * k, y: self.y * k, z: self.z * k }
+    }
+    fn add(self, o: Quat) -> Quat {
+        Quat { w: self.w + o.w, x: self.x + o.x, y: self.y + o.y, z: self.z + o.z }
+    }
+    pub fn normalized(self) -> Quat {
+        let l = self.len();
+        if l > 1e-300 && l.is_finite() { self.scale(1.0 / l) } else { Quat { w: 1.0, x: 0.0, y: 0.0, z: 0.0 } }
+    }
+    /// Shortest-arc spherical interpolation.
+    pub fn slerp(self, o: Quat, t: f64) -> Quat {
+        let mut d = self.dot(o);
+        let o = if d < 0.0 {
+            d = -d;
+            o.scale(-1.0)
+        } else {
+            o
+        };
+        if d > 0.9995 {
+            return self.scale(1.0 - t).add(o.scale(t)).normalized();
+        }
+        let th = d.clamp(-1.0, 1.0).acos();
+        let s = th.sin();
+        self.scale(((1.0 - t) * th).sin() / s).add(o.scale((t * th).sin() / s)).normalized()
+    }
+    /// The rotated basis vectors (columns of the rotation matrix).
+    pub fn basis(self) -> (Vec3, Vec3, Vec3) {
+        let Quat { w, x, y, z } = self;
+        (
+            Vec3::new(1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + w * z), 2.0 * (x * z - w * y)),
+            Vec3::new(2.0 * (x * y - w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + w * x)),
+            Vec3::new(2.0 * (x * z + w * y), 2.0 * (y * z - w * x), 1.0 - 2.0 * (x * x + y * y)),
+        )
+    }
+}
+
+/// A camera move in progress: from one camera to another over `duration` seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraAnim {
+    pub from: Camera,
+    pub to: Camera,
+    pub start: f64,
+    pub duration: f64,
+}
+
+impl CameraAnim {
+    /// The usual length of a view change, in seconds.
+    pub const DURATION: f64 = 0.5;
+    pub fn new(from: Camera, to: Camera, now: f64) -> CameraAnim {
+        CameraAnim { from, to, start: now, duration: CameraAnim::DURATION }
+    }
+    /// The camera at time `now`, and whether the move has finished.
+    pub fn sample(&self, now: f64) -> (Camera, bool) {
+        let t = if self.duration > 0.0 { (now - self.start) / self.duration } else { 1.0 };
+        if !(t < 1.0) {
+            return (self.to, true);
+        }
+        (Camera::interpolate(&self.from, &self.to, ease_in_out(t)), false)
+    }
+}
+
 /// Orbit camera around `target` (Z up).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Camera {
@@ -205,6 +308,55 @@ impl Camera {
         let r = (b.diagonal() * 0.5).max(1.0);
         self.distance = if self.fov > 0.0 { r / (self.fov * 0.5).sin() * 1.1 } else { r / 0.4 * 1.15 };
     }
+    /// The same camera looking from direction `back` (target → eye). Straight up or down
+    /// keeps the yaw, rounded to the nearest quarter turn so the view stays square.
+    pub fn looking_from(&self, back: Vec3) -> Camera {
+        let Some(b) = back.normalized() else { return *self };
+        let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
+        let pitch = b.z.clamp(-1.0, 1.0).asin().clamp(-lim, lim);
+        let yaw = if b.x.hypot(b.y) < 1e-6 {
+            let q = std::f64::consts::FRAC_PI_2;
+            (self.yaw / q).round() * q
+        } else {
+            (-b.x).atan2(-b.y)
+        };
+        Camera { yaw, pitch, ..*self }
+    }
+    /// Orientation as a unit quaternion (camera → world rotation).
+    pub fn orientation(&self) -> Quat {
+        let (r, u, b) = self.basis();
+        Quat::from_basis(r, u, b)
+    }
+    /// Blend between two cameras at `s` in [0, 1]: orientation by quaternion slerp, target,
+    /// distance and field of view linearly. The ends are returned exactly.
+    pub fn interpolate(a: &Camera, b: &Camera, s: f64) -> Camera {
+        if !(s > 0.0) {
+            return *a;
+        }
+        if s >= 1.0 {
+            return *b;
+        }
+        let q = a.orientation().slerp(b.orientation(), s);
+        let (r, _, back) = q.basis();
+        let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
+        let pitch = back.z.clamp(-1.0, 1.0).asin().clamp(-lim, lim);
+        // The camera has no roll: follow the slerped view direction, and near straight up/down
+        // (where the direction has no heading) the slerped right vector.
+        let yaw = if back.x.hypot(back.y) > 1e-3 {
+            (-back.x).atan2(-back.y)
+        } else if r.x.hypot(r.y) > 1e-9 {
+            (-r.y).atan2(r.x)
+        } else {
+            a.yaw + (b.yaw - a.yaw) * s
+        };
+        Camera {
+            target: a.target + (b.target - a.target) * s,
+            yaw,
+            pitch,
+            distance: a.distance + (b.distance - a.distance) * s,
+            fov: a.fov + (b.fov - a.fov) * s,
+        }
+    }
     pub fn is_valid(&self) -> bool {
         self.target.is_finite() && self.yaw.is_finite() && self.pitch.is_finite() && self.distance.is_finite() && self.distance > 0.0
     }
@@ -239,6 +391,41 @@ mod tests {
         c.orbit(20.0, 0.0);
         let x1 = c.to_screen(near, 800.0, 600.0, 10.0).unwrap().0;
         assert!(x1 > x0, "dragging right must move the near side right: {x0} -> {x1}");
+    }
+
+    #[test]
+    fn view_animation_interpolates() {
+        let mut a = Camera { target: Vec3::new(1.0, 2.0, 3.0), distance: 80.0, ..Default::default() };
+        a.set_view(StandardView::Iso);
+        let mut b = Camera { target: Vec3::new(-5.0, 0.0, 10.0), distance: 120.0, ..Default::default() };
+        b.set_view(StandardView::Top);
+        let anim = CameraAnim::new(a, b, 10.0);
+        // Endpoints are exact.
+        assert_eq!(anim.sample(10.0).0, a);
+        assert_eq!(anim.sample(10.0 + CameraAnim::DURATION), (b, true));
+        assert_eq!(anim.sample(99.0), (b, true));
+        // Midpoint: a valid orientation half way between (equal angles to both ends).
+        let (m, done) = anim.sample(10.0 + CameraAnim::DURATION / 2.0);
+        assert!(!done && m.is_valid());
+        let q = m.orientation();
+        assert!((q.len() - 1.0).abs() < 1e-12);
+        let (qa, qb) = (a.orientation(), b.orientation());
+        let qm = qa.slerp(qb, 0.5);
+        assert!((qm.dot(qa).abs() - qm.dot(qb).abs()).abs() < 1e-12);
+        // The camera keeps no roll but follows the slerped view direction.
+        let (_, _, back) = qm.basis();
+        assert!(m.back().dist(back) < 1e-9, "{:?} vs {back:?}", m.back());
+        assert!(m.target.dist(Vec3::new(-2.0, 1.0, 6.5)) < 1e-9 && (m.distance - 100.0).abs() < 1e-9);
+        // Quaternion round trip of a basis.
+        let (r, u, bk) = a.basis();
+        let (r2, u2, b2) = a.orientation().basis();
+        assert!(r.dist(r2) < 1e-12 && u.dist(u2) < 1e-12 && bk.dist(b2) < 1e-12);
+        // Ease: fixed ends, symmetric, monotonic.
+        assert_eq!((ease_in_out(0.0), ease_in_out(1.0), ease_in_out(0.5)), (0.0, 1.0, 0.5));
+        assert!(ease_in_out(0.25) < 0.25 && ease_in_out(0.75) > 0.75);
+        // Looking from a corner direction.
+        let c = a.looking_from(Vec3::new(1.0, -1.0, 1.0));
+        assert!(c.back().dist(Vec3::new(1.0, -1.0, 1.0).normalized().unwrap()) < 1e-9);
     }
 
     #[test]

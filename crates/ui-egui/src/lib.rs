@@ -25,7 +25,7 @@ use std::sync::mpsc::Receiver;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solvecraft_engine::Session;
-use solvecraft_engine::render::Camera;
+use solvecraft_engine::render::{Camera, CameraAnim, StandardView};
 
 pub use control::{ControlRequest, ControlResponse};
 
@@ -72,6 +72,10 @@ pub struct SolveApp {
     pub session: Session,
     pub ui: UiState,
     pub cam: Camera,
+    /// A view change in progress (view cube, Home, Fit); any mouse navigation cancels it.
+    pub cam_anim: Option<CameraAnim>,
+    /// Seconds since start, as of this frame.
+    pub now: f64,
     pub services: Services,
     pub viewport: viewport::ViewportState,
     pub tool: Option<tools::Tool>,
@@ -95,6 +99,8 @@ impl SolveApp {
             session,
             ui: UiState::default(),
             cam: Camera::default(),
+            cam_anim: None,
+            now: 0.0,
             services,
             viewport: viewport::ViewportState::default(),
             tool: None,
@@ -175,13 +181,62 @@ impl SolveApp {
         }
     }
 
+    /// Frame the model at once (programmatic use; the toolbar animates).
     pub fn fit_view(&mut self) {
+        self.cam_anim = None;
+        self.cam = self.fitted(self.cam);
+    }
+
+    /// `cam` moved to frame the whole model.
+    pub fn fitted(&self, mut cam: Camera) -> Camera {
         let b = solvecraft_engine::view::bounds(&self.session);
         if b.is_empty() {
-            self.cam.target = solvecraft_engine::geom::Vec3::ZERO;
-            self.cam.distance = 150.0;
+            cam.target = solvecraft_engine::geom::Vec3::ZERO;
+            cam.distance = 150.0;
         } else {
-            self.cam.fit(&b);
+            cam.fit(&b);
+        }
+        cam
+    }
+
+    /// Move the camera to `to` over half a second (ease in-out, orientation slerped).
+    pub fn animate_to(&mut self, to: Camera) {
+        if !to.is_valid() {
+            return;
+        }
+        self.cam_anim = Some(CameraAnim::new(self.cam, to, self.now));
+    }
+
+    /// Animated view changes for the view cube and navigation bar.
+    pub fn animate_view(&mut self, v: &str) {
+        let mut to = self.cam;
+        match v {
+            "fit" => to = self.fitted(to),
+            "home" => {
+                to.set_view(StandardView::Iso);
+                to = self.fitted(to);
+            }
+            v => match StandardView::parse(v) {
+                Some(sv) => to.set_view(sv),
+                None => return,
+            },
+        }
+        self.animate_to(to);
+    }
+
+    /// Stop any view animation where it is (the user took over the camera).
+    pub fn cancel_view_animation(&mut self) {
+        self.cam_anim = None;
+    }
+
+    fn step_view_animation(&mut self, ctx: &egui::Context) {
+        let Some(anim) = self.cam_anim else { return };
+        let (cam, done) = anim.sample(self.now);
+        self.cam = if cam.is_valid() { cam } else { anim.to };
+        if done {
+            self.cam_anim = None;
+        } else {
+            ctx.request_repaint();
         }
     }
 
@@ -195,6 +250,8 @@ impl SolveApp {
             self.fit_view();
             self.fitted = true;
         }
+        self.now = ctx.input(|i| i.time);
+        self.step_view_animation(ctx);
         self.drain_control(ctx);
         if !self.synthetic.is_empty() {
             ctx.request_repaint();

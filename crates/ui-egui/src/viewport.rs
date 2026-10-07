@@ -379,7 +379,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             i.pointer.delta(),
         )
     });
-    let inside = hover.is_some_and(|p| rect.contains(p));
+    // The view cube handles its own clicks; the model underneath must not see them.
+    let cube = Rect::from_center_size(pos2(rect.right() - 80.0, rect.top() + 80.0), vec2(150.0, 150.0));
+    let inside = hover.is_some_and(|p| rect.contains(p) && !cube.contains(p));
     app.viewport.mouse = hover.filter(|_| inside);
 
     // ---- navigation ----
@@ -393,6 +395,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let den = d.dot(n);
             if den.abs() > 1e-9 { o + d * ((app.cam.target - o).dot(n) / den) } else { app.cam.target }
         });
+        app.cancel_view_animation();
         app.cam.zoom_at(f, anchor);
     }
     let dragging = resp.dragged() || (inside && (middle || secondary_down));
@@ -407,6 +410,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else {
             None
         };
+        if mode.is_some() {
+            app.cancel_view_animation();
+        }
         match mode {
             Some(NavMode::Orbit) => app.cam.orbit(dx, dy),
             Some(NavMode::Pan) => app.cam.pan(dx, dy, h),
@@ -707,12 +713,13 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         (Vec3::new(0.0, 0.0, -1.0), "BOTTOM", StandardView::Bottom),
     ];
     let painter = ui.painter_at(rect);
-    let mut clicked: Option<StandardView> = None;
+    // Clicked view direction (target → eye): a face, or an edge/corner zone of a face.
+    let mut clicked: Option<Vec3> = None;
     let hover = ui.input(|i| i.pointer.hover_pos());
     let mut order: Vec<usize> = (0..6).collect();
     order.sort_by(|a, b2| faces[*a].0.dot(b).total_cmp(&faces[*b2].0.dot(b)));
     for i in order {
-        let (n, label, v) = faces[i];
+        let (n, label, _) = faces[i];
         if n.dot(b) <= 1e-3 {
             continue;
         }
@@ -727,14 +734,31 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         let pts: Vec<Pos2> = corners.iter().map(|p| to2(*p).0).collect();
         let poly_hover = hover.is_some_and(|h| point_in_poly(h, &pts));
         let shade = (0.75 + 0.25 * n.dot(b)) as f32;
-        let fill = if poly_hover { t.accent_soft } else { Color32::from_gray((236.0 * shade) as u8) };
-        painter.add(Shape::convex_polygon(pts.clone(), fill, Stroke::new(1.0, Color32::from_rgb(140, 148, 160))));
+        painter.add(Shape::convex_polygon(
+            pts.clone(),
+            Color32::from_gray((236.0 * shade) as u8),
+            Stroke::new(1.0, Color32::from_rgb(140, 148, 160)),
+        ));
+        // Hover zone: the outer band of a face picks the edge or corner it borders.
+        let zone = hover.filter(|_| poly_hover).and_then(|h| cube_zone(&pts, h));
+        if let Some((zi, zj)) = zone {
+            let lo = |k: i32| match k {
+                -1 => (-1.0, -1.0 + 2.0 * CUBE_BAND),
+                0 => (-1.0 + 2.0 * CUBE_BAND, 1.0 - 2.0 * CUBE_BAND),
+                _ => (1.0 - 2.0 * CUBE_BAND, 1.0),
+            };
+            let ((a0, a1), (b0, b1)) = (lo(zi), lo(zj));
+            let zp: Vec<Pos2> = [(a0, b0), (a1, b0), (a1, b1), (a0, b1)].iter().map(|(x, y)| to2(n + e1 * *x + e2 * *y).0).collect();
+            painter.add(Shape::convex_polygon(zp, t.accent_soft, Stroke::NONE));
+        }
         let center = to2(n).0;
         if n.dot(b) > 0.35 {
             painter.text(center, Align2::CENTER_CENTER, label, FontId::proportional(9.5), t.text);
         }
-        if poly_hover && ui.input(|i| i.pointer.primary_clicked()) {
-            clicked = Some(v);
+        if let Some((zi, zj)) = zone
+            && ui.input(|i| i.pointer.primary_clicked())
+        {
+            clicked = Some(n + e1 * zi as f64 + e2 * zj as f64);
         }
     }
     // Axis triad at the cube's corner.
@@ -748,12 +772,43 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let hr = ui.interact(home, ui.id().with("vc_home"), Sense::click());
     icons::paint(&painter, home, "home", t.icon, if hr.hovered() { t.accent_soft } else { Color32::WHITE }, t.accent);
     if hr.on_hover_text("Home view").clicked() {
-        app.cam.set_view(StandardView::Iso);
-        app.fit_view();
+        app.animate_view("home");
     }
-    if let Some(v) = clicked {
-        app.cam.set_view(v);
+    if let Some(dir) = clicked {
+        let to = app.cam.looking_from(dir);
+        app.animate_to(to);
     }
+}
+
+/// Width of the edge/corner band of a view cube face, as a fraction of the face.
+const CUBE_BAND: f64 = 0.2;
+
+/// Which of the 3×3 zones of a projected cube face (corners in order −−, +−, ++, −+) the point
+/// is over: (−1|0|1, −1|0|1).
+pub(crate) fn cube_zone(pts: &[Pos2], p: Pos2) -> Option<(i32, i32)> {
+    let [c0, c1, _, c3] = pts else { return None };
+    let (ux, uy) = ((c1.x - c0.x) as f64, (c1.y - c0.y) as f64);
+    let (vx, vy) = ((c3.x - c0.x) as f64, (c3.y - c0.y) as f64);
+    let det = ux * vy - uy * vx;
+    if det.abs() < 1e-9 {
+        return None;
+    }
+    let (px, py) = ((p.x - c0.x) as f64, (p.y - c0.y) as f64);
+    let a = (px * vy - py * vx) / det;
+    let b = (ux * py - uy * px) / det;
+    if !(-1e-6..=1.0 + 1e-6).contains(&a) || !(-1e-6..=1.0 + 1e-6).contains(&b) {
+        return None;
+    }
+    let k = |t: f64| {
+        if t < CUBE_BAND {
+            -1
+        } else if t > 1.0 - CUBE_BAND {
+            1
+        } else {
+            0
+        }
+    };
+    Some((k(a), k(b)))
 }
 
 fn point_in_poly(p: Pos2, poly: &[Pos2]) -> bool {
@@ -808,14 +863,27 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 "orbit" => app.viewport.nav = toggle(NavMode::Orbit, app.viewport.nav),
                 "pan" => app.viewport.nav = toggle(NavMode::Pan, app.viewport.nav),
                 "zoom" => app.viewport.nav = toggle(NavMode::Zoom, app.viewport.nav),
-                "fit" => app.fit_view(),
-                "home" => {
-                    app.cam.set_view(StandardView::Iso);
-                    app.fit_view();
-                }
+                "fit" => app.animate_view("fit"),
+                "home" => app.animate_view("home"),
                 "perspective" => app.ui.perspective = !app.ui.perspective,
                 _ => app.ui.show_grid = !app.ui.show_grid,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn view_cube_zones() {
+        // A square face 100 px wide, corners in order −−, +−, ++, −+ (screen y down).
+        let pts = [pos2(0.0, 100.0), pos2(100.0, 100.0), pos2(100.0, 0.0), pos2(0.0, 0.0)];
+        assert_eq!(cube_zone(&pts, pos2(50.0, 50.0)), Some((0, 0)));
+        assert_eq!(cube_zone(&pts, pos2(5.0, 95.0)), Some((-1, -1)));
+        assert_eq!(cube_zone(&pts, pos2(95.0, 50.0)), Some((1, 0)));
+        assert_eq!(cube_zone(&pts, pos2(50.0, 5.0)), Some((0, 1)));
+        assert_eq!(cube_zone(&pts, pos2(150.0, 50.0)), None);
     }
 }

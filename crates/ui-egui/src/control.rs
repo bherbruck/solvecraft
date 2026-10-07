@@ -6,7 +6,7 @@
 //! - `engine.commands`: every command with tab, panel, params and enablement
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
-//! - `ui.set {...UiState fields}`; `ui.view {view: front|back|top|bottom|left|right|iso|home|fit}`
+//! - `ui.set {...UiState fields}`; `ui.view {view: front|back|top|bottom|left|right|iso|home|fit, animate?: bool}` (snaps unless animate)
 //! - `ui.start {command}`: like clicking the toolbar button (starts tools/dialogs)
 //! - `ui.click {x, y, button?, shift?}`, `ui.move {x, y}`, `ui.scroll {x, y, delta}`: real
 //!   pointer input in screen points; `ui.key {key, cmd?, shift?}`, `ui.text {text}`
@@ -110,7 +110,16 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             }
         }
         "ui.view" => {
-            match s("view").unwrap_or("home") {
+            let v = s("view").unwrap_or("home");
+            if p.get("animate").and_then(Value::as_bool).unwrap_or(false) {
+                if v != "fit" && v != "home" && StandardView::parse(v).is_none() {
+                    return err(format!("unknown view `{v}`"));
+                }
+                app.animate_view(v);
+                return ok(json!({ "animating": true, "to": app.cam_anim.map(|a| a.to) }));
+            }
+            app.cam_anim = None;
+            match v {
                 "fit" => app.fit_view(),
                 "home" => {
                     app.cam.set_view(StandardView::Iso);
