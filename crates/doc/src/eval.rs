@@ -210,7 +210,12 @@ fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region2>> 
         return Err(DocError::Invalid(format!("{} has no closed profiles", ss.name)));
     }
     let out: Vec<Region2> = match sel {
-        ProfileSel::All => ps.iter().map(|p| p.region.clone()).collect(),
+        // "All" means what was drawn: projected reference geometry (a face's auto-projected
+        // edges) only counts when the drawn curves alone make no profile.
+        ProfileSel::All => {
+            let drawn = solvecraft_sketch::find_drawn_profiles(&ss.sketch);
+            if drawn.is_empty() { ps.iter().map(|p| p.region.clone()).collect() } else { drawn.into_iter().map(|p| p.region).collect() }
+        }
         ProfileSel::Indices { indices } => {
             let mut v = Vec::new();
             for i in indices {

@@ -178,6 +178,20 @@ fn curvature(s: &Seg2) -> f64 {
 
 /// Find all closed profiles of a sketch. Curves are split where other curves end on them or
 /// cross them, like a drawing would be read.
+/// Profiles of the drawn geometry only (linked reference curves left out).
+pub fn find_drawn_profiles(sk: &Sketch) -> Vec<Profile> {
+    if sk.links.is_empty() {
+        return find_profiles(sk);
+    }
+    let mut d = sk.clone();
+    for c in &mut d.curves {
+        if c.link.is_some() {
+            c.construction = true;
+        }
+    }
+    find_profiles(&d)
+}
+
 pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
     let tol = MERGE_TOL * 10.0;
     // Analytic shapes of the profile curves.
