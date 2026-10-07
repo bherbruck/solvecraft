@@ -128,6 +128,62 @@ fn classify(pts: &[Vec3], nrm: &[Vec3], tol: f64, id: usize) -> Surf {
     Surf::Other(id)
 }
 
+/// Per-face vertex samples (position, normal) from the tessellation.
+fn face_vertices(mesh: &Mesh, nf: usize) -> Vec<Vec<(Vec3, Vec3)>> {
+    let mut out: Vec<Vec<(Vec3, Vec3)>> = vec![Vec::new(); nf];
+    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        for &k in t {
+            if let (Some(p), Some(n), Some(v)) = (mesh.positions.get(k as usize), mesh.normals.get(k as usize), out.get_mut(*f as usize)) {
+                v.push((*p, *n));
+            }
+        }
+    }
+    out
+}
+
+/// Normal of face `f` nearest to `p`.
+fn normal_near(verts: &[(Vec3, Vec3)], p: Vec3) -> Option<Vec3> {
+    verts.iter().min_by(|a, b| a.0.dist(p).total_cmp(&b.0.dist(p))).map(|v| v.1)
+}
+
+/// Cone signature of a non-analytic face: (axis, cos of the normal/axis angle) when all normals
+/// make the same angle with one axis.
+fn cone_signature(verts: &[(Vec3, Vec3)]) -> Option<(Vec3, f64)> {
+    let n0 = verts.first()?.1;
+    let n1 = verts.iter().map(|v| v.1).max_by(|a, b| (*a - n0).len().total_cmp(&(*b - n0).len()))?;
+    let n2 = verts.iter().map(|v| v.1).max_by(|a, b| (*a - n0).cross(n1 - n0).len().total_cmp(&(*b - n0).cross(n1 - n0).len()))?;
+    let mut a = (n1 - n0).cross(n2 - n0).normalized()?;
+    if a.x + a.y * 1e-3 + a.z * 1e-6 < 0.0 {
+        a = -a;
+    }
+    let c = n0.dot(a);
+    verts.iter().all(|v| (v.1.dot(a) - c).abs() < 2e-3).then_some((a, c))
+}
+
+/// Do adjacent faces `a` and `b` (sharing the edge polyline `edge`) lie on one surface?
+/// Analytic classes compare parameters; other faces must join smoothly along the edge and have
+/// the same cone signature (or both have none).
+fn same_surface(surfs: &[Surf], verts: &[Vec<(Vec3, Vec3)>], edge: Option<&Vec<Vec3>>, a: usize, b: usize, tol: f64) -> bool {
+    let (Some(sa), Some(sb)) = (surfs.get(a), surfs.get(b)) else { return false };
+    match (sa, sb) {
+        (Surf::Other(_), Surf::Other(_)) => {}
+        _ => return sa.same(sb, tol),
+    }
+    let (Some(va), Some(vb), Some(e)) = (verts.get(a), verts.get(b), edge) else { return false };
+    let smooth = e.iter().all(|p| match (normal_near(va, *p), normal_near(vb, *p)) {
+        (Some(na), Some(nb)) => na.dot(nb) > 1.0 - 2e-3,
+        _ => false,
+    });
+    if !smooth {
+        return false;
+    }
+    match (cone_signature(va), cone_signature(vb)) {
+        (Some((xa, ca)), Some((xb, cb))) => xa.dot(xb) > 1.0 - 1e-4 && (ca - cb).abs() < 1e-3,
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 fn find(p: &mut [usize], mut i: usize) -> usize {
     while let Some(&q) = p.get(i) {
         if q == i {
@@ -144,6 +200,7 @@ pub fn seam_flags(b: &Body, mesh: &Mesh) -> Vec<bool> {
     let nf = solid.face_iter().count();
     let tol = (b.size() * 1e-4).max(1e-6);
     let surfs = classify_faces(mesh, nf, tol);
+    let verts = face_vertices(mesh, nf);
     let mut faces_of: HashMap<String, Vec<usize>> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for (fi, f) in solid.face_iter().enumerate() {
@@ -160,11 +217,11 @@ pub fn seam_flags(b: &Body, mesh: &Mesh) -> Vec<bool> {
     }
     order
         .iter()
-        .map(|k| match faces_of.get(k).map(Vec::as_slice) {
-            Some([a, b2]) => match (surfs.get(*a), surfs.get(*b2)) {
-                (Some(sa), Some(sb)) => !matches!(sa, Surf::Plane { .. }) && sa.same(sb, tol * 10.0),
-                _ => false,
-            },
+        .enumerate()
+        .map(|(ei, k)| match faces_of.get(k).map(Vec::as_slice) {
+            Some([a, b2]) => {
+                !matches!(surfs.get(*a), Some(Surf::Plane { .. })) && same_surface(&surfs, &verts, mesh.edges.get(ei), *a, *b2, tol * 10.0)
+            }
             _ => false,
         })
         .collect()
@@ -191,21 +248,17 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     let solid = &*b.solid;
     let nf = solid.face_iter().count();
     let tol = (b.size() * 1e-4).max(1e-6);
-    let mut pts: Vec<Vec<Vec3>> = vec![Vec::new(); nf];
-    let mut nrm: Vec<Vec<Vec3>> = vec![Vec::new(); nf];
+    let surfs = classify_faces(mesh, nf, tol);
+    let verts = face_vertices(mesh, nf);
+    // Zero-area faces (a revolved profile edge lying on the axis) don't count.
+    let mut area = vec![0.0f64; nf];
     for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        for &k in t {
-            if let (Some(p), Some(n), Some(pv), Some(nv)) =
-                (mesh.positions.get(k as usize), mesh.normals.get(k as usize), pts.get_mut(*f as usize), nrm.get_mut(*f as usize))
-            {
-                pv.push(*p);
-                nv.push(*n);
-            }
+        if let (Some([p, q, r]), Some(a)) = (mesh.tri(t), area.get_mut(*f as usize)) {
+            *a += (q - p).cross(r - p).len() * 0.5;
         }
     }
-    let surfs: Vec<Surf> = (0..nf)
-        .map(|i| classify(pts.get(i).map(Vec::as_slice).unwrap_or(&[]), nrm.get(i).map(Vec::as_slice).unwrap_or(&[]), tol * 10.0, i))
-        .collect();
+    let degenerate: Vec<bool> = area.iter().map(|a| *a < (b.size() * 1e-6).powi(2)).collect();
+    let is_deg = |f: usize| degenerate.get(f).copied().unwrap_or(false);
 
     // Edge → faces, edge → vertices.
     let mut edge_faces: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -237,10 +290,9 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     }
     // Merge faces.
     let mut fp: Vec<usize> = (0..nf).collect();
-    for faces in edge_faces.values() {
+    for (ei, faces) in &edge_faces {
         if let [a, b] = faces[..]
-            && let (Some(sa), Some(sb)) = (surfs.get(a), surfs.get(b))
-            && sa.same(sb, tol * 10.0)
+            && same_surface(&surfs, &verts, mesh.edges.get(*ei), a, b, tol * 10.0)
         {
             let (ra, rb) = (find(&mut fp, a), find(&mut fp, b));
             if let Some(s) = fp.get_mut(ra) {
@@ -251,6 +303,9 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     let mut groups: BTreeMap<usize, usize> = BTreeMap::new();
     let mut face_types: BTreeMap<String, usize> = BTreeMap::new();
     for f in 0..nf {
+        if is_deg(f) {
+            continue;
+        }
         let r = find(&mut fp, f);
         if groups.insert(r, f).is_none()
             && let Some(s) = surfs.get(f)
@@ -264,6 +319,9 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     eids.sort();
     for e in eids {
         let faces = edge_faces.get(e).cloned().unwrap_or_default();
+        if faces.iter().any(|f| is_deg(*f)) {
+            continue;
+        }
         let gs: Vec<usize> = faces.iter().map(|f| find(&mut fp, *f)).collect();
         let pair = match gs[..] {
             [a, b] if a == b => continue,

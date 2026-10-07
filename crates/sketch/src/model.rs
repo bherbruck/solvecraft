@@ -49,6 +49,10 @@ pub struct Curve {
     pub kind: CurveKind,
     #[serde(default)]
     pub construction: bool,
+    /// An arc drawn clockwise: stored counter-clockwise, but `<id>.start` / `<id>.end` keep the
+    /// as-drawn meaning.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reversed: bool,
 }
 
 /// Geometric constraints and dimensions. Indices refer to `Sketch::points` (`p`, `q`) or
@@ -147,11 +151,15 @@ pub enum ConstraintKind {
         c: usize,
         value: f64,
     },
-    /// Angle from line `a` to line `b`, radians, counter-clockwise.
+    /// Angle from line `a` to line `b`, radians, counter-clockwise. With `flip` the angle is
+    /// measured to the reversed direction of one line (the constraint holds `value + 180°`), which
+    /// lets a dimension pick any of the four angles between two lines.
     Angle {
         a: usize,
         b: usize,
         value: f64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
     },
 }
 
@@ -316,7 +324,8 @@ impl Sketch {
         }
     }
 
-    fn fresh(&mut self, prefix: &str) -> String {
+    /// A new unused id with the given prefix (`l` → `l3`).
+    pub fn fresh(&mut self, prefix: &str) -> String {
         let n = self.counters.entry(prefix.to_string()).or_insert(0);
         loop {
             *n += 1;
@@ -386,7 +395,7 @@ impl Sketch {
             return Err(SketchError::Invalid("line needs two distinct points".into()));
         }
         let id = self.curve_id(id, "l")?;
-        self.curves.push(Curve { id, kind: CurveKind::Line { a, b }, construction: false });
+        self.curves.push(Curve { id, kind: CurveKind::Line { a, b }, construction: false, reversed: false });
         Ok(self.curves.len() - 1)
     }
 
@@ -415,7 +424,7 @@ impl Sketch {
             Some(i) if i < self.points.len() => i,
             _ => self.own_point(&id, "center", center)?,
         };
-        self.curves.push(Curve { id, kind: CurveKind::Circle { c, r }, construction: false });
+        self.curves.push(Curve { id, kind: CurveKind::Circle { c, r }, construction: false, reversed: false });
         Ok(self.curves.len() - 1)
     }
 
@@ -441,7 +450,7 @@ impl Sketch {
             Some(i) if i < n && i != a => i,
             _ => self.own_point(&id, "end", p1)?,
         };
-        self.curves.push(Curve { id, kind: CurveKind::Arc { c, a, b }, construction: false });
+        self.curves.push(Curve { id, kind: CurveKind::Arc { c, a, b }, construction: false, reversed: false });
         Ok(self.curves.len() - 1)
     }
 
@@ -656,6 +665,11 @@ impl Sketch {
         }
         let (cid, role) = r.rsplit_once('.')?;
         let c = self.curves.get(self.curve_index(cid)?)?;
+        let role = match (role, c.reversed) {
+            ("start", true) => "end",
+            ("end", true) => "start",
+            (r, _) => r,
+        };
         match (&c.kind, role) {
             (CurveKind::Line { a, .. }, "start") | (CurveKind::Arc { a, .. }, "start") => Some(*a),
             (CurveKind::Line { b, .. }, "end") | (CurveKind::Arc { b, .. }, "end") => Some(*b),

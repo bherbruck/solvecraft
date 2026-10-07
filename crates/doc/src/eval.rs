@@ -328,6 +328,31 @@ fn apply_op(state: &mut ModelState, f: &Feature, tools: Vec<Body>, op: Operation
     Ok(())
 }
 
+/// Distance that reaches through every target body from the sketch plane (either side).
+fn through_all_distance(st: &ModelState, plane: &Plane, targets: &[String]) -> Result<f64> {
+    let mut far: f64 = 0.0;
+    let mut any = false;
+    for b in st.bodies.iter().filter(|b| targets.is_empty() || targets.contains(&b.name)) {
+        let bb = b.mesh().bounds();
+        if bb.is_empty() {
+            continue;
+        }
+        any = true;
+        for i in 0..8 {
+            let p = Vec3::new(
+                if i & 1 == 0 { bb.min.x } else { bb.max.x },
+                if i & 2 == 0 { bb.min.y } else { bb.max.y },
+                if i & 4 == 0 { bb.min.z } else { bb.max.z },
+            );
+            far = far.max(plane.height(p).abs());
+        }
+    }
+    if !any {
+        return Err(DocError::Invalid("through all needs a body to cut".into()));
+    }
+    Ok(far * 1.02 + 1.0)
+}
+
 /// Sample points inside a region (sketch coordinates).
 fn region_samples(r: &Region2) -> Vec<Vec2> {
     let mut out = vec![r.interior_point()];
@@ -428,6 +453,14 @@ fn revolve_axis(ss: &SolvedSketch, axis: &AxisRef) -> Result<(Vec2, Vec2)> {
             }
             Ok((pl.to_local(Vec3::ZERO), Vec2::new(d.dot(pl.x), d.dot(pl.y))))
         }
+        AxisRef::Line { origin, dir } => {
+            let pl = &ss.plane;
+            let d = dir.normalized().ok_or_else(|| DocError::Invalid("revolve axis has no direction".into()))?;
+            if d.dot(pl.normal()).abs() > 1e-9 || pl.height(*origin).abs() > 1e-6 {
+                return Err(DocError::Invalid("the revolve axis does not lie in the sketch plane".into()));
+            }
+            Ok((pl.to_local(*origin), Vec2::new(d.dot(pl.x), d.dot(pl.y))))
+        }
     }
 }
 
@@ -448,8 +481,19 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         }
         FeatureKind::Extrude { sketch, profiles, extent, operation, targets } => {
             let ss = st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?.clone();
-            let regions = select_profiles(&ss, profiles)?;
-            let d = val(vals, &extent.distance, Kind::Length)?;
+            let regions = solvecraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
+            let d = if extent.through_all { through_all_distance(st, &ss.plane, targets)? } else { val(vals, &extent.distance, Kind::Length)? };
+            if let Some(tp) = &extent.taper {
+                let taper = val(vals, tp, Kind::Angle)?;
+                if extent.distance2.is_some() || extent.start_offset.is_some() || extent.direction == crate::Direction::Symmetric {
+                    return Err(DocError::Invalid("not supported yet: taper with two-sided, symmetric or offset extents".into()));
+                }
+                let sign = if extent.direction == crate::Direction::Negative { -1.0 } else { 1.0 };
+                let (len, sign) = if d < 0.0 { (-d, -sign) } else { (d, sign) };
+                let tools =
+                    regions.iter().map(|r| kernel::extrude_tapered(&ss.plane, r, len, sign, taper)).collect::<std::result::Result<Vec<_>, _>>()?;
+                return apply_op(st, f, tools, *operation, targets);
+            }
             let off = match &extent.start_offset {
                 Some(e) => val(vals, e, Kind::Length)?,
                 None => 0.0,
@@ -471,7 +515,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         }
         FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets } => {
             let ss = st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?.clone();
-            let regions = select_profiles(&ss, profiles)?;
+            let regions = solvecraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
             let (o, d) = revolve_axis(&ss, axis)?;
             let ang = val(vals, angle, Kind::Angle)?;
             let tools = kernel::revolve(&ss.plane, &regions, o, d, ang)?;

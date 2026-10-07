@@ -51,6 +51,8 @@ fn sketch_cmds(f: &Value, out: &mut Vec<Value>) -> Result<(), String> {
         match e.get("type").and_then(Value::as_str) {
             Some("line") => out.push(json!({"command": "DrawPolyline", "params": {"points": [parg(e.get("start")), parg(e.get("end"))], "ids": [id], "construction": construction}})),
             Some("circle") => out.push(json!({"command": "CircleCenterRadius", "params": {"center": parg(e.get("center")), "radius": e.get("radius"), "id": id, "construction": construction}})),
+            Some("arc_three_point") => out.push(json!({"command": "ArcThreePoint", "params": {"start": parg(e.get("start")), "end": parg(e.get("end")), "through": e.get("mid").or(e.get("through")), "id": id}})),
+            Some("arc_center_start_sweep") => out.push(json!({"command": "ArcCenterTwoPoint", "params": {"center": parg(e.get("center")), "start": parg(e.get("start")), "sweep": e.get("sweep_deg").or(e.get("sweep")), "id": id}})),
             Some("arc") => {
                 if e.get("center").is_some() {
                     out.push(json!({"command": "ArcCenterTwoPoint", "params": {"center": parg(e.get("center")), "start": parg(e.get("start")), "end": parg(e.get("end")), "id": id}}))
@@ -64,46 +66,113 @@ fn sketch_cmds(f: &Value, out: &mut Vec<Value>) -> Result<(), String> {
         }
     }
     for c in f.get("constraints").and_then(Value::as_array).into_iter().flatten() {
-        let ty = c.get("type").and_then(Value::as_str).unwrap_or("");
-        let cmd = match ty.to_ascii_lowercase().as_str() {
-            "horizontal" | "vertical" => {
-                let mut p = c.clone();
-                p["mode"] = json!(ty.to_ascii_lowercase());
-                out.push(json!({"command": "ConstraintHorizontalVertical", "params": p}));
-                continue;
-            }
-            "coincident" => "ConstraintCoincident",
-            "tangent" => "ConstraintTangent",
-            "equal" => "ConstraintEqual",
-            "parallel" => "ConstraintParallel",
-            "perpendicular" => "ConstraintPerpendicular",
-            "fix" => "ConstraintFix",
-            "midpoint" => "ConstraintMidPoint",
-            "concentric" => "ConstraintConcentric",
-            "collinear" => "ConstraintCollinear",
-            "symmetry" | "symmetric" => "ConstraintSymmetry",
-            other => return Err(format!("recipe: constraint `{other}` is not supported yet")),
-        };
-        out.push(json!({"command": cmd, "params": c}));
+        out.push(constraint_cmd(c)?);
     }
     for d in f.get("dimensions").and_then(Value::as_array).into_iter().flatten() {
-        out.push(json!({"command": "SketchDimension", "params": d}));
+        let mut p = json!({"entities": d.get("refs").or(d.get("entities")), "type": d.get("type"), "value": d.get("value")});
+        for k in ["orientation", "text_at"] {
+            if let Some(v) = d.get(k) {
+                p[k] = v.clone();
+            }
+        }
+        out.push(json!({"command": "SketchDimension", "params": p}));
     }
     out.push(json!({"command": "SketchStop", "params": {}}));
     Ok(())
 }
 
-fn extent(f: &Value) -> (Value, Value, Value) {
+/// Extent parameters for the Extrude command.
+fn extent(f: &Value, p: &mut Value) {
     let e = f.get("extent").cloned().unwrap_or(Value::Null);
-    let d = e.get("distance").cloned().or_else(|| f.get("distance").cloned()).unwrap_or(Value::Null);
-    let dir = e.get("direction").cloned().unwrap_or(json!("positive"));
-    (d, dir, e.get("distance2").cloned().unwrap_or(Value::Null))
+    let ty = e.get("type").and_then(Value::as_str).unwrap_or("distance");
+    let dist = e.get("distance").cloned().or_else(|| f.get("distance").cloned()).unwrap_or(Value::Null);
+    match ty {
+        "symmetric" => {
+            let full = e.get("is_full_length").and_then(Value::as_bool).unwrap_or(false);
+            p["direction"] = json!("symmetric");
+            p["distance"] = if full { json!(format!("({}) / 2", expr_text(&dist))) } else { dist };
+        }
+        "two_sides" => {
+            p["distance"] = e.get("side1").cloned().unwrap_or(Value::Null);
+            p["distance2"] = e.get("side2_opposite").or(e.get("side2")).cloned().unwrap_or(Value::Null);
+        }
+        "through_all" => {
+            p["through_all"] = json!(true);
+            p["direction"] = e.get("direction").cloned().unwrap_or(json!("positive"));
+        }
+        _ => {
+            p["distance"] = dist;
+            p["direction"] = e.get("direction").cloned().unwrap_or(json!("positive"));
+        }
+    }
+    if let Some(t) = e.get("taper_deg") {
+        p["taper"] = t.clone();
+    }
+}
+
+fn expr_text(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn refs(c: &Value) -> Vec<Value> {
+    c.get("refs").and_then(Value::as_array).cloned().unwrap_or_default()
+}
+
+/// A recipe constraint `{type, refs}` → a constraint command.
+fn constraint_cmd(c: &Value) -> Result<Value, String> {
+    let ty = c.get("type").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
+    let r = refs(c);
+    let at = |i: usize| r.get(i).cloned().unwrap_or(Value::Null);
+    let is_point = |v: &Value| v.as_str().is_some_and(|s| s.contains('.') || s == "origin" || s.starts_with('p'));
+    let (cmd, p) = match ty.as_str() {
+        "horizontal" | "vertical" if r.len() >= 2 => ("ConstraintHorizontalVertical", json!({"points": [at(0), at(1)], "mode": ty})),
+        "horizontal" | "vertical" => ("ConstraintHorizontalVertical", json!({"line": at(0), "mode": ty})),
+        "horizontal_points" => ("ConstraintHorizontalVertical", json!({"points": [at(0), at(1)], "mode": "horizontal"})),
+        "vertical_points" => ("ConstraintHorizontalVertical", json!({"points": [at(0), at(1)], "mode": "vertical"})),
+        "coincident" | "point_on_curve" => {
+            // The point goes first.
+            if is_point(&at(0)) {
+                ("ConstraintCoincident", json!({"a": at(0), "b": at(1)}))
+            } else {
+                ("ConstraintCoincident", json!({"a": at(1), "b": at(0)}))
+            }
+        }
+        "midpoint" => {
+            if is_point(&at(0)) {
+                ("ConstraintMidPoint", json!({"point": at(0), "line": at(1)}))
+            } else {
+                ("ConstraintMidPoint", json!({"point": at(1), "line": at(0)}))
+            }
+        }
+        "symmetric" | "symmetry" => ("ConstraintSymmetry", json!({"a": at(0), "b": at(1), "line": at(2)})),
+        "fix" => ("ConstraintFix", json!({"entity": at(0), "fixed": true})),
+        "tangent" => ("ConstraintTangent", json!({"a": at(0), "b": at(1)})),
+        "equal" => ("ConstraintEqual", json!({"a": at(0), "b": at(1)})),
+        "parallel" => ("ConstraintParallel", json!({"a": at(0), "b": at(1)})),
+        "perpendicular" => ("ConstraintPerpendicular", json!({"a": at(0), "b": at(1)})),
+        "concentric" => ("ConstraintConcentric", json!({"a": at(0), "b": at(1)})),
+        "collinear" => ("ConstraintCollinear", json!({"a": at(0), "b": at(1)})),
+        other => return Err(format!("recipe: constraint `{other}` is not supported yet")),
+    };
+    Ok(json!({"command": cmd, "params": p}))
+}
+
+/// The profiles a feature uses (`profiles` list or a single `profile`).
+fn profiles_of(f: &Value) -> Value {
+    match (f.get("profiles"), f.get("profile")) {
+        (Some(p), _) => p.clone(),
+        (None, Some(p)) => json!([p]),
+        _ => json!("all"),
+    }
 }
 
 /// The sketch a feature uses (name), from its profiles.
 fn profile_sketch(f: &Value) -> Value {
-    f.get("profiles")
-        .and_then(Value::as_array)
+    profiles_of(f)
+        .as_array()
         .and_then(|a| a.first())
         .and_then(|p| p.get("sketch"))
         .cloned()
@@ -123,17 +192,23 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
         match f.get("op").and_then(Value::as_str) {
             Some("sketch") => sketch_cmds(f, &mut out)?,
             Some("extrude") => {
-                let (d, dir, d2) = extent(f);
-                let mut p = json!({"sketch": profile_sketch(f), "profiles": f.get("profiles").cloned().unwrap_or(json!("all")), "distance": d, "direction": dir, "operation": op(f), "name": name, "body_names": bodies});
-                if !d2.is_null() {
-                    p["distance2"] = d2;
-                }
+                let mut p = json!({"sketch": profile_sketch(f), "profiles": profiles_of(f), "operation": op(f), "name": name, "body_names": bodies});
+                extent(f, &mut p);
                 out.push(json!({"command": "Extrude", "params": p}));
             }
-            Some("revolve") => out.push(json!({"command": "Revolve", "params": {
-                "sketch": profile_sketch(f), "profiles": f.get("profiles").cloned().unwrap_or(json!("all")),
-                "axis": f.get("axis").and_then(|a| a.get("ref").or(a.get("line")).cloned()).or_else(|| f.get("axis").cloned()),
-                "angle": f.get("angle").cloned().unwrap_or(json!("360 deg")), "operation": op(f), "name": name, "body_names": bodies}})),
+            Some("combine") => out.push(json!({"command": "FusionCombineCommand", "params": {
+                "target": f.get("target_body").or(f.get("target")), "tools": f.get("tool_bodies").or(f.get("tools")),
+                "operation": op(f), "keep_tools": f.get("keep_tools").cloned().unwrap_or(json!(false)), "name": name}})),
+            Some("revolve") => {
+                let axis = match f.get("axis") {
+                    Some(a) if a.get("dir").is_some() => json!({"origin": a.get("origin").cloned().unwrap_or(json!([0, 0, 0])), "dir": a.get("dir")}),
+                    Some(a) => a.get("line").or(a.get("ref")).cloned().unwrap_or_else(|| a.clone()),
+                    None => Value::Null,
+                };
+                out.push(json!({"command": "Revolve", "params": {
+                    "sketch": profile_sketch(f), "profiles": profiles_of(f), "axis": axis,
+                    "angle": f.get("angle").cloned().unwrap_or(json!("360 deg")), "operation": op(f), "name": name, "body_names": bodies}}));
+            }
             Some("fillet") => {
                 out.push(json!({"command": "FusionFilletEdgesCommand", "params": {"edges": edge_points(f), "radius": f.get("radius"), "name": name}}))
             }

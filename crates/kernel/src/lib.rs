@@ -22,7 +22,7 @@ mod topo;
 
 pub use blend::{chamfer, fillet};
 pub use body::{Body, EdgeInfo, FaceInfo};
-pub use build::{box_solid, cylinder, extrude, revolve, sphere, torus};
+pub use build::{box_solid, cylinder, extrude, extrude_tapered, revolve, sphere, torus};
 pub use measure::{BodyMeasure, measure};
 pub use ops::{BoolOp, boolean, transform};
 pub use step::step_export;

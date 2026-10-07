@@ -14,7 +14,7 @@ mod profiles;
 mod solver;
 
 pub use model::{Constraint, ConstraintKind, Curve, CurveKind, SPoint, Sketch, SketchError};
-pub use profiles::{Profile, find_profiles};
+pub use profiles::{Profile, find_profiles, merge_regions};
 pub use solver::{SolveReport, SolveStatus, solve};
 
 #[cfg(test)]

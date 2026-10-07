@@ -59,7 +59,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("arc_center")
         .enabled(in_sketch)
-        .params("center, start, end (counter-clockwise from start)"),
+        .params("center, start, end (counter-clockwise from start) | center, start, sweep: signed degrees"),
     CommandSpec::new("ShapePolygonInscribed", "Inscribed Polygon", polygon_inscribed)
         .at("SKETCH", "CREATE")
         .icon("polygon")
@@ -586,8 +586,12 @@ fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
         // Counter-clockwise from start to end must pass the through point; otherwise swap.
         let ang = |q: Vec2| (q - o).angle();
         let ccw_span = |from: f64, to: f64| (to - from).rem_euclid(std::f64::consts::TAU);
-        let (s0, e0) = if ccw_span(ang(a.pos()), ang(t)) < ccw_span(ang(a.pos()), ang(b.pos())) { (a, b) } else { (b, a) };
+        let ccw = ccw_span(ang(a.pos()), ang(t)) < ccw_span(ang(a.pos()), ang(b.pos()));
+        let (s0, e0) = if ccw { (a, b) } else { (b, a) };
         let ci = sk.add_arc(o, s0.pos(), e0.pos(), [None, s0.idx(), e0.idx()], id.as_deref())?;
+        if let Some(c) = sk.curves.get_mut(ci) {
+            c.reversed = !ccw;
+        }
         Ok((ids_of(sk, &[ci]), Vec::new()))
     })?;
     Ok(result(out, info))
@@ -596,9 +600,36 @@ fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
 fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "ArcCenterTwoPoint";
     let id = str_(p, "id").map(str::to_string);
+    let sweep = num(p, "sweep");
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let c = req_parg(sk, p, "center", cmd)?;
         let a = req_parg(sk, p, "start", cmd)?;
+        if let Some(sw) = sweep {
+            // Start point and signed sweep (degrees); clockwise arcs keep `<id>.start` at the start.
+            if !(sw.abs() > 1e-9 && sw.abs() < 360.0) {
+                return Err(bad(cmd, "`sweep` must be between -360 and 360 degrees (not 0)"));
+            }
+            let end = c.pos() + Vec2::from_angle((a.pos() - c.pos()).angle() + sw.to_radians()) * a.pos().dist(c.pos());
+            let cid = match &id {
+                Some(i) => i.clone(),
+                None => sk.fresh("a"),
+            };
+            let ai = match a.idx() {
+                Some(i) => i,
+                None => sk.add_point(a.pos(), Some(&format!("{cid}.start")))?,
+            };
+            let bi = sk.add_point(end, Some(&format!("{cid}.end")))?;
+            let ci = if sw > 0.0 {
+                sk.add_arc(c.pos(), a.pos(), end, [c.idx(), Some(ai), Some(bi)], Some(&cid))?
+            } else {
+                let ci = sk.add_arc(c.pos(), end, a.pos(), [c.idx(), Some(bi), Some(ai)], Some(&cid))?;
+                if let Some(cu) = sk.curves.get_mut(ci) {
+                    cu.reversed = true;
+                }
+                ci
+            };
+            return Ok((ids_of(sk, &[ci]), Vec::new()));
+        }
         let b = req_parg(sk, p, "end", cmd)?;
         let ci = sk.add_arc(c.pos(), a.pos(), b.pos(), [c.idx(), a.idx(), b.idx()], id.as_deref())?;
         Ok((ids_of(sk, &[ci]), Vec::new()))
@@ -814,13 +845,43 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn c_symmetry(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "ConstraintSymmetry";
-    constrain(s, p, cmd, |sk| {
-        Ok(ConstraintKind::Symmetric {
-            p: point_ref(sk, p.get("a"), cmd, "a")?,
-            q: point_ref(sk, p.get("b"), cmd, "b")?,
-            l: curve_ref(sk, p.get("line"), cmd, "line")?,
-        })
-    })
+    let (ids, info) = edit(s, p, cmd, true, |sk, _| {
+        let l = curve_ref(sk, p.get("line"), cmd, "line")?;
+        let ra = p.get("a").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`a` must be a point or curve"))?;
+        let rb = p.get("b").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`b` must be a point or curve"))?;
+        let mut out = Vec::new();
+        match (sk.resolve_point(ra), sk.resolve_point(rb)) {
+            (Some(a), Some(b)) => out.push(add_c(sk, ConstraintKind::Symmetric { p: a, q: b, l })?),
+            _ => {
+                // Two curves: circles/arcs mirror their centres and keep equal radii; lines mirror
+                // their end points.
+                let ca = sk.curve_index(ra).ok_or_else(|| bad(cmd, format!("unknown entity `{ra}`")))?;
+                let cb = sk.curve_index(rb).ok_or_else(|| bad(cmd, format!("unknown entity `{rb}`")))?;
+                match (sk.curves.get(ca).map(|c| c.kind.clone()), sk.curves.get(cb).map(|c| c.kind.clone())) {
+                    (Some(CurveKind::Line { a: a0, b: a1 }), Some(CurveKind::Line { a: b0, b: b1 })) => {
+                        out.push(add_c(sk, ConstraintKind::Symmetric { p: a0, q: b0, l })?);
+                        out.push(add_c(sk, ConstraintKind::Symmetric { p: a1, q: b1, l })?);
+                    }
+                    (Some(_), Some(_)) => {
+                        let pa = round_center(sk, ca).ok_or_else(|| bad(cmd, "symmetry needs two lines or two circles/arcs"))?;
+                        let pb = round_center(sk, cb).ok_or_else(|| bad(cmd, "symmetry needs two lines or two circles/arcs"))?;
+                        out.push(add_c(sk, ConstraintKind::Symmetric { p: pa, q: pb, l })?);
+                        out.push(add_c(sk, ConstraintKind::Equal { a: ca, b: cb })?);
+                    }
+                    _ => return Err(bad(cmd, "symmetry needs two points or two curves")),
+                }
+            }
+        }
+        Ok(out)
+    })?;
+    Ok(json!({"constraints": ids, "sketch": info}))
+}
+
+fn round_center(sk: &Sketch, c: usize) -> Option<usize> {
+    match sk.curves.get(c)?.kind {
+        CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
+        CurveKind::Line { .. } => None,
+    }
 }
 
 fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
@@ -877,7 +938,14 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`entities` must list one or two sketch entities"));
     }
     let ty = str_(p, "type").unwrap_or("auto").to_ascii_lowercase();
+    let ty = match (ty.as_str(), str_(p, "orientation").map(str::to_ascii_lowercase).as_deref()) {
+        ("distance" | "auto", Some("horizontal")) => "horizontal".to_string(),
+        ("distance" | "auto", Some("vertical")) => "vertical".to_string(),
+        ("offset", _) => "distance".to_string(),
+        _ => ty,
+    };
     let value = expr(p, "value");
+    let text_at = p.get("text_at").and_then(vec2);
     let ((param, kind_name, current), info) = edit(s, p, cmd, true, |sk, doc| {
         let ent = |r: &str| -> Result<(Option<usize>, Option<usize>)> {
             if let Some(c) = sk.curve_index(r) {
@@ -937,13 +1005,18 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                     let d = da.normalized().map(|d| d.cross(b0 - a0).abs()).unwrap_or(0.0);
                     (ConstraintKind::PointLineDistance { p: bq, l: a, value: d }, d)
                 } else {
-                    let mut ang = da.cross(db).atan2(da.dot(db));
-                    let (mut ka, mut kb) = (a, b);
-                    if ang < 0.0 {
-                        ang = -ang;
-                        std::mem::swap(&mut ka, &mut kb);
+                    match text_at {
+                        Some(t) => angle_by_sector(a, b, (a0, a1), (b0, b1), t).ok_or_else(|| bad(cmd, "cannot place that angle"))?,
+                        None => {
+                            let mut ang = da.cross(db).atan2(da.dot(db));
+                            let (mut ka, mut kb) = (a, b);
+                            if ang < 0.0 {
+                                ang = -ang;
+                                std::mem::swap(&mut ka, &mut kb);
+                            }
+                            (ConstraintKind::Angle { a: ka, b: kb, value: ang, flip: false }, ang)
+                        }
                     }
-                    (ConstraintKind::Angle { a: ka, b: kb, value: ang }, ang)
                 }
             }
             _ => return Err(bad(cmd, "cannot dimension that combination of entities")),
@@ -965,6 +1038,33 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     let v = s.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
     Ok(json!({"param": param, "type": kind_name, "expression": v, "measured": current, "sketch": info}))
+}
+
+/// The angle dimension between two lines whose sector contains `t` (the text position): returns
+/// the constraint and the current value of that sector angle.
+fn angle_by_sector(a: usize, b: usize, (a0, a1): (Vec2, Vec2), (b0, b1): (Vec2, Vec2), t: Vec2) -> Option<(ConstraintKind, f64)> {
+    let (da, db) = ((a1 - a0).normalized()?, (b1 - b0).normalized()?);
+    let den = da.cross(db);
+    if den.abs() < 1e-12 {
+        return None;
+    }
+    let s = (b0 - a0).cross(db) / den;
+    let x = a0 + da * s;
+    let ta = (t - x).angle();
+    // The four rays from the intersection, with their line and direction sign.
+    let mut rays: Vec<(f64, usize, bool)> = vec![(da.angle(), a, true), ((-da).angle(), a, false), (db.angle(), b, true), ((-db).angle(), b, false)];
+    rays.sort_by(|p, q| p.0.total_cmp(&q.0));
+    let tau = std::f64::consts::TAU;
+    for k in 0..4 {
+        let (s0, l0, p0) = rays[k];
+        let (s1, l1, p1) = rays[(k + 1) % 4];
+        let span = (s1 - s0).rem_euclid(tau);
+        let off = (ta - s0).rem_euclid(tau);
+        if off <= span && l0 != l1 {
+            return Some((ConstraintKind::Angle { a: l0, b: l1, value: span, flip: p0 != p1 }, span));
+        }
+    }
+    None
 }
 
 fn round6(x: f64) -> f64 {

@@ -202,3 +202,97 @@ pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
     let mut v = revolve(&plane, &[r], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?;
     v.pop().ok_or_else(|| KernelError::Failed("torus".into()))
 }
+
+/// Offset every segment of a loop to its right by `d` (outward for a region's outer loop and
+/// holes alike). Loops of lines (mitred corners) and loops of arcs on one circle are supported.
+fn offset_loop(lp: &Loop2, d: f64) -> Result<Loop2> {
+    if d == 0.0 {
+        return Ok(lp.clone());
+    }
+    let all_arcs = lp.segs.iter().all(|s| matches!(s, Seg2::Arc { .. }));
+    if all_arcs {
+        let segs = lp
+            .segs
+            .iter()
+            .map(|s| match *s {
+                Seg2::Arc { center, radius, start, sweep } => {
+                    let r = radius + sweep.signum() * d;
+                    if r > 1e-6 {
+                        Ok(Seg2::Arc { center, radius: r, start, sweep })
+                    } else {
+                        Err(KernelError::Invalid("the taper closes the profile".into()))
+                    }
+                }
+                Seg2::Line { .. } => Err(KernelError::Failed("not supported yet: tapered profiles mixing lines and arcs".into())),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        return Ok(Loop2 { segs });
+    }
+    let n = lp.segs.len();
+    let mut lines: Vec<(Vec2, Vec2)> = Vec::with_capacity(n);
+    for s in &lp.segs {
+        let Seg2::Line { a, b } = *s else { return Err(KernelError::Failed("not supported yet: tapered profiles mixing lines and arcs".into())) };
+        let dir = (b - a).normalized().ok_or_else(|| KernelError::Invalid("zero-length edge".into()))?;
+        let right = Vec2::new(dir.y, -dir.x);
+        lines.push((a + right * d, dir));
+    }
+    let mut pts = Vec::with_capacity(n);
+    for i in 0..n {
+        let (Some(&(p0, d0)), Some(&(p1, d1))) = (lines.get((i + n - 1) % n), lines.get(i)) else { continue };
+        let den = d0.cross(d1);
+        if den.abs() < 1e-12 {
+            pts.push(p1);
+            continue;
+        }
+        let t = (p1 - p0).cross(d1) / den;
+        pts.push(p0 + d0 * t);
+    }
+    let out = Loop2::polygon(&pts);
+    if out.signed_area().signum() != lp.signed_area().signum() || out.signed_area().abs() < 1e-9 {
+        return Err(KernelError::Invalid("the taper closes the profile".into()));
+    }
+    Ok(out)
+}
+
+/// Extrude one region by `length` along `dir_sign` × the plane normal with a taper angle
+/// (radians; positive grows the profile).
+pub fn extrude_tapered(plane: &Plane, region: &Region2, length: f64, dir_sign: f64, taper: f64) -> Result<Body> {
+    let (length, taper) = (finite(length, "distance")?, finite(taper, "taper")?);
+    if length <= 1e-6 {
+        return Err(KernelError::Invalid("extrude distance is zero".into()));
+    }
+    if taper.abs() >= std::f64::consts::FRAC_PI_2 - 1e-3 {
+        return Err(KernelError::Invalid("taper must be between −90° and 90°".into()));
+    }
+    region_ok(region)?;
+    let d = length * taper.tan();
+    let top_plane = plane.offset(length * dir_sign.signum());
+    let loops0: Vec<Loop2> = std::iter::once(region.outer.ccw()).chain(region.holes.iter().map(|h| h.ccw().reversed())).collect();
+    let loops1: Vec<Loop2> = loops0.iter().map(|l| offset_loop(l, d)).collect::<Result<_>>()?;
+    guard("tapered extrude", || {
+        let w0: Vec<mt::Wire> = loops0.iter().map(|l| wire(plane, l)).collect::<Result<_>>()?;
+        let w1: Vec<mt::Wire> = loops1.iter().map(|l| wire(&top_plane, l)).collect::<Result<_>>()?;
+        let mut faces: Vec<mt::Face> = Vec::new();
+        for (a, b) in w0.iter().zip(&w1) {
+            let sides = builder::try_wire_homotopy(a, b).map_err(|e| KernelError::Failed(format!("taper sides: {e}")))?;
+            faces.extend(sides.face_iter().cloned());
+        }
+        let bottom = builder::try_attach_plane(&w0.iter().map(|w| w.inverse()).collect::<Vec<_>>())
+            .map_err(|e| KernelError::Failed(format!("taper bottom: {e}")))?;
+        let top = builder::try_attach_plane(&w1).map_err(|e| KernelError::Failed(format!("taper top: {e}")))?;
+        let mut tries: Vec<(mt::Face, mt::Face)> = vec![(bottom.clone(), top.clone())];
+        tries.push((bottom.inverse(), top.inverse()));
+        let mut last = String::new();
+        for (b, t) in tries {
+            let mut all = faces.clone();
+            all.push(b);
+            all.push(t);
+            let shell: mt::Shell = all.into();
+            match Solid::try_new(vec![shell]) {
+                Ok(s) => return Body::new(s),
+                Err(e) => last = e.to_string(),
+            }
+        }
+        Err(KernelError::Failed(format!("tapered extrude: {last}")))
+    })
+}

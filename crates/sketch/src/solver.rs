@@ -14,7 +14,7 @@ use solvecraft_geom::Vec2;
 use crate::linalg::{Mat, determined_vars, solve as lin_solve};
 use crate::model::{ConstraintKind, CurveKind, Sketch};
 
-const MAX_ITERS: usize = 200;
+const MAX_ITERS: usize = 500;
 /// Converged when every residual is below this (mm).
 const TOL: f64 = 1e-9;
 /// A solution is accepted when every residual is below this (mm).
@@ -254,21 +254,24 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         }
         Radius { c, value } => out.push(s.round(c).1 - value),
         Diameter { c, value } => out.push(2.0 * s.round(c).1 - value),
-        Angle { a, b, value } => {
+        Angle { a, b, value, flip } => {
             let (a0, a1) = s.line(a);
             let (b0, b1) = s.line(b);
             let (da, db) = (a1 - a0, b1 - b0);
             let ang = da.cross(db).atan2(da.dot(db));
             let scale = 0.5 * (da.len() + db.len());
-            out.push(wrap_angle(ang - value) * scale.max(1e-6));
+            let target = if flip { value + std::f64::consts::PI } else { value };
+            out.push(wrap_angle(ang - target) * scale.max(1e-6));
         }
     }
 }
 
-/// One residual block: implicit arc radius equality or a user constraint.
+/// One residual block: implicit arc radius equality, a user constraint, or a tangency at a known
+/// touch point (better conditioned than the distance form when an end point is on the curve).
 enum Block<'a> {
     Arc { c: usize, a: usize, b: usize },
     User(usize, &'a ConstraintKind),
+    TangentAt(usize, &'a ConstraintKind, usize),
 }
 
 fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
@@ -278,7 +281,43 @@ fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
             out.push(cc.dist(s.p(*b)) - cc.dist(s.p(*a)));
         }
         Block::User(_, k) => residuals(s, k, out),
+        Block::TangentAt(_, k, p) => {
+            let ConstraintKind::Tangent { a, b } = **k else { return };
+            let pt = s.p(*p);
+            if s.is_line(a) || s.is_line(b) {
+                let (l, c) = if s.is_line(a) { (a, b) } else { (b, a) };
+                let (p0, p1) = s.line(l);
+                let (cc, _) = s.round(c);
+                let d = p1 - p0;
+                // The radius to the touch point is perpendicular to the line.
+                out.push((pt - cc).dot(d) / d.len().max(1e-12));
+            } else {
+                let (c1, _) = s.round(a);
+                let (c2, _) = s.round(b);
+                let (u, v) = (pt - c1, pt - c2);
+                // Both centres on one line through the touch point.
+                out.push(u.cross(v) / (u.len() + v.len()).max(1e-12));
+            }
+        }
     }
+}
+
+/// A point where a tangency must happen: an end point shared by the two curves, or a line end
+/// point constrained onto the round curve.
+fn touch_point(sk: &Sketch, k: &ConstraintKind) -> Option<usize> {
+    let ConstraintKind::Tangent { a, b } = *k else { return None };
+    let ends = |c: usize| -> Vec<usize> {
+        match sk.curves.get(c).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, b }) | Some(CurveKind::Arc { a, b, .. }) => vec![*a, *b],
+            _ => Vec::new(),
+        }
+    };
+    let (ea, eb) = (ends(a), ends(b));
+    if let Some(p) = ea.iter().find(|p| eb.contains(p)) {
+        return Some(*p);
+    }
+    let on = |p: usize, c: usize| sk.constraints.iter().any(|x| x.kind == ConstraintKind::PointOnCurve { p, c });
+    ea.iter().find(|p| on(**p, b)).or_else(|| eb.iter().find(|p| on(**p, a))).copied()
 }
 
 /// Variables a block depends on.
@@ -345,6 +384,13 @@ fn block_vars(sk: &Sketch, lay: &Layout, b: &Block) -> Vec<usize> {
             }
             Fix { .. } => {}
         },
+        Block::TangentAt(_, k, p) => {
+            pt(&mut v, *p);
+            if let ConstraintKind::Tangent { a, b } = **k {
+                curve(&mut v, a);
+                curve(&mut v, b);
+            }
+        }
     }
     v.sort_unstable();
     v.dedup();
@@ -517,7 +563,10 @@ pub fn solve(sk: &mut Sketch) -> SolveReport {
         }
     }
     for (i, c) in sk.constraints.iter().enumerate() {
-        let bl = Block::User(i, &c.kind);
+        let bl = match touch_point(sk, &c.kind) {
+            Some(p) => Block::TangentAt(i, &c.kind, p),
+            None => Block::User(i, &c.kind),
+        };
         let vars = block_vars(sk, &lay, &bl);
         blocks.push((bl, vars));
     }
@@ -569,6 +618,7 @@ pub fn solve(sk: &mut Sketch) -> SolveReport {
                     let b2 = match b {
                         Block::Arc { c, a, b } => Block::Arc { c: *c, a: *a, b: *b },
                         Block::User(i, k) => Block::User(*i, k),
+                        Block::TangentAt(i, k, p) => Block::TangentAt(*i, k, *p),
                     };
                     (b2, v.clone())
                 })
@@ -583,7 +633,7 @@ pub fn solve(sk: &mut Sketch) -> SolveReport {
     let mut failing: Vec<String> = Vec::new();
     for (row, v) in r.iter().enumerate() {
         if !(v.abs() < ACCEPT)
-            && let Some((Block::User(ci, _), _)) = owner.get(row).and_then(|bi| all_blocks.get(*bi))
+            && let Some((Block::User(ci, _) | Block::TangentAt(ci, _, _), _)) = owner.get(row).and_then(|bi| all_blocks.get(*bi))
             && let Some(c) = sk.constraints.get(*ci)
             && !failing.contains(&c.id)
         {

@@ -121,7 +121,7 @@ fn line_tangent_to_circle_and_angles() {
     let (a, _) = line_pts(&sk, l);
     assert!((a.y.abs() - 10.0).abs() < 1e-7, "{a:?}");
     let m = sk.add_line(v(0.0, 0.0), v(10.0, 3.0), Some(0), None, None).unwrap();
-    sk.add_constraint(Angle { a: l, b: m, value: PI / 6.0 }, None).unwrap();
+    sk.add_constraint(Angle { a: l, b: m, value: PI / 6.0, flip: false }, None).unwrap();
     sk.add_constraint(Length { l: m, value: 8.0 }, None).unwrap();
     assert!(solve(&mut sk).ok());
     let (p, q) = line_pts(&sk, m);
@@ -249,4 +249,55 @@ fn hostile_values_rejected() {
     assert!(sk.add_constraint(ConstraintKind::Horizontal { l: c }, None).is_err());
     assert!(sk.add_constraint(ConstraintKind::Radius { c, value: f64::NAN }, None).is_err());
     assert!(sk.add_constraint(ConstraintKind::Radius { c, value: -2.0 }, None).is_err());
+}
+
+#[test]
+fn profiles_split_at_crossings_and_touch_points() {
+    // A line across a circle: two half discs.
+    let mut sk = Sketch::new();
+    sk.add_circle(v(0.0, 0.0), 10.0, None, None).unwrap();
+    sk.add_line(v(-15.0, 0.0), v(15.0, 0.0), None, None, None).unwrap();
+    let ps = find_profiles(&sk);
+    assert_eq!(ps.len(), 2, "{ps:?}");
+    for p in &ps {
+        assert!((p.area - PI * 50.0).abs() < 1e-6, "{}", p.area);
+    }
+    // Belt: two circles joined by two tangent lines whose ends sit on the circles.
+    let mut b = Sketch::new();
+    let c1 = b.add_circle(v(0.0, 0.0), 20.0, Some(0), None).unwrap();
+    let c2 = b.add_circle(v(50.0, 0.0), 10.0, None, None).unwrap();
+    let l1 = b.add_line(v(3.0, 19.0), v(47.0, 13.0), None, None, None).unwrap();
+    let l2 = b.add_line(v(1.0, -22.0), v(44.0, -8.0), None, None, None).unwrap();
+    use ConstraintKind::*;
+    for (l, end, c) in [(l1, "start", c1), (l1, "end", c2), (l2, "start", c1), (l2, "end", c2)] {
+        let p = b.resolve_point(&format!("{}.{end}", b.curves[l].id)).unwrap();
+        b.add_constraint(PointOnCurve { p, c }, None).unwrap();
+    }
+    for (l, c) in [(l1, c1), (l1, c2), (l2, c1), (l2, c2)] {
+        b.add_constraint(Tangent { a: l, b: c }, None).unwrap();
+    }
+    b.add_constraint(Radius { c: c1, value: 20.0 }, None).unwrap();
+    b.add_constraint(Radius { c: c2, value: 10.0 }, None).unwrap();
+    let r = solve(&mut b);
+    assert!(r.ok(), "{r:?}");
+    let ps = find_profiles(&b);
+    assert_eq!(ps.len(), 3, "two discs and the band between them: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
+    let total: f64 = ps.iter().map(|p| p.area).sum();
+    assert!(total > PI * 500.0, "{total}");
+}
+
+#[test]
+fn merging_adjacent_regions() {
+    let a =
+        solvecraft_geom::Region2 { outer: solvecraft_geom::Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]), holes: vec![] };
+    let b = solvecraft_geom::Region2 {
+        outer: solvecraft_geom::Loop2::polygon(&[v(10.0, 0.0), v(20.0, 0.0), v(20.0, 10.0), v(10.0, 10.0)]),
+        holes: vec![],
+    };
+    let c = solvecraft_geom::Region2 { outer: solvecraft_geom::Loop2::polygon(&[v(50.0, 0.0), v(60.0, 0.0), v(60.0, 10.0)]), holes: vec![] };
+    let m = merge_regions(&[a, b, c]);
+    assert_eq!(m.len(), 2);
+    let mut areas: Vec<f64> = m.iter().map(|r| r.area()).collect();
+    areas.sort_by(f64::total_cmp);
+    assert!((areas[0] - 50.0).abs() < 1e-9 && (areas[1] - 200.0).abs() < 1e-9, "{areas:?}");
 }

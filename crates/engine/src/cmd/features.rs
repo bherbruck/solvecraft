@@ -13,7 +13,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("extrude")
         .key("E")
-        .params("distance: expr; sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [[curve ids]] | [{point:[x,y]}]; direction?: positive|negative|symmetric; distance2?; start_offset?; operation?: new|join|cut|intersect; targets?: [body]; name?; body_name?"),
+        .params("distance: expr (or through_all: true); taper?: angle expr; sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [[curve ids]] | [{point:[x,y]}]; direction?: positive|negative|symmetric; distance2?; start_offset?; operation?: new|join|cut|intersect; targets?: [body]; name?; body_name?"),
     CommandSpec::new("Revolve", "Revolve", revolve)
         .at("SOLID", "CREATE")
         .icon("revolve")
@@ -143,8 +143,13 @@ fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
 fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "Extrude";
     let sketch = feature_sketch(s, p, cmd)?;
-    let distance = req_expr(cmd, p, "distance")?;
+    let through_all = bool_(p, "through_all").unwrap_or(false) || str_(p, "extent").is_some_and(|e| e.eq_ignore_ascii_case("through_all"));
+    let distance = if through_all { expr(p, "distance").unwrap_or_else(|| "0".into()) } else { req_expr(cmd, p, "distance")? };
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
+    let taper = expr(p, "taper");
+    if let Some(t) = &taper {
+        check_expr(s, t, Kind::Angle, cmd, "taper")?;
+    }
     let direction = match str_(p, "direction").map(str::to_ascii_lowercase).as_deref() {
         None | Some("positive") | Some("one_side") => Direction::Positive,
         Some("negative") | Some("reverse") | Some("flip") => Direction::Negative,
@@ -162,7 +167,7 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let kind = FeatureKind::Extrude {
         sketch,
         profiles: profiles(p, cmd)?,
-        extent: Extent { distance, direction, distance2, start_offset },
+        extent: Extent { distance, direction, distance2, start_offset, through_all, taper },
         operation: operation(p, cmd)?,
         targets: string_list(p, "targets"),
     };
@@ -172,11 +177,17 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
 fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "Revolve";
     let sketch = feature_sketch(s, p, cmd)?;
-    let axis = match str_(p, "axis") {
-        Some(a @ ("X" | "Y" | "Z")) => AxisRef::World { axis: a.into() },
-        Some(a @ ("x" | "y")) => AxisRef::SketchAxis { axis: a.into() },
-        Some(id) => AxisRef::SketchLine { curve: id.into() },
-        None => return Err(bad(cmd, "`axis` must be a sketch line id, x, y (sketch axes) or X, Y, Z")),
+    let axis = if let Some(o) = p.get("axis").filter(|v| v.is_object()) {
+        let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
+        let dir = o.get("dir").and_then(vec3).ok_or_else(|| bad(cmd, "axis needs `dir`"))?;
+        AxisRef::Line { origin, dir }
+    } else {
+        match str_(p, "axis") {
+            Some(a @ ("X" | "Y" | "Z")) => AxisRef::World { axis: a.into() },
+            Some(a @ ("x" | "y")) => AxisRef::SketchAxis { axis: a.into() },
+            Some(id) => AxisRef::SketchLine { curve: id.into() },
+            None => return Err(bad(cmd, "`axis` must be a sketch line id, x, y (sketch axes), X, Y, Z or {origin, dir}")),
+        }
     };
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;

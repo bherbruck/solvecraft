@@ -146,6 +146,30 @@ fn fillets_on_several_edges_and_angles() {
 }
 
 #[test]
+fn tapered_extrudes() {
+    // 40 x 40 square, 30 up, 10° outward: a frustum.
+    let sq = Region2 {
+        outer: Loop2::polygon(&[Vec2::new(-20.0, -20.0), Vec2::new(20.0, -20.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)]),
+        holes: vec![],
+    };
+    let b = extrude_tapered(&Plane::XY, &sq, 30.0, 1.0, 10f64.to_radians()).unwrap();
+    let top = 40.0 + 2.0 * 30.0 * 10f64.to_radians().tan();
+    let v = 30.0 / 3.0 * (1600.0 + top * top + 40.0 * top);
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, v) < 1e-6, "{} vs {v}", m.volume);
+    assert_eq!(m.merged.faces, 6);
+    // Inward taper on a circle (a cone frustum), downward.
+    let c = Region2 { outer: Loop2::circle(Vec2::ZERO, 10.0), holes: vec![] };
+    let b = extrude_tapered(&Plane::XY, &c, 10.0, -1.0, -20f64.to_radians()).unwrap();
+    let r2 = 10.0 - 10.0 * 20f64.to_radians().tan();
+    let v = PI * 10.0 / 3.0 * (100.0 + r2 * r2 + 10.0 * r2);
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
+    assert!(m.bbox.max.z < 1e-6 && m.bbox.min.z > -10.0 - 1e-6, "{:?}", m.bbox);
+    assert!(extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians()).is_err(), "closes the profile");
+}
+
+#[test]
 #[ignore]
 fn debug_convergence() {
     let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 15.0), holes: vec![] }], 0.0, 50.0).unwrap().pop().unwrap();
@@ -215,4 +239,28 @@ fn debug_revolve_doc_case() {
     let r2 = Region2 { outer: r.outer.reversed(), holes: vec![] };
     let q = revolve(&Plane::XY, std::slice::from_ref(&r2), Vec2::ZERO, Vec2::Y, PI / 2.0).unwrap().pop().unwrap();
     println!("reversed: {}", measure(&q).unwrap().volume);
+}
+
+#[test]
+#[ignore]
+fn debug_coplanar_union_rate() {
+    let a = box_solid(Vec3::ZERO, Vec3::new(40.0, 40.0, 20.0)).unwrap();
+    let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::new(40.0, 20.0), 12.0), holes: vec![] }], 0.0, 40.0).unwrap().pop().unwrap();
+    let mut ok = 0;
+    for i in 0..20 {
+        let sh = Vec3::new(0.0137 * i as f64, 0.0291 * i as f64, -0.0173 * i as f64);
+        let (a2, b2) = (transform(&a, sh, Vec3::ZERO, Vec3::Z, 0.0).unwrap(), transform(&b, sh, Vec3::ZERO, Vec3::Z, 0.0).unwrap());
+        for tol in [1e-3, 1e-2, 5e-2] {
+            let r = guard("t", || {
+                let (sa, sb) = (a2.deep_copy(), b2.deep_copy());
+                Ok(truck_shapeops::or(&sa, &sb, tol))
+            });
+            let good = matches!(r, Ok(Some(_)));
+            if good {
+                ok += 1;
+            }
+            println!("shift {i} tol {tol}: {}", if good { "ok" } else { "fail" });
+        }
+    }
+    println!("ok {ok}/60");
 }

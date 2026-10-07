@@ -31,7 +31,14 @@ fn plate_doc() -> (Document, u64) {
         FeatureKind::Extrude {
             sketch: s,
             profiles: ProfileSel::All,
-            extent: Extent { distance: "20".into(), direction: Direction::Positive, distance2: None, start_offset: None },
+            extent: Extent {
+                distance: "20".into(),
+                direction: Direction::Positive,
+                distance2: None,
+                start_offset: None,
+                through_all: false,
+                taper: None,
+            },
             operation: Operation::NewBody,
             targets: vec![],
         },
@@ -82,7 +89,14 @@ fn box_fillet_cut_timeline() {
         FeatureKind::Extrude {
             sketch: s2,
             profiles: ProfileSel::Points { points: vec![Vec2::new(20.0, 15.0)] },
-            extent: Extent { distance: "20".into(), direction: Direction::Positive, distance2: None, start_offset: None },
+            extent: Extent {
+                distance: "20".into(),
+                direction: Direction::Positive,
+                distance2: None,
+                start_offset: None,
+                through_all: false,
+                taper: None,
+            },
             operation: Operation::Cut,
             targets: vec![],
         },

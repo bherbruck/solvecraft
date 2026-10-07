@@ -101,6 +101,12 @@ pub struct Extent {
     /// Start offset from the sketch plane (expression).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_offset: Option<String>,
+    /// Through all bodies in the direction(s) instead of `distance`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub through_all: bool,
+    /// Taper angle (expression; positive grows the profile).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taper: Option<String>,
 }
 
 /// Revolve axis.
@@ -113,6 +119,8 @@ pub enum AxisRef {
     SketchAxis { axis: String },
     /// World X / Y / Z axis through the origin.
     World { axis: String },
+    /// Any line in the sketch plane, in world coordinates.
+    Line { origin: Vec3, dir: Vec3 },
 }
 
 /// Feature definitions.
@@ -258,6 +266,9 @@ impl FeatureKind {
                     v.push(d);
                 }
                 if let Some(d) = &extent.start_offset {
+                    v.push(d);
+                }
+                if let Some(d) = &extent.taper {
                     v.push(d);
                 }
             }

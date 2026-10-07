@@ -22,7 +22,7 @@ use solvecraft_engine::Session;
 use solvecraft_engine::render::{StandardView, render_png};
 
 const USAGE: &str = "usage:
-  solvecraft-cli run <script.json|design.solvecraft> [--out FILE]... [--save FILE] [--quiet]
+  solvecraft-cli run <script.json|design.solvecraft> [--out FILE]... [--save FILE] [--quiet] [--results]
   solvecraft-cli eval <script.json|design.solvecraft>     (alias: inspect)
   solvecraft-cli snapshot <script|design> --out shot.png [--width W] [--height H] [--view iso|front|back|top|bottom|left|right]
   solvecraft-cli exec <command> [json-params]
@@ -96,6 +96,14 @@ fn flags<'a>(args: &'a [String], name: &str) -> Vec<&'a str> {
 
 fn cmd_run(args: &[String]) -> Result<(), String> {
     let path = args.first().ok_or_else(|| USAGE.to_string())?;
+    if args.iter().any(|a| a == "--results") {
+        // Print every command's result (scripts only).
+        let v = read_json(path)?;
+        let mut s = Session::default();
+        let r = s.run_script(&v).map_err(|e| e.to_string())?;
+        println!("{}", pretty(&Value::Array(r)));
+        return Ok(());
+    }
     let mut s = load(path)?;
     for out in flags(args, "--out") {
         s.execute("ExportCommand", &json!({"path": out})).map_err(|e| e.to_string())?;
