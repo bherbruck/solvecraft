@@ -121,7 +121,7 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
                     empty_votes += 1;
                     last = "empty result".into();
                 }
-                Ok(s) => match Body::new(s) {
+                Ok(s) => match Body::new(crate::heal::heal(s, size)) {
                     Ok(body) => {
                         let v = volume(&body);
                         if v > 0.0 && plausible(v, &body) {

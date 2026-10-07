@@ -44,7 +44,7 @@ fn plane_normal(f: &mt::Face) -> Option<Vec3> {
 /// edges where consecutive edges no longer connect.
 fn rebuild_face(f: &mt::Face, subst: &HashMap<mt::EdgeID, mt::Edge>, connectors: &[mt::Edge]) -> Result<mt::Face> {
     let mut wires = Vec::new();
-    for w in f.boundaries() {
+    for w in f.absolute_boundaries() {
         let mut edges: Vec<mt::Edge> = Vec::new();
         for e in w.edge_iter() {
             let ne = match subst.get(&e.id()) {
@@ -81,8 +81,7 @@ fn rebuild_face(f: &mt::Face, subst: &HashMap<mt::EdgeID, mt::Edge>, connectors:
         }
         wires.push(mt::Wire::from(out));
     }
-    let surface = f.oriented_surface();
-    mt::Face::try_new(wires, surface).map_err(|e| KernelError::Failed(format!("blend: {e}")))
+    crate::heal::absolute_face(f, wires).ok_or_else(|| KernelError::Failed("blend: a face could not be rebuilt".into()))
 }
 
 fn blend_one(solid: &Solid, edge: &mt::Edge, size: f64, r: f64, shape: Shape) -> Result<Solid> {
@@ -103,22 +102,25 @@ fn blend_one(solid: &Solid, edge: &mt::Edge, size: f64, r: f64, shape: Shape) ->
     let (v0, v1) = (edge.absolute_front().clone(), edge.absolute_back().clone());
     let (p0, p1) = (vtx(&v0), vtx(&v1));
     let d = (p1 - p0).normalized().ok_or_else(|| KernelError::Failed("zero-length edge".into()))?;
-    // In-face directions perpendicular to the edge, pointing away from it.
-    let mut t1 = n1.cross(d);
-    if t1.dot(n2) > 0.0 {
-        t1 = -t1;
-    }
-    let mut t2 = n2.cross(d);
-    if t2.dot(n1) > 0.0 {
-        t2 = -t2;
-    }
-    // Convex edge: the faces' outward normals point away from each other's interior.
+    // In-face directions perpendicular to the edge, into each face: a face's boundary runs
+    // counter-clockwise about its outward normal, so its interior is to the left.
+    let into = |f: &mt::Face, n: Vec3| -> Option<Vec3> {
+        let e = f.boundary_iters().into_iter().flatten().find(|e| e.id() == edge.id())?;
+        let dir = (vtx(e.back()) - vtx(e.front())).normalized()?;
+        n.cross(dir).normalized()
+    };
+    let (Some(t1), Some(t2)) = (into(f1, n1), into(f2, n2)) else { return Err(KernelError::Failed("blend: edge direction".into())) };
+    // Convex edge: each face's outward normal points away from the other face; concave: toward.
     let cos_phi = t1.dot(t2).clamp(-1.0, 1.0);
     let phi = cos_phi.acos();
-    if !(phi > 1e-3 && phi < std::f64::consts::PI - 1e-3) || n1.dot(t2) > 1e-9 || n2.dot(t1) > 1e-9 {
-        return Err(unsupported("only convex edges can be blended"));
+    let convex = n1.dot(t2) < -1e-9 && n2.dot(t1) < -1e-9;
+    let concave = n1.dot(t2) > 1e-9 && n2.dot(t1) > 1e-9;
+    if !(phi > 1e-3 && phi < std::f64::consts::PI - 1e-3) || !(convex || concave) {
+        return Err(unsupported("the faces at the edge are tangent or the edge is ambiguous"));
     }
-    blend_geometry(solid, si, &faces, (i1, i2), edge, (v0, v1), (p0, p1, d), (n1, t1, t2, phi), size, r, shape)
+    // The blend's centre line is inside the material for a convex edge, outside for a concave one.
+    let side = if convex { -1.0 } else { 1.0 };
+    blend_geometry(solid, si, &faces, (i1, i2), edge, (v0, v1), (p0, p1, d), (n1, t1, t2, phi, side), size, r, shape)
 }
 
 /// Distance along each face from the edge to the blend boundary.
@@ -138,7 +140,7 @@ fn blend_geometry(
     edge: &mt::Edge,
     (v0, v1): (mt::Vertex, mt::Vertex),
     (p0, p1, d): (Vec3, Vec3, Vec3),
-    (n1, t1, t2, phi): (Vec3, Vec3, Vec3, f64),
+    (n1, t1, t2, phi, side): (Vec3, Vec3, Vec3, f64, f64),
     size: f64,
     r: f64,
     shape: Shape,
@@ -190,16 +192,17 @@ fn blend_geometry(
     let b0 = builder::vertex(p3(p0 + t2 * s));
     let a1 = builder::vertex(p3(p1 + t1 * s));
     let b1 = builder::vertex(p3(p1 + t2 * s));
-    // Corner curves on the end faces (A → B) and the blend surface.
-    let bisector = (t1 + t2).normalized().ok_or_else(|| KernelError::Failed("bisector".into()))?;
+    // Corner curves on the end faces (A → B) and the blend surface. The arc centre is r from
+    // both faces (inside the material for a convex edge, outside for a concave one); the arc's
+    // middle is the point nearest the old edge.
+    let centre = |p: Vec3| p + t1 * s + n1 * (r * side);
+    let arc_mid = |p: Vec3| {
+        let c = centre(p);
+        c + (p - c).normalized().unwrap_or(-n1) * r
+    };
     let corner = |a: &mt::Vertex, b: &mt::Vertex, p: Vec3| -> mt::Edge {
         match shape {
-            Shape::Round => {
-                // Arc centre is r inside both faces; its mid point is on the bisector, toward the edge.
-                let c = p + t1 * s - n1 * r;
-                let mid = c - bisector * r;
-                builder::circle_arc(a, b, p3(mid))
-            }
+            Shape::Round => builder::circle_arc(a, b, p3(arc_mid(p))),
             Shape::Flat => builder::line(a, b),
         }
     };
@@ -248,13 +251,14 @@ fn blend_geometry(
         Shape::Round => {
             let swept: mt::Face = builder::tsweep(&c0, v3(p1 - p0));
             let mut surf = swept.oriented_surface();
-            // Outward normal at the arc middle points away from the arc centre.
-            let c = p0 + t1 * s - n1 * r;
-            let mid = c - bisector * r;
+            // Outward normal at the arc middle: away from the centre on a convex edge (the
+            // centre is in the material), toward it on a concave one.
+            let (c, mid) = (centre(p0), arc_mid(p0));
+            let outward = (mid - c) * (-side);
             use mt::{ParametricSurface3D, SearchParameter};
             if let Some((u, v)) = surf.search_parameter(p3(mid), None, 100) {
                 let nn = surf.normal(u, v);
-                if Vec3::new(nn.x, nn.y, nn.z).dot(bisector) > 0.0 {
+                if Vec3::new(nn.x, nn.y, nn.z).dot(outward) < 0.0 {
                     surf = mt::Invertible::inverse(&surf);
                 }
             }
@@ -280,7 +284,48 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
     if edges.len() > 1000 {
         return Err(KernelError::Invalid("too many edges".into()));
     }
-    let mut cur = body.clone();
+    // Coplanar neighbours as one face (as after a join), so corners look as they should.
+    let mut cur = Body::new(crate::heal::heal(body.deep_copy(), body.size()))?;
+    // Every edge of a convex planar body: rounded as a whole (sphere corners).
+    if shape == Shape::Round && edges.len() >= 6 {
+        let solid = cur.deep_copy();
+        let all = Body::unique_edges(&solid);
+        if all.len() == edges.len() {
+            let size = cur.size();
+            let tol = (size * 2e-3).max(1e-3);
+            let mut hit = std::collections::HashSet::new();
+            for p in edges {
+                if let Some((idx, _)) = cur.nearest_edge(*p, tol)? {
+                    hit.insert(idx);
+                }
+            }
+            if hit.len() == all.len()
+                && let Ok(b) = crate::polyhedron::round_all_edges(&cur, r)
+            {
+                return Ok(b);
+            }
+        }
+    }
+    // A whole smooth loop of a planar face is blended in one go.
+    if edges.len() >= 2 {
+        let size = cur.size();
+        let tol = (size * 2e-3).max(1e-3);
+        let solid = cur.deep_copy();
+        let all = Body::unique_edges(&solid);
+        let mut ids = Vec::new();
+        for p in edges {
+            if let Some((idx, dist)) = cur.nearest_edge(*p, tol)?
+                && dist <= size * 0.05 + 1e-3
+                && let Some(e) = all.get(idx)
+                && !ids.contains(&e.id())
+            {
+                ids.push(e.id());
+            }
+        }
+        if let Some(r2) = crate::loopblend::loop_blend(&solid, &ids, size, r, shape == Shape::Round) {
+            return Body::new(guard(what, || r2)?);
+        }
+    }
     for p in edges {
         let size = cur.size();
         let tol = (size * 2e-3).max(1e-3);
@@ -336,7 +381,28 @@ pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
             return Ok(r);
         }
     }
-    let mut cur = body.clone();
+    // Coplanar neighbours as one face (as after a join), so corners look as they should.
+    let mut cur = Body::new(crate::heal::heal(body.deep_copy(), body.size()))?;
+    // A whole smooth loop of a planar face is blended in one go.
+    if edges.len() >= 2 {
+        let size = cur.size();
+        let tol = (size * 2e-3).max(1e-3);
+        let solid = cur.deep_copy();
+        let all = Body::unique_edges(&solid);
+        let mut ids = Vec::new();
+        for p in edges {
+            if let Some((idx, dist)) = cur.nearest_edge(*p, tol)?
+                && dist <= size * 0.05 + 1e-3
+                && let Some(e) = all.get(idx)
+                && !ids.contains(&e.id())
+            {
+                ids.push(e.id());
+            }
+        }
+        if let Some(r2) = crate::loopblend::loop_blend(&solid, &ids, size, distance, false) {
+            return Body::new(guard("chamfer", || r2)?);
+        }
+    }
     for p in edges {
         cur = match chamfer_tool(&cur, *p, distance, 0).and_then(|t| crate::ops::boolean(&cur, &t, crate::BoolOp::Cut)) {
             Ok(Some(b)) => b,

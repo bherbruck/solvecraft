@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use solvecraft_geom::{Plane, Vec3};
 use truck_modeling::{self as mt, builder};
 
-use crate::body::{Body, Solid, from_p3, p3};
+use crate::body::{Body, Solid, from_p3, p3, v3};
 use crate::{KernelError, Result, guard};
 
 /// A half-space `n · x <= d` (n is the outward unit normal).
@@ -22,8 +22,9 @@ fn det3(a: Vec3, b: Vec3, c: Vec3) -> f64 {
     a.dot(b.cross(c))
 }
 
-/// The convex polyhedron bounded by the half-spaces.
-pub fn convex_polyhedron(hs: &[HalfSpace]) -> Result<Body> {
+/// Vertices, and per half-space with a face its vertex loop (counter-clockwise about the
+/// outward normal), of the convex polyhedron bounded by the half-spaces.
+fn combinatorics(hs: &[HalfSpace]) -> Result<(Vec<Vec3>, Vec<(usize, Vec<usize>)>)> {
     if hs.len() < 4 || hs.len() > 200 {
         return Err(KernelError::Invalid("a polyhedron needs 4…200 planes".into()));
     }
@@ -53,8 +54,8 @@ pub fn convex_polyhedron(hs: &[HalfSpace]) -> Result<Body> {
         return Err(KernelError::Invalid("the planes don't enclose a solid".into()));
     }
     // Faces: the vertices on each plane, ordered counter-clockwise about its outward normal.
-    let mut faces_idx: Vec<Vec<usize>> = Vec::new();
-    for h in hs {
+    let mut faces_idx: Vec<(usize, Vec<usize>)> = Vec::new();
+    for (hi, h) in hs.iter().enumerate() {
         let on: Vec<usize> = (0..verts.len()).filter(|i| verts.get(*i).is_some_and(|v| (h.n.dot(*v) - h.d).abs() < scale * 1e-7)).collect();
         if on.len() < 3 {
             continue;
@@ -67,13 +68,19 @@ pub fn convex_polyhedron(hs: &[HalfSpace]) -> Result<Body> {
             let ang = |i: usize| verts.get(i).map(|v| (*v - c).dot(w).atan2((*v - c).dot(u))).unwrap_or(0.0);
             ang(*a).total_cmp(&ang(*b))
         });
-        faces_idx.push(ordered);
+        faces_idx.push((hi, ordered));
     }
+    Ok((verts, faces_idx))
+}
+
+/// The convex polyhedron bounded by the half-spaces.
+pub fn convex_polyhedron(hs: &[HalfSpace]) -> Result<Body> {
+    let (verts, faces_idx) = combinatorics(hs)?;
     guard("polyhedron", || {
         let tv: Vec<mt::Vertex> = verts.iter().map(|v| builder::vertex(p3(*v))).collect();
         let mut edges: HashMap<(usize, usize), mt::Edge> = HashMap::new();
         let mut faces: Vec<mt::Face> = Vec::new();
-        for f in &faces_idx {
+        for (_, f) in &faces_idx {
             let n = f.len();
             let mut wire: Vec<mt::Edge> = Vec::with_capacity(n);
             for k in 0..n {
@@ -175,4 +182,123 @@ pub fn draft(b: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) 
         return Err(KernelError::Invalid("no faces to draft".into()));
     }
     convex_polyhedron(&out)
+}
+
+/// Round every edge of a convex body with planar faces by `r`: faces shrink, each edge becomes a
+/// cylinder and each corner a sphere patch (the body is the inner polyhedron grown by a ball).
+pub fn round_all_edges(b: &Body, r: f64) -> Result<Body> {
+    let hs: Vec<HalfSpace> = planar_convex(b)?.into_iter().map(|(h, _)| h).collect();
+    let inner: Vec<HalfSpace> = hs.iter().map(|h| HalfSpace { n: h.n, d: h.d - r }).collect();
+    let (q, faces) = combinatorics(&inner)?;
+    if faces.len() != hs.len() {
+        return Err(KernelError::Failed("not supported yet: the rounding is larger than a face".into()));
+    }
+    let normal = |hi: usize| hs.get(hi).map(|h| h.n).unwrap_or(Vec3::Z);
+    // Edges of the inner polyhedron: (vertex a, vertex b) → (face left, face right).
+    let mut edge_faces: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+    for (hi, lp) in &faces {
+        let n = lp.len();
+        for k in 0..n {
+            let (Some(&a), Some(&bb)) = (lp.get(k), lp.get((k + 1) % n)) else { continue };
+            edge_faces.entry((a.min(bb), a.max(bb))).or_default().push(*hi);
+        }
+    }
+    if edge_faces.values().any(|f| f.len() != 2) {
+        return Err(KernelError::Failed("not supported yet: rounding this shape".into()));
+    }
+    guard("round edges", || {
+        // Vertex of face `hi` at inner vertex `qi`.
+        let mut verts: HashMap<(usize, usize), mt::Vertex> = HashMap::new();
+        let mut vert = |hi: usize, qi: usize| -> mt::Vertex {
+            verts.entry((hi, qi)).or_insert_with(|| builder::vertex(p3(q.get(qi).copied().unwrap_or_default() + normal(hi) * r))).clone()
+        };
+        let mut lines: HashMap<(usize, usize, usize), mt::Edge> = HashMap::new();
+        let mut arcs: HashMap<(usize, usize, usize), mt::Edge> = HashMap::new();
+        // Straight edge of face hi between inner vertices a and b (stored low → high).
+        let mut line = |hi: usize, a: usize, bb: usize, vert: &mut dyn FnMut(usize, usize) -> mt::Vertex| -> mt::Edge {
+            let (lo, hi_v) = (a.min(bb), a.max(bb));
+            let e = lines.entry((hi, lo, hi_v)).or_insert_with(|| builder::line(&vert(hi, lo), &vert(hi, hi_v))).clone();
+            if a < bb { e } else { e.inverse() }
+        };
+        // Arc at inner vertex qi from face f to face g (stored with f < g).
+        let mut arc = |qi: usize, f: usize, g: usize, vert: &mut dyn FnMut(usize, usize) -> mt::Vertex| -> mt::Edge {
+            let (lo, hi_f) = (f.min(g), f.max(g));
+            let c = q.get(qi).copied().unwrap_or_default();
+            let e = arcs
+                .entry((qi, lo, hi_f))
+                .or_insert_with(|| {
+                    let mid = c + (normal(lo) + normal(hi_f)).normalized().unwrap_or(Vec3::Z) * r;
+                    builder::circle_arc(&vert(lo, qi), &vert(hi_f, qi), p3(mid))
+                })
+                .clone();
+            if f < g { e } else { e.inverse() }
+        };
+        let mut out: Vec<mt::Face> = Vec::new();
+        // Planar faces.
+        for (hi, lp) in &faces {
+            let n = lp.len();
+            let mut w: Vec<mt::Edge> = Vec::new();
+            for k in 0..n {
+                let (Some(&a), Some(&bb)) = (lp.get(k), lp.get((k + 1) % n)) else { continue };
+                w.push(line(*hi, a, bb, &mut vert));
+            }
+            out.push(builder::try_attach_plane(&[w.into()]).map_err(|e| KernelError::Failed(format!("rounded face: {e}")))?);
+        }
+        use mt::{ParametricSurface3D, SearchNearestParameter};
+        let orient = |mut surf: mt::Surface, at: Vec3, outward: Vec3| -> mt::Surface {
+            if let Some((u, v)) = surf.search_nearest_parameter(p3(at), None, 100) {
+                let nn = surf.normal(u, v);
+                if Vec3::new(nn.x, nn.y, nn.z).dot(outward) < 0.0 {
+                    surf = mt::Invertible::inverse(&surf);
+                }
+            }
+            surf
+        };
+        // Edge cylinders: face f's loop runs a → b, so the cylinder (to f's right) runs b → a
+        // along f, then across to g.
+        for ((a, bb), fs) in &edge_faces {
+            let (Some(&f0), Some(&f1)) = (fs.first(), fs.get(1)) else { continue };
+            // Which face runs a → b?
+            let runs = |hi: usize| {
+                faces.iter().find(|(h, _)| *h == hi).is_some_and(|(_, lp)| {
+                    let n = lp.len();
+                    (0..n).any(|k| lp.get(k) == Some(a) && lp.get((k + 1) % n) == Some(bb))
+                })
+            };
+            let (f, g) = if runs(f0) { (f0, f1) } else { (f1, f0) };
+            let w: Vec<mt::Edge> =
+                vec![line(f, *bb, *a, &mut vert), arc(*a, f, g, &mut vert), line(g, *a, *bb, &mut vert), arc(*bb, g, f, &mut vert)];
+            let (qa, qb) = (q.get(*a).copied().unwrap_or_default(), q.get(*bb).copied().unwrap_or_default());
+            let profile = arc(*a, f, g, &mut vert);
+            let swept = builder::tsweep(&profile, v3(qb - qa));
+            let out_dir = (normal(f) + normal(g)).normalized().unwrap_or(Vec3::Z);
+            let mid = (qa + qb) * 0.5 + out_dir * r;
+            let surf = orient(swept.oriented_surface(), mid, out_dir);
+            out.push(mt::Face::try_new(vec![w.into()], surf).map_err(|e| KernelError::Failed(format!("rounded edge: {e}")))?);
+        }
+        // Corner sphere patches: the faces around each inner vertex, counter-clockwise.
+        for (qi, c) in q.iter().enumerate() {
+            let mut around: Vec<usize> = faces.iter().filter(|(_, lp)| lp.contains(&qi)).map(|(h, _)| *h).collect();
+            let axis = around.iter().fold(Vec3::ZERO, |acc, h| acc + normal(*h)).normalized().unwrap_or(Vec3::Z);
+            let u = axis.any_perp();
+            let w2 = axis.cross(u);
+            around.sort_by(|x, y| {
+                let ang = |h: usize| normal(h).dot(w2).atan2(normal(h).dot(u));
+                ang(*x).total_cmp(&ang(*y))
+            });
+            let k = around.len();
+            let w: Vec<mt::Edge> = (0..k).filter_map(|i| Some(arc(qi, *around.get(i)?, *around.get((i + 1) % k)?, &mut vert))).collect();
+            // A sphere surface whose poles and seam are away from this patch.
+            let side = axis.any_perp();
+            let (np, sp, back) = (*c + side * r, *c - side * r, *c - axis * r);
+            let meridian = builder::circle_arc(&builder::vertex(p3(np)), &builder::vertex(p3(sp)), p3(back));
+            let surf =
+                mt::Surface::RevolutedCurve(mt::Processor::new(mt::RevolutedCurve::by_revolution(meridian.oriented_curve(), p3(*c), v3(side))));
+            let surf = orient(surf, *c + axis * r, axis);
+            out.push(mt::Face::try_new(vec![w.into()], surf).map_err(|e| KernelError::Failed(format!("rounded corner: {e}")))?);
+        }
+        let shell: mt::Shell = out.into();
+        let solid = Solid::try_new(vec![shell]).map_err(|e| KernelError::Failed(format!("rounded body: {e}")))?;
+        Body::new(solid)
+    })
 }

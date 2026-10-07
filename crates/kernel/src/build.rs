@@ -609,7 +609,7 @@ fn cubic_basis(knots: &[f64], n_ctrl: usize, u: f64) -> Vec<f64> {
 }
 
 /// Cubic B-spline through points at uniform parameters (clamped, knots by averaging).
-fn interpolate_cubic(pts: &[Vec3]) -> Option<mt::BSplineCurve<mt::Point3>> {
+pub(crate) fn interpolate_cubic(pts: &[Vec3]) -> Option<mt::BSplineCurve<mt::Point3>> {
     let m = pts.len();
     if m < 4 {
         return None;

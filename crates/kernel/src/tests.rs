@@ -630,4 +630,96 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert!(crate::mesh_body(&pos, &[[0, 1, 99]]).is_err());
     assert!(crate::mesh_body(&[Vec3::new(f64::NAN, 0.0, 0.0)], &[[0, 0, 0]]).is_err());
     assert!(crate::mesh_body(&pos, &[[0, 0, 1]]).is_err());
+
+fn concave_fillet() {
+    // An L made of a base and a wall (one solid), fillet the inside corner.
+    let base = box_solid(Vec3::ZERO, Vec3::new(80.0, 50.0, 8.0)).unwrap();
+    let wall = box_solid(Vec3::new(0.0, 42.0, 0.0), Vec3::new(80.0, 50.0, 50.0)).unwrap();
+    let l = boolean(&base, &wall, BoolOp::Union).unwrap().unwrap();
+    let v0 = measure(&l).unwrap().volume;
+    let f = fillet(&l, &[Vec3::new(40.0, 42.0, 8.0)], 5.0).unwrap();
+    let m = measure(&f).unwrap();
+    assert!(rel(m.volume, v0 + (25.0 - 25.0 * PI / 4.0) * 80.0) < 1e-4, "{} vs {}", m.volume, v0 + (25.0 - 25.0 * PI / 4.0) * 80.0);
+    assert_eq!(m.merged.face_types.get("cylinder"), Some(&1));
+}
+
+#[test]
+#[ignore]
+fn debug_pocket_corners() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(80.0, 60.0, 20.0)).unwrap();
+    let p = box_solid(Vec3::new(15.0, 15.0, 12.0), Vec3::new(65.0, 45.0, 25.0)).unwrap();
+    let mut cur = boolean(&b, &p, BoolOp::Cut).unwrap().unwrap();
+    for e in [Vec3::new(65.0, 15.0, 16.0), Vec3::new(15.0, 15.0, 16.0), Vec3::new(65.0, 45.0, 16.0), Vec3::new(15.0, 45.0, 16.0)] {
+        match fillet(&cur, &[e], 5.0) {
+            Ok(n) => {
+                println!("ok {e:?} vol {}", measure(&n).unwrap().volume);
+                cur = n;
+            }
+            Err(err) => {
+                println!("fail {e:?}: {err}");
+                break;
+            }
+        }
+    }
+}
+
+#[test]
+fn pocket_floor_loop_fillet() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(80.0, 60.0, 20.0)).unwrap();
+    let p = box_solid(Vec3::new(15.0, 15.0, 12.0), Vec3::new(65.0, 45.0, 25.0)).unwrap();
+    let mut cur = boolean(&b, &p, BoolOp::Cut).unwrap().unwrap();
+    cur = fillet(&cur, &[Vec3::new(65.0, 15.0, 16.0), Vec3::new(15.0, 15.0, 16.0), Vec3::new(65.0, 45.0, 16.0), Vec3::new(15.0, 45.0, 16.0)], 5.0)
+        .unwrap();
+    let v1 = measure(&cur).unwrap().volume;
+    let floor: Vec<Vec3> = [(40.0, 15.0), (65.0, 30.0), (40.0, 45.0), (15.0, 30.0)].iter().map(|(x, y)| Vec3::new(*x, *y, 12.0)).collect();
+    let mut pts = floor.clone();
+    let d = 5.0 - 5.0 / 2f64.sqrt();
+    pts.extend([(15.0 + d, 15.0 + d), (65.0 - d, 15.0 + d), (65.0 - d, 45.0 - d), (15.0 + d, 45.0 - d)].iter().map(|(x, y)| Vec3::new(*x, *y, 12.0)));
+    let f = fillet(&cur, &pts, 2.0).unwrap();
+    let m = measure(&f).unwrap();
+    // Added: the fillet profile (r²(1 − π/4)) swept along the floor outline (Pappus for the
+    // corners: the profile's centroid sits 2 − 4·2/(3(4 − π))·… inward; check loosely).
+    let straight = 2.0 * (40.0 + 20.0);
+    let added_lines = (4.0 - PI) * straight;
+    assert!(m.volume > v1 + added_lines && m.volume < v1 + added_lines + 4.0 * 2.0 * PI * 5.0, "{} {}", m.volume, v1);
+    println!("pocket: {:?} vol {}", m.merged, m.volume);
+}
+
+#[test]
+fn round_every_edge_of_a_box() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let mut pts = Vec::new();
+    for e in b.edges(0.1).unwrap() {
+        pts.push(e.mid);
+    }
+    let f = fillet(&b, &pts, 3.0).unwrap();
+    let m = measure(&f).unwrap();
+    let r = 3.0f64;
+    let (a, bb, c) = (40.0 - 2.0 * r, 30.0 - 2.0 * r, 20.0 - 2.0 * r);
+    // Inner box grown by a ball (Steiner): V = abc + 2r(ab+bc+ca) + πr²(a+b+c) + 4/3πr³.
+    let want = a * bb * c + 2.0 * r * (a * bb + bb * c + c * a) + PI * r * r * (a + bb + c) + 4.0 / 3.0 * PI * r.powi(3);
+    assert!(rel(m.volume, want) < 1e-3, "{} vs {want}", m.volume);
+    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (26, 48, 24), "{:?}", m.merged);
+}
+
+#[test]
+#[ignore]
+fn debug_heal_sphere_cut() {
+    let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
+    let s = sphere(Vec3::ZERO, 15.0).unwrap();
+    let r = guard("t", || {
+        let mut sb = s.deep_copy();
+        sb.not();
+        Ok(truck_shapeops::and(&b.deep_copy(), &sb, 0.05))
+    })
+    .unwrap()
+    .unwrap();
+    let raw = Body::new(r.clone()).unwrap();
+    let healed = Body::new(crate::heal::heal(r, 60.0)).unwrap();
+    for (name, x) in [("raw", raw), ("healed", healed)] {
+        println!("{name}: vol {} faces {}", measure(&x).unwrap().volume, x.face_count());
+        for f in x.faces(0.05).unwrap() {
+            println!("  face {} area {:.2} c {:?}", f.index, f.area, f.centroid);
+        }
+    }
 }

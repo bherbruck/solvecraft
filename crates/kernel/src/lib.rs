@@ -15,6 +15,8 @@
 mod blend;
 mod body;
 mod build;
+mod heal;
+mod loopblend;
 mod measure;
 mod meshbody;
 mod ops;
