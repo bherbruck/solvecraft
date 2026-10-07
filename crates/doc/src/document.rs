@@ -734,15 +734,16 @@ impl Document {
     }
 
     pub fn from_json(s: &str) -> Result<Document> {
-        let d: Document = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("document: {e}")))?;
+        let mut d: Document = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("document: {e}")))?;
+        if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
+            return Err(DocError::Invalid("document too large".into()));
+        }
         // Feature inputs get parameter names (designs from before they had them).
-        let mut d = d;
         let ids: Vec<u64> = d.features.iter().map(|f| f.id).collect();
         for id in ids {
             d.name_feature_inputs(id);
         }
         // Designs from before occurrences: every component gets one, in place.
-        let mut d = d;
         let missing: Vec<(u64, u64)> =
             d.components.iter().filter(|c| !d.occurrences.iter().any(|o| o.component == c.id)).map(|c| (c.id, c.parent)).collect();
         for (c, p) in missing {
