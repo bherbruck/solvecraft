@@ -160,9 +160,24 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
             }
         }
     }
-    if shapes.len() <= 2000 {
+    // Bounding boxes: only shapes whose boxes overlap can cross.
+    let boxes: Vec<(Vec2, Vec2)> = shapes
+        .iter()
+        .map(|(_, sh)| match *sh {
+            Shape::Line { a, b } => (Vec2::new(a.x.min(b.x) - tol, a.y.min(b.y) - tol), Vec2::new(a.x.max(b.x) + tol, a.y.max(b.y) + tol)),
+            Shape::Round { c, r, .. } => (Vec2::new(c.x - r - tol, c.y - r - tol), Vec2::new(c.x + r + tol, c.y + r + tol)),
+        })
+        .collect();
+    let overlap = |i: usize, j: usize| match (boxes.get(i), boxes.get(j)) {
+        (Some((a0, a1)), Some((b0, b1))) => a0.x <= b1.x && b0.x <= a1.x && a0.y <= b1.y && b0.y <= a1.y,
+        _ => false,
+    };
+    if shapes.len() <= 20_000 {
         for i in 0..shapes.len() {
             for j in (i + 1)..shapes.len() {
+                if !overlap(i, j) {
+                    continue;
+                }
                 let (Some((_, x)), Some((_, y))) = (shapes.get(i), shapes.get(j)) else { continue };
                 let mut pts = intersections(x, y);
                 // A tangent touch gives two nearly equal roots: one point.
@@ -172,12 +187,12 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
                     pts = vec![(p + q) * 0.5];
                 }
                 for p in pts {
-                    // Crossings at (or next to) curve ends are already cuts.
-                    if ends.iter().any(|e| e.dist(p) < tol * 100.0) {
-                        continue;
-                    }
                     let on_x = x.param_on(p, tol).or_else(|| end_param(x, p, tol));
                     let on_y = y.param_on(p, tol).or_else(|| end_param(y, p, tol));
+                    // Crossings at (or next to) curve ends are already cuts.
+                    if on_x.is_none() || on_y.is_none() || ends.iter().any(|e| e.dist(p) < tol * 100.0) {
+                        continue;
+                    }
                     if let (Some(tx), Some(ty)) = (on_x, on_y) {
                         if x.param_on(p, tol).is_some()
                             && let Some(c) = cuts.get_mut(i)

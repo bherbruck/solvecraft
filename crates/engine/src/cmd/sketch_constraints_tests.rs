@@ -133,3 +133,16 @@ fn auto_constrain_fully_constrains_a_rough_sketch() {
     assert!(s.active_sketch.is_none());
     assert!(r["added"].as_array().unwrap().len() >= 3, "{r}");
 }
+
+#[test]
+fn drawing_infers_tangent_and_perpendicular() {
+    let mut s = new_sketch();
+    let l1 = ids(&run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [10, 10]], "infer": true}))["curves"])[0].clone();
+    let r = run(&mut s, "DrawPolyline", json!({"points": [format!("{l1}.end"), [20, 0]], "infer": true}));
+    assert_eq!(r["constraints"].as_array().unwrap().len(), 1, "{r}");
+    let a = ids(&run(&mut s, "ArcCenterTwoPoint", json!({"center": [50, 0], "start": [60, 0], "end": [50, 10]}))["curves"])[0].clone();
+    let r = run(&mut s, "DrawPolyline", json!({"points": [format!("{a}.end"), [30, 10]], "infer": true}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    let names: Vec<&str> = si["constraints"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"Perpendicular") && names.contains(&"Tangent"), "{names:?} {r}");
+}

@@ -362,3 +362,48 @@ fn links_update_in_place_rebuild_and_break() {
     assert_eq!(back, sk);
     assert_eq!(back.link(&j3).unwrap().kind, LinkKind::Intersect);
 }
+
+/// Many independent constrained rectangles solve quickly (per-component work).
+#[test]
+fn large_sketch_solves_fast() {
+    let mut sk = Sketch::new();
+    for i in 0..150 {
+        let o = v(i as f64 * 50.0, 0.0);
+        let l = rect(&mut sk, [o, o + v(40.0, 0.5), o + v(40.5, 30.0), o + v(-0.3, 30.2)]);
+        use ConstraintKind::*;
+        sk.add_constraint(Horizontal { l: l[0] }, None).unwrap();
+        sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[1] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[3] }, None).unwrap();
+        sk.add_constraint(Length { l: l[0], value: 40.0 }, None).unwrap();
+        sk.add_constraint(Length { l: l[1], value: 30.0 }, None).unwrap();
+    }
+    let t = std::time::Instant::now();
+    let rep = solve(&mut sk);
+    let ms = t.elapsed().as_millis();
+    assert!(rep.ok());
+    assert_eq!(rep.dof, 300);
+    assert!(ms < 10_000, "{ms} ms");
+    eprintln!("large sketch: {ms} ms");
+}
+
+#[test]
+fn long_connected_chain_solves() {
+    let mut sk = Sketch::new();
+    let n = 300;
+    let mut prev = 0usize;
+    for i in 0..n {
+        let p = sk.add_point(v((i + 1) as f64 * 10.0 + 0.3, if i % 2 == 0 { 0.4 } else { -0.2 }), None).unwrap();
+        let l = sk.add_line_pts(prev, p, None).unwrap();
+        sk.add_constraint(ConstraintKind::Horizontal { l }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Length { l, value: 10.0 }, None).unwrap();
+        prev = p;
+    }
+    let t = std::time::Instant::now();
+    let rep = solve(&mut sk);
+    let ms = t.elapsed().as_millis();
+    eprintln!("chain: {ms} ms, iters {}", rep.iterations);
+    assert!(rep.ok(), "{rep:?}");
+    assert_eq!(rep.dof, 0);
+    assert!(ms < 10_000, "{ms} ms");
+}

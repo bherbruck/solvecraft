@@ -435,10 +435,17 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
             }
             if infer {
                 let d = b.pos() - a.pos();
-                if d.y.abs() <= d.len() * 1e-9 {
+                let axis = if d.y.abs() <= d.len() * 1e-9 {
                     cons.push(add_c(sk, ConstraintKind::Horizontal { l: c })?);
+                    true
                 } else if d.x.abs() <= d.len() * 1e-9 {
                     cons.push(add_c(sk, ConstraintKind::Vertical { l: c })?);
+                    true
+                } else {
+                    false
+                };
+                if let Some(k) = infer_at_start(sk, c, axis) {
+                    cons.push(add_c(sk, k)?);
                 }
             }
             curves.push(c);
@@ -447,6 +454,38 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
         Ok((ids_of(sk, &curves), cons))
     })?;
     Ok(result((curves, cons), info))
+}
+
+/// A relation the new line `c` has with the curve it starts from (drawn exactly so): tangent
+/// to an arc, or perpendicular to a line (parallel continuations are left alone). `axis`: the
+/// line already got horizontal/vertical, so a perpendicular to an axis-aligned line would be
+/// redundant.
+fn infer_at_start(sk: &Sketch, c: usize, axis: bool) -> Option<ConstraintKind> {
+    let CurveKind::Line { a, b } = sk.curves.get(c)?.kind else { return None };
+    let (pa, pb) = (sk.point(a)?, sk.point(b)?);
+    let u = (pb - pa).normalized()?;
+    for (i, o) in sk.curves.iter().enumerate() {
+        if i == c || !o.kind.uses(a) {
+            continue;
+        }
+        match o.kind {
+            CurveKind::Arc { c: cc, .. } => {
+                let r = (pa - sk.point(cc)?).normalized()?;
+                if r.dot(u).abs() < 1e-9 {
+                    return Some(ConstraintKind::Tangent { a: i, b: c });
+                }
+            }
+            CurveKind::Line { a: oa, b: ob } => {
+                let v = (sk.point(ob)? - sk.point(oa)?).normalized()?;
+                let o_axis = v.x.abs() < 1e-9 || v.y.abs() < 1e-9;
+                if u.dot(v).abs() < 1e-9 && !(axis && o_axis) {
+                    return Some(ConstraintKind::Perpendicular { a: i, b: c });
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Closed polygon of lines through new or referenced corner points.
