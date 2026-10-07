@@ -11,7 +11,7 @@ pub mod expr;
 pub mod project;
 
 pub use document::*;
-pub use eval::{FeatureResult, Model, ModelBody, ModelState, SolvedSketch};
+pub use eval::{FeatureResult, Model, ModelBody, ModelState, SolvedSketch, ThreadInfo, parse_metric_thread};
 pub use solvecraft_kernel as kernel;
 pub use solvecraft_sketch as sketch;
 

@@ -28,7 +28,7 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 | M6 | UI depth: selection feedback and origin (done), timeline editing (done: edit feature, history marker drag, reorder with dependency checks, suppress, rename, delete with dependents, re-resolved references), live previews, measure tool, section view, drag-solve | in progress | 16 |
 | M7 | Sweep, loft, rib, web, emboss, thread, coil, pipe | planned | 24 |
 | M8 | Surface workspace | planned | 30 |
-| M9 | Assemblies and joints | planned | 40 |
+| M9 | Components and assemblies (Fusion-style): New Component / Create Components from Bodies, active component, per-component origin/bodies/sketches/timeline entries, occurrences with transforms, Copy/Paste vs Paste New, nested Browser tree with visibility and isolate; Ground, Move/Copy of occurrences, joints (rigid, revolute, slider, cylindrical, pin-slot, planar, ball) by joint origins with limits and Drive Joints, As-built Joint, Rigid Group, contact sets later; interference, per-component physical properties; STEP with assembly structure. Groundwork done: the document is a component tree (features and bodies carry a component, active component, New Component, Create Components from Bodies) | planned | 40 |
 | M10 | Sheet metal | planned | 30 |
 | M11 | 2D drawings | planned | 30 |
 | M12 | Release: installers, signing, docs, performance | planned | 16 |

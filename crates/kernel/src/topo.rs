@@ -459,3 +459,55 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     }
     Ok(TopoCounts { faces: groups.len(), edges: edge_groups.len() + apexes, vertices: real_vertices + closed_loops + apexes, face_types })
 }
+
+/// A cylindrical face of a body near a point: where its axis is, which way, its radius, the
+/// extent of the face along the axis (from the axis point), and whether it is a hole (the
+/// material outside the cylinder).
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct CylinderFace {
+    pub axis_point: Vec3,
+    pub axis: Vec3,
+    pub radius: f64,
+    pub start: f64,
+    pub end: f64,
+    pub internal: bool,
+}
+
+pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
+    let size = b.size();
+    let mesh = b.tessellate((size * 1e-3).max(1e-3)).ok()?;
+    // The face of the triangle nearest the point.
+    let mut best: Option<(f64, u32)> = None;
+    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        let Some([a, bb, c]) = mesh.tri(t) else { continue };
+        let d = ((a + bb + c) / 3.0).dist(p).min(a.dist(p)).min(bb.dist(p)).min(c.dist(p));
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, *f));
+        }
+    }
+    let (d, face) = best?;
+    if d > size * 0.05 {
+        return None;
+    }
+    let nf = b.face_count();
+    let tol = (size * 1e-4).max(1e-6);
+    let surfs = classify_faces(&mesh, nf, tol);
+    let Surf::Cylinder { axis, p: ap, r } = *surfs.get(face as usize)? else { return None };
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    let mut inward = 0.0;
+    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        if *f != face {
+            continue;
+        }
+        for k in t {
+            let (Some(q), Some(n)) = (mesh.positions.get(*k as usize), mesh.normals.get(*k as usize)) else { continue };
+            let s = (*q - ap).dot(axis);
+            lo = lo.min(s);
+            hi = hi.max(s);
+            let radial = *q - ap - axis * s;
+            inward += n.dot(radial);
+        }
+    }
+    Some(CylinderFace { axis_point: ap, axis, radius: r, start: lo, end: hi, internal: inward < 0.0 })
+}

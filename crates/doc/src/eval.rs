@@ -48,9 +48,140 @@ pub struct SolvedSketch {
     pub profiles: Vec<Profile>,
 }
 
+/// A cosmetic thread: on which cylinder, its size, and the threaded part of the axis.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ThreadInfo {
+    pub feature: u64,
+    pub body: String,
+    pub designation: String,
+    pub major_diameter: f64,
+    pub pitch: f64,
+    pub internal: bool,
+    pub axis_point: Vec3,
+    pub axis: Vec3,
+    /// Threaded part along the axis from `axis_point`.
+    pub start: f64,
+    pub end: f64,
+}
+
+/// ISO metric coarse threads: (nominal diameter, pitch).
+const ISO_COARSE: [(f64, f64); 22] = [
+    (1.6, 0.35),
+    (2.0, 0.4),
+    (2.5, 0.45),
+    (3.0, 0.5),
+    (4.0, 0.7),
+    (5.0, 0.8),
+    (6.0, 1.0),
+    (8.0, 1.25),
+    (10.0, 1.5),
+    (12.0, 1.75),
+    (14.0, 2.0),
+    (16.0, 2.0),
+    (18.0, 2.5),
+    (20.0, 2.5),
+    (22.0, 2.5),
+    (24.0, 3.0),
+    (27.0, 3.0),
+    (30.0, 3.5),
+    (36.0, 4.0),
+    (42.0, 4.5),
+    (48.0, 5.0),
+    (56.0, 5.5),
+];
+
+/// "M8" or "M8x1" → (nominal diameter, pitch).
+pub fn parse_metric_thread(s: &str) -> Option<(f64, f64)> {
+    let t = s.trim().to_ascii_uppercase();
+    let body = t.strip_prefix('M')?;
+    let (d, p) = match body.split_once(['X', '×']) {
+        Some((d, p)) => (d.trim().parse::<f64>().ok()?, Some(p.trim().parse::<f64>().ok()?)),
+        None => (body.trim().parse::<f64>().ok()?, None),
+    };
+    let pitch = match p {
+        Some(p) => p,
+        None => ISO_COARSE.iter().find(|(n, _)| (n - d).abs() < 1e-9)?.1,
+    };
+    (d > 0.0 && pitch > 0.0 && pitch < d).then_some((d, pitch))
+}
+
+/// The metric thread a cylinder of this diameter takes: a shaft is the major diameter, a hole
+/// the tap drill (major − pitch).
+fn thread_for(diameter: f64, internal: bool) -> Option<(f64, f64)> {
+    ISO_COARSE
+        .iter()
+        .map(|&(n, p)| (n, p, if internal { n - p } else { n }))
+        .min_by(|a, b| (a.2 - diameter).abs().total_cmp(&(b.2 - diameter).abs()))
+        .filter(|(_, _, want)| (want - diameter).abs() <= 0.15 * diameter)
+        .map(|(n, p, _)| (n, p))
+}
+
+fn format_thread(d: f64, p: f64) -> String {
+    let coarse = ISO_COARSE.iter().any(|(n, q)| (n - d).abs() < 1e-9 && (q - p).abs() < 1e-9);
+    let num = |x: f64| if (x - x.round()).abs() < 1e-9 { format!("{}", x.round()) } else { format!("{x}") };
+    if coarse { format!("M{}", num(d)) } else { format!("M{}x{}", num(d), num(p)) }
+}
+
+/// A cosmetic thread on the cylindrical face at `p`.
+fn thread_on(st: &ModelState, feature: u64, p: Vec3, designation: Option<&str>, length: Option<f64>) -> Result<ThreadInfo> {
+    let (body, cyl) = st
+        .bodies
+        .iter()
+        .filter_map(|b| kernel::cylinder_face_at(&b.body, p).map(|c| (b.name.clone(), c)))
+        .min_by(|a, b| {
+            let dist = |c: &kernel::CylinderFace| ((p - c.axis_point - c.axis * (p - c.axis_point).dot(c.axis)).len() - c.radius).abs();
+            dist(&a.1).total_cmp(&dist(&b.1))
+        })
+        .ok_or_else(|| DocError::Invalid("no cylindrical face there to thread".into()))?;
+    let dia = cyl.radius * 2.0;
+    let (major, pitch) = match designation {
+        Some(s) => parse_metric_thread(s).ok_or_else(|| DocError::Invalid(format!("unknown thread `{s}` (ISO metric, like M8 or M8x1)")))?,
+        None => thread_for(dia, cyl.internal).ok_or_else(|| DocError::Invalid(format!("no metric thread fits a {dia:.2} mm cylinder")))?,
+    };
+    let fits = if cyl.internal {
+        (major - pitch * 1.0825 - dia).abs() < 0.2 * major || (major - pitch - dia).abs() < 0.15 * major
+    } else {
+        (major - dia).abs() < 0.15 * major
+    };
+    if !fits {
+        return Err(DocError::Invalid(format!(
+            "an {} thread does not fit a {dia:.2} mm {}",
+            format_thread(major, pitch),
+            if cyl.internal { "hole" } else { "shaft" }
+        )));
+    }
+    // From the end of the face nearest the point.
+    let s = (p - cyl.axis_point).dot(cyl.axis);
+    let (mut a, mut b) = (cyl.start, cyl.end);
+    if let Some(l) = length {
+        if !(l > 0.0) {
+            return Err(DocError::Invalid("thread length must be positive".into()));
+        }
+        if (s - a).abs() <= (b - s).abs() {
+            b = (a + l).min(b);
+        } else {
+            a = (b - l).max(a);
+        }
+    }
+    Ok(ThreadInfo {
+        feature,
+        body,
+        designation: format_thread(major, pitch),
+        major_diameter: major,
+        pitch,
+        internal: cyl.internal,
+        axis_point: cyl.axis_point,
+        axis: cyl.axis,
+        start: a,
+        end: b,
+    })
+}
+
 /// Model after some prefix of the timeline.
 #[derive(Clone, Debug, Default)]
 pub struct ModelState {
+    /// Cosmetic threads (from Thread features and threaded holes).
+    pub threads: Vec<ThreadInfo>,
     pub bodies: Vec<ModelBody>,
     pub sketches: Vec<SolvedSketch>,
     pub body_counter: usize,
@@ -624,6 +755,108 @@ fn revolve_axis(ss: &SolvedSketch, axis: &AxisRef) -> Result<(Vec2, Vec2)> {
     }
 }
 
+/// Where a hole feature drills (each on the surface) and in which direction: at its sketch
+/// points perpendicular to the sketch (into the material), else at its position.
+fn hole_spots(st: &ModelState, f: &Feature) -> Result<(Vec<Vec3>, Vec3)> {
+    let FeatureKind::Hole { position, direction, points, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
+    let (spots, dir) = match points {
+        Some(sp) => {
+            let ss = st.sketch(sp.sketch).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sp.sketch)))?;
+            let mut v = Vec::new();
+            for id in &sp.ids {
+                let p = ss.sketch.points.iter().find(|p| &p.id == id).ok_or_else(|| DocError::Unknown(format!("sketch point `{id}`")))?;
+                v.push(ss.plane.to_world(p.pos));
+            }
+            (v, -ss.plane.normal())
+        }
+        None => (vec![*position], direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?),
+    };
+    if spots.is_empty() || spots.len() > 10_000 {
+        return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
+    }
+    Ok((spots.into_iter().map(|p| hole_on_surface(st, p, dir)).collect(), dir))
+}
+
+/// The cutting tools of one hole at `position`, drilling along `dir`.
+#[allow(clippy::too_many_arguments)]
+fn hole_tools(
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    position: &Vec3,
+    dir: Vec3,
+    diameter: &str,
+    depth: &Option<String>,
+    hole: &HoleKind,
+) -> Result<Vec<Body>> {
+    let r = val(vals, diameter, Kind::Length)? / 2.0;
+    if !(r > 1e-6) {
+        return Err(DocError::Invalid("hole diameter must be positive".into()));
+    }
+    let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
+    let top = (size * 0.01).max(0.1);
+    let bottom = match depth {
+        Some(d) => -val(vals, d, Kind::Length)?,
+        None => -(size * 2.0 + 1.0),
+    };
+    if bottom >= 0.0 {
+        return Err(DocError::Invalid("hole depth must be positive".into()));
+    }
+    // Tools are cylinders and cones made by (tapered) extrudes along the axis, cut one
+    // after another, widest first.
+    let plane = Plane::from_normal(*position, -dir).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+    // Each tool's circle seam at its own angle, so seams don't line up between tools.
+    let seam = std::cell::Cell::new(0.0);
+    let disc = |rad: f64| {
+        seam.set(seam.get() + 0.613);
+        Region2 { outer: solvecraft_geom::Loop2::circle_from(Vec2::ZERO, rad, seam.get()), holes: vec![] }
+    };
+    let cyl = |rad: f64, lo: f64, hi: f64| -> Result<Body> {
+        kernel::extrude(&plane, &[disc(rad)], lo, hi)?.pop().ok_or_else(|| DocError::Invalid("hole tool".into()))
+    };
+    let mut tools = Vec::new();
+    match hole {
+        HoleKind::Simple => tools.push(cyl(r, bottom, top)?),
+        HoleKind::Drilled { tip_angle } => {
+            let half = val(vals, tip_angle, Kind::Angle)? / 2.0;
+            if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 {
+                // One revolved tool (cylinder with a drill point).
+                let tip = r / half.tan();
+                let up = -dir;
+                let side = up.any_perp();
+                let rp = Plane::new(*position, side, up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+                let pts = [Vec2::new(0.0, top), Vec2::new(r, top), Vec2::new(r, bottom), Vec2::new(0.0, bottom - tip)];
+                let region = Region2 { outer: solvecraft_geom::Loop2::polygon(&pts), holes: vec![] };
+                tools.extend(kernel::revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?);
+            } else {
+                tools.push(cyl(r, bottom, top)?);
+            }
+        }
+        HoleKind::Counterbore { cb_diameter, cb_depth } => {
+            let (rc, dc) = (val(vals, cb_diameter, Kind::Length)? / 2.0, val(vals, cb_depth, Kind::Length)?);
+            if !(rc > r && dc > 0.0 && -dc > bottom) {
+                return Err(DocError::Invalid("the counterbore must be wider than the hole and shallower than it".into()));
+            }
+            // Wide and shallow first: the narrow hole then crosses the pocket floor.
+            tools.push(cyl(rc, -dc, top)?);
+            tools.push(cyl(r, bottom, top)?);
+        }
+        HoleKind::Countersink { cs_diameter, cs_angle } => {
+            let (rc, half) = (val(vals, cs_diameter, Kind::Length)? / 2.0, val(vals, cs_angle, Kind::Angle)? / 2.0);
+            if !(rc > r && half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
+                return Err(DocError::Invalid("the countersink must be wider than the hole".into()));
+            }
+            // Cone from above the face to just inside the hole radius, then the hole.
+            let r_top = rc + top * half.tan();
+            let r_end = r * 0.9;
+            let len = (r_top - r_end) / half.tan();
+            let top_plane = plane.offset(top);
+            tools.push(kernel::extrude_tapered(&top_plane, &disc(r_top), len, -1.0, -half)?);
+            tools.push(cyl(r, bottom, top)?);
+        }
+    }
+    Ok(tools)
+}
+
 /// The tool bodies a feature adds or removes (extrude, revolve, primitives), in the current state.
 fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Vec<Body>> {
     match &f.kind {
@@ -718,74 +951,14 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
         FeatureKind::Torus { center, major, minor, .. } => {
             Ok(vec![kernel::torus(*center, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?])
         }
-        FeatureKind::Hole { position, direction, diameter, depth, hole } => {
-            let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
-            let position = &hole_on_surface(st, *position, dir);
-            let r = val(vals, diameter, Kind::Length)? / 2.0;
-            if !(r > 1e-6) {
-                return Err(DocError::Invalid("hole diameter must be positive".into()));
+        FeatureKind::Hole { diameter, depth, hole, .. } => {
+            let (spots, dir) = hole_spots(st, f)?;
+            if spots.is_empty() || spots.len() > 10_000 {
+                return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
             }
-            let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
-            let top = (size * 0.01).max(0.1);
-            let bottom = match depth {
-                Some(d) => -val(vals, d, Kind::Length)?,
-                None => -(size * 2.0 + 1.0),
-            };
-            if bottom >= 0.0 {
-                return Err(DocError::Invalid("hole depth must be positive".into()));
-            }
-            // Tools are cylinders and cones made by (tapered) extrudes along the axis, cut one
-            // after another, widest first.
-            let plane = Plane::from_normal(*position, -dir).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
-            // Each tool's circle seam at its own angle, so seams don't line up between tools.
-            let seam = std::cell::Cell::new(0.0);
-            let disc = |rad: f64| {
-                seam.set(seam.get() + 0.613);
-                Region2 { outer: solvecraft_geom::Loop2::circle_from(Vec2::ZERO, rad, seam.get()), holes: vec![] }
-            };
-            let cyl = |rad: f64, lo: f64, hi: f64| -> Result<Body> {
-                kernel::extrude(&plane, &[disc(rad)], lo, hi)?.pop().ok_or_else(|| DocError::Invalid("hole tool".into()))
-            };
             let mut tools = Vec::new();
-            match hole {
-                HoleKind::Simple => tools.push(cyl(r, bottom, top)?),
-                HoleKind::Drilled { tip_angle } => {
-                    let half = val(vals, tip_angle, Kind::Angle)? / 2.0;
-                    if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 {
-                        // One revolved tool (cylinder with a drill point).
-                        let tip = r / half.tan();
-                        let up = -dir;
-                        let side = up.any_perp();
-                        let rp = Plane::new(*position, side, up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
-                        let pts = [Vec2::new(0.0, top), Vec2::new(r, top), Vec2::new(r, bottom), Vec2::new(0.0, bottom - tip)];
-                        let region = Region2 { outer: solvecraft_geom::Loop2::polygon(&pts), holes: vec![] };
-                        tools.extend(kernel::revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?);
-                    } else {
-                        tools.push(cyl(r, bottom, top)?);
-                    }
-                }
-                HoleKind::Counterbore { cb_diameter, cb_depth } => {
-                    let (rc, dc) = (val(vals, cb_diameter, Kind::Length)? / 2.0, val(vals, cb_depth, Kind::Length)?);
-                    if !(rc > r && dc > 0.0 && -dc > bottom) {
-                        return Err(DocError::Invalid("the counterbore must be wider than the hole and shallower than it".into()));
-                    }
-                    // Wide and shallow first: the narrow hole then crosses the pocket floor.
-                    tools.push(cyl(rc, -dc, top)?);
-                    tools.push(cyl(r, bottom, top)?);
-                }
-                HoleKind::Countersink { cs_diameter, cs_angle } => {
-                    let (rc, half) = (val(vals, cs_diameter, Kind::Length)? / 2.0, val(vals, cs_angle, Kind::Angle)? / 2.0);
-                    if !(rc > r && half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
-                        return Err(DocError::Invalid("the countersink must be wider than the hole".into()));
-                    }
-                    // Cone from above the face to just inside the hole radius, then the hole.
-                    let r_top = rc + top * half.tan();
-                    let r_end = r * 0.9;
-                    let len = (r_top - r_end) / half.tan();
-                    let top_plane = plane.offset(top);
-                    tools.push(kernel::extrude_tapered(&top_plane, &disc(r_top), len, -1.0, -half)?);
-                    tools.push(cyl(r, bottom, top)?);
-                }
+            for at in spots {
+                tools.extend(hole_tools(vals, st, &at, dir, diameter, depth, hole)?);
             }
             Ok(tools)
         }
@@ -989,9 +1162,29 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let tools = feature_tools(vals, f, st)?;
             apply_op(st, f, tools, *operation, targets)
         }
-        FeatureKind::Hole { .. } => {
+        FeatureKind::Hole { thread, diameter, .. } => {
+            let (spots, dir) = hole_spots(st, f)?;
             let tools = feature_tools(vals, f, st)?;
-            apply_op(st, f, tools, Operation::Cut, &[])
+            apply_op(st, f, tools, Operation::Cut, &[])?;
+            if let Some(d) = thread {
+                // A point on each hole's wall, a little below the entry.
+                let r = val(vals, diameter, Kind::Length)? / 2.0;
+                for p in spots {
+                    let wall = p + dir.any_perp() * r + dir * (r * 0.5);
+                    let t = thread_on(st, f.id, wall, Some(d), None)?;
+                    st.threads.push(t);
+                }
+            }
+            Ok(())
+        }
+        FeatureKind::Thread { face, designation, length } => {
+            let l = match length {
+                Some(e) => Some(val(vals, e, Kind::Length)?),
+                None => None,
+            };
+            let t = thread_on(st, f.id, *face, designation.as_deref(), l)?;
+            st.threads.push(t);
+            Ok(())
         }
         FeatureKind::Shell { faces, thickness, body } => {
             let t = val(vals, thickness, Kind::Length)?;

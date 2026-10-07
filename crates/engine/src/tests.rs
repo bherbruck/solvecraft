@@ -652,3 +652,48 @@ fn threemf_export_open_insert() {
     assert_eq!(*s.doc, *before);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn holes_at_sketch_points_threads_and_components() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 60, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "SketchCreate", json!({"plane": {"face": [30, 20, 10]}, "name": "HolePoints"}));
+    let mut ids = Vec::new();
+    for (k, (x, y)) in [(10.0, 10.0), (50.0, 10.0), (50.0, 30.0), (10.0, 30.0)].into_iter().enumerate() {
+        let id = format!("h{k}");
+        run(&mut s, "DrawPoint", json!({ "point": [x, y], "id": id }));
+        ids.push(id);
+    }
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "FusionHoleCommand", json!({"sketch": "HolePoints", "points": ids, "diameter": 5, "thread": "M6", "name": "Holes"}));
+    let v = volume(&mut s);
+    assert!(rel(v, 60.0 * 40.0 * 10.0 - 4.0 * PI * 6.25 * 10.0) < 1e-3, "{v}");
+    let t = run(&mut s, "model.threads", json!({}));
+    let threads = t["threads"].as_array().unwrap();
+    assert_eq!(threads.len(), 4, "{t}");
+    assert_eq!(threads[0]["designation"], "M6");
+    assert_eq!(threads[0]["internal"], true);
+    // A cosmetic thread on a shaft; designation from its size.
+    run(&mut s, "PrimitiveCylinder", json!({"base": [100, 0, 0], "radius": 4, "height": 20, "name": "Shaft", "body_name": "Shaft"}));
+    let th = run(&mut s, "FusionThreadCommand", json!({"face": [104, 0, 10], "length": 12}));
+    assert_eq!(th["thread"]["designation"], "M8", "{th}");
+    assert!((th["thread"]["end"].as_f64().unwrap() - th["thread"]["start"].as_f64().unwrap() - 12.0).abs() < 1e-6, "{th}");
+    assert!(s.execute("FusionThreadCommand", &json!({"face": [104, 0, 10], "designation": "M20"})).is_err());
+    // Components: features made while one is active belong to it.
+    let c = run(&mut s, "FusionCreateNewComponentCommand", json!({"name": "Bracket"}));
+    let cid = c["component"].as_u64().unwrap();
+    run(&mut s, "PrimitiveBox", json!({"corner": [0, 60, 0], "length": 10, "width": 10, "height": 10, "name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let l = run(&mut s, "component.list", json!({}));
+    let comps = l["components"].as_array().unwrap();
+    let bracket = comps.iter().find(|x| x["id"] == cid).unwrap();
+    assert_eq!(bracket["features"], json!(["Block"]), "{l}");
+    assert_eq!(bracket["bodies"].as_array().map(|a| a.len()), Some(1), "{l}");
+    let r = run(&mut s, "FusionCreateComponentsFromBodiesCommand", json!({"bodies": ["Shaft"]}));
+    assert_eq!(r["components"].as_array().map(|a| a.len()), Some(1));
+    // Saved and loaded with the components.
+    let text = s.doc.to_json();
+    let back = solvecraft_doc::Document::from_json(&text).unwrap();
+    assert_eq!(back.components.len(), 2);
+    assert_eq!(back.body_components.len(), 1);
+}

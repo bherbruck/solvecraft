@@ -2,6 +2,7 @@
 //! toolbar placement (`tab`, `panel`) follows Fusion's Design workspace so the registry doubles
 //! as the parity metric (`cargo xtask parity`).
 
+mod component;
 mod edit;
 mod face;
 mod features;
@@ -112,6 +113,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_modify::COMMANDS.iter());
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
+    v.extend(component::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());

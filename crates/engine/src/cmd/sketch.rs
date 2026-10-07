@@ -355,6 +355,10 @@ fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     s.doc.resolve_plane(&vals, &plane, 0)?;
     let name = str_(p, "name");
     let id = s.doc_mut().add_feature(FeatureKind::Sketch { plane, sketch: Sketch::new() }, name)?;
+    let comp = s.active_component;
+    if let Some(f) = s.doc_mut().feature_mut(id) {
+        f.component = comp;
+    }
     s.active_sketch = Some(id);
     let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     // Sketching on a face projects the face's edges (unless turned off).

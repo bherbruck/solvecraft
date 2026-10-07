@@ -18,6 +18,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.inspect", "Inspect Sketch", sketch_inspect).noundo().params("sketch?: id|name (default active)"),
     CommandSpec::new("model.edges", "List Edges", model_edges).noundo().params("body: name"),
     CommandSpec::new("model.faces", "List Faces", model_faces).noundo().params("body: name"),
+    CommandSpec::new("model.threads", "List Threads", model_threads).noundo(),
     CommandSpec::new("engine.commands", "List Commands", commands).noundo(),
 ];
 
@@ -205,4 +206,9 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
     Ok(Value::Array(crate::command_specs().iter().map(|c| serde_json::to_value(c.info(s)).unwrap_or_default()).collect()))
+}
+
+fn model_threads(s: &mut Session, _p: &Value) -> Result<Value> {
+    let st = s.model.state();
+    Ok(json!({ "threads": st.threads }))
 }

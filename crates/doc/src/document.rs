@@ -227,6 +227,23 @@ pub enum FeatureKind {
         depth: Option<String>,
         #[serde(default)]
         hole: HoleKind,
+        /// Drill at these sketch points instead (one hole each, perpendicular to the sketch);
+        /// the holes follow the points when the sketch changes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        points: Option<SketchPoints>,
+        /// A cosmetic thread in the holes (e.g. "M6x1").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<String>,
+    },
+    /// A cosmetic thread on a cylindrical face (no geometry change; drawn and exported as an
+    /// annotation). `designation` is an ISO metric size such as "M8" or "M8x1".
+    Thread {
+        face: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        designation: Option<String>,
+        /// Thread length from the face's end nearest `face`; `None` = full length.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        length: Option<String>,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
@@ -310,6 +327,24 @@ pub struct MeshData {
     pub triangles: Vec<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f32; 3]>,
+}
+
+/// Points of a sketch, by id.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SketchPoints {
+    pub sketch: u64,
+    pub ids: Vec<String>,
+}
+
+/// A component: a node of the design tree that owns sketches, features and bodies. The root
+/// (id 0) is the design itself and is not stored.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Component {
+    pub id: u64,
+    pub name: String,
+    /// Parent component (0 = the root).
+    #[serde(default)]
+    pub parent: u64,
 }
 
 /// One loft section: profiles of a sketch.
@@ -403,6 +438,7 @@ impl FeatureKind {
             FeatureKind::Mirror { .. } => "MirrorFeature",
             FeatureKind::ConstructionPlane { .. } => "ConstructionPlane",
             FeatureKind::Hole { .. } => "HoleFeature",
+            FeatureKind::Thread { .. } => "ThreadFeature",
             FeatureKind::Loft { .. } => "LoftFeature",
             FeatureKind::Sweep { .. } => "SweepFeature",
             FeatureKind::Shell { .. } => "ShellFeature",
@@ -431,6 +467,7 @@ impl FeatureKind {
             FeatureKind::Mirror { .. } => "Mirror",
             FeatureKind::ConstructionPlane { .. } => "Plane",
             FeatureKind::Hole { .. } => "Hole",
+            FeatureKind::Thread { .. } => "Thread",
             FeatureKind::Loft { .. } => "Loft",
             FeatureKind::Sweep { .. } => "Sweep",
             FeatureKind::Shell { .. } => "Shell",
@@ -493,6 +530,7 @@ impl FeatureKind {
                     HoleKind::Countersink { cs_diameter, cs_angle } => v.extend([cs_diameter.as_str(), cs_angle]),
                 }
             }
+            FeatureKind::Thread { length, .. } => v.extend(length.iter().map(String::as_str)),
             FeatureKind::Move { translate, angle, .. } => {
                 v.extend(translate.iter().map(String::as_str));
                 if let Some(a) = angle {
@@ -514,8 +552,15 @@ pub struct Feature {
     /// Names for the bodies this feature creates (in order); missing ones get `BodyN`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub body_names: Vec<String>,
+    /// The component the feature (and what it makes) belongs to; 0 = the root.
+    #[serde(default, skip_serializing_if = "is_root")]
+    pub component: u64,
     #[serde(flatten)]
     pub kind: FeatureKind,
+}
+
+fn is_root(c: &u64) -> bool {
+    *c == 0
 }
 
 /// The document.
@@ -533,6 +578,12 @@ pub struct Document {
     pub marker: Option<usize>,
     #[serde(default)]
     pub next_id: u64,
+    /// Components below the root, as a tree (by parent).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub components: Vec<Component>,
+    /// Bodies moved into another component than their feature's (by body name).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub body_components: std::collections::BTreeMap<String, u64>,
 }
 
 fn default_format() -> String {
@@ -558,7 +609,46 @@ impl Document {
             features: Vec::new(),
             marker: None,
             next_id: 1,
+            components: Vec::new(),
+            body_components: Default::default(),
         }
+    }
+
+    /// The component a body belongs to: where it was moved, else its feature's.
+    pub fn body_component(&self, body: &str, feature: u64) -> u64 {
+        self.body_components.get(body).copied().unwrap_or_else(|| self.feature(feature).map(|f| f.component).unwrap_or(0))
+    }
+
+    /// Add a component under `parent` and return its id.
+    pub fn add_component(&mut self, name: Option<&str>, parent: u64) -> Result<u64> {
+        if parent != 0 && !self.components.iter().any(|c| c.id == parent) {
+            return Err(DocError::Unknown(format!("component {parent}")));
+        }
+        if self.components.len() >= 10_000 {
+            return Err(DocError::Invalid("too many components".into()));
+        }
+        let id = self.next_id.max(1);
+        self.next_id = id + 1;
+        let name = match name.map(str::trim) {
+            Some(n) if !n.is_empty() => n.to_string(),
+            _ => {
+                let mut k = self.components.len() + 1;
+                while self.components.iter().any(|c| c.name == format!("Component{k}")) {
+                    k += 1;
+                }
+                format!("Component{k}")
+            }
+        };
+        self.components.push(Component { id, name, parent });
+        Ok(id)
+    }
+
+    /// A component by id or name (0 / "root" is the design itself).
+    pub fn find_component(&self, key: &str) -> Option<u64> {
+        if key == "0" || key.eq_ignore_ascii_case("root") || key == self.name {
+            return Some(0);
+        }
+        self.components.iter().find(|c| c.id.to_string() == key || c.name == key).map(|c| c.id)
     }
 
     pub fn from_json(s: &str) -> Result<Document> {
@@ -613,7 +703,7 @@ impl Document {
             Some(n) if !n.trim().is_empty() => n.trim().to_string(),
             _ => self.unique_name(kind.base_name()),
         };
-        let f = Feature { id, name, suppressed: false, body_names: Vec::new(), kind };
+        let f = Feature { id, name, suppressed: false, body_names: Vec::new(), component: 0, kind };
         match self.marker {
             Some(m) if m < self.features.len() => {
                 self.features.insert(m, f);

@@ -149,6 +149,8 @@ pub struct Session {
     pub revision: u64,
     /// Project a face's edges into a sketch created on it (Fusion's default; `sketch.auto_project`).
     pub auto_project: bool,
+    /// The component new sketches and features go into (0 = the root).
+    pub active_component: u64,
 }
 
 const MAX_UNDO: usize = 200;
@@ -177,6 +179,7 @@ impl Session {
             log: Vec::new(),
             revision: 1,
             auto_project: true,
+            active_component: 0,
         }
     }
 
@@ -268,6 +271,7 @@ impl Session {
             log: Vec::new(),
             revision: self.revision,
             auto_project: self.auto_project,
+            active_component: self.active_component,
         }
     }
 

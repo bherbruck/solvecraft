@@ -47,7 +47,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face; direction?: [x,y,z] (default: into the face); diameter; depth? (default through all); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?"),
+        .params("position: [x,y,z] on a face | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch); direction?: [x,y,z] (default: into the face); diameter; depth? (default through all); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\" (cosmetic)"),
+    CommandSpec::new("FusionThreadCommand", "Thread", thread)
+        .at("SOLID", "CREATE")
+        .icon("thread")
+        .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); length?: expr (default: the whole face). Cosmetic: the model is unchanged, model.threads lists it"),
     CommandSpec::new("FusionShellBodyCommand", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -217,6 +221,12 @@ fn check_expr(s: &Session, e: &str, kind: Kind, cmd: &str, what: &str) -> Result
 fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
     let name = str_(p, "name");
     let id = s.doc_mut().add_feature(kind, name)?;
+    let comp = s.active_component;
+    if comp != 0
+        && let Some(f) = s.doc_mut().feature_mut(id)
+    {
+        f.component = comp;
+    }
     let mut names = string_list(p, "body_names");
     if let Some(b) = str_(p, "body_name") {
         names.insert(0, b.to_string());
@@ -595,25 +605,60 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "FusionHoleCommand";
-    let position = p.get("position").and_then(vec3).ok_or_else(|| bad(cmd, "`position` must be [x, y, z]"))?;
-    let direction = match p.get("direction").and_then(vec3) {
-        Some(d) => d.normalized().ok_or_else(|| bad(cmd, "`direction` must be non-zero"))?,
-        None => {
-            // Into the planar face the position lies on.
+    // At sketch points: the holes go perpendicular to the sketch and follow its points.
+    let points = match (p.get("sketch"), p.get("points")) {
+        (Some(_), Some(_)) => {
+            let sketch = feature_sketch(s, p, cmd)?;
+            let ids = string_list(p, "points");
+            if ids.is_empty() || ids.len() > 10_000 {
+                return Err(bad(cmd, "`points` must list 1…10000 sketch point ids"));
+            }
             let st = s.model.state();
-            let mut found = None;
-            for b in &st.bodies {
-                let tol = (b.body.size() * 1e-3).max(1e-3);
-                for f in b.body.faces(tol).unwrap_or_default() {
-                    if let Some(n) = f.plane_normal
-                        && (position - f.centroid).dot(n).abs() < tol * 10.0
-                    {
-                        found = Some(-n);
-                    }
+            let ss = st.sketch(sketch).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
+            for id in &ids {
+                if !ss.sketch.points.iter().any(|q| &q.id == id) {
+                    return Err(bad(cmd, format!("no point `{id}` in the sketch")));
                 }
             }
-            found.ok_or_else(|| bad(cmd, "no planar face at `position`; give `direction`"))?
+            let n = ss.plane.normal();
+            let first =
+                ids.first().and_then(|id| ss.sketch.points.iter().find(|q| &q.id == id)).map(|q| ss.plane.to_world(q.pos)).unwrap_or_default();
+            Some((solvecraft_doc::SketchPoints { sketch, ids }, first, -n))
         }
+        _ => None,
+    };
+    let thread = str_(p, "thread").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    if let Some(t) = &thread
+        && solvecraft_doc::parse_metric_thread(t).is_none()
+    {
+        return Err(bad(cmd, format!("unknown thread `{t}` (ISO metric, like M6 or M6x0.75)")));
+    }
+    let position = match (&points, p.get("position").and_then(vec3)) {
+        (Some((_, first, _)), None) => *first,
+        (_, Some(x)) => x,
+        (None, None) => return Err(bad(cmd, "`position` must be [x, y, z] (or give `sketch` and `points`)")),
+    };
+    let direction = match (p.get("direction").and_then(vec3), &points) {
+        (None, Some((_, _, d))) => *d,
+        (d, _) => match d {
+            Some(d) => d.normalized().ok_or_else(|| bad(cmd, "`direction` must be non-zero"))?,
+            None => {
+                // Into the planar face the position lies on.
+                let st = s.model.state();
+                let mut found = None;
+                for b in &st.bodies {
+                    let tol = (b.body.size() * 1e-3).max(1e-3);
+                    for f in b.body.faces(tol).unwrap_or_default() {
+                        if let Some(n) = f.plane_normal
+                            && (position - f.centroid).dot(n).abs() < tol * 10.0
+                        {
+                            found = Some(-n);
+                        }
+                    }
+                }
+                found.ok_or_else(|| bad(cmd, "no planar face at `position`; give `direction`"))?
+            }
+        },
     };
     let diameter = req_expr(cmd, p, "diameter")?;
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
@@ -638,7 +683,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         },
         other => return Err(bad(cmd, format!("unknown hole type `{other}`"))),
     };
-    add_feature(s, p, FeatureKind::Hole { position, direction, diameter, depth, hole: kind })
+    add_feature(s, p, FeatureKind::Hole { position, direction, diameter, depth, hole: kind, points: points.map(|x| x.0), thread })
 }
 
 fn face_points(p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
@@ -715,4 +760,26 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
         sections.push(solvecraft_doc::LoftSection { sketch, profiles: profiles(sec, cmd)? });
     }
     add_feature(s, p, FeatureKind::Loft { sections, operation: operation(p, cmd)?, targets: string_list(p, "targets") })
+}
+
+fn thread(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionThreadCommand";
+    let face = p
+        .get("face")
+        .and_then(|v| vec3(v).or_else(|| v.get("point").and_then(vec3)))
+        .ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on a cylindrical face"))?;
+    let designation = str_(p, "designation").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    if let Some(t) = &designation
+        && solvecraft_doc::parse_metric_thread(t).is_none()
+    {
+        return Err(bad(cmd, format!("unknown thread `{t}` (ISO metric, like M8 or M8x1)")));
+    }
+    let length = expr(p, "length");
+    if let Some(l) = &length {
+        check_expr(s, l, Kind::Length, cmd, "length")?;
+    }
+    let v = add_feature(s, p, FeatureKind::Thread { face, designation, length })?;
+    let st = s.model.state();
+    let t = v.get("feature").and_then(Value::as_u64).and_then(|id| st.threads.iter().find(|t| t.feature == id).cloned());
+    Ok(json!({"feature": v.get("feature"), "name": v.get("name"), "thread": t}))
 }
