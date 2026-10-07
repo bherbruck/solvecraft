@@ -35,13 +35,38 @@ fn face_sums(m: &Mesh, nf: usize) -> Vec<(f64, f64, Vec3)> {
     out
 }
 
-/// Measure a body from a fine tessellation (chord tolerance 5e-5 of the body size). Faces whose
-/// fine tessellation disagrees with a coarse one (a meshing failure) use the coarse result.
+/// Smallest radius of curvature along the mesh's edge polylines (straight edges ignored).
+fn min_edge_radius(m: &Mesh) -> Option<f64> {
+    let mut best: Option<f64> = None;
+    for e in &m.edges {
+        for w in e.windows(3) {
+            let (Some(&a), Some(&b), Some(&c)) = (w.first(), w.get(1), w.get(2)) else { continue };
+            let (ab, bc, ca) = (b - a, c - b, a - c);
+            let cross = ab.cross(bc).len();
+            if !(cross > 1e-12 * ab.len() * bc.len()) {
+                continue;
+            }
+            let r = ab.len() * bc.len() * ca.len() / (2.0 * cross);
+            if r.is_finite() && r > 0.0 && best.is_none_or(|x| r < x) {
+                best = Some(r);
+            }
+        }
+    }
+    best
+}
+
+/// Measure a body from a fine tessellation (chord tolerance 5e-5 of the body size, finer for
+/// small radii down to 5e-6). Faces whose fine tessellation disagrees with a coarse one (a
+/// meshing failure) use the coarse result.
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
     let size = b.size();
-    let fine = b.tessellate((size * 5e-5).max(1e-4))?;
-    let medium = b.tessellate((size * 2.5e-4).max(2e-4))?;
     let coarse = b.tessellate((size * 1e-3).max(1e-3))?;
+    // Chord error relative to a radius sets the volume error: keep it near 3e-4 of the
+    // smallest radius (thin tubes, small fillets).
+    let tight = min_edge_radius(&coarse).map(|r| r * 3e-4).unwrap_or(f64::INFINITY);
+    let fine_tol = (size * 5e-5).min(tight).max(size * 5e-6).max(1e-4);
+    let fine = b.tessellate(fine_tol)?;
+    let medium = b.tessellate((fine_tol * 5.0).max(2e-4))?;
     let nf = b.face_count();
     let (sf, sm, sc) = (face_sums(&fine, nf), face_sums(&medium, nf), face_sums(&coarse, nf));
     let close = |x: f64, y: f64| (x - y).abs() <= 0.01 * x.abs().max(y.abs()) + 1e-9;

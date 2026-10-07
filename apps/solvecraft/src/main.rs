@@ -1,6 +1,8 @@
 //! SolveCraft desktop app.
 //!
-//! Usage: `solvecraft [--control <port>] [--sample] [design.solvecraft]`
+//! Usage: `solvecraft [--control <port>] [--sample] [design.solvecraft | part.step]`
+//!
+//! A `.step`/`.stp` file opens as a new design holding the file's bodies (an Import feature).
 //!
 //! `--control <port>` (or `SOLVECRAFT_CONTROL_PORT`) starts a localhost JSON-lines control
 //! server: `{"id":1,"method":"engine.execute","params":{"command":"PrimitiveBox","params":{…}}}`.
@@ -35,7 +37,9 @@ fn services() -> Services {
     Services {
         pick_open: Some(Box::new(|| {
             rfd::FileDialog::new()
+                .add_filter("Designs and STEP", &["solvecraft", "step", "stp", "STEP", "STP"])
                 .add_filter("SolveCraft design", &["solvecraft"])
+                .add_filter("STEP", &["step", "stp", "STEP", "STP"])
                 .add_filter("All files", &["*"])
                 .pick_file()
                 .map(|p| p.to_string_lossy().to_string())
@@ -63,7 +67,7 @@ fn main() -> eframe::Result {
                 return Ok(());
             }
             "--help" | "-h" => {
-                println!("usage: solvecraft [--control PORT] [--sample] [design.solvecraft]");
+                println!("usage: solvecraft [--control PORT] [--sample] [design.solvecraft | part.step]");
                 return Ok(());
             }
             _ => files.push(a),

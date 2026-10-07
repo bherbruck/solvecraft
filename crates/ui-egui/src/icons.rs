@@ -361,6 +361,10 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.poly(&[(4.0, 10.0), (4.0, 20.0), (16.0, 20.0), (16.0, 10.0)], pen.fill, ink);
             pen.arrow((10.0, 14.0), (20.0, 4.0), a);
         }
+        "import" => {
+            pen.iso_box(4.0, 12.0, 12.0, 7.0, 7.0);
+            pen.arrow((20.0, 3.0), (12.0, 11.0), a);
+        }
         "home" => {
             pen.poly(&[(4.0, 12.0), (12.0, 4.0), (20.0, 12.0)], pen.fill, ink);
             pen.poly(&[(6.0, 12.0), (18.0, 12.0), (18.0, 20.0), (6.0, 20.0)], pen.fill, ink);

@@ -567,6 +567,32 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Recent imports, so a file read for a command and then evaluated in the timeline is only
+/// read once.
+static RECENT: std::sync::Mutex<Vec<(u64, usize, std::sync::Arc<StepImport>)>> = std::sync::Mutex::new(Vec::new());
+
+/// [`step_import`] through a small cache of recent results (keyed by the text).
+pub fn step_import_shared(text: &str) -> Result<std::sync::Arc<StepImport>> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    let key = (h.finish(), text.len());
+    if let Ok(cache) = RECENT.lock()
+        && let Some((_, _, imp)) = cache.iter().find(|(k, n, _)| (*k, *n) == key)
+    {
+        return Ok(imp.clone());
+    }
+    let imp = std::sync::Arc::new(step_import(text)?);
+    if let Ok(mut cache) = RECENT.lock() {
+        cache.retain(|(k, n, _)| (*k, *n) != key);
+        cache.push((key.0, key.1, imp.clone()));
+        if cache.len() > 4 {
+            cache.remove(0);
+        }
+    }
+    Ok(imp)
+}
+
 /// Read a STEP file: its solids (as bodies, placed by the assembly structure) and the tree.
 pub fn step_import(text: &str) -> Result<StepImport> {
     let ex = p21::parse(text).map_err(KernelError::Invalid)?;

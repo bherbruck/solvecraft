@@ -280,6 +280,17 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         angle: Option<String>,
     },
+    /// A non-parametric base feature: bodies imported from a STEP file. The STEP text is kept
+    /// in the design (it is the B-rep), so the design reopens without the original file.
+    Import {
+        /// Source file name (display only).
+        file: String,
+        /// The STEP (ISO 10303-21) text.
+        step: String,
+        /// The file's product/assembly tree, kept for components.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        components: Vec<solvecraft_kernel::StepNode>,
+    },
 }
 
 /// One loft section: profiles of a sketch.
@@ -379,6 +390,7 @@ impl FeatureKind {
             FeatureKind::Draft { .. } => "DraftFeature",
             FeatureKind::Split { .. } => "SplitBodyFeature",
             FeatureKind::Move { .. } => "MoveFeature",
+            FeatureKind::Import { .. } => "BaseFeature",
         }
     }
     /// Default name prefix (`Extrude` → `Extrude1`).
@@ -405,6 +417,7 @@ impl FeatureKind {
             FeatureKind::Draft { .. } => "Draft",
             FeatureKind::Split { .. } => "Split",
             FeatureKind::Move { .. } => "Move",
+            FeatureKind::Import { .. } => "Import",
         }
     }
     /// Every expression the feature uses.
@@ -465,6 +478,7 @@ impl FeatureKind {
                     v.push(a);
                 }
             }
+            FeatureKind::Import { .. } => {}
         }
         v
     }

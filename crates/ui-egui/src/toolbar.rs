@@ -127,6 +127,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 close = true;
             }
+            if item(ui, "Insert STEP…", "") {
+                app.start("FusionImportCommandFromToolbar");
+                close = true;
+            }
             if item(ui, "Save", "Ctrl+S") {
                 save(app);
                 close = true;

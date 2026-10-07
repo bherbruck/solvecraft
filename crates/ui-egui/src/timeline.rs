@@ -30,6 +30,7 @@ fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",
         FeatureKind::Move { .. } => "move",
+        FeatureKind::Import { .. } => "import",
     }
 }
 

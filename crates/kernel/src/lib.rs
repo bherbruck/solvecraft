@@ -31,7 +31,7 @@ pub use ops::{BoolOp, boolean, split_by_plane, transform, transform_matrix};
 pub use polybool::planar_boolean;
 pub use polyhedron::{HalfSpace, convex_polyhedron, draft, shell};
 pub use step::step_export;
-pub use step_in::{ImportedBody, StepImport, StepNode, step_import};
+pub use step_in::{ImportedBody, StepImport, StepNode, step_import, step_import_shared};
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]

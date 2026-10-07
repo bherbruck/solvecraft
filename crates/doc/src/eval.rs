@@ -1100,5 +1100,29 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
+        FeatureKind::Import { step, .. } => {
+            let imp = kernel::step_import_shared(step)?;
+            for (k, b) in imp.bodies.iter().enumerate() {
+                let base = f.body_names.get(k).filter(|n| !n.trim().is_empty()).unwrap_or(&b.name);
+                let name = unique_body_name(st, base);
+                st.bodies.push(ModelBody::new(name, b.body.clone(), f.id));
+            }
+            if !imp.warnings.is_empty() {
+                let n = imp.warnings.len();
+                let shown: Vec<&str> = imp.warnings.iter().take(3).map(String::as_str).collect();
+                let more = if n > 3 { format!(" (+{} more)", n - 3) } else { String::new() };
+                *warning = Some(format!("{}{more}", shown.join("; ")));
+            }
+            Ok(())
+        }
     }
+}
+
+/// `base`, or `base (2)`, `base (3)`… if a body already has that name.
+fn unique_body_name(st: &ModelState, base: &str) -> String {
+    let base = if base.trim().is_empty() { "Body" } else { base.trim() };
+    if st.body(base).is_none() {
+        return base.to_string();
+    }
+    (2..).map(|i| format!("{base} ({i})")).find(|n| st.body(n).is_none()).unwrap_or_else(|| base.to_string())
 }

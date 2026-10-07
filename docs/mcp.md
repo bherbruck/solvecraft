@@ -59,7 +59,7 @@ Claude Desktop (`claude_desktop_config.json`), bridged to a running app:
 | `export` | `path`, `format?` (step, stl, stla, obj), `bodies?` | STEP or mesh export. |
 | `undo`, `redo` | — | Undo / redo one change. |
 | `new_design` | `name?` | Start an empty design. |
-| `open` | `path` | Open a `.solvecraft` design. |
+| `open` | `path` | Open a `.solvecraft` design, or a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature). |
 | `save` | `path?` | Save the design (to its current file without `path`). |
 
 Resources: `solvecraft://design` (inspect JSON with measurements) and `solvecraft://commands`

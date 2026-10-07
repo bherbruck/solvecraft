@@ -1,5 +1,6 @@
 //! File formats. Designs are saved as JSON (`.solvecraft`): the parametric document only, the
-//! model is recomputed on load. Bodies export as STL (binary or ASCII), OBJ and STEP.
+//! model is recomputed on load. Bodies export as STL (binary or ASCII), OBJ and STEP; STEP files
+//! import as a base feature (see [`step_import_feature`]).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
@@ -26,6 +27,52 @@ pub enum IoError {
 }
 
 pub type Result<T> = std::result::Result<T, IoError>;
+
+/// Largest STEP file we read.
+pub const MAX_STEP_BYTES: usize = 512 << 20;
+
+/// Is this a STEP file name (`.step` / `.stp`, any case)?
+pub fn is_step_path(path: &str) -> bool {
+    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"))
+}
+
+/// A STEP file read as an import feature.
+pub struct StepFeature {
+    /// Timeline name: the root product's name, else the file name.
+    pub name: String,
+    pub kind: solvecraft_doc::FeatureKind,
+    /// Body names from the file (solid names, else product names).
+    pub body_names: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+/// Read STEP bytes (`file` is the source file name) into an Import base feature. The file is
+/// read once here to fail early and collect names; the feature holds the STEP text.
+pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
+    if bytes.len() > MAX_STEP_BYTES {
+        return Err(IoError::Invalid(format!("STEP file too large ({} MB, limit {} MB)", bytes.len() >> 20, MAX_STEP_BYTES >> 20)));
+    }
+    // STEP is 7-bit text with escapes; tolerate stray 8-bit bytes.
+    let text = String::from_utf8_lossy(bytes).into_owned();
+    let imp = solvecraft_kernel::step_import_shared(&text)?;
+    let stem = std::path::Path::new(file)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Import".into());
+    let generic = |n: &str| n.trim().is_empty() || n.starts_with('(') || n.eq_ignore_ascii_case("import") || n.eq_ignore_ascii_case("unnamed");
+    let name = match imp.tree.as_slice() {
+        [root] if !generic(&root.name) => root.name.clone(),
+        _ => stem,
+    };
+    let file_name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    Ok(StepFeature {
+        name,
+        body_names: imp.bodies.iter().map(|b| b.name.clone()).collect(),
+        kind: solvecraft_doc::FeatureKind::Import { file: file_name, step: text, components: imp.tree.clone() },
+        warnings: imp.warnings.clone(),
+    })
+}
 
 /// Export formats.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -239,6 +286,13 @@ mod tests {
         assert!(read_design(b"\xff\xfe").is_err());
         assert!(matches!(export(&m.state(), &["nope".into()], Format::Step, "t"), Err(IoError::Empty)));
         assert_eq!(Format::from_name("a.STP").unwrap(), Format::Step);
+        assert!(is_step_path("/x/Part.STEP") && is_step_path("a.stp") && !is_step_path("a.step.json") && !is_step_path("step"));
+        let f = step_import_feature(s.as_bytes(), "/tmp/My Part.step").unwrap();
+        assert_eq!(f.name, "My Part");
+        assert_eq!(f.body_names.len(), 1);
+        assert!(matches!(&f.kind, FeatureKind::Import { file, .. } if file == "My Part.step"));
+        assert!(step_import_feature(b"ISO-10303-21;", "x.step").is_err());
+        assert!(step_import_feature(&[0xff, 0xfe, 0x00], "x.step").is_err());
         assert!(Format::from_name("a.dwg").is_err());
         assert!(read_stl(&[0u8; 10]).is_err());
         let mut fake = vec![0u8; 84];

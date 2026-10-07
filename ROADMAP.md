@@ -23,7 +23,7 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 | M1 | Sketch depth, oracle sketch cases (arcs, taper, two-sided, sketch modify tools) | in progress | 16 |
 | M2 | Robust modelling: coplanar booleans in the kernel, holes (placed on faces and on sketch points), threads (cosmetic, then modelled), patterns, mirror, shell, draft, split, construction geometry | in progress | 16 |
 | M3 | General fillets and chamfers (curved edges, chains, vertex blends) | planned | 30 |
-| M4 | Files: STEP import, mesh import, DXF sketches, 3MF | planned | 16 |
+| M4 | Files: STEP import (done: all 29 Fusion STEP files — [docs/step-import.md](docs/step-import.md)), mesh import, DXF sketches, 3MF | in progress | 10 |
 | M5 | Persistent naming of faces and edges | planned | 20 |
 | M6 | UI depth: selection feedback and origin (done), timeline editing (done: edit feature, history marker drag, reorder with dependency checks, suppress, rename, delete with dependents, re-resolved references), live previews, measure tool, section view, drag-solve | in progress | 16 |
 | M7 | Sweep, loft, rib, web, emboss, thread, coil, pipe | planned | 24 |
@@ -40,7 +40,10 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 - Booleans of bodies with coincident faces fail unless they come from extrudes (where the tool is
   extended automatically); fully internal voids are not supported.
 - Mass properties come from fine tessellation (curved faces within ~1e-4 relative).
-- No STEP import yet; no persistent naming (fillet edges are re-found by position).
+- STEP import reads solids (B-rep with analytic and B-spline geometry), units, product names,
+  colours and assemblies; offset surfaces and pcurve-only edges are not read yet, and assembly
+  components are flattened into bodies (the tree is kept for M9).
+- No persistent naming (fillet edges are re-found by position).
 - Shell and draft work on convex bodies with planar faces; loft is ruled (no tangency end conditions).
 - Dialogs have no live preview of the result yet.
 

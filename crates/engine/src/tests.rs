@@ -380,4 +380,95 @@ fn timeline_edits_reresolve_references() {
     run(&mut s, "UndoCommand", json!({}));
     run(&mut s, "UndoCommand", json!({}));
     assert!(rel(volume(&mut s), 60.0 * 30.0 * 25.0 - f4 - PI * 9.0 * 25.0) < 1e-3);
+
+/// A 40 × 30 × 20 box exported to a STEP file in a fresh temp directory.
+fn step_box_file(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("solvecraft-step-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    let p = dir.join("Block.step");
+    run(&mut s, "ExportCommand", json!({"path": p.to_string_lossy()}));
+    p
+}
+
+/// File → Open of a STEP file gives an Import base feature, and features work on its faces.
+#[test]
+fn step_open_then_model_on_it() {
+    let p = step_box_file("open");
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": p.to_string_lossy()}));
+    assert_eq!(r["features"], 1, "{r}");
+    assert_eq!(s.doc.name, "Block");
+    assert_eq!(s.doc.features[0].kind.type_name(), "BaseFeature");
+    assert!(matches!(&s.doc.features[0].kind, doc::FeatureKind::Import { file, .. } if file == "Block.step"));
+    assert!(s.is_dirty() && s.path.is_none() && s.undo.is_empty());
+    assert!(rel(volume(&mut s), 24000.0) < 1e-6);
+    let corner = run(&mut s, "MeasureCommand", json!({}))["bodies"][0]["bbox"]["min"].clone();
+    let (x0, y0, z0) = (corner[0].as_f64().unwrap(), corner[1].as_f64().unwrap(), corner[2].as_f64().unwrap());
+    let at = |x: f64, y: f64, z: f64| json!([x0 + x, y0 + y, z0 + z]);
+
+    // Fillet a vertical edge, drill a through hole, cut a pocket sketched on the top face.
+    run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [at(0.0, 0.0, 10.0)], "radius": 3}));
+    let mut want = 24000.0 - (9.0 - PI * 9.0 / 4.0) * 20.0;
+    assert!(rel(volume(&mut s), want) < 2e-4);
+    run(&mut s, "FusionHoleCommand", json!({"position": at(28.0, 15.0, 20.0), "diameter": 6}));
+    want -= PI * 9.0 * 20.0;
+    assert!(rel(volume(&mut s), want) < 5e-4, "{} vs {want}", volume(&mut s));
+    run(&mut s, "SketchCreate", json!({"plane": {"face": at(10.0, 15.0, 20.0)}}));
+    let c = [x0 + 10.0, y0 + 15.0];
+    // Sketch coordinates on the face are relative to the model origin projected onto it.
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [c[0] - 4.0, c[1] - 4.0], "p1": [c[0] + 4.0, c[1] + 4.0]}));
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Extrude", json!({"distance": -5, "operation": "cut"}));
+    want -= 64.0 * 5.0;
+    assert!(rel(volume(&mut s), want) < 5e-4, "{} vs {want}", volume(&mut s));
+    assert_eq!(s.model.results.iter().filter(|r| r.error.is_some()).count(), 0);
+
+    // The design saves and reopens without the STEP file.
+    let before = volume(&mut s);
+    let design = p.with_extension("solvecraft");
+    run(&mut s, "SaveDocumentAsCommand", json!({"path": design.to_string_lossy()}));
+    std::fs::remove_file(&p).unwrap();
+    let mut s2 = Session::default();
+    run(&mut s2, "doc.open", json!({"path": design.to_string_lossy()}));
+    assert!(rel(volume(&mut s2), before) < 1e-6);
+}
+
+/// Shell an imported body; insert STEP into an existing design; extension case; bad files.
+#[test]
+fn step_insert_shell_and_errors() {
+    let p = step_box_file("insert");
+    let upper = p.with_file_name("BLOCK.STP");
+    std::fs::copy(&p, &upper).unwrap();
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": upper.to_string_lossy()}));
+    let top = run(&mut s, "MeasureCommand", json!({}))["bodies"][0]["bbox"]["max"].clone();
+    let (x1, y1, z1) = (top[0].as_f64().unwrap(), top[1].as_f64().unwrap(), top[2].as_f64().unwrap());
+    run(&mut s, "FusionShellBodyCommand", json!({"faces": [[x1 - 20.0, y1 - 15.0, z1]], "thickness": 2}));
+    let walls = 24000.0 - 36.0 * 26.0 * 18.0;
+    assert!(rel(volume(&mut s), walls) < 5e-4, "{}", volume(&mut s));
+
+    let mut d = Session::default();
+    run(&mut d, "PrimitiveBox", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]}));
+    let r = run(&mut d, "FusionImportCommandFromToolbar", json!({"path": p.to_string_lossy()}));
+    assert_eq!(r["bodies"].as_array().unwrap().len(), 1, "{r}");
+    run(&mut d, "FusionImportCommandFromToolbar", json!({"path": p.to_string_lossy()}));
+    let names: Vec<String> = d.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 3);
+    let mut uniq = names.clone();
+    uniq.dedup();
+    assert_eq!(uniq.len(), 3, "{names:?}");
+    assert!(rel(volume(&mut d), 125.0 + 48000.0) < 1e-6);
+    run(&mut d, "UndoCommand", json!({}));
+    assert_eq!(d.model.state().bodies.len(), 2);
+
+    let junk = p.with_file_name("junk.step");
+    std::fs::write(&junk, "ISO-10303-21;\nDATA;\n#1=CARTESIAN_POINT('',(0.,0.,0.));\nENDSEC;\nEND-ISO-10303-21;\n").unwrap();
+    let before = d.doc.clone();
+    assert!(d.execute("FusionImportCommandFromToolbar", &json!({"path": junk.to_string_lossy()})).is_err());
+    assert!(d.execute("doc.open", &json!({"path": junk.to_string_lossy()})).is_err());
+    assert!(d.execute("FusionImportCommandFromToolbar", &json!({"path": "/nonexistent/a.step"})).is_err());
+    assert!(d.execute("FusionImportCommandFromToolbar", &json!({"path": p.with_extension("stl").to_string_lossy()})).is_err());
+    assert_eq!(*d.doc, *before);
 }

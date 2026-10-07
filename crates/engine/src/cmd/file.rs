@@ -1,4 +1,4 @@
-//! Documents and files: new, open, save, export.
+//! Documents and files: new, open (designs and STEP), insert STEP, save, export.
 
 use serde_json::{Value, json};
 use solvecraft_doc::Document;
@@ -10,7 +10,15 @@ use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("NewDocumentCommand", "New Design", new_doc).icon("new").key("Ctrl+N").noundo().params("name?"),
-    CommandSpec::new("doc.open", "Open", open).icon("open").key("Ctrl+O").noundo().params("path: .solvecraft design"),
+    CommandSpec::new("doc.open", "Open", open)
+        .icon("open")
+        .key("Ctrl+O")
+        .noundo()
+        .params("path: .solvecraft design, or a .step/.stp file (opens as a new design)"),
+    CommandSpec::new("FusionImportCommandFromToolbar", "Insert STEP", insert_step)
+        .at("SOLID", "INSERT")
+        .icon("import")
+        .params("path: .step/.stp file (its bodies join the design as an Import base feature); name?"),
     CommandSpec::new("SaveDocumentCommand", "Save", save).icon("save").key("Ctrl+S").noundo().params("path? (default: current file)"),
     CommandSpec::new("SaveDocumentAsCommand", "Save As", save_as).icon("save").noundo().params("path"),
     CommandSpec::new("ExportCommand", "Export", export)
@@ -30,8 +38,56 @@ fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
     str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))
 }
 
+/// Read a STEP file as an Import feature.
+fn read_step(path: &str) -> Result<solvecraft_io::StepFeature> {
+    let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if meta.len() > solvecraft_io::MAX_STEP_BYTES as u64 {
+        return Err(EngineError::Other(format!("{path}: file too large")));
+    }
+    let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    solvecraft_io::step_import_feature(&bytes, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+}
+
+/// Add an Import feature for a STEP file to the session's design.
+fn add_step(s: &mut Session, path: &str, name: Option<&str>) -> Result<Value> {
+    let sf = read_step(path)?;
+    let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
+    let id = s.doc_mut().add_feature(sf.kind, Some(&fname))?;
+    if let Some(f) = s.doc_mut().feature_mut(id) {
+        f.body_names = sf.body_names;
+    }
+    s.active_sketch = None;
+    s.refresh();
+    if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
+        return Err(EngineError::Other(e));
+    }
+    let st = s.model.state();
+    let bodies: Vec<&str> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.as_str()).collect();
+    let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+    Ok(json!({"path": path, "feature": id, "name": fname, "bodies": bodies, "warnings": sf.warnings}))
+}
+
+fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionImportCommandFromToolbar";
+    let path = path_arg(p, cmd)?;
+    if !solvecraft_io::is_step_path(path) {
+        return Err(bad(cmd, "only STEP files (.step, .stp) can be inserted"));
+    }
+    add_step(s, path, str_(p, "name"))
+}
+
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, "doc.open")?;
+    if solvecraft_io::is_step_path(path) {
+        // A new, unsaved design holding the file's bodies.
+        let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
+        let mut fresh = Session::new(Document::new(&stem));
+        let r = add_step(&mut fresh, path, None)?;
+        fresh.undo.clear();
+        *s = fresh;
+        let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
+        return Ok(json!({"path": path, "features": s.doc.features.len(), "errors": errors, "bodies": r["bodies"], "warnings": r["warnings"]}));
+    }
     let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     if meta.len() as usize > solvecraft_io::MAX_DESIGN_BYTES {
         return Err(EngineError::Other(format!("{path}: file too large")));

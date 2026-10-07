@@ -158,6 +158,10 @@ fn agent_builds_box_fillet_hole() {
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0);
     tool(&mut s, "open", json!({"path": design.to_string_lossy()}));
     assert!(rel(volume(&mut s), expect) < 5e-4);
+    // A STEP file opens as a new design with the same body.
+    let r = tool(&mut s, "open", json!({"path": step.to_string_lossy()}));
+    assert_eq!(r["features"], 1, "{r}");
+    assert!(rel(volume(&mut s), expect) < 5e-4);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

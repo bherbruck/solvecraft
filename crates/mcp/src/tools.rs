@@ -190,8 +190,10 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "open",
             "Open a design",
-            "Open a .solvecraft design file (replaces the current design).",
-            obj(json!({"path": string("Path to a .solvecraft file")}), &["path"]),
+            "Open a .solvecraft design file, or a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
+             Import base feature; insert into the current design with the FusionImportCommandFromToolbar command). Replaces \
+             the current design.",
+            obj(json!({"path": string("Path to a .solvecraft or .step/.stp file")}), &["path"]),
             false,
             true,
         ),

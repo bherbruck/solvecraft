@@ -166,6 +166,12 @@ impl SolveApp {
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
         self.tool = None;
+        if id == "FusionImportCommandFromToolbar" {
+            if let Some(p) = self.services.pick_open.as_ref().and_then(|f| f()) {
+                self.insert_path(&p);
+            }
+            return;
+        }
         if id == "SketchStop" {
             let r = self.run(id, json!({}));
             if r.is_ok()
@@ -237,6 +243,25 @@ impl SolveApp {
     pub fn open_path(&mut self, path: &str) {
         if self.run("doc.open", json!({ "path": path })).is_ok() {
             self.fit_view();
+        }
+    }
+
+    /// Insert a STEP file's bodies into the current design (an Import base feature).
+    pub fn insert_path(&mut self, path: &str) {
+        if let Ok(r) = self.run("FusionImportCommandFromToolbar", json!({ "path": path })) {
+            self.fit_view();
+            if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {
+                self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
+            }
+        }
+    }
+
+    /// A dropped file: a STEP file joins a design that has features, anything else opens.
+    pub fn drop_path(&mut self, path: &str) {
+        if solvecraft_engine::io::is_step_path(path) && !self.session.doc.features.is_empty() {
+            self.insert_path(path);
+        } else {
+            self.open_path(path);
         }
     }
 
@@ -321,7 +346,7 @@ impl SolveApp {
         for f in ctx.input(|i| i.raw.dropped_files.clone()) {
             let p = f.path().to_string_lossy().to_string();
             if !p.is_empty() {
-                self.open_path(&p);
+                self.drop_path(&p);
             }
         }
     }
