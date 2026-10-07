@@ -164,7 +164,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 // Helpers
 
 /// Resolve the sketch a command acts on: `sketch` param (id or name) or the active sketch.
-fn target_sketch(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
+pub(super) fn target_sketch(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     if let Some(v) = p.get("sketch") {
         let key = match v {
             Value::Number(n) => n.to_string(),
@@ -182,7 +182,7 @@ fn target_sketch(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
 
 /// Edit a sketch: clone it, apply `f`, solve with the document's dimension values and store
 /// it. With `strict`, an edit that makes the constraints unsolvable is rejected.
-fn edit<T>(
+pub(super) fn edit<T>(
     s: &mut Session,
     p: &Value,
     cmd: &str,
@@ -207,18 +207,18 @@ fn edit<T>(
 
 /// A point argument: `[x, y]` (new point), a point reference string, or `{at, ref}`.
 #[derive(Clone)]
-enum PArg {
+pub(super) enum PArg {
     At(Vec2),
     Ref(usize, Vec2),
 }
 
 impl PArg {
-    fn pos(&self) -> Vec2 {
+    pub(super) fn pos(&self) -> Vec2 {
         match self {
             PArg::At(p) | PArg::Ref(_, p) => *p,
         }
     }
-    fn idx(&self) -> Option<usize> {
+    pub(super) fn idx(&self) -> Option<usize> {
         match self {
             PArg::Ref(i, _) => Some(*i),
             PArg::At(_) => None,
@@ -226,7 +226,7 @@ impl PArg {
     }
 }
 
-fn parg(sk: &Sketch, v: &Value, cmd: &str) -> Result<PArg> {
+pub(super) fn parg(sk: &Sketch, v: &Value, cmd: &str) -> Result<PArg> {
     if let Some(p) = vec2(v) {
         return Ok(PArg::At(p));
     }
@@ -245,29 +245,29 @@ fn parg(sk: &Sketch, v: &Value, cmd: &str) -> Result<PArg> {
     Err(bad(cmd, "a point must be [x, y], a point id like \"l1.end\", or {at, ref}"))
 }
 
-fn req_parg(sk: &Sketch, p: &Value, k: &str, cmd: &str) -> Result<PArg> {
+pub(super) fn req_parg(sk: &Sketch, p: &Value, k: &str, cmd: &str) -> Result<PArg> {
     parg(sk, p.get(k).ok_or_else(|| bad(cmd, format!("missing `{k}`")))?, cmd)
 }
 
-fn curve_ref(sk: &Sketch, v: Option<&Value>, cmd: &str, what: &str) -> Result<usize> {
+pub(super) fn curve_ref(sk: &Sketch, v: Option<&Value>, cmd: &str, what: &str) -> Result<usize> {
     let id = v.and_then(Value::as_str).ok_or_else(|| bad(cmd, format!("`{what}` must be a curve id")))?;
     sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown sketch curve `{id}`")))
 }
 
-fn point_ref(sk: &Sketch, v: Option<&Value>, cmd: &str, what: &str) -> Result<usize> {
+pub(super) fn point_ref(sk: &Sketch, v: Option<&Value>, cmd: &str, what: &str) -> Result<usize> {
     let id = v.and_then(Value::as_str).ok_or_else(|| bad(cmd, format!("`{what}` must be a point reference")))?;
     sk.resolve_point(id).ok_or_else(|| bad(cmd, format!("unknown sketch point `{id}`")))
 }
 
-fn ids_of(sk: &Sketch, curves: &[usize]) -> Vec<String> {
+pub(super) fn ids_of(sk: &Sketch, curves: &[usize]) -> Vec<String> {
     curves.iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect()
 }
 
-fn add_c(sk: &mut Sketch, k: ConstraintKind) -> Result<String> {
+pub(super) fn add_c(sk: &mut Sketch, k: ConstraintKind) -> Result<String> {
     Ok(sk.add_constraint(k, None)?)
 }
 
-fn mark_construction(sk: &mut Sketch, curves: &[usize], p: &Value) {
+pub(super) fn mark_construction(sk: &mut Sketch, curves: &[usize], p: &Value) {
     if bool_(p, "construction").unwrap_or(false) {
         for c in curves {
             if let Some(cu) = sk.curves.get_mut(*c) {
@@ -277,7 +277,7 @@ fn mark_construction(sk: &mut Sketch, curves: &[usize], p: &Value) {
     }
 }
 
-fn result(sk_out: (Vec<String>, Vec<String>), info: Value) -> Value {
+pub(super) fn result(sk_out: (Vec<String>, Vec<String>), info: Value) -> Value {
     json!({"curves": sk_out.0, "constraints": sk_out.1, "sketch": info})
 }
 
@@ -529,7 +529,7 @@ fn rect_three_point(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(result(out, info))
 }
 
-fn radius_arg(p: &Value, cmd: &str) -> Result<f64> {
+pub(super) fn radius_arg(p: &Value, cmd: &str) -> Result<f64> {
     let r = match (num(p, "radius"), num(p, "diameter")) {
         (Some(r), _) => r,
         (None, Some(d)) => d / 2.0,
@@ -567,7 +567,7 @@ fn circle_two(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Circle through three points.
-fn circumcircle(a: Vec2, b: Vec2, c: Vec2) -> Option<(Vec2, f64)> {
+pub(super) fn circumcircle(a: Vec2, b: Vec2, c: Vec2) -> Option<(Vec2, f64)> {
     let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
     if d.abs() < 1e-12 {
         return None;
@@ -727,7 +727,7 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
     polygon(s, p, cmd, center, rv, start, n, true)
 }
 
-fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
+pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
@@ -941,7 +941,7 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
 // ---------------------------------------------------------------------------------------------
 // Dimensions
 
-fn line_pts(sk: &Sketch, l: usize) -> Option<(Vec2, Vec2)> {
+pub(super) fn line_pts(sk: &Sketch, l: usize) -> Option<(Vec2, Vec2)> {
     match sk.curves.get(l)?.kind {
         CurveKind::Line { a, b } => Some((sk.point(a)?, sk.point(b)?)),
         _ => None,
@@ -1084,7 +1084,7 @@ fn angle_by_sector(a: usize, b: usize, (a0, a1): (Vec2, Vec2), (b0, b1): (Vec2, 
     None
 }
 
-fn round6(x: f64) -> f64 {
+pub(super) fn round6(x: f64) -> f64 {
     (x * 1e6).round() / 1e6
 }
 

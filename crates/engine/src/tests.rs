@@ -263,6 +263,19 @@ fn hostile_params_never_panic() {
         "refs",
         "link",
         "project_edges",
+        "mid",
+        "near",
+        "factor",
+        "copy",
+        "count",
+        "spacing",
+        "count2",
+        "spacing2",
+        "dir",
+        "side",
+        "chain",
+        "at",
+        "curve",
     ];
     let mut internal = Vec::new();
     for spec in command_specs() {

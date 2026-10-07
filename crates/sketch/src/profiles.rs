@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use solvecraft_geom::{Loop2, Region2, Seg2, Vec2};
 
 use crate::model::{CurveKind, Sketch};
+use crate::shape::{Shape, intersections};
 
 const MERGE_TOL: f64 = 1e-6;
 const MAX_EDGES: usize = 50_000;
@@ -75,97 +76,6 @@ fn find(p: &mut [usize], mut i: usize) -> usize {
         i = q;
     }
     i
-}
-
-/// A curve of the sketch as an analytic shape for splitting.
-#[derive(Clone, Copy)]
-enum Shape {
-    Line {
-        a: Vec2,
-        b: Vec2,
-    },
-    /// Circle (full when `sweep` is 2π) from `start` angle sweeping counter-clockwise.
-    Round {
-        c: Vec2,
-        r: f64,
-        start: f64,
-        sweep: f64,
-    },
-}
-
-impl Shape {
-    /// Curve parameter of `p` if it lies on the curve's interior (line t in (0,1); round:
-    /// angle offset from start in (0, sweep)).
-    fn param_on(&self, p: Vec2, tol: f64) -> Option<f64> {
-        match *self {
-            Shape::Line { a, b } => {
-                let d = b - a;
-                let l2 = d.len2();
-                if l2 < 1e-24 {
-                    return None;
-                }
-                let t = (p - a).dot(d) / l2;
-                let q = a + d * t;
-                (q.dist(p) <= tol && t * l2.sqrt() > tol && (1.0 - t) * l2.sqrt() > tol).then_some(t)
-            }
-            Shape::Round { c, r, start, sweep } => {
-                if (p.dist(c) - r).abs() > tol {
-                    return None;
-                }
-                let off = ((p - c).angle() - start).rem_euclid(TAU);
-                let ang_tol = tol / r.max(1e-12);
-                let full = sweep >= TAU - 1e-12;
-                if full {
-                    return Some(off);
-                }
-                (off > ang_tol && off < sweep - ang_tol).then_some(off)
-            }
-        }
-    }
-    fn point(&self, t: f64) -> Vec2 {
-        match *self {
-            Shape::Line { a, b } => a.lerp(b, t),
-            Shape::Round { c, r, start, .. } => c + Vec2::from_angle(start + t) * r,
-        }
-    }
-}
-
-/// Intersection points of two shapes (as circles/infinite lines; callers filter by range).
-fn intersections(x: &Shape, y: &Shape) -> Vec<Vec2> {
-    match (*x, *y) {
-        (Shape::Line { a, b }, Shape::Line { a: c, b: d }) => {
-            let (r, s) = (b - a, d - c);
-            let den = r.cross(s);
-            if den.abs() < 1e-12 * r.len() * s.len() {
-                return Vec::new();
-            }
-            let t = (c - a).cross(s) / den;
-            vec![a + r * t]
-        }
-        (Shape::Line { a, b }, Shape::Round { c, r, .. }) | (Shape::Round { c, r, .. }, Shape::Line { a, b }) => {
-            let d = b - a;
-            let f = a - c;
-            let (qa, qb, qc) = (d.len2(), 2.0 * f.dot(d), f.len2() - r * r);
-            let disc = qb * qb - 4.0 * qa * qc;
-            if qa < 1e-24 || disc < 0.0 {
-                return Vec::new();
-            }
-            let sq = disc.sqrt();
-            vec![a + d * ((-qb - sq) / (2.0 * qa)), a + d * ((-qb + sq) / (2.0 * qa))]
-        }
-        (Shape::Round { c: c1, r: r1, .. }, Shape::Round { c: c2, r: r2, .. }) => {
-            let dv = c2 - c1;
-            let d = dv.len();
-            if d < 1e-12 || d > r1 + r2 || d < (r1 - r2).abs() {
-                return Vec::new();
-            }
-            let a = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d);
-            let h = (r1 * r1 - a * a).max(0.0).sqrt();
-            let m = c1 + dv * (a / d);
-            let n = dv.perp() / d;
-            vec![m + n * h, m - n * h]
-        }
-    }
 }
 
 /// Signed curvature at the start of a segment (left turns positive).

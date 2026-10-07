@@ -1,0 +1,293 @@
+//! More sketch creation tools: midpoint line, tangent arc, tangent circles, center-point and
+//! arc slots.
+
+use serde_json::{Value, json};
+use solvecraft_geom::Vec2;
+use solvecraft_sketch::{ConstraintKind, CurveKind, Sketch};
+
+use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg, result, slot};
+use super::{CommandSpec, in_sketch};
+use crate::params::{bad, num, req_vec2, str_, string_list};
+use crate::{Result, Session};
+
+pub static COMMANDS: &[CommandSpec] =
+    &[
+        CommandSpec::new("SketchMidpointLine", "Midpoint Line", midpoint_line)
+            .at("SKETCH", "CREATE")
+            .icon("line_mid")
+            .enabled(in_sketch)
+            .params("mid: [x,y] or point ref, end: [x,y]; construction?"),
+        CommandSpec::new("ArcTangent", "Tangent Arc", arc_tangent).at("SKETCH", "CREATE").icon("arc_tangent").enabled(in_sketch).params(
+            "start: end point of a line or arc (\"l1.end\"), end: [x,y]; curve?: the curve to be tangent to (default: the one ending at start)",
+        ),
+        CommandSpec::new("CircleTanTanRadius", "2-Tangent Circle", circle_tan_tan)
+            .at("SKETCH", "CREATE")
+            .icon("circle_tt")
+            .enabled(in_sketch)
+            .params("curves: [two lines/circles/arcs], radius | diameter: expr, near: [x,y] (which of the solutions)"),
+        CommandSpec::new("CircleThreeTangent", "3-Tangent Circle", circle_three_tan)
+            .at("SKETCH", "CREATE")
+            .icon("circle_ttt")
+            .enabled(in_sketch)
+            .params("curves: [three lines/circles/arcs], near: [x,y] (which of the solutions)"),
+        CommandSpec::new("ShapeSlotCenterPoint", "Center Point Slot", slot_center_point)
+            .at("SKETCH", "CREATE")
+            .icon("slot")
+            .enabled(in_sketch)
+            .params("center: slot centre, end: one arc centre, width"),
+        CommandSpec::new("ShapeArcSlotThreePoint", "Three Point Arc Slot", arc_slot_three)
+            .at("SKETCH", "CREATE")
+            .icon("arc_slot")
+            .enabled(in_sketch)
+            .params("start, through, end: points on the centre arc, width"),
+        CommandSpec::new("ShapeArcSlotCenterTwoPoint", "Center Point Arc Slot", arc_slot_center)
+            .at("SKETCH", "CREATE")
+            .icon("arc_slot")
+            .enabled(in_sketch)
+            .params("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise), width"),
+    ];
+
+fn midpoint_line(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "SketchMidpointLine";
+    let end = req_vec2(cmd, p, "end")?;
+    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+        let m = req_parg(sk, p, "mid", cmd)?;
+        let start = m.pos() * 2.0 - end;
+        if start.dist(end) < 1e-9 {
+            return Err(bad(cmd, "the end must differ from the midpoint"));
+        }
+        let l = sk.add_line(start, end, None, None, None)?;
+        let mp = match m.idx() {
+            Some(i) => i,
+            None => sk.add_point(m.pos(), None)?,
+        };
+        let k = add_c(sk, ConstraintKind::Midpoint { p: mp, l })?;
+        mark_construction(sk, &[l], p);
+        Ok((ids_of(sk, &[l]), vec![k]))
+    })?;
+    Ok(result(out, info))
+}
+
+/// Direction leaving curve `ci` at its end point `pi` (continuing the curve past that end).
+fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
+    match sk.curves.get(ci)?.kind {
+        CurveKind::Line { a, b } => {
+            let (pa, pb) = (sk.point(a)?, sk.point(b)?);
+            if pi == b {
+                (pb - pa).normalized()
+            } else if pi == a {
+                (pa - pb).normalized()
+            } else {
+                None
+            }
+        }
+        CurveKind::Arc { c, a, b } => {
+            let (pc, q) = (sk.point(c)?, sk.point(pi)?);
+            let ccw = (q - pc).perp().normalized()?;
+            if pi == b {
+                Some(ccw)
+            } else if pi == a {
+                Some(-ccw)
+            } else {
+                None
+            }
+        }
+        CurveKind::Circle { .. } => None,
+    }
+}
+
+fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ArcTangent";
+    let end = req_vec2(cmd, p, "end")?;
+    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+        let st = req_parg(sk, p, "start", cmd)?;
+        let pi = st.idx().ok_or_else(|| bad(cmd, "`start` must be the end point of a line or arc"))?;
+        let ci = match str_(p, "curve") {
+            Some(id) => sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?,
+            None => sk
+                .curves
+                .iter()
+                .enumerate()
+                .find(|(i, c)| !c.construction && leaving_dir(sk, *i, pi).is_some())
+                .map(|(i, _)| i)
+                .ok_or_else(|| bad(cmd, "no line or arc ends at `start`"))?,
+        };
+        let t = leaving_dir(sk, ci, pi).ok_or_else(|| bad(cmd, "`start` is not an end of that curve"))?;
+        let s0 = st.pos();
+        let n = t.perp();
+        let d = end - s0;
+        let den = 2.0 * n.dot(d);
+        if den.abs() < 1e-9 * d.len().max(1e-9) || d.len() < 1e-9 {
+            return Err(bad(cmd, "the end is straight ahead: draw a line instead"));
+        }
+        let center = s0 + n * (d.len2() / den);
+        let a = if den > 0.0 {
+            sk.add_arc(center, s0, end, [None, Some(pi), None], None)?
+        } else {
+            let a = sk.add_arc(center, end, s0, [None, None, Some(pi)], None)?;
+            if let Some(c) = sk.curves.get_mut(a) {
+                c.reversed = true;
+            }
+            a
+        };
+        let k = add_c(sk, ConstraintKind::Tangent { a: ci, b: a })?;
+        Ok((ids_of(sk, &[a]), vec![k]))
+    })?;
+    Ok(result(out, info))
+}
+
+/// Initial radius for a circle near `at` touching the curves: the mean distance to them.
+fn guess_radius(sk: &Sketch, curves: &[usize], at: Vec2) -> f64 {
+    let ds: Vec<f64> = curves.iter().filter_map(|c| sk.shape(*c)).map(|sh| sh.project(at).dist(at)).collect();
+    let r = ds.iter().sum::<f64>() / ds.len().max(1) as f64;
+    if r.is_finite() && r > 1e-6 { r } else { 1.0 }
+}
+
+fn tangent_curves(sk: &Sketch, p: &Value, cmd: &str, n: usize) -> Result<Vec<usize>> {
+    let ids = string_list(p, "curves");
+    if ids.len() != n {
+        return Err(bad(cmd, format!("`curves` must list {n} curves")));
+    }
+    ids.iter().map(|id| sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))).collect()
+}
+
+/// A circle tangent to `curves`, solved from a start near `near`.
+fn tangent_circle(s: &mut Session, p: &Value, cmd: &str, n: usize, radius: Option<String>) -> Result<Value> {
+    let near = req_vec2(cmd, p, "near")?;
+    let (out, info) = edit(s, p, cmd, true, |sk, doc| {
+        let cs = tangent_curves(sk, p, cmd, n)?;
+        let r0 = match &radius {
+            Some(e) => doc.eval(e, solvecraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?,
+            None => guess_radius(sk, &cs, near),
+        };
+        if !(r0 > 1e-9 && r0 < 1e8) {
+            return Err(bad(cmd, "radius must be positive"));
+        }
+        // Start where the circle already nearly touches: move the centre so the guessed circle
+        // sits between the curves.
+        let first_new = sk.points.len();
+        let c = sk.add_circle(near, r0, None, None)?;
+        let mut cons = Vec::new();
+        for k in &cs {
+            cons.push(add_c(sk, ConstraintKind::Tangent { a: *k, b: c })?);
+        }
+        if let Some(e) = &radius {
+            let pname = doc.new_model_param(e, "mm");
+            let k = sk.add_constraint(ConstraintKind::Radius { c, value: r0 }, Some(pname))?;
+            cons.push(k);
+        }
+        solve_new_only(sk, first_new);
+        Ok((ids_of(sk, &[c]), cons))
+    })?;
+    if info["solved"] != json!(true) {
+        return Err(bad(cmd, "no tangent circle there"));
+    }
+    Ok(result(out, info))
+}
+
+fn circle_tan_tan(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "CircleTanTanRadius";
+    let r = match (crate::params::expr(p, "radius"), num(p, "diameter")) {
+        (Some(r), _) => r,
+        (None, Some(d)) => format!("{}", d / 2.0),
+        _ => return Err(bad(cmd, "needs `radius` or `diameter`")),
+    };
+    tangent_circle(s, p, cmd, 2, Some(r))
+}
+
+fn circle_three_tan(s: &mut Session, p: &Value) -> Result<Value> {
+    tangent_circle(s, p, "CircleThreeTangent", 3, None)
+}
+
+fn width(p: &Value, cmd: &str) -> Result<f64> {
+    num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))
+}
+
+fn slot_center_point(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ShapeSlotCenterPoint";
+    let (c, e) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "end")?);
+    let w = width(p, cmd)?;
+    slot(s, p, cmd, c * 2.0 - e, e, w)
+}
+
+/// Arc slot around `o` (centre-line radius `r`) from angle `t0` sweeping `sweep` (> 0).
+fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, sweep: f64, w: f64) -> Result<Value> {
+    let h = w / 2.0;
+    if h >= r {
+        return Err(bad(cmd, "the slot is wider than its centre arc's diameter"));
+    }
+    if !(sweep > 1e-6 && sweep < std::f64::consts::TAU - 1e-6) {
+        return Err(bad(cmd, "the centre arc must have a length"));
+    }
+    let t1 = t0 + sweep;
+    let at = |t: f64, rr: f64| o + Vec2::from_angle(t) * rr;
+    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+        let oc = sk.add_point(o, None)?;
+        let ps = sk.add_point(at(t0, r), None)?;
+        let pe = sk.add_point(at(t1, r), None)?;
+        let (os, is) = (sk.add_point(at(t0, r + h), None)?, sk.add_point(at(t0, r - h), None)?);
+        let (oe, ie) = (sk.add_point(at(t1, r + h), None)?, sk.add_point(at(t1, r - h), None)?);
+        let outer = sk.add_arc(o, at(t0, r + h), at(t1, r + h), [Some(oc), Some(os), Some(oe)], None)?;
+        let inner = sk.add_arc(o, at(t0, r - h), at(t1, r - h), [Some(oc), Some(is), Some(ie)], None)?;
+        let cap_e = sk.add_arc(at(t1, r), at(t1, r + h), at(t1, r - h), [Some(pe), Some(oe), Some(ie)], None)?;
+        let cap_s = sk.add_arc(at(t0, r), at(t0, r - h), at(t0, r + h), [Some(ps), Some(is), Some(os)], None)?;
+        let centre = sk.add_arc(o, at(t0, r), at(t1, r), [Some(oc), Some(ps), Some(pe)], None)?;
+        if let Some(c) = sk.curves.get_mut(centre) {
+            c.construction = true;
+        }
+        let mut cons = Vec::new();
+        for (a, b) in [(outer, cap_e), (inner, cap_e), (outer, cap_s), (inner, cap_s)] {
+            cons.push(add_c(sk, ConstraintKind::Tangent { a, b })?);
+        }
+        cons.push(add_c(sk, ConstraintKind::Equal { a: cap_s, b: cap_e })?);
+        Ok((ids_of(sk, &[outer, cap_e, inner, cap_s]), cons))
+    })?;
+    Ok(result(out, info))
+}
+
+fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ShapeArcSlotThreePoint";
+    let (a, t, b) = (req_vec2(cmd, p, "start")?, req_vec2(cmd, p, "through")?, req_vec2(cmd, p, "end")?);
+    let w = width(p, cmd)?;
+    let (o, r) = circumcircle(a, t, b).ok_or_else(|| bad(cmd, "the points are collinear"))?;
+    let ang = |q: Vec2| (q - o).angle();
+    let span = |from: f64, to: f64| (to - from).rem_euclid(std::f64::consts::TAU);
+    // Counter-clockwise from start must pass the through point; otherwise go from the end.
+    let (t0, sweep) = if span(ang(a), ang(t)) < span(ang(a), ang(b)) { (ang(a), span(ang(a), ang(b))) } else { (ang(b), span(ang(b), ang(a))) };
+    arc_slot(s, p, cmd, o, r, t0, sweep, w)
+}
+
+fn arc_slot_center(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ShapeArcSlotCenterTwoPoint";
+    let (o, a, b) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "start")?, req_vec2(cmd, p, "end")?);
+    let w = width(p, cmd)?;
+    let r = o.dist(a);
+    if r < 1e-9 || o.dist(b) < 1e-9 {
+        return Err(bad(cmd, "the points must differ from the centre"));
+    }
+    let t0 = (a - o).angle();
+    let sweep = ((b - o).angle() - t0).rem_euclid(std::f64::consts::TAU);
+    arc_slot(s, p, cmd, o, r, t0, sweep, w)
+}
+
+/// Solve moving only the points from `first_new` on (the geometry a tool just made), so the
+/// existing drawing stays put when the new entities alone can satisfy the constraints. Falls
+/// back to leaving everything to the normal solve.
+pub(super) fn solve_new_only(sk: &mut Sketch, first_new: usize) {
+    let mut trial = sk.clone();
+    for (i, p) in trial.points.iter_mut().enumerate() {
+        if i < first_new {
+            p.fixed = true;
+        }
+    }
+    if solvecraft_sketch::solve(&mut trial).ok() {
+        for (p, t) in sk.points.iter_mut().zip(&trial.points).skip(first_new) {
+            p.pos = t.pos;
+        }
+        for (c, t) in sk.curves.iter_mut().zip(&trial.curves) {
+            if let (CurveKind::Circle { r, .. }, CurveKind::Circle { r: tr, .. }) = (&mut c.kind, &t.kind) {
+                *r = *tr;
+            }
+        }
+    }
+}

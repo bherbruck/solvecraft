@@ -9,6 +9,8 @@ pub use features::auto_operation;
 mod file;
 mod inspect;
 mod sketch;
+mod sketch_create;
+mod sketch_modify;
 mod sketch_project;
 
 use serde::Serialize;
@@ -106,6 +108,8 @@ pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
 pub fn command_specs() -> Vec<&'static CommandSpec> {
     let mut v: Vec<&'static CommandSpec> = Vec::new();
     v.extend(sketch::COMMANDS.iter());
+    v.extend(sketch_create::COMMANDS.iter());
+    v.extend(sketch_modify::COMMANDS.iter());
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
