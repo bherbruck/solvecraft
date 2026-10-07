@@ -599,3 +599,35 @@ fn debug_cube_sphere_measure() {
         println!("face {} area {:.2} c {:?} planar {:?}", f.index, f.area, f.centroid, f.plane_normal.is_some());
     }
 }
+
+#[test]
+fn mesh_bodies_move_measure_and_refuse_solid_ops() {
+    // Unit cube as 12 triangles with repeated corners (welded on construction).
+    let c = |i: u32| Vec3::new((i & 1) as f64 * 10.0, ((i >> 1) & 1) as f64 * 10.0, ((i >> 2) & 1) as f64 * 10.0);
+    let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+    let mut pos = Vec::new();
+    let mut tris = Vec::new();
+    for q in quads {
+        for t in [[q[0], q[2], q[1]], [q[0], q[3], q[2]]] {
+            let n = pos.len() as u32;
+            pos.extend(t.iter().map(|i| c(*i)));
+            tris.push([n, n + 1, n + 2]);
+        }
+    }
+    let b = crate::mesh_body(&pos, &tris).unwrap();
+    assert!(b.is_mesh() && b.is_closed_mesh());
+    let m = measure(&b).unwrap();
+    assert!((m.volume - 1000.0).abs() < 1e-9 && (m.area - 600.0).abs() < 1e-9, "{m:?}");
+    assert_eq!((m.faces, m.edges, m.vertices), (12, 18, 8));
+    let moved = crate::transform(&b, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.7).unwrap();
+    assert!((measure(&moved).unwrap().volume - 1000.0).abs() < 1e-9);
+    let mirrored = crate::transform_matrix(&b, [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]).unwrap();
+    assert!((measure(&mirrored).unwrap().volume - 1000.0).abs() < 1e-9);
+    let solid = box_solid(Vec3::ZERO, Vec3::new(5.0, 5.0, 5.0)).unwrap();
+    assert!(fillet(&b, &[Vec3::new(5.0, 0.0, 0.0)], 1.0).unwrap_err().to_string().contains("mesh"));
+    assert!(boolean(&solid, &b, BoolOp::Union).is_err());
+    assert!(crate::step_export(&[&b], "t").is_err());
+    assert!(crate::mesh_body(&pos, &[[0, 1, 99]]).is_err());
+    assert!(crate::mesh_body(&[Vec3::new(f64::NAN, 0.0, 0.0)], &[[0, 0, 0]]).is_err());
+    assert!(crate::mesh_body(&pos, &[[0, 0, 1]]).is_err());
+}

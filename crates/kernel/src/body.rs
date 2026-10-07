@@ -7,10 +7,16 @@ use crate::{KernelError, Result, guard};
 
 pub(crate) type Solid = mt::Solid;
 
-/// A solid body (one or more closed shells). Cheap to clone; never mutated in place.
+/// A solid body (one or more closed shells), or a mesh body (triangles only, like an imported
+/// 3MF or STL: it renders, measures and exports, but B-rep features cannot use it). Cheap to
+/// clone; never mutated in place.
 #[derive(Clone, Debug)]
 pub struct Body {
     pub(crate) solid: std::sync::Arc<Solid>,
+    /// Set for mesh bodies (`solid` is then empty).
+    pub(crate) mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>,
+    /// Display colour (linear RGB 0..1) from an imported file; operations drop it.
+    pub(crate) color: Option<[f32; 3]>,
 }
 
 /// A B-rep edge as seen by the rest of the application.
@@ -85,7 +91,7 @@ impl Body {
         if v < 0.0 {
             solid.not();
         }
-        Ok(Body { solid: std::sync::Arc::new(solid) })
+        Ok(Body { solid: std::sync::Arc::new(solid), mesh: None, color: None })
     }
 
     /// A deep copy of the solid that can be mutated without affecting other bodies.
@@ -93,9 +99,39 @@ impl Body {
         mt::builder::clone(&*self.solid)
     }
 
+    /// Is this a mesh body (no B-rep)?
+    pub fn is_mesh(&self) -> bool {
+        self.mesh.is_some()
+    }
+
+    /// Error for operations that need a B-rep.
+    pub(crate) fn require_brep(&self, what: &str) -> Result<()> {
+        if self.is_mesh() {
+            Err(KernelError::Invalid(format!("{what} needs a solid body; mesh bodies can only be moved, measured and exported")))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Display colour from an imported file.
+    pub fn color(&self) -> Option<[f32; 3]> {
+        self.color
+    }
+
+    /// The same body with a display colour.
+    pub fn with_color(mut self, c: Option<[f32; 3]>) -> Body {
+        self.color = c.filter(|c| c.iter().all(|x| x.is_finite())).map(|c| c.map(|x| x.clamp(0.0, 1.0)));
+        self
+    }
+
     /// Characteristic size (bounding box diagonal) for tolerances.
     pub fn size(&self) -> f64 {
         let mut b = solvecraft_geom::Aabb3::EMPTY;
+        if let Some(m) = &self.mesh {
+            for p in &m.positions {
+                b.add(*p);
+            }
+        }
         for v in self.solid.vertex_iter() {
             b.add(from_p3(v.point()));
         }
@@ -113,6 +149,9 @@ impl Body {
     pub fn tessellate(&self, tol: f64) -> Result<Mesh> {
         let tol = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
         let tol = tol.max(self.size() * 1e-6);
+        if let Some(m) = &self.mesh {
+            return Ok(m.to_mesh());
+        }
         guard("tessellate", || {
             let meshed = mesh_shells(&self.solid, tol);
             let mut out = Mesh::default();
@@ -185,6 +224,9 @@ impl Body {
     /// Display mesh: like [`Body::tessellate`], with seam edges flagged.
     pub fn display_mesh(&self, tol: f64) -> Result<Mesh> {
         let mut m = self.tessellate(tol)?;
+        if self.is_mesh() {
+            return Ok(m);
+        }
         m.seams = crate::topo::seam_flags(self, &m);
         Ok(m)
     }
@@ -205,7 +247,7 @@ impl Body {
     /// Faces with area and centroid.
     pub fn faces(&self, tol: f64) -> Result<Vec<FaceInfo>> {
         let m = self.tessellate(tol)?;
-        let nf = self.solid.face_iter().count();
+        let nf = self.face_count();
         let mut acc: Vec<(f64, Vec3, Vec3, bool)> = vec![(0.0, Vec3::ZERO, Vec3::ZERO, true); nf];
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {
             let Some([a, b, c]) = m.tri(t) else { continue };
@@ -257,17 +299,32 @@ impl Body {
         self.tessellate(self.size() * 2e-3).map(|m| m.contains(p)).unwrap_or(false)
     }
 
+    /// B-rep faces (a mesh body is one face; [`crate::measure`] counts its triangles).
     pub fn face_count(&self) -> usize {
-        self.solid.face_iter().count()
+        match &self.mesh {
+            Some(_) => 1,
+            None => self.solid.face_iter().count(),
+        }
     }
+    /// B-rep edges (none for a mesh body).
     pub fn edge_count(&self) -> usize {
-        Self::unique_edges(&self.solid).len()
+        match &self.mesh {
+            Some(_) => 0,
+            None => Self::unique_edges(&self.solid).len(),
+        }
     }
+    /// B-rep vertices (none for a mesh body).
     pub fn vertex_count(&self) -> usize {
+        if self.mesh.is_some() {
+            return 0;
+        }
         let mut seen = std::collections::HashSet::new();
         self.solid.vertex_iter().filter(|v| seen.insert(v.id())).count()
     }
     pub fn shell_count(&self) -> usize {
-        self.solid.boundaries().len()
+        match &self.mesh {
+            Some(_) => 1,
+            None => self.solid.boundaries().len(),
+        }
     }
 }

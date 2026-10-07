@@ -1,7 +1,7 @@
 //! SolveCraft headless command line.
 //!
 //! ```text
-//! solvecraft-cli run <script.json|design.solvecraft|part.step> [--in design|part.step] [--out FILE]... [--save FILE] [--quiet]
+//! solvecraft-cli run <script.json|design.solvecraft|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet]
 //! solvecraft-cli eval <script.json|design.solvecraft|part.step> (alias: inspect) measurements as JSON
 //! solvecraft-cli snapshot <script|design> --out shot.png [--width W] [--height H] [--view iso|front|top|…]
 //! solvecraft-cli exec <command> [json-params]                 run one command on an empty design
@@ -78,10 +78,10 @@ pub fn read_json(path: &str) -> Result<Value, String> {
     serde_json::from_str(&s).map_err(|e| format!("{path}: {e}"))
 }
 
-/// A session from a design file, a STEP file, a command script, or an oracle recipe.
+/// A session from a design file, a STEP/3MF/STL file, a command script, or an oracle recipe.
 pub fn load(path: &str) -> Result<Session, String> {
     let mut s = Session::default();
-    if solvecraft_engine::io::is_step_path(path) {
+    if solvecraft_engine::io::is_step_path(path) || solvecraft_engine::io::is_mesh_path(path) {
         s.execute("doc.open", &json!({"path": path})).map_err(|e| e.to_string())?;
         return Ok(s);
     }

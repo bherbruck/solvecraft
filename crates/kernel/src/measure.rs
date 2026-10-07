@@ -59,6 +59,25 @@ fn min_edge_radius(m: &Mesh) -> Option<f64> {
 /// small radii down to 5e-6). Faces whose fine tessellation disagrees with a coarse one (a
 /// meshing failure) use the coarse result.
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
+    if let Some((pos, tris)) = b.triangle_mesh() {
+        // Exact for a mesh body; topology counts are facets, sides and vertices.
+        let m = b.tessellate(1.0)?;
+        let mm = m.measure();
+        let edges = b.mesh.as_ref().map(|m| m.edge_count()).unwrap_or(0);
+        let merged =
+            TopoCounts { faces: tris.len(), edges, vertices: pos.len(), face_types: [("mesh".to_string(), tris.len())].into_iter().collect() };
+        return Ok(BodyMeasure {
+            volume: mm.volume,
+            area: mm.area,
+            centroid: mm.centroid,
+            bbox: m.bounds(),
+            faces: tris.len(),
+            edges,
+            vertices: pos.len(),
+            shells: 1,
+            merged,
+        });
+    }
     let size = b.size();
     let coarse = b.tessellate((size * 1e-3).max(1e-3))?;
     // Chord error relative to a radius sets the volume error: keep it near 3e-4 of the

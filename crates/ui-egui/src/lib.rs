@@ -170,7 +170,7 @@ impl SolveApp {
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
         self.tool = None;
-        if id == "FusionImportCommandFromToolbar" {
+        if matches!(id, "FusionImportCommandFromToolbar" | "ParaMeshInsertAlignCommand") {
             if let Some(p) = self.services.pick_open.as_ref().and_then(|f| f()) {
                 self.insert_path(&p);
             }
@@ -250,9 +250,11 @@ impl SolveApp {
         }
     }
 
-    /// Insert a STEP file's bodies into the current design (an Import base feature).
+    /// Insert a STEP file's bodies (an Import base feature) or a 3MF/STL file's meshes into the
+    /// current design.
     pub fn insert_path(&mut self, path: &str) {
-        if let Ok(r) = self.run("FusionImportCommandFromToolbar", json!({ "path": path })) {
+        let cmd = if solvecraft_engine::io::is_mesh_path(path) { "ParaMeshInsertAlignCommand" } else { "FusionImportCommandFromToolbar" };
+        if let Ok(r) = self.run(cmd, json!({ "path": path })) {
             self.fit_view();
             if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {
                 self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
@@ -260,9 +262,11 @@ impl SolveApp {
         }
     }
 
-    /// A dropped file: a STEP file joins a design that has features, anything else opens.
+    /// A dropped file: a STEP, 3MF or STL file joins a design that has features, anything else
+    /// opens.
     pub fn drop_path(&mut self, path: &str) {
-        if solvecraft_engine::io::is_step_path(path) && !self.session.doc.features.is_empty() {
+        let import = solvecraft_engine::io::is_step_path(path) || solvecraft_engine::io::is_mesh_path(path);
+        if import && !self.session.doc.features.is_empty() {
             self.insert_path(path);
         } else {
             self.open_path(path);

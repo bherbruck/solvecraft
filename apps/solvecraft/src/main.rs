@@ -2,7 +2,8 @@
 //!
 //! Usage: `solvecraft [--control <port>] [--sample] [design.solvecraft | part.step]`
 //!
-//! A `.step`/`.stp` file opens as a new design holding the file's bodies (an Import feature).
+//! A `.step`/`.stp` file opens as a new design holding the file's bodies (an Import feature); a
+//! `.3mf`/`.stl` file as a new design holding mesh bodies.
 //!
 //! `--control <port>` (or `SOLVECRAFT_CONTROL_PORT`) starts a localhost JSON-lines control
 //! server: `{"id":1,"method":"engine.execute","params":{"command":"PrimitiveBox","params":{…}}}`.
@@ -37,9 +38,10 @@ fn services() -> Services {
     Services {
         pick_open: Some(Box::new(|| {
             rfd::FileDialog::new()
-                .add_filter("Designs and STEP", &["solvecraft", "step", "stp", "STEP", "STP"])
+                .add_filter("Designs, STEP and meshes", &["solvecraft", "step", "stp", "STEP", "STP", "3mf", "3MF", "stl", "STL"])
                 .add_filter("SolveCraft design", &["solvecraft"])
                 .add_filter("STEP", &["step", "stp", "STEP", "STP"])
+                .add_filter("Mesh (3MF, STL)", &["3mf", "3MF", "stl", "STL"])
                 .add_filter("All files", &["*"])
                 .pick_file()
                 .map(|p| p.to_string_lossy().to_string())

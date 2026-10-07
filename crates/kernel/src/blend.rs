@@ -298,6 +298,7 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
 
 /// Constant-radius fillet of the edges nearest to the given points.
 pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+    body.require_brep("fillet")?;
     blend(body, edges, radius, Shape::Round, "fillet")
 }
 
@@ -305,6 +306,7 @@ pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
 /// prism whose only face inside the body is the chamfer plane (so neighbouring chamfers meet in
 /// a mitre); the local operation is the fallback.
 pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+    body.require_brep("chamfer")?;
     if !(distance.is_finite() && distance > 1e-6 && distance < 1e6) {
         return Err(KernelError::Invalid("chamfer size must be positive".into()));
     }

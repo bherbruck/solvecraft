@@ -101,6 +101,7 @@ pub fn convex_polyhedron(hs: &[HalfSpace]) -> Result<Body> {
 
 /// The half-spaces of a convex body with only planar faces, or an error.
 pub fn planar_convex(b: &Body) -> Result<Vec<(HalfSpace, Vec3)>> {
+    b.require_brep("this operation")?;
     let tol = (b.size() * 1e-3).max(1e-3);
     let faces = b.faces(tol)?;
     let mut out: Vec<(HalfSpace, Vec3)> = Vec::new();
@@ -122,6 +123,7 @@ pub fn planar_convex(b: &Body) -> Result<Vec<(HalfSpace, Vec3)>> {
 
 /// Hollow a convex planar body: walls of `thickness` inside, faces near `open` removed.
 pub fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
+    b.require_brep("shell")?;
     if !(thickness.is_finite() && thickness > 1e-6) {
         return Err(KernelError::Invalid("shell thickness must be positive".into()));
     }
@@ -144,6 +146,7 @@ pub fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
 /// Tilt the faces near `faces` by `angle` about their line on the neutral plane, so that they
 /// lean in (positive angle) going along `pull`.
 pub fn draft(b: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Body> {
+    b.require_brep("draft")?;
     if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 - 1e-3 {
         return Err(KernelError::Invalid("draft angle must be between −90° and 90°".into()));
     }

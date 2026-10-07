@@ -164,12 +164,12 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "export",
             "Export",
-            "Export bodies to STEP (.step/.stp), binary STL (.stl), ASCII STL (format stla) or OBJ. The format comes from \
-             the extension unless given.",
+            "Export bodies to STEP (.step/.stp), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla) or OBJ. The format \
+             comes from the extension unless given.",
             obj(
                 json!({
                     "path": string("Output file"),
-                    "format": {"type": "string", "enum": ["step", "stl", "stla", "obj"]},
+                    "format": {"type": "string", "enum": ["step", "3mf", "stl", "stla", "obj"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all)"},
                 }),
                 &["path"],
@@ -190,10 +190,10 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "open",
             "Open a design",
-            "Open a .solvecraft design file, or a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
-             Import base feature; insert into the current design with the FusionImportCommandFromToolbar command). Replaces \
-             the current design.",
-            obj(json!({"path": string("Path to a .solvecraft or .step/.stp file")}), &["path"]),
+            "Open a .solvecraft design file, a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
+             Import base feature) or a 3MF/STL mesh (.3mf/.stl: mesh bodies). Replaces the current design; insert into it \
+             instead with the FusionImportCommandFromToolbar (STEP) or ParaMeshInsertAlignCommand (3MF/STL) commands.",
+            obj(json!({"path": string("Path to a .solvecraft, .step/.stp, .3mf or .stl file")}), &["path"]),
             false,
             true,
         ),

@@ -291,6 +291,25 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         components: Vec<solvecraft_kernel::StepNode>,
     },
+    /// A non-parametric base feature: mesh bodies imported from a 3MF or STL file (kept in the
+    /// design). Mesh bodies render, measure, move and export; solid features cannot use them.
+    MeshImport {
+        /// Source file name (display only).
+        file: String,
+        meshes: Vec<MeshData>,
+    },
+}
+
+/// Triangles of one imported mesh body (millimetres).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MeshData {
+    pub name: String,
+    /// x, y, z per vertex.
+    pub positions: Vec<f64>,
+    /// Three vertex indices per triangle.
+    pub triangles: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[f32; 3]>,
 }
 
 /// One loft section: profiles of a sketch.
@@ -391,6 +410,7 @@ impl FeatureKind {
             FeatureKind::Split { .. } => "SplitBodyFeature",
             FeatureKind::Move { .. } => "MoveFeature",
             FeatureKind::Import { .. } => "BaseFeature",
+            FeatureKind::MeshImport { .. } => "MeshFeature",
         }
     }
     /// Default name prefix (`Extrude` → `Extrude1`).
@@ -418,6 +438,7 @@ impl FeatureKind {
             FeatureKind::Split { .. } => "Split",
             FeatureKind::Move { .. } => "Move",
             FeatureKind::Import { .. } => "Import",
+            FeatureKind::MeshImport { .. } => "Mesh",
         }
     }
     /// Every expression the feature uses.
@@ -478,7 +499,7 @@ impl FeatureKind {
                     v.push(a);
                 }
             }
-            FeatureKind::Import { .. } => {}
+            FeatureKind::Import { .. } | FeatureKind::MeshImport { .. } => {}
         }
         v
     }

@@ -548,3 +548,43 @@ fn extrude_a_body_face() {
     assert!(rel(v - before, (1200.0 - PI * 25.0) * 10.0) < 1e-3, "{v} {before}");
     assert!(s.execute("Extrude", &json!({"face": [500, 5, 20], "distance": 10})).is_err());
 }
+
+/// Export 3MF; open and insert it as mesh bodies; mesh bodies move and export but refuse
+/// solid features.
+#[test]
+fn threemf_export_open_insert() {
+    let dir = std::env::temp_dir().join(format!("solvecraft-3mf-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "PrimitiveCylinder", json!({"radius": 5, "height": 10, "base": [100, 0, 0]}));
+    let p = dir.join("Parts.3MF");
+    run(&mut s, "ExportCommand", json!({"path": p.to_string_lossy()}));
+    let want = volume(&mut s);
+
+    let mut m = Session::default();
+    let r = run(&mut m, "doc.open", json!({"path": p.to_string_lossy()}));
+    assert_eq!(r["bodies"].as_array().unwrap().len(), 2, "{r}");
+    assert_eq!(m.doc.features[0].kind.type_name(), "MeshFeature");
+    assert!(rel(volume(&mut m), want) < 2e-3, "{} vs {want}", volume(&mut m));
+    let meas = run(&mut m, "MeasureCommand", json!({}));
+    assert!(meas["bodies"][0]["face_types"]["mesh"].as_u64().unwrap() >= 12, "{meas}");
+    let e = m.execute("FusionFilletEdgesCommand", &json!({"edges": [[0, 0, 10]], "radius": 2})).unwrap_err().to_string();
+    assert!(e.contains("mesh"), "{e}");
+    assert!(m.execute("ExportCommand", &json!({"path": dir.join("x.step").to_string_lossy()})).is_err());
+    let stl = dir.join("again.stl");
+    run(&mut m, "ExportCommand", json!({"path": stl.to_string_lossy()}));
+
+    // Insert the STL into the solid design; names stay unique.
+    run(&mut s, "ParaMeshInsertAlignCommand", json!({"path": stl.to_string_lossy()}));
+    assert_eq!(s.model.state().bodies.len(), 3);
+    assert!(rel(volume(&mut s), 2.0 * want) < 2e-3);
+    assert!(s.execute("ParaMeshInsertAlignCommand", &json!({"path": dir.join("x.step").to_string_lossy()})).is_err());
+    let junk = dir.join("junk.3mf");
+    std::fs::write(&junk, b"PK\x03\x04 not really").unwrap();
+    let before = s.doc.clone();
+    assert!(s.execute("ParaMeshInsertAlignCommand", &json!({"path": junk.to_string_lossy()})).is_err());
+    assert!(s.execute("doc.open", &json!({"path": junk.to_string_lossy()})).is_err());
+    assert_eq!(*s.doc, *before);
+    let _ = std::fs::remove_dir_all(&dir);
+}

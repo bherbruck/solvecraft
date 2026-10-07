@@ -131,6 +131,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 app.start("FusionImportCommandFromToolbar");
                 close = true;
             }
+            if item(ui, "Insert Mesh…", "") {
+                app.start("ParaMeshInsertAlignCommand");
+                close = true;
+            }
             if item(ui, "Save", "Ctrl+S") {
                 save(app);
                 close = true;
@@ -146,6 +150,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
             }
             if item(ui, "Export STEP…", "") {
                 export(app, "step");
+                close = true;
+            }
+            if item(ui, "Export 3MF…", "") {
+                export(app, "3mf");
                 close = true;
             }
             if item(ui, "Export OBJ…", "") {

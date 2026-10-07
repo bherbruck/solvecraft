@@ -37,6 +37,10 @@ truck-meshalgo = { version = "0.4", default-features = false, features = ["tesse
 truck-stepio = { version = "0.3", default-features = false }
 truck-topology = "0.6"
 
+# packages (3MF)
+zip = { version = "3", default-features = false, features = ["deflate"] }
+quick-xml = "0.38"
+
 # images
 image = { version = "0.25", default-features = false, features = ["png"] }
 

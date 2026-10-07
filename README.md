@@ -29,7 +29,9 @@ storytold "craft" family.
   changed feature; it can be rolled back, and features can be suppressed, renamed, edited and
   deleted.
 - **Parameters** with unit-aware expressions (`2 * width + 5 mm`, `angle / 2`).
-- **Files**: designs as JSON (`.solvecraft`), export to STEP, STL (binary/ASCII) and OBJ;
+- **Files**: designs as JSON (`.solvecraft`), export to STEP, 3MF, STL (binary/ASCII) and OBJ;
+  3MF and STL import as mesh bodies (they render, measure, move and export; solid features need
+  B-rep bodies);
   STEP import (AP203/AP214/AP242 solids, assemblies, units, names, colours) as a base feature
   that later features build on — open a `.step`/`.stp` file, insert one into a design, or drop it
   on the window ([docs/step-import.md](docs/step-import.md)).
@@ -88,7 +90,7 @@ configuration and an example session: [docs/mcp.md](docs/mcp.md).
 | L0 | `geom` | vectors, planes, profiles, meshes and their measures |
 | L1 | `sketch`, `kernel`, `render` | constraint solver and profiles; the B-rep kernel boundary (truck); view math and CPU rasterizer |
 | L2 | `doc` | parameters, expressions, the feature timeline and its incremental evaluation |
-| L3 | `io` | design files, STL/OBJ/STEP export, STEP import features |
+| L3 | `io` | design files, STL/OBJ/STEP/3MF export, STEP and 3MF/STL import features |
 | L4 | `engine` | the session and the command registry (everything is a command) |
 | L5 | `ui-egui`, `mcp` | the swappable desktop front end; the MCP server (headless or bridged to the app) |
 | apps | `solvecraft`, `solvecraft-cli` | desktop app, headless CLI |

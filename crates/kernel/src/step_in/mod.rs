@@ -455,14 +455,8 @@ impl<'a> Reader<'a> {
                             let own = e.params().first().and_then(Param::as_str).unwrap_or("").trim().to_string();
                             let name = if own.is_empty() { product.to_string() } else { own };
                             out.push(self.bodies.len());
-                            self.bodies.push(ImportedBody {
-                                name,
-                                body,
-                                color: self.colors.get(&item).copied(),
-                                path: path.to_vec(),
-                                closed,
-                                file_faces,
-                            });
+                            let color = self.colors.get(&item).copied();
+                            self.bodies.push(ImportedBody { name, body: body.with_color(color), color, path: path.to_vec(), closed, file_faces });
                         }
                         Err(err) => {
                             let label = self.label(item);

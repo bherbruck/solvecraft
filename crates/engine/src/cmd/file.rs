@@ -19,12 +19,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSERT")
         .icon("import")
         .params("path: .step/.stp file (its bodies join the design as an Import base feature); name?"),
+    CommandSpec::new("ParaMeshInsertAlignCommand", "Insert Mesh", insert_mesh)
+        .at("SOLID", "INSERT")
+        .icon("import")
+        .params("path: .3mf or .stl file (its meshes join the design as mesh bodies); name?"),
     CommandSpec::new("SaveDocumentCommand", "Save", save).icon("save").key("Ctrl+S").noundo().params("path? (default: current file)"),
     CommandSpec::new("SaveDocumentAsCommand", "Save As", save_as).icon("save").noundo().params("path"),
     CommandSpec::new("ExportCommand", "Export", export)
         .icon("export")
         .noundo()
-        .params("path; format?: stl|stla|obj|step (default from extension); bodies?: [names]"),
+        .params("path; format?: stl|stla|obj|step|3mf (default from extension); bodies?: [names]"),
     CommandSpec::new("FusionSaveAsSTLCommand", "Save As Mesh", save_stl).icon("export").noundo().params("path; bodies?: [names]; ascii?: bool"),
 ];
 
@@ -67,6 +71,39 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>) -> Result<Value> {
     Ok(json!({"path": path, "feature": id, "name": fname, "bodies": bodies, "warnings": sf.warnings}))
 }
 
+/// Add a MeshImport feature for a 3MF or STL file.
+fn add_mesh(s: &mut Session, path: &str, name: Option<&str>) -> Result<Value> {
+    let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if meta.len() > solvecraft_io::MAX_3MF_BYTES as u64 {
+        return Err(EngineError::Other(format!("{path}: file too large")));
+    }
+    let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let mf = solvecraft_io::mesh_import_feature(&bytes, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&mf.name).to_string();
+    let id = s.doc_mut().add_feature(mf.kind, Some(&fname))?;
+    if let Some(f) = s.doc_mut().feature_mut(id) {
+        f.body_names = mf.body_names;
+    }
+    s.active_sketch = None;
+    s.refresh();
+    if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
+        return Err(EngineError::Other(e));
+    }
+    let st = s.model.state();
+    let bodies: Vec<&str> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.as_str()).collect();
+    let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+    Ok(json!({"path": path, "feature": id, "name": fname, "bodies": bodies, "warnings": mf.warnings}))
+}
+
+fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ParaMeshInsertAlignCommand";
+    let path = path_arg(p, cmd)?;
+    if !solvecraft_io::is_mesh_path(path) {
+        return Err(bad(cmd, "only 3MF and STL files (.3mf, .stl) can be inserted as meshes"));
+    }
+    add_mesh(s, path, str_(p, "name"))
+}
+
 fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "FusionImportCommandFromToolbar";
     let path = path_arg(p, cmd)?;
@@ -78,11 +115,11 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, "doc.open")?;
-    if solvecraft_io::is_step_path(path) {
+    if solvecraft_io::is_step_path(path) || solvecraft_io::is_mesh_path(path) {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
-        let r = add_step(&mut fresh, path, None)?;
+        let r = if solvecraft_io::is_step_path(path) { add_step(&mut fresh, path, None)? } else { add_mesh(&mut fresh, path, None)? };
         fresh.undo.clear();
         *s = fresh;
         let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();

@@ -222,6 +222,8 @@ fn planar_polys(b: &Body) -> Option<Vec<Poly>> {
 
 /// Boolean of two all-planar bodies.
 pub fn planar_boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
+    a.require_brep("a boolean")?;
+    b.require_brep("a boolean")?;
     let (Some(pa), Some(pb)) = (planar_polys(a), planar_polys(b)) else {
         return Err(KernelError::Failed("not supported yet: coincident faces on curved bodies".into()));
     };

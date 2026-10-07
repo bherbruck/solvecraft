@@ -8,6 +8,9 @@ pub fn step_export(bodies: &[&Body], system: &str) -> Result<String> {
     if bodies.is_empty() {
         return Err(KernelError::Invalid("nothing to export".into()));
     }
+    for b in bodies {
+        b.require_brep("STEP export")?;
+    }
     guard("step export", || {
         let cs: Vec<_> = bodies.iter().map(|b| b.solid.compress()).collect();
         let models: out::StepModels<_, _, _> = cs.iter().collect();

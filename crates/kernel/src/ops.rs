@@ -73,6 +73,8 @@ fn mismatch(a: &solvecraft_geom::Mesh, b: &solvecraft_geom::Mesh, result: &solve
 /// everything or an intersection of disjoint bodies. Results are checked against volume bounds
 /// and retried with shifted copies and other tolerances when they fail or look wrong.
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
+    a.require_brep("a boolean")?;
+    b.require_brep("a boolean")?;
     let size = a.size().max(b.size());
     let (va, vb) = (volume(a), volume(b));
     let slack = 2e-3 * (va + vb) + 1e-9;
@@ -157,6 +159,9 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
     if m.iter().flatten().any(|x| !x.is_finite()) {
         return Err(KernelError::Invalid("non-finite transform".into()));
     }
+    if let Some(b) = body.mesh_transformed(&m) {
+        return Ok(b);
+    }
     guard("transform", || {
         let mat = mt::Matrix4::new(
             m[0][0], m[0][1], m[0][2], m[0][3], m[1][0], m[1][1], m[1][2], m[1][3], m[2][0], m[2][1], m[2][2], m[2][3], m[3][0], m[3][1], m[3][2],
@@ -170,6 +175,25 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
 pub fn transform(body: &Body, translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Body> {
     if !(translate.is_finite() && origin.is_finite() && angle.is_finite()) {
         return Err(KernelError::Invalid("non-finite transform".into()));
+    }
+    if body.is_mesh() {
+        // Same motion as a matrix: rotate about the line through `origin`, then translate.
+        let ax = if angle.abs() > 1e-12 { axis.normalized().ok_or_else(|| KernelError::Invalid("rotation axis".into()))? } else { Vec3::Z };
+        let (c, s) = (angle.cos(), angle.sin());
+        let t = 1.0 - c;
+        let r = [
+            [t * ax.x * ax.x + c, t * ax.x * ax.y + s * ax.z, t * ax.x * ax.z - s * ax.y],
+            [t * ax.x * ax.y - s * ax.z, t * ax.y * ax.y + c, t * ax.y * ax.z + s * ax.x],
+            [t * ax.x * ax.z + s * ax.y, t * ax.y * ax.z - s * ax.x, t * ax.z * ax.z + c],
+        ];
+        let ro = Vec3::new(
+            r[0][0] * origin.x + r[1][0] * origin.y + r[2][0] * origin.z,
+            r[0][1] * origin.x + r[1][1] * origin.y + r[2][1] * origin.z,
+            r[0][2] * origin.x + r[1][2] * origin.y + r[2][2] * origin.z,
+        );
+        let tr = origin - ro + translate;
+        let m = [[r[0][0], r[0][1], r[0][2], 0.0], [r[1][0], r[1][1], r[1][2], 0.0], [r[2][0], r[2][1], r[2][2], 0.0], [tr.x, tr.y, tr.z, 1.0]];
+        return body.mesh_transformed(&m).ok_or_else(|| KernelError::Failed("mesh transform".into()));
     }
     guard("transform", || {
         let mut s = body.deep_copy();
@@ -187,6 +211,7 @@ pub fn transform(body: &Body, translate: Vec3, origin: Vec3, axis: Vec3, angle: 
 /// Split a body with a plane: the parts on the positive and the negative side of the plane
 /// (only the non-empty ones).
 pub fn split_by_plane(body: &Body, plane: &solvecraft_geom::Plane) -> Result<Vec<Body>> {
+    body.require_brep("split")?;
     let size = body.size();
     let mut bb = solvecraft_geom::Aabb3::EMPTY;
     for v in body.solid.vertex_iter() {

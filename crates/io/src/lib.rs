@@ -1,11 +1,16 @@
 //! File formats. Designs are saved as JSON (`.solvecraft`): the parametric document only, the
-//! model is recomputed on load. Bodies export as STL (binary or ASCII), OBJ and STEP; STEP files
-//! import as a base feature (see [`step_import_feature`]).
+//! model is recomputed on load. Bodies export as STL (binary or ASCII), OBJ, STEP and 3MF; STEP
+//! files import as a base feature (see [`step_import_feature`]), 3MF and STL files as mesh bodies
+//! (see [`mesh_import_feature`]).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod threemf;
+
+pub use threemf::{MAX_3MF_BYTES, MeshObject, model_xml, read_3mf, weld, write_3mf};
+
 use solvecraft_doc::{Document, ModelState};
-use solvecraft_geom::Mesh;
+use solvecraft_geom::{Mesh, Vec3};
 
 /// Design file extension.
 pub const DESIGN_EXT: &str = "solvecraft";
@@ -14,7 +19,7 @@ pub const MAX_DESIGN_BYTES: usize = 256 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
-    #[error("unsupported format `{0}` (use stl, obj, step or solvecraft)")]
+    #[error("unsupported format `{0}` (use stl, obj, step, 3mf or solvecraft)")]
     Format(String),
     #[error("nothing to export: the design has no bodies")]
     Empty,
@@ -76,6 +81,64 @@ pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
     })
 }
 
+/// Is this a mesh file we import (`.3mf`, `.stl`, any case)?
+pub fn is_mesh_path(path: &str) -> bool {
+    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("3mf") || e.eq_ignore_ascii_case("stl"))
+}
+
+/// A 3MF or STL file read as a mesh import feature.
+pub struct MeshFeature {
+    /// Timeline name: the only mesh's name, else the file name.
+    pub name: String,
+    pub kind: solvecraft_doc::FeatureKind,
+    pub body_names: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+/// Read 3MF or STL bytes (the format from `file`'s extension) into a MeshImport feature.
+pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
+    if bytes.len() > MAX_3MF_BYTES {
+        return Err(IoError::Invalid(format!("mesh file too large ({} MB)", bytes.len() >> 20)));
+    }
+    let path = std::path::Path::new(file);
+    let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Mesh".into());
+    let is_stl = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("stl"));
+    let (objects, warnings) = if is_stl {
+        let tris = read_stl(bytes)?;
+        if tris.is_empty() {
+            return Err(IoError::Invalid("STL has no triangles".into()));
+        }
+        let positions: Vec<Vec3> = tris.iter().flatten().map(|v| Vec3::new(v[0] as f64, v[1] as f64, v[2] as f64)).collect();
+        let n = u32::try_from(tris.len()).map_err(|_| IoError::Invalid("STL too large".into()))?;
+        let triangles = (0..n).map(|i| [i * 3, i * 3 + 1, i * 3 + 2]).collect();
+        (vec![MeshObject { name: stem.clone(), positions, triangles, color: None }], Vec::new())
+    } else {
+        read_3mf(bytes)?
+    };
+    // Check every mesh now, so the command fails rather than the timeline.
+    let mut meshes = Vec::with_capacity(objects.len());
+    for o in &objects {
+        solvecraft_kernel::mesh_body(&o.positions, &o.triangles).map_err(|e| IoError::Invalid(format!("mesh `{}`: {e}", o.name)))?;
+        meshes.push(solvecraft_doc::MeshData {
+            name: o.name.clone(),
+            positions: o.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+            triangles: o.triangles.iter().flatten().copied().collect(),
+            color: o.color,
+        });
+    }
+    let name = match objects.as_slice() {
+        [only] if !only.name.trim().is_empty() => only.name.clone(),
+        _ => stem,
+    };
+    let file_name = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    Ok(MeshFeature {
+        name,
+        body_names: objects.iter().map(|o| o.name.clone()).collect(),
+        kind: solvecraft_doc::FeatureKind::MeshImport { file: file_name, meshes },
+        warnings,
+    })
+}
+
 /// Export formats.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -83,6 +146,7 @@ pub enum Format {
     StlAscii,
     Obj,
     Step,
+    ThreeMf,
     Design,
 }
 
@@ -95,6 +159,7 @@ impl Format {
             "stla" | "stl-ascii" => Format::StlAscii,
             "obj" => Format::Obj,
             "step" | "stp" => Format::Step,
+            "3mf" => Format::ThreeMf,
             "solvecraft" | "json" => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -187,6 +252,18 @@ pub fn export(state: &ModelState, bodies: &[String], format: Format, name: &str)
         Format::Step => {
             let bs: Vec<&solvecraft_kernel::Body> = sel.iter().map(|b| &b.body).collect();
             solvecraft_kernel::step_export(&bs, "SolveCraft")?.into_bytes()
+        }
+        Format::ThreeMf => {
+            let objs: Vec<MeshObject> = sel
+                .iter()
+                .map(|b| {
+                    let m = export_mesh(&b.body)?;
+                    let eps = (b.body.size() * 1e-6).max(1e-7);
+                    let (positions, triangles) = threemf::weld(&m.positions, &m.triangles, eps);
+                    Ok(MeshObject { name: b.name.clone(), positions, triangles, color: b.body.color() })
+                })
+                .collect::<Result<_>>()?;
+            write_3mf(&objs)?
         }
         Format::Design => return Err(IoError::Format("solvecraft (save the document instead)".into())),
     })
@@ -300,5 +377,77 @@ mod tests {
         let mut fake = vec![0u8; 84];
         fake[80..84].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(read_stl(&fake).is_err());
+    }
+
+    fn stl_volume(bytes: &[u8]) -> f64 {
+        read_stl(bytes)
+            .unwrap()
+            .iter()
+            .map(|t| {
+                let p = |k: usize| Vec3::new(t[k][0] as f64, t[k][1] as f64, t[k][2] as f64);
+                p(0).dot(p(1).cross(p(2))) / 6.0
+            })
+            .sum()
+    }
+
+    /// Build → export 3MF → import → the same volume as the STL export, closed meshes, names.
+    #[test]
+    fn threemf_round_trip() {
+        let mut doc = Document::new("t");
+        doc.add_feature(
+            FeatureKind::Box { corner: Vec3::ZERO, length: "40".into(), width: "30".into(), height: "10".into(), operation: Operation::NewBody },
+            None,
+        )
+        .unwrap();
+        doc.add_feature(FeatureKind::Fillet { edges: vec![Vec3::new(0.0, 0.0, 5.0)], radius: "4".into(), body: None }, None).unwrap();
+        doc.add_feature(
+            FeatureKind::Cylinder {
+                base: Vec3::new(80.0, 0.0, 0.0),
+                axis: Vec3::Z,
+                radius: "6".into(),
+                height: "15".into(),
+                operation: Operation::NewBody,
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_feature(
+            FeatureKind::Torus { center: Vec3::new(0.0, 80.0, 0.0), major: "12".into(), minor: "3".into(), operation: Operation::NewBody },
+            None,
+        )
+        .unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let st = m.state();
+        assert_eq!(st.bodies.len(), 3);
+        let bytes = export(&st, &[], Format::ThreeMf, "t").unwrap();
+        let f = mesh_import_feature(&bytes, "/tmp/parts.3MF").unwrap();
+        assert_eq!(f.body_names, st.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>());
+        let mut d2 = Document::new("m");
+        let id = d2.add_feature(f.kind, Some(&f.name)).unwrap();
+        let mut m2 = Model::new();
+        m2.evaluate(&d2);
+        assert!(m2.result(id).unwrap().error.is_none());
+        let st2 = m2.state();
+        assert_eq!(st2.bodies.len(), 3);
+        for (a, b) in st.bodies.iter().zip(&st2.bodies) {
+            assert_eq!(a.name, b.name);
+            assert!(b.body.is_mesh() && b.body.is_closed_mesh(), "{} is not watertight", b.name);
+            let v_stl = stl_volume(&export(&st, std::slice::from_ref(&a.name), Format::StlBinary, "t").unwrap());
+            let v = solvecraft_kernel::measure(&b.body).unwrap().volume;
+            assert!((v - v_stl).abs() <= 1e-6 * v_stl.abs(), "{}: {v} vs {v_stl}", a.name);
+        }
+        // Mesh bodies export again (3MF, STL, OBJ) but not as STEP.
+        assert!(export(&st2, &[], Format::ThreeMf, "t").is_ok());
+        assert!(export(&st2, &[], Format::StlAscii, "t").is_ok());
+        assert!(export(&st2, &[], Format::Obj, "t").is_ok());
+        assert!(export(&st2, &[], Format::Step, "t").is_err());
+        // STL imports the same way.
+        let stl = export(&st, &[], Format::StlBinary, "t").unwrap();
+        let fs = mesh_import_feature(&stl, "all.stl").unwrap();
+        assert_eq!(fs.name, "all");
+        assert!(mesh_import_feature(b"PK", "x.3mf").is_err());
+        assert!(mesh_import_feature(&[0u8; 84], "x.stl").is_err());
+        assert!(is_mesh_path("a.3MF") && is_mesh_path("b.stl") && !is_mesh_path("c.step"));
     }
 }

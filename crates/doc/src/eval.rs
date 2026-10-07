@@ -569,7 +569,13 @@ fn blend_target(state: &ModelState, body: &Option<String>, edges: &[Vec3]) -> Re
             best = Some((i, d));
         }
     }
-    best.map(|(i, _)| i).ok_or_else(|| DocError::Invalid("there is no body to modify".into()))
+    best.map(|(i, _)| i).ok_or_else(|| {
+        if state.bodies.iter().any(|b| b.body.is_mesh()) {
+            DocError::Invalid("there is no solid body to modify (mesh bodies have no edges)".into())
+        } else {
+            DocError::Invalid("there is no body to modify".into())
+        }
+    })
 }
 
 fn revolve_axis(ss: &SolvedSketch, axis: &AxisRef) -> Result<(Vec2, Vec2)> {
@@ -1100,6 +1106,13 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
+        FeatureKind::MeshImport { meshes, .. } => {
+            for (name, b) in mesh_bodies(meshes)? {
+                let name = unique_body_name(st, &name);
+                st.bodies.push(ModelBody::new(name, b, f.id));
+            }
+            Ok(())
+        }
         FeatureKind::Import { step, .. } => {
             let imp = kernel::step_import_shared(step)?;
             for (k, b) in imp.bodies.iter().enumerate() {
@@ -1116,6 +1129,18 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             Ok(())
         }
     }
+}
+
+/// Mesh bodies of a MeshImport feature.
+fn mesh_bodies(meshes: &[crate::MeshData]) -> Result<Vec<(String, Body)>> {
+    let mut out = Vec::with_capacity(meshes.len());
+    for m in meshes {
+        let positions: Vec<Vec3> = m.positions.as_chunks::<3>().0.iter().map(|c| Vec3::new(c[0], c[1], c[2])).collect();
+        let triangles: Vec<[u32; 3]> = m.triangles.as_chunks::<3>().0.to_vec();
+        let b = kernel::mesh_body(&positions, &triangles).map_err(|e| DocError::Invalid(format!("mesh `{}`: {e}", m.name)))?;
+        out.push((m.name.clone(), b.with_color(m.color)));
+    }
+    Ok(out)
 }
 
 /// `base`, or `base (2)`, `base (3)`… if a body already has that name.

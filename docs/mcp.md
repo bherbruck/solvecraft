@@ -56,10 +56,10 @@ Claude Desktop (`claude_desktop_config.json`), bridged to a running app:
 | `body_topology` | `body` | Edges (index, midpoint, length, ends) and faces (index, area, centroid, normal). An edge midpoint is the `[x,y,z]` that picks that edge for fillet and chamfer. |
 | `set_parameter` | `name`, `value` (number or expression), `unit?`, `comment?` | Create or change a user parameter and recompute; reports features that now fail. |
 | `screenshot` | `view?` (iso, top, front, back, bottom, left, right, home, fit), `path?`, `width?`, `height?`, `source?` (window, model) | A PNG image content block. Headless: CPU render fitted to the model. Bridged: the app window (default) or a model render with the app's camera. |
-| `export` | `path`, `format?` (step, stl, stla, obj), `bodies?` | STEP or mesh export. |
+| `export` | `path`, `format?` (step, 3mf, stl, stla, obj), `bodies?` | STEP, 3MF or mesh export. |
 | `undo`, `redo` | — | Undo / redo one change. |
 | `new_design` | `name?` | Start an empty design. |
-| `open` | `path` | Open a `.solvecraft` design, or a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature). |
+| `open` | `path` | Open a `.solvecraft` design, a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. |
 | `save` | `path?` | Save the design (to its current file without `path`). |
 
 Resources: `solvecraft://design` (inspect JSON with measurements) and `solvecraft://commands`

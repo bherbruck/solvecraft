@@ -1,6 +1,6 @@
 [package]
 name = "solvecraft-io"
-description = "SolveCraft file formats: designs (JSON), STL, OBJ and STEP export"
+description = "SolveCraft file formats: designs (JSON), STL, OBJ, STEP and 3MF"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,3 +13,5 @@ solvecraft-geom = { workspace = true }
 solvecraft-kernel = { workspace = true }
 solvecraft-doc = { workspace = true }
 thiserror = { workspace = true }
+zip = { workspace = true }
+quick-xml = { workspace = true }
