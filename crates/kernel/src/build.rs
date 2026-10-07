@@ -140,7 +140,22 @@ pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: 
                 .collect(),
         };
         let r = &Region2 { outer: snap_loop(&r.outer), holes: r.holes.iter().map(snap_loop).collect() };
+        // A full revolution of a profile with one edge on the axis: sweep the rest of the loop
+        // as a cone-like shell (no zero-area faces, which booleans can't handle).
+        if angle.abs() >= std::f64::consts::TAU - 1e-9
+            && r.holes.is_empty()
+            && let Some(b) = revolve_touching_axis(plane, &r.outer, axis_origin, d)?
+        {
+            out.push(b);
+            continue;
+        }
         let f = face(plane, r)?;
+        // Partial revolves sweep toward the side the sketch normal points to (as features
+        // extrude toward it).
+        let c = plane.to_world(r.centroid());
+        let radial = (c - o) - axis * (c - o).dot(axis);
+        let toward = axis.cross(radial).dot(plane.normal());
+        let angle = if toward < 0.0 { -angle } else { angle };
         let solid: Solid = guard("revolve", || Ok(builder::rsweep(&f, p3(o), v3(axis), mt::Rad(angle))))?;
         out.push(Body::new(solid)?);
     }
@@ -294,5 +309,54 @@ pub fn extrude_tapered(plane: &Plane, region: &Region2, length: f64, dir_sign: f
             }
         }
         Err(KernelError::Failed(format!("tapered extrude: {last}")))
+    })
+}
+
+/// Revolve 360° a loop that has exactly one line segment on the axis, without degenerate faces.
+fn revolve_touching_axis(plane: &Plane, lp: &Loop2, axis_origin: Vec2, d: Vec2) -> Result<Option<Body>> {
+    let on_axis = |p: Vec2| d.cross(p - axis_origin).abs() < 1e-9;
+    let n = lp.segs.len();
+    let axis_segs: Vec<usize> =
+        (0..n).filter(|i| lp.segs.get(*i).is_some_and(|s| matches!(s, Seg2::Line { a, b } if on_axis(*a) && on_axis(*b)))).collect();
+    let [k] = axis_segs[..] else { return Ok(None) };
+    // The open chain after the axis segment, back around to it.
+    let mut chain: Vec<Seg2> = (1..n).filter_map(|j| lp.segs.get((k + j) % n).copied()).collect();
+    // A single arc (a sphere) is split off-centre: a seam on the equator would lie in the very
+    // planes other bodies are often cut with.
+    if let [Seg2::Arc { center, radius, start, sweep }] = chain[..] {
+        let f = 0.37;
+        chain = vec![
+            Seg2::Arc { center, radius, start, sweep: sweep * f },
+            Seg2::Arc { center, radius, start: start + sweep * f, sweep: sweep * (1.0 - f) },
+        ];
+    }
+    if chain.is_empty() || chain.iter().skip(1).take(chain.len().saturating_sub(2)).any(|s| on_axis(s.start()) && on_axis(s.end())) {
+        return Ok(None);
+    }
+    // Built with the axis through the world origin (truck tessellates such cones reliably), then
+    // moved into place.
+    let shift = plane.to_world(axis_origin);
+    let local = Plane { origin: plane.origin - shift, ..*plane };
+    let plane = &local;
+    guard("revolve", || {
+        let verts: Vec<mt::Vertex> = chain
+            .iter()
+            .map(|s| builder::vertex(p3(plane.to_world(s.start()))))
+            .chain(chain.last().map(|s| builder::vertex(p3(plane.to_world(s.end())))))
+            .collect();
+        let mut edges: Vec<mt::Edge> = Vec::new();
+        for (i, s) in chain.iter().enumerate() {
+            let (Some(a), Some(b)) = (verts.get(i), verts.get(i + 1)) else { continue };
+            edges.push(match *s {
+                Seg2::Line { .. } => builder::line(a, b),
+                Seg2::Arc { .. } => builder::circle_arc(a, b, p3(plane.to_world(s.mid()))),
+            });
+        }
+        let w: mt::Wire = edges.into();
+        let axis = plane.dir_to_world(d);
+        let shell = builder::cone(&w, v3(axis), mt::Rad(std::f64::consts::TAU));
+        let solid = Solid::try_new(vec![shell]).map_err(|e| KernelError::Failed(format!("revolve: {e}")))?;
+        let solid = if shift.len() > 0.0 { builder::translated(&solid, v3(shift)) } else { solid };
+        Body::new(solid).map(Some)
     })
 }

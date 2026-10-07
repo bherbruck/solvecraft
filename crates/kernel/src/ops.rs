@@ -24,6 +24,51 @@ fn volume(b: &Body) -> f64 {
     b.tessellate(b.size() * 2e-3).map(|m| m.measure().volume).unwrap_or(f64::NAN)
 }
 
+/// Halton low-discrepancy value (base `b`) for index `i`.
+fn halton(mut i: usize, b: usize) -> f64 {
+    let (mut f, mut r) = (1.0, 0.0);
+    while i > 0 {
+        f /= b as f64;
+        r += f * (i % b) as f64;
+        i /= b;
+    }
+    r
+}
+
+/// Fraction of sample points where `result` disagrees with `op` applied to `a` and `b`
+/// (membership by ray parity). Samples cover the overlap box densely and the union box lightly.
+fn mismatch(a: &solvecraft_geom::Mesh, b: &solvecraft_geom::Mesh, result: &solvecraft_geom::Mesh, op: BoolOp) -> Option<f64> {
+    if a.triangles.len() + b.triangles.len() + result.triangles.len() > 60_000 {
+        return None;
+    }
+    let (ba, bb) = (a.bounds(), b.bounds());
+    let lo = ba.min.max(bb.min);
+    let hi = ba.max.min(bb.max);
+    let all = ba.union(&bb);
+    let mut boxes = vec![(all, 300usize)];
+    if lo.x < hi.x && lo.y < hi.y && lo.z < hi.z {
+        boxes.push((solvecraft_geom::Aabb3 { min: lo, max: hi }, 900));
+    }
+    let (mut n, mut bad) = (0usize, 0usize);
+    for (bx, count) in boxes {
+        let s = bx.size();
+        for i in 1..=count {
+            let p = bx.min + Vec3::new(s.x * halton(i, 2), s.y * halton(i, 3), s.z * halton(i, 5));
+            let (ia, ib) = (a.contains(p), b.contains(p));
+            let want = match op {
+                BoolOp::Union => ia || ib,
+                BoolOp::Cut => ia && !ib,
+                BoolOp::Intersect => ia && ib,
+            };
+            n += 1;
+            if result.contains(p) != want {
+                bad += 1;
+            }
+        }
+    }
+    Some(bad as f64 / n.max(1) as f64)
+}
+
 /// Boolean of two bodies. The result may be empty (`Ok(None)`) for a cut that removes
 /// everything or an intersection of disjoint bodies. Results are checked against volume bounds
 /// and retried with shifted copies and other tolerances when they fail or look wrong.
@@ -31,10 +76,20 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     let size = a.size().max(b.size());
     let (va, vb) = (volume(a), volume(b));
     let slack = 2e-3 * (va + vb) + 1e-9;
-    let plausible = |v: f64| match op {
-        BoolOp::Union => v >= va.max(vb) - slack && v <= va + vb + slack,
-        BoolOp::Cut => v >= va - vb - slack && v <= va + slack,
-        BoolOp::Intersect => v <= va.min(vb) + slack,
+    let tol_m = size * 5e-4;
+    let meshes = (a.tessellate(tol_m).ok(), b.tessellate(tol_m).ok());
+    let plausible = |v: f64, r: &Body| {
+        let bounds = match op {
+            BoolOp::Union => v >= va.max(vb) - slack && v <= va + vb + slack,
+            BoolOp::Cut => v >= va - vb - slack && v <= va + slack,
+            BoolOp::Intersect => v <= va.min(vb) + slack,
+        };
+        // Membership check against the operands (catches misclassified pieces).
+        let consistent = match (&meshes, r.tessellate(tol_m)) {
+            ((Some(ma), Some(mb)), Ok(mr)) => mismatch(ma, mb, &mr, op).is_none_or(|f| f < 0.004),
+            _ => true,
+        };
+        bounds && consistent
     };
     let mut last = String::new();
     let mut empty_votes = 0;
@@ -67,7 +122,7 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
                 Ok(s) => match Body::new(s) {
                     Ok(body) => {
                         let v = volume(&body);
-                        if v > 0.0 && plausible(v) {
+                        if v > 0.0 && plausible(v, &body) {
                             return Ok(Some(body));
                         }
                         last = format!("implausible result volume {v:.4}");

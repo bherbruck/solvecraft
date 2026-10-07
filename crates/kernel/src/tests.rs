@@ -295,3 +295,38 @@ fn debug_chamfer_cut() {
         println!("tess {tol}: {}", r.tessellate(tol).unwrap().measure().volume);
     }
 }
+
+#[test]
+#[ignore]
+fn debug_revolved_hole_tool() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(60.0, 40.0, 15.0)).unwrap();
+    // Drill point profile in the XZ plane through x = 50: revolve about the vertical line x = 50.
+    let pl = Plane { origin: Vec3::new(50.0, 20.0, 0.0), x: Vec3::X, y: Vec3::Z };
+    let r = 3.0;
+    let tip = r / 59f64.to_radians().tan();
+    let prof =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 16.0), Vec2::new(0.0, 5.0 - tip), Vec2::new(r, 5.0), Vec2::new(r, 16.0)]), holes: vec![] };
+    let tool = revolve(&pl, &[prof], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
+    println!("tool vol {}", measure(&tool).unwrap().volume);
+    let res = boolean(&b, &tool, BoolOp::Cut);
+    println!("cut: {:?}", res.map(|o| o.map(|x| measure(&x).unwrap().volume)));
+    let expect = 36000.0 - std::f64::consts::PI * 9.0 * 10.0 - std::f64::consts::PI * 9.0 * tip / 3.0;
+    println!("expect {expect}");
+}
+
+#[test]
+#[ignore]
+fn debug_sphere() {
+    let s = sphere(Vec3::new(1.0, 2.0, 3.0), 10.0).unwrap();
+    let m = measure(&s).unwrap();
+    println!("vol {} area {} faces {} bbox {:?}", m.volume, m.area, m.faces, m.bbox);
+    for f in s.faces(0.05).unwrap() {
+        println!("face {} area {:.3} c {:?}", f.index, f.area, f.centroid);
+    }
+    let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
+    for (name, c) in [("origin", Vec3::ZERO), ("up", Vec3::new(0.0, 0.0, 3.0)), ("off", Vec3::new(1.3, 2.1, 0.7))] {
+        let sp = sphere(c, 15.0).unwrap();
+        println!("{name} cut {:?}", boolean(&b, &sp, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume)));
+        println!("{name} and {:?}", boolean(&b, &sp, BoolOp::Intersect).map(|o| o.map(|x| measure(&x).unwrap().volume)));
+    }
+}

@@ -373,6 +373,73 @@ fn region_samples(r: &Region2) -> Vec<Vec2> {
     out
 }
 
+/// Grow profile edges that lie on a face of a target body away from the profile, by a small
+/// amount, when the space they grow into is already material (join) or empty (cut). `probe`
+/// maps a sketch point to the world points where the tool would be (along the extrude, around
+/// the revolve). Only loops of straight edges are adjusted.
+fn grow_profile_for_coplanar(st: &ModelState, r: &Region2, op: Operation, targets: &[String], probe: &dyn Fn(Vec2) -> Vec<Vec3>) -> Region2 {
+    if !matches!(op, Operation::Cut | Operation::Join) {
+        return r.clone();
+    }
+    let bodies: Vec<&ModelBody> = st.bodies.iter().filter(|b| targets.is_empty() || targets.contains(&b.name)).collect();
+    if bodies.is_empty() {
+        return r.clone();
+    }
+    let meshes: Vec<Arc<Mesh>> = bodies.iter().map(|b| b.mesh()).collect();
+    let size = bodies.iter().map(|b| b.body.size()).fold(0.0, f64::max);
+    let delta = (size * 0.005).max(1e-3);
+    let lp = r.outer.ccw();
+    let lines: Option<Vec<(Vec2, Vec2)>> =
+        lp.segs.iter().map(|s| if let solvecraft_geom::Seg2::Line { a, b } = *s { Some((a, b)) } else { None }).collect();
+    let Some(lines) = lines else { return r.clone() };
+    let inside_any = |p: Vec3| meshes.iter().any(|m| m.contains(p));
+    let mut grow = vec![0.0; lines.len()];
+    let mut any = false;
+    for (i, (a, b)) in lines.iter().enumerate() {
+        let Some(dir) = (*b - *a).normalized() else { continue };
+        let out = Vec2::new(dir.y, -dir.x);
+        // Is the edge on a body face? Material on exactly one side of it.
+        let mids = [a.lerp(*b, 0.25), a.lerp(*b, 0.5), a.lerp(*b, 0.75)];
+        let side = |k: f64| mids.iter().flat_map(|m| probe(*m + out * (delta * k))).map(inside_any).collect::<Vec<bool>>();
+        let (outer, inner) = (side(0.5), side(-0.5));
+        let want_outer = op == Operation::Join;
+        let on_face = outer.iter().all(|x| *x == want_outer) && inner.iter().any(|x| *x != want_outer);
+        let room = side(1.0).iter().all(|x| *x == want_outer);
+        if on_face && room {
+            if let Some(g) = grow.get_mut(i) {
+                *g = delta;
+            }
+            any = true;
+        }
+    }
+    if !any {
+        return r.clone();
+    }
+    // Offset the chosen lines and re-intersect neighbours.
+    let n = lines.len();
+    let shifted: Vec<(Vec2, Vec2)> = lines
+        .iter()
+        .zip(&grow)
+        .map(|((a, b), g)| {
+            let dir = (*b - *a).normalized().unwrap_or(Vec2::X);
+            let out = Vec2::new(dir.y, -dir.x);
+            (*a + out * *g, dir)
+        })
+        .collect();
+    let mut pts = Vec::with_capacity(n);
+    for i in 0..n {
+        let (Some(&(p0, d0)), Some(&(p1, d1))) = (shifted.get((i + n - 1) % n), shifted.get(i)) else { return r.clone() };
+        let den = d0.cross(d1);
+        if den.abs() < 1e-12 {
+            pts.push(p1);
+            continue;
+        }
+        let t = (p1 - p0).cross(d1) / den;
+        pts.push(p0 + d0 * t);
+    }
+    Region2 { outer: solvecraft_geom::Loop2::polygon(&pts), holes: r.holes.clone() }
+}
+
 /// Booleans struggle with coincident faces (a cut starting on the face it cuts, a boss
 /// starting on the face it joins). Extending the tool past such an end changes nothing when the
 /// space beyond is empty (cut) or already material (join), so do exactly that.
@@ -498,7 +565,10 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
             let mut tools = Vec::new();
             for r in &regions {
                 let (l2, h2) = extend_for_coplanar(st, &ss.plane, r, lo + off, hi + off, *operation, targets);
-                tools.extend(kernel::extrude(&ss.plane, std::slice::from_ref(r), l2, h2)?);
+                let n = ss.plane.normal();
+                let probe = |p: Vec2| (1..4).map(|k| ss.plane.to_world(p) + n * (lo + off + (hi - lo) * k as f64 / 4.0)).collect::<Vec<_>>();
+                let r = grow_profile_for_coplanar(st, r, *operation, targets, &probe);
+                tools.extend(kernel::extrude(&ss.plane, std::slice::from_ref(&r), l2, h2)?);
             }
             Ok(tools)
         }
@@ -507,6 +577,20 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
             let regions = solvecraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
             let (o, d) = revolve_axis(&ss, axis)?;
             let ang = val(vals, angle, Kind::Angle)?;
+            let (operation, targets) = feature_op(f);
+            let axis_w = ss.plane.dir_to_world(d);
+            let origin_w = ss.plane.to_world(o);
+            let probe = |p: Vec2| {
+                let q = ss.plane.to_world(p);
+                (1..4)
+                    .map(|k| {
+                        let a = ang * k as f64 / 4.0;
+                        let v = q - origin_w;
+                        origin_w + v * a.cos() + axis_w.cross(v) * a.sin() + axis_w * (axis_w.dot(v) * (1.0 - a.cos()))
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let regions: Vec<Region2> = regions.iter().map(|r| grow_profile_for_coplanar(st, r, operation, &targets, &probe)).collect();
             Ok(kernel::revolve(&ss.plane, &regions, o, d, ang)?)
         }
         FeatureKind::Box { corner, length, width, height, .. } => {
