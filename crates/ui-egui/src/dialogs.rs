@@ -13,7 +13,7 @@ use solvecraft_engine::doc::{AxisRef, Direction, FeatureKind, HoleKind, Operatio
 use solvecraft_engine::geom::Vec3;
 
 use crate::SolveApp;
-use crate::selection::{self, AXES, Accept, BODIES, EDGES, FACES, PLANAR_FACES, PLANES, PROFILES, SelInput};
+use crate::selection::{self, AXES, Accept, BODIES, CURVES, EDGES, FACES, PLANAR_FACES, PLANES, PROFILES, SelInput};
 use crate::theme::Tokens;
 use crate::viewport::Hit;
 
@@ -52,6 +52,26 @@ pub enum Kind {
         angle: String,
     },
     Mirror,
+    /// Rectangular pattern of bodies: along one direction, optionally a second.
+    PatternRect {
+        count: String,
+        spacing: String,
+        count2: String,
+        spacing2: String,
+    },
+    /// Circular pattern of bodies around an axis.
+    PatternCirc {
+        count: String,
+        angle: String,
+    },
+    /// Loft through profiles of different sketches, in pick order.
+    Loft {
+        operation: usize,
+    },
+    /// Sweep a profile along a path of sketch curves.
+    Sweep {
+        operation: usize,
+    },
     /// Move bodies by a distance along X, Y and Z.
     Move {
         x: String,
@@ -119,7 +139,8 @@ fn fits(a: Accept, s: &Sel) -> bool {
         Sel::Face { .. } => a & (FACES | PLANAR_FACES) != 0,
         Sel::Body { .. } => a & BODIES != 0,
         Sel::Plane { .. } => a & PLANES != 0,
-        Sel::Axis { .. } | Sel::SketchCurve { .. } => a & AXES != 0,
+        Sel::Axis { .. } => a & AXES != 0,
+        Sel::SketchCurve { .. } => a & (AXES | CURVES) != 0,
         Sel::Vertex { .. } => a & selection::VERTICES != 0,
         Sel::Feature { .. } | Sel::SketchPoint { .. } => false,
     }
@@ -157,6 +178,19 @@ impl Dialog {
             "MirrorCommand" => {
                 Dialog::new(Kind::Mirror, vec![SelInput::new("Bodies", BODIES, true), SelInput::new("Mirror plane", PLANES | PLANAR_FACES, false)])
             }
+            "PatternRectangular" => Dialog::new(
+                Kind::PatternRect { count: "3".into(), spacing: "20 mm".into(), count2: "1".into(), spacing2: "20 mm".into() },
+                vec![SelInput::new("Objects", BODIES, true), SelInput::new("Direction", AXES, false), SelInput::new("Direction 2", AXES, false)],
+            ),
+            "PatternCircular" => Dialog::new(
+                Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
+                vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXES, false)],
+            ),
+            "SolidLoft" => Dialog::new(Kind::Loft { operation: usize::from(has_bodies) }, vec![SelInput::new("Profiles", PROFILES, true)]),
+            "Sweep" => Dialog::new(
+                Kind::Sweep { operation: usize::from(has_bodies) },
+                vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Path", CURVES, true)],
+            ),
             "FusionMoveCommand" => {
                 Dialog::new(Kind::Move { x: "0 mm".into(), y: "0 mm".into(), z: "10 mm".into() }, vec![SelInput::new("Bodies", BODIES, true)])
             }
@@ -248,6 +282,10 @@ impl Dialog {
                 | Kind::Shell { .. }
                 | Kind::Draft { .. }
                 | Kind::Mirror
+                | Kind::PatternRect { .. }
+                | Kind::PatternCirc { .. }
+                | Kind::Loft { .. }
+                | Kind::Sweep { .. }
                 | Kind::Move { .. }
                 | Kind::Hole { .. }
                 | Kind::Primitive { .. }
@@ -265,6 +303,8 @@ impl Dialog {
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Hole { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
             Kind::Move { z, .. } => ("Z", ValueKind::Length, z),
+            Kind::PatternRect { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
+            Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
             _ => return None,
         })
     }
@@ -312,6 +352,7 @@ impl Dialog {
         }
         // Extrude and revolve take profiles of one sketch.
         if let Sel::Profile { sketch, .. } = &sel
+            && !matches!(self.kind, Kind::Loft { .. })
             && let Some(inp) = self.inputs.get_mut(self.active)
         {
             inp.items.retain(|x| !matches!(x, Sel::Profile { sketch: s2, .. } if s2 != sketch));
@@ -411,6 +452,10 @@ fn title(k: &Kind) -> &'static str {
         Kind::Shell { .. } => "SHELL",
         Kind::Draft { .. } => "DRAFT",
         Kind::Mirror => "MIRROR",
+        Kind::PatternRect { .. } => "RECTANGULAR PATTERN",
+        Kind::PatternCirc { .. } => "CIRCULAR PATTERN",
+        Kind::Loft { .. } => "LOFT",
+        Kind::Sweep { .. } => "SWEEP",
         Kind::Move { .. } => "MOVE",
         Kind::Hole { .. } => "HOLE",
         Kind::Primitive { cmd, .. } => match *cmd {
@@ -437,6 +482,8 @@ fn hint(inp: &SelInput) -> &'static str {
         "click a plane or planar face"
     } else if a & AXES != 0 {
         "click an axis or sketch line"
+    } else if a & CURVES != 0 {
+        "click sketch curves"
     } else if a & BODIES != 0 {
         "click bodies"
     } else {
@@ -590,6 +637,30 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                     Kind::Mirror => {}
+                    Kind::PatternRect { count, spacing, count2, spacing2 } => {
+                        for (l, v) in [("Quantity", count), ("Spacing", spacing), ("Quantity 2", count2), ("Spacing 2", spacing2)] {
+                            ui.label(l);
+                            enter |= field(ui, v);
+                            ui.end_row();
+                        }
+                    }
+                    Kind::PatternCirc { count, angle } => {
+                        for (l, v) in [("Quantity", count), ("Total angle", angle)] {
+                            ui.label(l);
+                            enter |= field(ui, v);
+                            ui.end_row();
+                        }
+                    }
+                    Kind::Loft { operation } => {
+                        ui.label("Operation");
+                        combo(ui, "lf_op", &OP_LABELS, operation);
+                        ui.end_row();
+                    }
+                    Kind::Sweep { operation } => {
+                        ui.label("Operation");
+                        combo(ui, "sw_op", &OP_LABELS, operation);
+                        ui.end_row();
+                    }
                     Kind::Move { x, y, z } => {
                         for (l, v) in [("X distance", x), ("Y distance", y), ("Z distance", z)] {
                             ui.label(l);
@@ -954,17 +1025,63 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Mirror => {
             need(0, "bodies")?;
             need(1, "the mirror plane")?;
-            let st = s.model.state();
-            let mut features: Vec<String> = Vec::new();
-            for n in body_names(0) {
-                if let Some(f) = st.body(&n).and_then(|b| s.doc.feature(b.feature)).map(|f| f.name.clone())
-                    && !features.contains(&f)
-                {
-                    features.push(f);
-                }
-            }
+            let features = source_features(s, &body_names(0));
             let plane = plane_value(s, sels(d, 1).first()).ok_or("the mirror plane must be a plane or a planar face")?;
             ("MirrorCommand", json!({"features": features, "plane": plane}))
+        }
+        Kind::PatternRect { count, spacing, count2, spacing2 } => {
+            need(0, "objects")?;
+            need(1, "a direction (an axis or a sketch line)")?;
+            let (_, d1) = sels(d, 1).first().and_then(|x| axis_of(app, x)).ok_or("the direction must be an axis or a sketch line")?;
+            let mut p = json!({"features": source_features(s, &body_names(0)), "dir1": pt(d1), "count1": count, "spacing1": spacing});
+            if let Some((_, d2)) = sels(d, 2).first().and_then(|x| axis_of(app, x)) {
+                p["dir2"] = pt(d2);
+                p["count2"] = json!(count2);
+                p["spacing2"] = json!(spacing2);
+            }
+            ("PatternRectangular", p)
+        }
+        Kind::PatternCirc { count, angle } => {
+            need(0, "objects")?;
+            need(1, "an axis")?;
+            let axis = match sels(d, 1).first() {
+                Some(Sel::Axis { name }) => json!(name),
+                Some(x) => {
+                    let (o, dir) = axis_of(app, x).ok_or("the axis must be an origin axis or a sketch line")?;
+                    json!({"origin": pt(o), "dir": pt(dir)})
+                }
+                None => return Err("select an axis".into()),
+            };
+            ("PatternCircular", json!({"features": source_features(s, &body_names(0)), "axis": axis, "count": count, "angle": angle}))
+        }
+        Kind::Loft { operation } => {
+            need(0, "profiles of two or more sketches")?;
+            // One section per sketch, in the order the sketches were first picked.
+            let mut sections: Vec<(u64, Vec<usize>)> = Vec::new();
+            for x in sels(d, 0) {
+                if let Sel::Profile { sketch, index } = x {
+                    match sections.iter_mut().find(|(sk, _)| sk == sketch) {
+                        Some((_, v)) => v.push(*index),
+                        None => sections.push((*sketch, vec![*index])),
+                    }
+                }
+            }
+            if sections.len() < 2 {
+                return Err("pick profiles in two or more sketches".into());
+            }
+            let sections: Vec<Value> = sections.into_iter().map(|(sk, v)| json!({"sketch": sk, "profiles": v})).collect();
+            ("SolidLoft", json!({"sections": sections, "operation": OPS.get(*operation).copied().unwrap_or("new")}))
+        }
+        Kind::Sweep { operation } => {
+            need(0, "a profile")?;
+            need(1, "the path")?;
+            let (sketch, idx) = profiles();
+            let path: Vec<String> = sels(d, 1).iter().filter_map(|x| if let Sel::SketchCurve { id } = x { Some(id.clone()) } else { None }).collect();
+            let path_sketch = curves_sketch(app, &path, sketch.as_u64()).ok_or("the path curves must be in one sketch")?;
+            (
+                "Sweep",
+                json!({"sketch": sketch, "profiles": idx, "path_sketch": path_sketch, "path": path, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
+            )
         }
         Kind::Move { x, y, z } => {
             need(0, "bodies")?;
@@ -1025,6 +1142,58 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
     }
     Ok(vec![(cmd.to_string(), params)])
+}
+
+/// The features that made these bodies (what patterns and mirrors copy).
+fn source_features(s: &Session, bodies: &[String]) -> Vec<String> {
+    let st = s.model.state();
+    let mut features: Vec<String> = Vec::new();
+    for n in bodies {
+        if let Some(f) = st.body(n).and_then(|b| s.doc.feature(b.feature)).map(|f| f.name.clone())
+            && !features.contains(&f)
+        {
+            features.push(f);
+        }
+    }
+    features
+}
+
+/// The sketch holding all these curve ids (the active sketch first, never `not`).
+fn curves_sketch(app: &SolveApp, ids: &[String], not: Option<u64>) -> Option<u64> {
+    let st = app.session.model.state();
+    let has = |sid: u64| st.sketch(sid).is_some_and(|ss| ids.iter().all(|id| ss.sketch.curve_index(id).is_some()));
+    if let Some(a) = app.session.active_sketch
+        && Some(a) != not
+        && has(a)
+    {
+        return Some(a);
+    }
+    st.sketches.iter().rev().map(|ss| ss.feature).find(|sid| Some(*sid) != not && has(*sid))
+}
+
+/// An axis selection as a line: a point on it and its unit direction (origin axes, or a straight
+/// sketch line).
+pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
+    match sel {
+        Sel::Axis { name } => Some((
+            Vec3::ZERO,
+            match name.as_str() {
+                "X" => Vec3::X,
+                "Y" => Vec3::Y,
+                _ => Vec3::Z,
+            },
+        )),
+        Sel::SketchCurve { id } => {
+            let st = app.session.model.state();
+            let sid = curves_sketch(app, std::slice::from_ref(id), None)?;
+            let ss = st.sketch(sid)?;
+            let c = ss.sketch.curves.get(ss.sketch.curve_index(id)?)?;
+            let solvecraft_engine::sketch::CurveKind::Line { a, b } = c.kind else { return None };
+            let (pa, pb) = (ss.plane.to_world(ss.sketch.point(a)?), ss.plane.to_world(ss.sketch.point(b)?));
+            Some((pa, (pb - pa).normalized()?))
+        }
+        _ => None,
+    }
 }
 
 /// Which profiles of a sketch a profile selection means.

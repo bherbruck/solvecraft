@@ -37,6 +37,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // Shell thickness grows into the body.
         Kind::Shell { .. } => (at, normal.map(|n| -n)),
         Kind::Move { .. } => (at, Some(Vec3::Z)),
+        Kind::PatternRect { .. } => (at, d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1)),
         _ => (at, None),
     })
 }
@@ -182,26 +183,7 @@ fn revolve_axis(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
     if !matches!(d.kind, Kind::Revolve { .. }) {
         return None;
     }
-    match d.inputs.get(1)?.items.first()? {
-        Sel::Axis { name } => Some((
-            Vec3::ZERO,
-            match name.as_str() {
-                "X" => Vec3::X,
-                "Y" => Vec3::Y,
-                _ => Vec3::Z,
-            },
-        )),
-        Sel::SketchCurve { id } => {
-            let st = app.session.model.state();
-            let sketch = d.inputs.first()?.items.iter().find_map(|x| if let Sel::Profile { sketch, .. } = x { Some(*sketch) } else { None })?;
-            let ss = st.sketch(sketch)?;
-            let c = ss.sketch.curves.get(ss.sketch.curve_index(id)?)?;
-            let solvecraft_engine::sketch::CurveKind::Line { a, b } = c.kind else { return None };
-            let (pa, pb) = (ss.plane.to_world(ss.sketch.point(a)?), ss.plane.to_world(ss.sketch.point(b)?));
-            Some((pa, (pb - pa).normalized()?))
-        }
-        _ => None,
-    }
+    crate::dialogs::axis_of(app, d.inputs.get(1)?.items.first()?)
 }
 
 /// The revolve angle rotator: an arc from the profile around the axis with a handle at its end

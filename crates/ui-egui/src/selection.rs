@@ -21,6 +21,8 @@ pub const PLANES: Accept = 32;
 /// Origin axes and straight sketch curves.
 pub const AXES: Accept = 64;
 pub const VERTICES: Accept = 128;
+/// Any sketch curve (a sweep path).
+pub const CURVES: Accept = 256;
 
 /// One selection input of a command dialog ("Profiles", "Edges", "Plane", ...).
 #[derive(Clone, Debug, PartialEq)]
@@ -50,6 +52,7 @@ impl SelInput {
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::SketchCurve { id, straight: true, .. } if a & AXES != 0 => Some(Sel::SketchCurve { id: id.clone() }),
+            Hit::SketchCurve { id, .. } if a & CURVES != 0 => Some(Sel::SketchCurve { id: id.clone() }),
             Hit::Vertex { body, point } if a & VERTICES != 0 => Some(Sel::Vertex { body: body.clone(), point: *point }),
             _ => None,
         }
