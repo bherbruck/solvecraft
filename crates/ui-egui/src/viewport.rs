@@ -42,6 +42,9 @@ pub struct ViewportState {
     pub build_ms: f64,
     /// The right-click menu, open at this screen position.
     pub context_menu: Option<Pos2>,
+    /// A sketch point being dragged (its id, and the undo depth when the drag began: the whole
+    /// drag is one undo step).
+    pub point_drag: Option<(String, usize)>,
 }
 
 /// Something under the cursor.
@@ -214,6 +217,15 @@ fn build_scene(app: &SolveApp) -> GpuScene {
     for sid in visible_sketches(app) {
         let Some(ss) = st.sketch(sid) else { continue };
         let active = s.active_sketch == Some(sid);
+        // Closed profiles are shaded (lifted off a face they may lie on).
+        let lift = ss.plane.normal() * 0.01;
+        for p in &ss.profiles {
+            for tri in p.region.triangulate(0.05) {
+                for q in tri {
+                    sc.trans_tri((ss.plane.to_world(q) + lift).to_f32(), [0.0; 3], c4(tk.profile_fill));
+                }
+            }
+        }
         for (pts, col, cons) in sketch_lines(&ss.sketch, &ss.plane, active, &ss.report.curve_determined) {
             for w in pts.windows(2) {
                 sc.line(w[0].to_f32(), w[1].to_f32(), sketch_color(&tk, col), if cons { 1.2 } else { 2.0 }, active);
@@ -881,8 +893,34 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // Dragging a sketch point of the active sketch moves it; the solver keeps the constraints.
+    if app.tool.is_none() && app.dialog.is_none() && app.viewport.nav.is_none() && app.session.active_sketch.is_some() {
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(a) = ui.input(|i| i.pointer.press_origin())
+            && let Some(Hit::SketchPoint { id, .. }) = pick(app, &proj, a).into_iter().next()
+        {
+            app.viewport.point_drag = Some((id, app.session.undo.len()));
+        }
+        if let Some((id, depth)) = app.viewport.point_drag.clone()
+            && resp.dragged_by(egui::PointerButton::Primary)
+            && let Some(p) = hover
+            && let Some(ss) = app.session.active_sketch.and_then(|sid| app.session.model.state().sketch(sid).cloned())
+            && let Some(w) = {
+                let (o, d) = proj.ray(p);
+                ss.plane.intersect_ray(o, d)
+            }
+        {
+            let q = ss.plane.to_local(w);
+            if app.session.execute("sketch.move_point", &json!({"point": id, "to": [q.x, q.y]})).is_ok() {
+                app.session.undo.truncate(depth + 1);
+            }
+        }
+        if resp.drag_stopped() {
+            app.viewport.point_drag = None;
+        }
+    }
     // Box selection: a primary drag on the model when no navigation mode is on.
-    if app.tool.is_none() && app.viewport.nav.is_none() {
+    if app.tool.is_none() && app.viewport.nav.is_none() && app.viewport.point_drag.is_none() {
         let origin = ui.input(|i| i.pointer.press_origin());
         if resp.dragged_by(egui::PointerButton::Primary)
             && let (Some(a), Some(b)) = (origin, hover)

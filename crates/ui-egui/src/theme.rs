@@ -83,6 +83,8 @@ pub struct Tokens {
     /// Sketch points: fully constrained, free.
     pub sketch_point: Color32,
     pub sketch_point_free: Color32,
+    /// Closed sketch profiles (translucent fill).
+    pub profile_fill: Color32,
     /// Constraint glyph boxes.
     pub glyph_bg: Color32,
     pub glyph_edge: Color32,
@@ -165,6 +167,7 @@ impl Tokens {
             sketch_fixed: Color32::from_rgb(20, 20, 20),
             sketch_point: Color32::BLACK,
             sketch_point_free: Color32::from_rgb(30, 90, 200),
+            profile_fill: Color32::from_rgba_unmultiplied_const(255, 196, 120, 70),
             glyph_bg: Color32::WHITE,
             glyph_edge: Color32::from_rgb(90, 150, 90),
             glyph_text: Color32::from_rgb(40, 110, 40),
@@ -215,6 +218,7 @@ impl Tokens {
         t.sketch_fixed = Color32::from_rgb(232, 234, 238);
         t.sketch_point = Color32::from_rgb(232, 234, 238);
         t.sketch_point_free = Color32::from_rgb(92, 150, 255);
+        t.profile_fill = Color32::from_rgba_unmultiplied_const(120, 150, 200, 40);
         t.glyph_bg = Color32::from_rgb(44, 50, 60);
         t.glyph_edge = Color32::from_rgb(96, 170, 110);
         t.glyph_text = Color32::from_rgb(150, 220, 160);
