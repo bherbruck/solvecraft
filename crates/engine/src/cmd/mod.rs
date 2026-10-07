@@ -5,6 +5,7 @@
 mod edit;
 mod face;
 mod features;
+pub use features::auto_operation;
 mod file;
 mod inspect;
 mod sketch;

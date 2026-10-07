@@ -1,42 +1,66 @@
 //! On-canvas command input: while a feature dialog is open, its main value (extrude distance,
-//! fillet radius…) gets a value box in the viewport next to the geometry, with a direction
-//! arrow for extrudes. The box takes the keyboard as soon as the command has its geometry, so
-//! typing a number sets the value at once; Enter applies, Tab moves on, Esc cancels.
+//! fillet radius…) gets a value box in the viewport next to the geometry, and an arrow
+//! (extrude, fillet, shell, move) that can be dragged: values snap to round steps (hold Alt or
+//! Ctrl for a free drag) and the dialog follows. The box takes the keyboard as soon as the
+//! command has its geometry, so typing a number sets the value at once; Enter applies, Tab
+//! moves on, Esc cancels.
 
 use egui::{Color32, Pos2, Stroke, vec2};
 use solvecraft_engine::Sel;
 use solvecraft_engine::doc::expr::Kind as ValueKind;
-use solvecraft_engine::geom::Vec3;
+use solvecraft_engine::geom::{Mesh, Vec3};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::theme::Tokens;
 use crate::viewport::Proj;
 
-/// Where the dialog's geometry is: a base point and, for directional values, the direction a
-/// positive value points.
+/// Where the dialog's geometry is: a base point and, for values that can be dragged, the
+/// direction a growing value points.
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     let st = app.session.model.state();
     let first = d.inputs.first()?.items.first()?;
-    let at = match first {
+    let (at, normal) = match first {
         Sel::Profile { sketch, index } => {
             let ss = st.sketch(*sketch)?;
             let p = ss.profiles.get(*index)?;
             (ss.plane.to_world(p.region.interior_point()), Some(ss.plane.normal()))
         }
         Sel::Face { body, index, point } => (*point, crate::dialogs::planar_face(&app.session, body, *index).map(|(_, n)| n)),
-        Sel::Edge { point, .. } | Sel::Vertex { point, .. } => (*point, None),
+        Sel::Edge { body, index, point } => (*point, st.body(body).and_then(|b| edge_bisector(&b.mesh(), *index, *point))),
+        Sel::Vertex { point, .. } => (*point, None),
         Sel::Body { name } => (st.body(name)?.mesh().bounds().center(), None),
         _ => return None,
     };
-    // Only extrudes point along the normal.
     Some(match d.kind {
-        Kind::Extrude { .. } => at,
-        _ => (at.0, None),
+        Kind::Extrude { .. } | Kind::Fillet { .. } => (at, normal),
+        // Shell thickness grows into the body.
+        Kind::Shell { .. } => (at, normal.map(|n| -n)),
+        Kind::Move { .. } => (at, Some(Vec3::Z)),
+        _ => (at, None),
     })
 }
 
-/// Draw the arrow and the value box (called by the viewport after the model is drawn).
+/// The outward direction between the two faces at an edge (where a fillet's radius arrow
+/// points).
+fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
+    let faces = m.edge_faces.get(index)?;
+    let mut sum = Vec3::ZERO;
+    for f in faces {
+        let n = m
+            .triangles
+            .iter()
+            .zip(&m.tri_face)
+            .filter(|(_, tf)| *tf == f)
+            .filter_map(|(t, _)| m.tri(t))
+            .min_by(|a, b| ((a[0] + a[1] + a[2]) / 3.0).dist(p).total_cmp(&((b[0] + b[1] + b[2]) / 3.0).dist(p)))
+            .and_then(|[a, b, c]| (b - a).cross(c - a).normalized())?;
+        sum += n;
+    }
+    sum.normalized()
+}
+
+/// Draw the manipulator and the value box (called by the viewport after the model is drawn).
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
     let Some(mut d) = app.dialog.take() else { return };
     if let Some((base, dir)) = anchor(app, &d)
@@ -47,6 +71,38 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     app.dialog = Some(d);
 }
 
+/// A round step for dragged values at this zoom (1, 2 or 5 times a power of ten).
+pub fn snap_step(half_height: f64) -> f64 {
+    let raw = (half_height / 40.0).max(1e-4);
+    let p = 10f64.powf(raw.log10().floor());
+    if raw / p < 2.0 {
+        p
+    } else if raw / p < 5.0 {
+        2.0 * p
+    } else {
+        5.0 * p
+    }
+}
+
+/// Parameter along the line `base + dir * t` closest to the view ray through `pos`.
+fn along(proj: &Proj, pos: Pos2, base: Vec3, dir: Vec3) -> Option<f64> {
+    let (o, r) = proj.ray(pos);
+    let w0 = base - o;
+    let (b, d, e) = (dir.dot(r), dir.dot(w0), r.dot(w0));
+    let den = 1.0 - b * b;
+    // Looking straight along the line: nothing to drag.
+    if den.abs() < 1e-6 {
+        return None;
+    }
+    Some((b * e - d) / den)
+}
+
+fn format_len(v: f64) -> String {
+    let s = format!("{v:.3}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    format!("{} mm", if s == "-0" { "0" } else { s })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog, base: Vec3, bs: Pos2, dir: Option<Vec3>) {
     let t = Tokens::get();
@@ -55,20 +111,45 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         _ => 1.0,
     };
     let symmetric = matches!(d.kind, Kind::Extrude { direction: 2, .. });
+    // Extrudes and moves go either way; radii and thicknesses stay positive.
+    let signed = matches!(d.kind, Kind::Extrude { .. } | Kind::Move { .. });
     let focus = std::mem::take(&mut d.focus);
+    let half_height = app.cam.half_height();
     let Some((label, kind, value)) = d.primary() else { return };
     let len = app.session.doc.eval(value, kind).ok().filter(|v| v.is_finite());
     let mut box_at = bs + vec2(16.0, -30.0);
     if let (Some(n), Some(l)) = (dir, len.filter(|_| kind == ValueKind::Length)) {
         let n = n * sign;
-        let tip = base + n * l;
-        let back = if symmetric { base - n * l } else { base };
-        if let (Some(ts), Some(b0)) = (proj.to_screen(tip), proj.to_screen(back)) {
-            arrow(painter, b0, ts, t.manipulator);
-            if symmetric && let Some(bt) = proj.to_screen(base - n * l) {
-                arrow(painter, bs, bt, t.manipulator);
+        // A short arrow still shows (and can be grabbed) when the value is near zero.
+        let min = 40.0 * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
+        let shown = if l.abs() < min { min * if l < 0.0 { -1.0 } else { 1.0 } } else { l };
+        let tip = base + n * shown;
+        if let Some(ts) = proj.to_screen(tip) {
+            let handle = egui::Rect::from_center_size(ts, vec2(20.0, 20.0));
+            let r = ui.interact(handle, egui::Id::new("sc_manipulator"), egui::Sense::drag());
+            let hot = r.hovered() || r.dragged();
+            let col = if hot { t.accent } else { t.manipulator };
+            arrow(painter, bs, ts, col);
+            if symmetric && let Some(bt) = proj.to_screen(base - n * shown) {
+                arrow(painter, bs, bt, col);
             }
-            painter.circle(bs, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
+            painter.circle(bs, 3.5, col, Stroke::new(1.0, Color32::WHITE));
+            if hot {
+                painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+            if r.dragged()
+                && let Some(p) = r.interact_pointer_pos()
+                && let Some(v) = along(proj, p, base, n)
+            {
+                let free = ui.input(|i| i.modifiers.alt || i.modifiers.ctrl || i.modifiers.command);
+                let step = snap_step(half_height);
+                let mut v = if free { v } else { (v / step).round() * step };
+                if !signed {
+                    v = v.max(if free { 1e-3 } else { step });
+                }
+                *value = format_len(v);
+            }
             box_at = ts + vec2(14.0, -12.0);
         }
     }
@@ -101,4 +182,19 @@ fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
     painter.line_segment([a, b], Stroke::new(2.0, col));
     let head = 11.0f32.min(l * 0.6);
     painter.add(egui::Shape::convex_polygon(vec![b, b - u * head + n * head * 0.45, b - u * head - n * head * 0.45], col, Stroke::NONE));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapping_steps_and_formatting() {
+        assert_eq!(snap_step(40.0), 1.0);
+        assert_eq!(snap_step(100.0), 2.0);
+        assert_eq!(snap_step(4.0), 0.1);
+        assert_eq!(format_len(12.0), "12 mm");
+        assert_eq!(format_len(-2.5), "-2.5 mm");
+        assert_eq!(format_len(-0.0001), "0 mm");
+    }
 }

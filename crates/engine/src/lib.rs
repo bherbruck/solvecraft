@@ -20,7 +20,7 @@ use serde_json::Value;
 use solvecraft_doc::{Document, Model, ModelState};
 use solvecraft_geom::Vec3;
 
-pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
+pub use cmd::{CommandInfo, CommandSpec, auto_operation, command_specs, find_command};
 pub use solvecraft_doc as doc;
 pub use solvecraft_geom as geom;
 pub use solvecraft_io as io;

@@ -32,6 +32,9 @@ pub enum Kind {
         distance: String,
         direction: usize,
         operation: usize,
+        /// The operation follows the geometry (into a body: cut, out of one: join, else new)
+        /// until the user picks one.
+        auto_op: bool,
     },
     Revolve {
         angle: String,
@@ -133,7 +136,7 @@ impl Dialog {
         let mut d = match id {
             "SketchCreate" => Dialog::new(Kind::Sketch, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)]),
             "Extrude" => Dialog::new(
-                Kind::Extrude { distance: "10 mm".into(), direction: 0, operation: usize::from(has_bodies) },
+                Kind::Extrude { distance: "10 mm".into(), direction: 0, operation: usize::from(has_bodies), auto_op: true },
                 vec![SelInput::new("Profiles", PROFILES | PLANAR_FACES, true)],
             ),
             "Revolve" => Dialog::new(
@@ -487,10 +490,28 @@ const DIALOG_MAX_W: f32 = 380.0;
 /// Width of value fields and choice boxes in a dialog.
 const FIELD_W: f32 = 140.0;
 
+/// Keep an automatic extrude operation in step with the geometry.
+fn auto_operation(app: &SolveApp, d: &mut Dialog) {
+    if !matches!(d.kind, Kind::Extrude { auto_op: true, .. }) {
+        return;
+    }
+    let Some(op) =
+        dialog_commands(app, d).ok().and_then(|c| c.into_iter().next()).and_then(|(_, p)| solvecraft_engine::auto_operation(&app.session, &p))
+    else {
+        return;
+    };
+    if let Kind::Extrude { operation, .. } = &mut d.kind
+        && let Some(i) = OPS.iter().position(|o| *o == op)
+    {
+        *operation = i;
+    }
+}
+
 /// Show the active dialog (if any), docked flush to the right edge of the viewport just below
 /// the view cube, sized to its content.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.dialog.take() else { return };
+    auto_operation(app, &mut d);
     let t = Tokens::get();
     let vp = app.viewport.rect.unwrap_or_else(|| ctx.content_rect());
     let anchor = egui::pos2(vp.right(), vp.top() + crate::viewport::VIEW_CUBE_CLEARANCE);
@@ -526,7 +547,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 input_rows(&mut d, ui);
                 match &mut d.kind {
                     Kind::Sketch => {}
-                    Kind::Extrude { distance, direction, operation } => {
+                    Kind::Extrude { distance, direction, operation, auto_op } => {
                         ui.label("Direction");
                         combo(ui, "ex_dir", &DIR_LABELS, direction);
                         ui.end_row();
@@ -534,7 +555,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         enter |= field(ui, distance);
                         ui.end_row();
                         ui.label("Operation");
+                        let before = *operation;
                         combo(ui, "ex_op", &OP_LABELS, operation);
+                        // A choice made by hand sticks.
+                        if *operation != before {
+                            *auto_op = false;
+                        }
                         ui.end_row();
                     }
                     Kind::Revolve { angle, operation } => {
@@ -838,7 +864,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         sels(d, i).iter().filter_map(|x| if let Sel::Face { point, .. } = x { Some(pt(*point)) } else { None }).collect()
     };
     let (cmd, params): (&str, Value) = match &d.kind {
-        Kind::Extrude { distance, direction, operation } => {
+        Kind::Extrude { distance, direction, operation, .. } => {
             need(0, "profiles or a planar face")?;
             let common = json!({"distance": distance, "direction": DIRS.get(*direction).copied().unwrap_or("positive"), "operation": OPS.get(*operation).copied().unwrap_or("new")});
             let with = |extra: Value| -> Value {
@@ -1092,6 +1118,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     Direction::Symmetric => 2,
                 },
                 operation: op_index(operation),
+                auto_op: false,
             };
             let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             if let Some(inp) = d.inputs.first_mut() {

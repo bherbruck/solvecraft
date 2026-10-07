@@ -13,7 +13,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("extrude")
         .key("E")
-        .params("distance: expr (or through_all: true); taper?: angle expr; sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [[curve ids]] | [{point:[x,y]}]; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); direction?: positive|negative|symmetric; distance2?; start_offset?; operation?: new|join|cut|intersect; targets?: [body]; name?; body_name?"),
+        .params("distance: expr (or through_all: true); taper?: angle expr; sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [[curve ids]] | [{point:[x,y]}]; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); direction?: positive|negative|symmetric; distance2?; start_offset?; operation?: new|join|cut|intersect|auto (cut into a body, join out of one, else new); targets?: [body]; name?; body_name?"),
     CommandSpec::new("Revolve", "Revolve", revolve)
         .at("SOLID", "CREATE")
         .icon("revolve")
@@ -72,6 +72,63 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet)"),
     CommandSpec::new("FusionMoveCommand", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr"),
 ];
+
+/// Where an extrude starts and which way is positive: a point inside the (first) profile or
+/// face, and the unit normal.
+fn extrude_base(s: &Session, p: &Value) -> Option<(Vec3, Vec3)> {
+    if let Some(fp) = p.get("face").and_then(vec3) {
+        return Some((fp, super::face::face_normal(s, fp)?));
+    }
+    let sid = feature_sketch(s, p, "Extrude").ok()?;
+    let st = s.model.state();
+    let ss = st.sketch(sid)?;
+    let ps = &ss.profiles;
+    let q = match profiles(p, "Extrude").ok()? {
+        ProfileSel::All => ps.first()?.region.interior_point(),
+        ProfileSel::Indices { indices } => ps.get(*indices.first()?)?.region.interior_point(),
+        ProfileSel::Points { points } => *points.first()?,
+        ProfileSel::Curves { loops } => {
+            let mut want: Vec<&String> = loops.first()?.iter().collect();
+            want.sort();
+            ps.iter()
+                .find(|x| {
+                    let mut have: Vec<&String> = x.outer_curves.iter().collect();
+                    have.sort();
+                    have == want
+                })?
+                .region
+                .interior_point()
+        }
+    };
+    Some((ss.plane.to_world(q), ss.plane.normal()))
+}
+
+/// What `operation: "auto"` means for an extrude with these parameters: `cut` when it goes
+/// into a body, `join` when it grows out of one, `new` otherwise.
+pub fn auto_operation(s: &Session, p: &Value) -> Option<&'static str> {
+    let d = s.doc.eval(&expr(p, "distance")?, Kind::Length).ok()?;
+    let dir = str_(p, "direction").map(str::to_ascii_lowercase);
+    let symmetric = dir.as_deref() == Some("symmetric");
+    let d = if matches!(dir.as_deref(), Some("negative" | "reverse" | "flip")) { -d } else { d };
+    let (base, n) = extrude_base(s, p)?;
+    let st = s.model.state();
+    if st.bodies.is_empty() || !d.is_finite() {
+        return Some("new");
+    }
+    let inside = |q: Vec3| st.bodies.iter().any(|b| b.mesh().contains(q));
+    let eps = (d.abs() * 1e-3).max(1e-3);
+    let sign = if d < 0.0 { -1.0 } else { 1.0 };
+    if symmetric {
+        return Some(if inside(base + n * (d.abs() * 0.5)) || inside(base - n * (d.abs() * 0.5)) { "cut" } else { "new" });
+    }
+    if inside(base + n * (d * 0.5)) {
+        Some("cut")
+    } else if inside(base - n * (eps * sign)) {
+        Some("join")
+    } else {
+        Some("new")
+    }
+}
 
 fn operation(p: &Value, cmd: &str) -> Result<Operation> {
     match str_(p, "operation") {
@@ -219,7 +276,10 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
             None => profiles(p, cmd)?,
         },
         extent: Extent { distance, direction, distance2, start_offset, through_all, taper },
-        operation: operation(p, cmd)?,
+        operation: match str_(p, "operation") {
+            Some(o) if o.eq_ignore_ascii_case("auto") => Operation::parse(auto_operation(s, p).unwrap_or("new")).unwrap_or(Operation::NewBody),
+            _ => operation(p, cmd)?,
+        },
         targets: string_list(p, "targets"),
     };
     add_feature(s, p, kind)

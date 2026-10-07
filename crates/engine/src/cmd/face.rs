@@ -17,6 +17,21 @@ fn point_triangle_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
     if inside { h.abs() } else { [(a, b), (b, c), (c, a)].iter().map(|(u, v)| p.dist_to_segment(*u, *v)).fold(f64::INFINITY, f64::min) }
 }
 
+/// The outward normal of the planar body face at `p`.
+pub(super) fn face_normal(s: &Session, p: Vec3) -> Option<Vec3> {
+    let (m, f, d) = face_at(s, p)?;
+    let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
+    if d > tol * 10.0 {
+        return None;
+    }
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter(|(_, tf)| **tf == f)
+        .filter_map(|(t, _)| m.tri(t))
+        .find_map(|[a, b, c]| (b - a).cross(c - a).normalized())
+}
+
 /// The body face under a point: (mesh, face index, distance).
 fn face_at(s: &Session, p: Vec3) -> Option<(std::sync::Arc<Mesh>, u32, f64)> {
     let st = s.model.state();

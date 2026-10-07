@@ -529,6 +529,32 @@ fn preview_of_an_edit() {
     assert!(Arc::ptr_eq(&doc, &s.doc));
 }
 
+/// `operation: "auto"`: into a body cuts, out of a body joins, in free space makes a new body.
+#[test]
+fn extrude_auto_operation() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    // A face pushed in (negative distance) cuts.
+    let p = json!({"face": [20, 15, 20], "distance": -5, "operation": "auto"});
+    assert_eq!(auto_operation(&s, &p), Some("cut"));
+    run(&mut s, "Extrude", p);
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 15.0) < 1e-6);
+    // Pulled out, it joins.
+    assert_eq!(auto_operation(&s, &json!({"face": [20, 15, 15], "distance": 5})), Some("join"));
+    // A sketch on XY under the box: up goes into it (cut), down grows out of it (join), and a
+    // profile beside the box makes a new body.
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [5, 5], "p1": [15, 15]}));
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [60, 5], "p1": [70, 15]}));
+    run(&mut s, "SketchStop", json!({}));
+    let at = |x: f64, d: f64| json!({"profiles": [{"point": [x, 10]}], "distance": d});
+    assert_eq!(auto_operation(&s, &at(10.0, 8.0)), Some("cut"));
+    assert_eq!(auto_operation(&s, &at(10.0, -8.0)), Some("join"));
+    assert_eq!(auto_operation(&s, &at(65.0, 8.0)), Some("new"));
+    run(&mut s, "Extrude", json!({"profiles": [{"point": [10, 10]}], "distance": 8, "operation": "auto"}));
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 15.0 - 100.0 * 8.0) < 1e-6);
+}
+
 /// Press Pull: positive pulls a face out, negative pushes it in (a cut), edges get a fillet.
 #[test]
 fn press_pull() {
