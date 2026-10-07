@@ -69,6 +69,51 @@ fn mismatch(a: &solvecraft_geom::Mesh, b: &solvecraft_geom::Mesh, result: &solve
     Some(bad as f64 / n.max(1) as f64)
 }
 
+/// How one body sits relative to another, from sample points: (fraction of `b`'s samples
+/// inside `a`, fraction of `a`'s samples inside `b`).
+fn overlap(a: &solvecraft_geom::Mesh, b: &solvecraft_geom::Mesh) -> Option<(f64, f64)> {
+    if a.triangles.len() + b.triangles.len() > 80_000 {
+        return None;
+    }
+    let frac = |inner: &solvecraft_geom::Mesh, outer: &solvecraft_geom::Mesh| -> Option<f64> {
+        let bx = inner.bounds();
+        let s = bx.size();
+        let (mut n, mut hit) = (0usize, 0usize);
+        for i in 1..=2000 {
+            let p = bx.min + Vec3::new(s.x * halton(i, 2), s.y * halton(i, 3), s.z * halton(i, 5));
+            if !inner.contains(p) {
+                continue;
+            }
+            n += 1;
+            if outer.contains(p) {
+                hit += 1;
+            }
+        }
+        (n >= 50).then(|| hit as f64 / n as f64)
+    };
+    Some((frac(b, a)?, frac(a, b)?))
+}
+
+/// Booleans that need no intersection: one body clear of the other, or inside it. These are
+/// common with coincident curved faces (a hole drilled where one already is, a body joined
+/// with itself), which the intersection can't handle.
+fn trivial(a: &Body, b: &Body, op: BoolOp, ma: &solvecraft_geom::Mesh, mb: &solvecraft_geom::Mesh) -> Option<Option<Body>> {
+    let (b_in_a, a_in_b) = overlap(ma, mb)?;
+    const NONE: f64 = 0.003;
+    const ALL: f64 = 0.997;
+    let disjoint = b_in_a < NONE && a_in_b < NONE;
+    match op {
+        BoolOp::Cut if disjoint => Some(Some(a.clone())),
+        BoolOp::Cut if a_in_b > ALL => Some(None),
+        BoolOp::Intersect if disjoint => Some(None),
+        BoolOp::Intersect if b_in_a > ALL => Some(Some(b.clone())),
+        BoolOp::Intersect if a_in_b > ALL => Some(Some(a.clone())),
+        BoolOp::Union if b_in_a > ALL => Some(Some(a.clone())),
+        BoolOp::Union if a_in_b > ALL => Some(Some(b.clone())),
+        _ => None,
+    }
+}
+
 thread_local! {
     /// Set while a boolean runs on bodies whose coincident faces were pushed apart (no
     /// second round of pushing).
@@ -99,6 +144,12 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         };
         bounds && consistent
     };
+    // One body clear of or inside the other: no intersection needed.
+    if let (Some(ma), Some(mb)) = &meshes
+        && let Some(r) = trivial(a, b, op, ma, mb)
+    {
+        return Ok(r);
+    }
     let mut last = String::new();
     // Coincident faces make the intersection fail after many retries; push them apart first.
     if !APART.with(|c| c.get()) && crate::coplanar::has_coincident_faces(a, b) {

@@ -215,6 +215,12 @@ pub enum FeatureKind {
     Mirror {
         features: Vec<String>,
         plane: PlaneRef,
+        /// Mirror these bodies instead of replaying features.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bodies: Vec<String>,
+        /// Join each mirrored body with its original.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        combine: bool,
     },
     /// A drilled hole (simple, counterbore or countersink) at a point, into the material.
     Hole {

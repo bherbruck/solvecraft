@@ -458,6 +458,20 @@ fn apply_op(state: &mut ModelState, f: &Feature, tools: Vec<Body>, op: Operation
                 i += 1;
                 keep
             });
+            // A cut can leave a body in pieces: each piece becomes its own body ("Bar", "Bar (1)").
+            let mut split: Vec<ModelBody> = Vec::new();
+            for mb in std::mem::take(&mut state.bodies) {
+                let pieces = mb.body.lumps().unwrap_or_else(|_| vec![mb.body.clone()]);
+                if pieces.len() < 2 {
+                    split.push(mb);
+                    continue;
+                }
+                for (k, p) in pieces.into_iter().enumerate() {
+                    let name = if k == 0 { mb.name.clone() } else { format!("{} ({k})", mb.name) };
+                    split.push(ModelBody::new(name, p, mb.feature));
+                }
+            }
+            state.bodies = split;
         }
         Operation::NewBody => {}
     }
@@ -1157,7 +1171,13 @@ fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut 
         return Err(DocError::Invalid("no features selected".into()));
     }
     for name in features {
-        let src = doc.find_feature(name).ok_or_else(|| DocError::Unknown(format!("feature `{name}`")))?;
+        // A sketch and its extrude often share a name; the feature that makes geometry wins.
+        let src = doc
+            .features
+            .iter()
+            .find(|x| &x.name == name && !matches!(x.kind, FeatureKind::Sketch { .. } | FeatureKind::ConstructionPlane { .. }))
+            .or_else(|| doc.find_feature(name))
+            .ok_or_else(|| DocError::Unknown(format!("feature `{name}`")))?;
         let tools = feature_tools(vals, src, st)?;
         let (op, targets) = feature_op(src);
         let mut copies = Vec::new();
@@ -1273,9 +1293,35 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let mats = pattern_transforms(vals, pattern)?;
             replay(doc, vals, f, st, features, &mats)
         }
-        FeatureKind::Mirror { features, plane } => {
+        FeatureKind::Mirror { features, plane, bodies, combine } => {
             let pl = doc.resolve_plane(vals, plane, 0)?;
-            replay(doc, vals, f, st, features, &[mirror_matrix(&pl)])
+            if bodies.is_empty() {
+                return replay(doc, vals, f, st, features, &[mirror_matrix(&pl)]);
+            }
+            let m = mirror_matrix(&pl);
+            for n in bodies {
+                let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+                let Some(mb) = st.bodies.get(i).cloned() else { continue };
+                let mirrored = kernel::transform_matrix(&mb.body, m)?;
+                if *combine {
+                    let joined = kernel::boolean(&mb.body, &mirrored, BoolOp::Union)?
+                        .ok_or_else(|| DocError::Invalid("the mirror join produced nothing".into()))?;
+                    for (k, p) in joined.lumps()?.into_iter().enumerate() {
+                        if k == 0 {
+                            if let Some(slot) = st.bodies.get_mut(i) {
+                                *slot = ModelBody::new(mb.name.clone(), p, mb.feature);
+                            }
+                        } else {
+                            let name = unique_body_name(st, &mb.name);
+                            st.bodies.push(ModelBody::new(name, p, f.id));
+                        }
+                    }
+                } else {
+                    let name = unique_body_name(st, &mb.name);
+                    st.bodies.push(ModelBody::new(name, mirrored, f.id));
+                }
+            }
+            Ok(())
         }
         FeatureKind::Fillet { edges, radius, body } | FeatureKind::Chamfer { edges, distance: radius, body } => {
             let r = val(vals, radius, Kind::Length)?;

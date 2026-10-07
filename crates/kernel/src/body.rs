@@ -56,6 +56,75 @@ fn mesh_shells(solid: &Solid, tol: f64) -> Vec<MeshedShell> {
         .collect()
 }
 
+/// Revolved surfaces are periodic in their angle; a face whose angles start at 0 is found at 0
+/// or 2π, which confuses the boolean's loop projection. Each revolved face's surface is turned
+/// (same geometry) so the face sits around angle π, well away from the wrap.
+fn rephase_revolved(solid: Solid) -> Solid {
+    use mt::{BoundedCurve, ParametricCurve, SearchNearestParameter};
+    let r = guard("rephase", || {
+        let mut changed = false;
+        let mut shells = Vec::new();
+        for sh in solid.boundaries() {
+            let mut faces = Vec::new();
+            for f in sh.face_iter() {
+                let mt::Surface::RevolutedCurve(proc_) = f.surface() else {
+                    faces.push(f.clone());
+                    continue;
+                };
+                let surf = f.surface();
+                // The face's middle angle.
+                let mut acc = Vec3::ZERO;
+                let mut n = 0.0f64;
+                for w in f.absolute_boundaries() {
+                    for e in w.edge_iter() {
+                        let c = e.oriented_curve();
+                        let (t0, t1) = c.range_tuple();
+                        for k in 0..4 {
+                            acc += from_p3(c.subs(t0 + (t1 - t0) * k as f64 / 4.0));
+                            n += 1.0;
+                        }
+                    }
+                }
+                let Some((_, v)) = surf.search_nearest_parameter(p3(acc / n.max(1.0)), None, 100) else {
+                    faces.push(f.clone());
+                    continue;
+                };
+                let phi = v.rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                if phi.abs() < 0.3 {
+                    faces.push(f.clone());
+                    continue;
+                }
+                let new_proc = proc_.map_ref(|rc| {
+                    let (o, a) = (rc.origin(), rc.axis());
+                    let rot = mt::Matrix4::from_translation(mt::EuclideanSpace::to_vec(o))
+                        * mt::Matrix4::from_axis_angle(a, mt::Rad(phi))
+                        * mt::Matrix4::from_translation(-mt::EuclideanSpace::to_vec(o));
+                    mt::RevolutedCurve::by_revolution(mt::Transformed::transformed(rc.entity_curve(), rot), o, a)
+                });
+                match mt::Face::try_new(f.absolute_boundaries().clone(), mt::Surface::RevolutedCurve(new_proc)) {
+                    Ok(mut nf) => {
+                        if !f.orientation() {
+                            nf.invert();
+                        }
+                        faces.push(nf);
+                        changed = true;
+                    }
+                    Err(_) => faces.push(f.clone()),
+                }
+            }
+            shells.push(mt::Shell::from(faces));
+        }
+        if !changed {
+            return Ok(None);
+        }
+        Ok(Solid::try_new(shells).ok())
+    });
+    match r {
+        Ok(Some(s)) => s,
+        _ => solid,
+    }
+}
+
 pub(crate) fn p3(v: Vec3) -> mt::Point3 {
     mt::Point3::new(v.x, v.y, v.z)
 }
@@ -82,10 +151,11 @@ fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
 }
 
 impl Body {
-    pub(crate) fn new(mut solid: Solid) -> Result<Body> {
+    pub(crate) fn new(solid: Solid) -> Result<Body> {
         if solid.boundaries().is_empty() {
             return Err(KernelError::Failed("empty result".into()));
         }
+        let mut solid = rephase_revolved(solid);
         // Orient outward: a closed solid must have positive volume.
         let v = guard("orient", || Ok(mesh_shells(&solid, 1.0).iter().map(|s| s.to_polygon().volume()).sum::<f64>()))?;
         if v < 0.0 {
@@ -326,5 +396,58 @@ impl Body {
             Some(_) => 1,
             None => self.solid.boundaries().len(),
         }
+    }
+}
+
+impl Body {
+    /// The separate pieces of a body: each outer shell with the voids inside it. A body in one
+    /// piece comes back as itself.
+    pub fn lumps(&self) -> Result<Vec<Body>> {
+        if self.mesh.is_some() || self.solid.boundaries().len() < 2 {
+            return Ok(vec![self.clone()]);
+        }
+        let tol = (self.size() * 1e-3).max(1e-3);
+        guard("lumps", || {
+            let shells: Vec<mt::Shell> = self.solid.boundaries().clone();
+            let meshes: Vec<(f64, Option<Mesh>)> = shells
+                .iter()
+                .map(|sh| {
+                    let pm = sh.robust_triangulation(tol).to_polygon();
+                    let v = pm.volume();
+                    let mut m = Mesh::default();
+                    for p in pm.positions() {
+                        m.positions.push(Vec3::new(p.x, p.y, p.z));
+                    }
+                    for t in pm.faces().triangle_iter() {
+                        let idx = |k: usize| t.get(k).map(|x| u32::try_from(x.pos).unwrap_or(0)).unwrap_or(0);
+                        m.triangles.push([idx(0), idx(1), idx(2)]);
+                        m.tri_face.push(0);
+                    }
+                    (v, Some(m))
+                })
+                .collect();
+            let outer: Vec<usize> = (0..shells.len()).filter(|i| meshes.get(*i).is_some_and(|m| m.0 > 0.0)).collect();
+            if outer.len() < 2 {
+                return Ok(vec![self.clone()]);
+            }
+            let mut groups: Vec<Vec<mt::Shell>> = outer.iter().filter_map(|i| shells.get(*i).cloned()).map(|s| vec![s]).collect();
+            for (i, sh) in shells.iter().enumerate() {
+                if outer.contains(&i) {
+                    continue;
+                }
+                // A void goes with the outer shell around one of its points.
+                let probe = sh.vertex_iter().next().map(|v| from_p3(v.point()));
+                let owner = outer.iter().position(|o| {
+                    let (Some(p), Some((_, Some(m)))) = (probe, meshes.get(*o)) else { return false };
+                    m.contains(p)
+                });
+                if let Some(k) = owner
+                    && let Some(g) = groups.get_mut(k)
+                {
+                    g.push(sh.clone());
+                }
+            }
+            groups.into_iter().map(|g| Solid::try_new(g).map_err(|e| KernelError::Failed(format!("lump: {e}"))).and_then(Body::new)).collect()
+        })
     }
 }

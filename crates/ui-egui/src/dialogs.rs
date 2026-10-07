@@ -1556,7 +1556,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Mirror { features, plane } => {
+        FeatureKind::Mirror { features, plane, .. } => {
             let mut d = start("MirrorCommand")?;
             let ids: Vec<u64> = features.iter().filter_map(|n| s.doc.find_feature(n).map(|f| f.id)).collect();
             if let Some(inp) = d.inputs.get_mut(0) {

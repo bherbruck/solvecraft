@@ -76,6 +76,14 @@ where
         }
         Some(())
     })?;
+    if std::env::var_os("SHAPEOPS_TRACE").is_some() {
+        for c in pre_faces.iter().flatten() {
+            eprintln!("  positive loop: area {:.4} pts {} first {:?}", c.poly.area(), c.poly.len(), c.poly.front());
+        }
+        for c in &negative_wires {
+            eprintln!("  negative loop: area {:.4} pts {} first {:?} status {:?}", c.poly.area(), c.poly.len(), c.poly.front(), c.wire.status());
+        }
+    }
     negative_wires.into_iter().try_for_each(|chunk| {
         let pt = chunk.poly.front();
         let op = crate::tr!(pre_faces.iter_mut().find(|face| face[0].poly.include(pt)), "loop not inside any face piece");

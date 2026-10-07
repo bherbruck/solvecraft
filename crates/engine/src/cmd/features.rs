@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
         .params("features: [names]; axis: X|Y|Z | {origin, dir}; count; angle? (default 360 deg)"),
-    CommandSpec::new("MirrorCommand", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names]; plane: XY|XZ|YZ | {origin, x_dir, y_dir}"),
+    CommandSpec::new("MirrorCommand", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ | {origin, x_dir, y_dir}"),
     CommandSpec::new("FusionHoleCommand", "Hole", hole)
         .at("SOLID", "CREATE")
         .icon("hole")
@@ -552,7 +552,8 @@ fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "MirrorCommand";
-    let features = source_features(s, p, cmd)?;
+    let bodies = string_list(p, "bodies");
+    let features = if bodies.is_empty() { source_features(s, p, cmd)? } else { Vec::new() };
     let plane = match p.get("plane") {
         Some(Value::String(n)) if solvecraft_geom::Plane::named(n).is_some() => solvecraft_doc::PlaneRef::Origin { name: n.to_ascii_uppercase() },
         Some(o @ Value::Object(_)) => {
@@ -566,7 +567,8 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
         }
         _ => return Err(bad(cmd, "`plane` must be XY, XZ, YZ or {origin, normal}")),
     };
-    add_feature(s, p, FeatureKind::Mirror { features, plane })
+    let combine = bool_(p, "combine").unwrap_or(false);
+    add_feature(s, p, FeatureKind::Mirror { features, plane, bodies, combine })
 }
 
 /// A plane reference from a parameter: an origin plane, a construction plane name, or an

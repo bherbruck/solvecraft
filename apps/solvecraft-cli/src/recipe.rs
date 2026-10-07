@@ -212,7 +212,7 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
             Some("rectangular_pattern") => {
                 let d1 = f.get("direction1").cloned().unwrap_or(Value::Null);
                 let d2 = f.get("direction2").cloned().unwrap_or(Value::Null);
-                let mut p = json!({"features": f.get("features"), "dir1": d1.get("axis"), "count1": d1.get("count"), "spacing1": d1.get("spacing"), "name": name});
+                let mut p = json!({"features": feature_refs(f.get("features")), "dir1": d1.get("axis"), "count1": d1.get("count"), "spacing1": d1.get("spacing"), "name": name});
                 if !d2.is_null() {
                     p["dir2"] = d2.get("axis").cloned().unwrap_or(Value::Null);
                     p["count2"] = d2.get("count").cloned().unwrap_or(Value::Null);
@@ -222,7 +222,7 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
             }
             Some("circular_pattern") => {
                 let axis = f.get("axis").map(|a| json!({"origin": a.get("origin").cloned().unwrap_or(json!([0, 0, 0])), "dir": a.get("dir")})).unwrap_or(Value::Null);
-                out.push(json!({"command": "PatternCircular", "params": {"features": f.get("features"), "axis": axis, "count": f.get("count"), "angle": f.get("total_angle").cloned().unwrap_or(json!(360)), "name": name}}));
+                out.push(json!({"command": "PatternCircular", "params": {"features": feature_refs(f.get("features")), "axis": axis, "count": f.get("count"), "angle": f.get("total_angle").cloned().unwrap_or(json!(360)), "name": name}}));
             }
             Some("loft") => {
                 let sections: Vec<Value> = f
@@ -255,11 +255,36 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
                 }
                 out.push(json!({"command": "FusionDraftCommand", "params": {"faces": faces, "angle": angle, "neutral": neutral, "pull": n, "name": name}}));
             }
+            Some("thread") => {
+                let face = f.get("face").and_then(|x| x.get("point")).cloned().unwrap_or(Value::Null);
+                let mut p = json!({"face": face, "designation": f.get("designation"), "name": name});
+                if f.get("full_length").and_then(Value::as_bool) == Some(false)
+                    && let Some(l) = f.get("length")
+                {
+                    p["length"] = l.clone();
+                }
+                out.push(json!({"command": "FusionThreadCommand", "params": p}));
+            }
             Some("hole") => {
                 let n = f.get("face").and_then(|fc| fc.get("plane_normal_outward").or(fc.get("normal_at_point_on_face"))).cloned();
                 let dir = n.and_then(|n| n.as_array().map(|a| a.iter().map(|x| -x.as_f64().unwrap_or(0.0)).collect::<Vec<f64>>()));
                 let ty = f.get("hole_type").and_then(Value::as_str).unwrap_or("simple");
                 let mut p = json!({"position": f.get("position"), "diameter": f.get("diameter"), "type": ty, "name": name});
+                // "sketch HolePoints points p1..p6"
+                if let Some(src) = f.get("positions_from").and_then(Value::as_str) {
+                    let w: Vec<&str> = src.split_whitespace().collect();
+                    if let (Some(sk), Some(range)) = (w.iter().position(|x| *x == "sketch").and_then(|i| w.get(i + 1)), w.iter().position(|x| *x == "points").and_then(|i| w.get(i + 1))) {
+                        let ids: Vec<String> = match range.split_once("..") {
+                            Some((a, b)) => {
+                                let pre: String = a.chars().take_while(|c| !c.is_ascii_digit()).collect();
+                                let (lo, hi) = (a[pre.len()..].parse::<u32>().unwrap_or(1), b.trim_start_matches(pre.as_str()).parse::<u32>().unwrap_or(0));
+                                (lo..=hi).map(|k| format!("{pre}{k}")).collect()
+                            }
+                            None => range.split(',').map(str::to_string).collect(),
+                        };
+                        p = json!({"sketch": sk, "points": ids, "diameter": f.get("diameter"), "type": ty, "name": name});
+                    }
+                }
                 if let Some(d) = dir {
                     p["direction"] = json!(d);
                 }
@@ -294,7 +319,11 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
                     Some(r @ ("XY" | "XZ" | "YZ")) => json!(r),
                     _ => json!({"origin": pl.get("origin").cloned().unwrap_or(json!([0, 0, 0])), "normal": pl.get("normal")}),
                 };
-                out.push(json!({"command": "MirrorCommand", "params": {"features": f.get("features"), "plane": plane, "name": name}}));
+                let mut p = json!({"features": feature_refs(f.get("features")), "plane": plane, "name": name});
+                if f.get("mirror_of").and_then(Value::as_str) == Some("bodies") {
+                    p = json!({"bodies": f.get("bodies"), "combine": f.get("combine").cloned().unwrap_or(json!(false)), "plane": plane, "name": name});
+                }
+                out.push(json!({"command": "MirrorCommand", "params": p}));
             }
             Some("fillet") => {
                 out.push(json!({"command": "FusionFilletEdgesCommand", "params": {"edges": edge_points(f), "radius": f.get("radius"), "name": name}}))
@@ -318,4 +347,26 @@ fn edge_points(f: &Value) -> Value {
             .map(|e| e.get("point").or(e.get("mid")).cloned().unwrap_or_else(|| e.clone()))
             .collect(),
     )
+}
+
+/// Fusion names a pattern's source features with an occurrence suffix ("Hole1 (1)"); the
+/// features are the recipe's own names.
+fn feature_refs(v: Option<&Value>) -> Value {
+    let list: Vec<Value> = v
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|x| match x.as_str() {
+            Some(s) => {
+                let t = s.trim();
+                let base = match t.rfind(" (") {
+                    Some(i) if t.ends_with(')') && t[i + 2..t.len() - 1].chars().all(|c| c.is_ascii_digit()) => &t[..i],
+                    _ => t,
+                };
+                json!(base)
+            }
+            None => x.clone(),
+        })
+        .collect();
+    json!(list)
 }

@@ -777,3 +777,82 @@ fn shell_non_convex() {
     let v = measure(&s).unwrap().volume;
     assert!(rel(v, outer - cavity) < 1e-6, "{v} vs {}", outer - cavity);
 }
+
+#[test]
+#[ignore]
+fn debug_drilled_hole() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 15.0)).unwrap();
+    let r = 3.4;
+    let half = (118f64 / 2.0).to_radians();
+    let tip = r / half.tan();
+    let (top, bottom) = (0.6, -12.0);
+    let a = std::env::var("ANG").ok().and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0);
+    let rp = Plane::new(Vec3::new(20.0, 15.0, 15.0), Vec3::new(a.cos(), a.sin(), 0.0), Vec3::Z).unwrap();
+    let tipv = if std::env::var_os("NOTIP").is_some() { 0.0 } else { tip };
+    let pts = [Vec2::new(0.0, top), Vec2::new(r, top), Vec2::new(r, bottom), Vec2::new(0.0, bottom - tipv)];
+    let region = Region2 { outer: Loop2::polygon(&pts), holes: vec![] };
+    let tool = revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
+    println!("tool faces {} vol {}", tool.face_count(), measure(&tool).unwrap().volume);
+    let r = guard("t", || {
+        let mut sb = tool.deep_copy();
+        sb.not();
+        Ok(truck_shapeops::and(&b.deep_copy(), &sb, 0.02).map(|s| s.face_iter().count()))
+    });
+    println!("cut: {r:?}");
+}
+
+#[test]
+#[ignore]
+fn debug_face_param_areas() {
+    use truck_modeling::{BoundedCurve, ParametricCurve, SearchNearestParameter};
+    let rp = Plane::new(Vec3::new(20.0, 15.0, 15.0), Vec3::X, Vec3::Z).unwrap();
+    let pts = [Vec2::new(0.0, 0.6), Vec2::new(3.4, 0.6), Vec2::new(3.4, -12.0), Vec2::new(0.0, -12.0)];
+    let region = Region2 { outer: Loop2::polygon(&pts), holes: vec![] };
+    let tool = revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
+    let ex = cylinder(Vec3::new(20.0, 15.0, 3.0), Vec3::Z, 3.4, 12.6).unwrap();
+    for (name, b) in [("revolve", &tool), ("extrude", &ex)] {
+        for f in b.solid.face_iter() {
+            let s = f.surface();
+            let mut poly: Vec<(f64, f64)> = Vec::new();
+            for w in f.absolute_boundaries() {
+                for e in w.edge_iter() {
+                    let c = e.oriented_curve();
+                    let (t0, t1) = c.range_tuple();
+                    for k in 0..8 {
+                        let p = c.subs(t0 + (t1 - t0) * k as f64 / 8.0);
+                        if let Some(uv) = s.search_nearest_parameter(p, poly.last().copied(), 100) {
+                            poly.push(uv);
+                        }
+                    }
+                }
+            }
+            let n = poly.len();
+            let area: f64 = (0..n)
+                .map(|i| {
+                    let (a, b) = (poly[i], poly[(i + 1) % n]);
+                    a.0 * b.1 - b.0 * a.1
+                })
+                .sum::<f64>()
+                / 2.0;
+            println!("{name}: orientation {} param area {area:.4} wires {}", f.orientation(), f.absolute_boundaries().len());
+        }
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_revolved_tube_cut() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 15.0)).unwrap();
+    let rp = Plane::new(Vec3::new(20.0, 15.0, 15.0), Vec3::X, Vec3::Z).unwrap();
+    for (name, inner) in [("tube", 1.0), ("solid", 0.0)] {
+        let pts = [Vec2::new(inner, 0.6), Vec2::new(3.4, 0.6), Vec2::new(3.4, -12.0), Vec2::new(inner, -12.0)];
+        let region = Region2 { outer: Loop2::polygon(&pts), holes: vec![] };
+        let tool = revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
+        let r = guard("t", || {
+            let mut sb = tool.deep_copy();
+            sb.not();
+            Ok(truck_shapeops::and(&b.deep_copy(), &sb, 0.02).map(|s| s.face_iter().count()))
+        });
+        println!("{name}: faces {} cut {r:?}", tool.face_count());
+    }
+}
