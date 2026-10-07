@@ -807,6 +807,7 @@ impl Document {
             }
             _ => self.features.push(f),
         }
+        self.name_feature_inputs(id);
         Ok(id)
     }
 
