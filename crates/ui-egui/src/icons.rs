@@ -183,6 +183,22 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.poly(&[(3.0, 7.0), (9.0, 10.0), (9.0, 17.0), (3.0, 17.0)], pen.fill, ink);
             pen.poly(&[(21.0, 7.0), (15.0, 10.0), (15.0, 17.0), (21.0, 17.0)], Color32::TRANSPARENT, a);
         }
+        "sun" => {
+            pen.circle(12.0, 12.0, 4.5, a, ink);
+            for i in 0..8 {
+                let t = i as f32 / 8.0 * std::f32::consts::TAU;
+                pen.line(&[(12.0 + 7.0 * t.cos(), 12.0 + 7.0 * t.sin()), (12.0 + 9.5 * t.cos(), 12.0 + 9.5 * t.sin())], ink);
+            }
+        }
+        "moon" => {
+            let outer: Vec<Pos2> =
+                (0..=24).map(|i| -0.6 + i as f32 / 24.0 * 4.4).map(|t| pen.at(12.0 + 8.0 * t.cos(), 12.0 + 8.0 * t.sin())).collect();
+            let inner: Vec<Pos2> =
+                (0..=24).rev().map(|i| -0.9 + i as f32 / 24.0 * 3.9).map(|t| pen.at(15.5 + 6.5 * t.cos(), 9.5 + 6.5 * t.sin())).collect();
+            let mut pts = outer;
+            pts.extend(inner);
+            p.add(Shape::closed_line(pts, Stroke::new(pen.w, ink)));
+        }
         "presspull" => {
             pen.poly(&[(3.0, 15.0), (12.0, 11.0), (21.0, 15.0), (12.0, 19.0)], pen.fill, ink);
             pen.arrow((12.0, 15.0), (12.0, 3.0), a);

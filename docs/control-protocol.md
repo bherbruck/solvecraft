@@ -21,8 +21,8 @@ Commands never open dialogs when run this way. `solvecraft-cli commands` prints 
 
 | Method | Params | Notes |
 |---|---|---|
-| `ui.inspect` | — | UI state, viewport rect, camera, active tool/dialog, hover, renderer, timings |
-| `ui.set` | any `UiState` field (`tab`, `perspective`, `showGrid`, `hiddenBodies`, …) | |
+| `ui.inspect` | — | UI state, viewport rect, camera, active tool/dialog, hover, renderer, timings, live preview (`active`, `busy`, `error`, `ms`, bodies it stands in for) |
+| `ui.set` | any `UiState` field (`tab`, `perspective`, `showGrid`, `hiddenBodies`, `dark`, …) | `dark: false` switches to the light theme |
 | `ui.view` | `view`: `front`, `back`, `top`, `bottom`, `left`, `right`, `iso`, `home`, `fit`; `animate` (bool, default false: snap) | |
 | `ui.start` | `command` | like a toolbar click: starts the sketch tool or dialog for the command |
 | `ui.click` | `x`, `y` (screen points), `button?`: left/right/middle, `shift?`, `ctrl?` | real pointer input |

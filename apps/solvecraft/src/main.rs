@@ -32,7 +32,13 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.0.ui(ui);
     }
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(PREFS_KEY, self.0.prefs());
+    }
 }
+
+/// Where the preferences (theme) are kept in eframe's storage.
+const PREFS_KEY: &str = "solvecraft.prefs";
 
 fn services() -> Services {
     Services {
@@ -91,6 +97,9 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let mut app = SolveApp::new(Session::default(), services());
+            if let Some(p) = cc.storage.and_then(|s| s.get_string(PREFS_KEY)) {
+                app.load_prefs(&p);
+            }
             if let Some(rs) = &cc.wgpu_render_state {
                 app.set_wgpu(rs, DEPTH_BITS, u32::from(MSAA));
             }

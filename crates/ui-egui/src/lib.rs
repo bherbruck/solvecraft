@@ -51,6 +51,8 @@ pub struct UiState {
     pub hidden_origin: Vec<String>,
     pub show_sketches: bool,
     pub palette_open: bool,
+    /// Dark theme (the default); a preference kept between runs.
+    pub dark: bool,
 }
 
 impl Default for UiState {
@@ -66,6 +68,7 @@ impl Default for UiState {
             hidden_origin: Vec::new(),
             show_sketches: true,
             palette_open: false,
+            dark: true,
         }
     }
 }
@@ -141,6 +144,20 @@ impl SolveApp {
     /// bits and MSAA sample count). Without it the viewport renders on the CPU.
     pub fn set_wgpu(&mut self, rs: &egui_wgpu::RenderState, depth_bits: u8, samples: u32) {
         self.viewport.gpu = Some(gpu::install(rs, depth_bits, samples));
+    }
+
+    /// Preferences kept between runs (JSON), for the host to store.
+    pub fn prefs(&self) -> String {
+        json!({ "dark": self.ui.dark }).to_string()
+    }
+
+    /// Restore preferences saved with [`SolveApp::prefs`].
+    pub fn load_prefs(&mut self, prefs: &str) {
+        if let Ok(v) = serde_json::from_str::<Value>(prefs)
+            && let Some(d) = v.get("dark").and_then(Value::as_bool)
+        {
+            self.ui.dark = d;
+        }
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
@@ -402,7 +419,8 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
-        if !self.styled {
+        if !self.styled || theme::is_dark() != self.ui.dark {
+            theme::set_dark(self.ui.dark);
             theme::apply(ctx);
             self.styled = true;
         }

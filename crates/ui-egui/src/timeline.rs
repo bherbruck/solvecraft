@@ -142,13 +142,13 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
                 hovered = Some(*id);
             }
             let bg = if err.is_some() {
-                Color32::from_rgb(250, 220, 220)
+                t.timeline_item_error
             } else if sel {
                 t.accent_soft
             } else if resp.hovered() || from_view == Some(*id) {
                 t.hover
             } else {
-                Color32::WHITE
+                t.timeline_item
             };
             let edge = if err.is_some() {
                 t.error
@@ -236,7 +236,7 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
             if resp.drag_started() {
                 drag = Some(Drag::Marker);
             }
-            let col = if resp.hovered() || drag == Some(Drag::Marker) { t.accent } else { Color32::from_rgb(70, 76, 88) };
+            let col = if resp.hovered() || drag == Some(Drag::Marker) { t.accent } else { t.timeline_marker };
             p.rect_filled(mr, 1.0, col);
             resp.on_hover_text("History marker: drag to roll the model back; new features go here");
         }

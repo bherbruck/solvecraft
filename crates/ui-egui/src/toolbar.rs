@@ -41,13 +41,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Brand mark: a small solid block drawn in code.
         let logo = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(20.0, 20.0));
         icons::paint(ui.painter(), logo, "box", Color32::from_rgb(220, 226, 236), Color32::from_rgb(90, 160, 240), Color32::WHITE);
-        ui.painter().text(
-            pos2(r.left() + 36.0, r.center().y),
-            Align2::LEFT_CENTER,
-            "SolveCraft",
-            FontId::proportional(14.0),
-            Color32::from_rgb(230, 234, 242),
-        );
+        ui.painter().text(pos2(r.left() + 36.0, r.center().y), Align2::LEFT_CENTER, "SolveCraft", FontId::proportional(14.0), t.app_bar_text);
         let mut x = r.left() + 128.0;
         let mut click = |ui: &mut egui::Ui, icon: &str, tip: &str| -> bool {
             let br = Rect::from_center_size(pos2(x, r.center().y), vec2(26.0, 26.0));
@@ -75,6 +69,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if click(ui, "redo", "Redo (Ctrl+Y)") {
             let _ = app.run("RedoCommand", json!({}));
+        }
+        let theme_tip = if app.ui.dark { "Light theme" } else { "Dark theme" };
+        if click(ui, if app.ui.dark { "sun" } else { "moon" }, theme_tip) {
+            app.ui.dark = !app.ui.dark;
         }
         if file {
             app.ui.palette_open = false;
@@ -206,7 +204,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Workspace selector and tabs.
         let tabs_y = r.top() + 2.0;
         let ws = Rect::from_min_size(pos2(r.left() + 8.0, tabs_y + 26.0), vec2(96.0, 56.0));
-        painter.rect(ws, 4.0, Color32::WHITE, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        painter.rect(ws, 4.0, t.field, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
         painter.text(pos2(ws.center().x - 5.0, ws.top() + 14.0), Align2::CENTER_CENTER, "DESIGN", FontId::proportional(12.0), t.text);
         caret(&painter, pos2(ws.center().x + 26.0, ws.top() + 14.0), t.text);
         painter.text(pos2(ws.center().x, ws.top() + 34.0), Align2::CENTER_CENTER, "workspace", FontId::proportional(10.0), t.text_dim);

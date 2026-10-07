@@ -144,6 +144,7 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.ui.show_sketches.hash(&mut h);
     app.ui.hidden_bodies.hash(&mut h);
     app.preview.replaced.hash(&mut h);
+    app.ui.dark.hash(&mut h);
     app.session.active_sketch.hash(&mut h);
     let (minor, _) = grid_step(app.cam.half_height());
     minor.to_bits().hash(&mut h);
@@ -152,7 +153,19 @@ fn scene_key(app: &SolveApp) -> u64 {
     h.finish()
 }
 
+/// A sketch curve colour from the engine, in the current theme.
+fn sketch_color(t: &Tokens, c: Rgb) -> [u8; 4] {
+    if c == colors::SKETCH {
+        c4(t.sketch)
+    } else if c == colors::SKETCH_DONE || c == colors::SKETCH_FIXED {
+        c4(t.sketch_fixed)
+    } else {
+        rgba(c)
+    }
+}
+
 fn build_scene(app: &SolveApp) -> GpuScene {
+    let tk = Tokens::get();
     let mut sc = GpuScene::default();
     let s = &app.session;
     let st = s.model.state();
@@ -164,7 +177,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         for i in -n..=n {
             let t = i as f64 * minor;
             let maj = (t / major).round() * major == t;
-            let col = if maj { rgba(colors::GRID_MAJOR) } else { rgba(colors::GRID) };
+            let col = if maj { c4(tk.grid_major) } else { c4(tk.grid) };
             let w = if maj { 1.0 } else { 0.7 };
             sc.line((c + Vec3::new(t, -ext, 0.0)).to_f32(), (c + Vec3::new(t, ext, 0.0)).to_f32(), col, w, false);
             sc.line((c + Vec3::new(-ext, t, 0.0)).to_f32(), (c + Vec3::new(ext, t, 0.0)).to_f32(), col, w, false);
@@ -174,7 +187,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         if app.ui.hidden_bodies.contains(&b.name) || app.preview.replaced.contains(&b.name) {
             continue;
         }
-        let col = rgba(colors::BODY);
+        let col = c4(tk.body);
         let m = b.mesh();
         for t in &m.triangles {
             for k in t {
@@ -189,7 +202,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
                 continue;
             }
             for w in e.windows(2) {
-                sc.line(w[0].to_f32(), w[1].to_f32(), rgba(colors::EDGE), 1.3, false);
+                sc.line(w[0].to_f32(), w[1].to_f32(), c4(tk.body_edge), 1.3, false);
             }
         }
     }
@@ -198,7 +211,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         let active = s.active_sketch == Some(sid);
         for (pts, col, cons) in sketch_lines(&ss.sketch, &ss.plane, active, &ss.report.curve_determined) {
             for w in pts.windows(2) {
-                sc.line(w[0].to_f32(), w[1].to_f32(), rgba(col), if cons { 1.2 } else { 2.0 }, active);
+                sc.line(w[0].to_f32(), w[1].to_f32(), sketch_color(&tk, col), if cons { 1.2 } else { 2.0 }, active);
             }
         }
     }
@@ -505,6 +518,7 @@ fn highlight_key(app: &SolveApp) -> u64 {
     serde_json::to_string(&app.highlighted()).unwrap_or_default().hash(&mut h);
     format!("{:?}", app.viewport.hover).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
+    app.ui.dark.hash(&mut h);
     app.preview.replaced.hash(&mut h);
     app.origin_visible().hash(&mut h);
     app.ui.hidden_origin.hash(&mut h);
@@ -573,13 +587,7 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
                 {
                     let m = b.mesh();
                     for f in 0..b.body.face_count() {
-                        face_tris(
-                            &mut sc,
-                            &m,
-                            f,
-                            c4(Color32::from_rgb(colors::BODY_SELECTED.0, colors::BODY_SELECTED.1, colors::BODY_SELECTED.2)),
-                            true,
-                        );
+                        face_tris(&mut sc, &m, f, c4(t.body_selected), true);
                     }
                 }
             }
@@ -609,7 +617,7 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
     // Bodies made by the timeline item under the cursor.
     if let Some(fid) = app.viewport.hover_feature {
         let k = t.hover_face_lift;
-        let c = colors::BODY;
+        let c = (t.body.r(), t.body.g(), t.body.b());
         for b in st.bodies.iter().filter(|b| b.feature == fid && !app.ui.hidden_bodies.contains(&b.name)) {
             let m = b.mesh();
             for f in 0..b.body.face_count() {
@@ -630,7 +638,7 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
         {
             if let Some(b) = st.body(body) {
                 let k = t.hover_face_lift;
-                let c = colors::BODY;
+                let c = (t.body.r(), t.body.g(), t.body.b());
                 face_tris(&mut sc, &b.mesh(), *index, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
                 let m = b.mesh();
                 for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
@@ -790,8 +798,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let proj = projection(app, rect);
     let painter = ui.painter_at(rect);
     // Background gradient.
-    let top = Color32::from_rgb(colors::BG_TOP.0, colors::BG_TOP.1, colors::BG_TOP.2);
-    let bot = Color32::from_rgb(colors::BG_BOTTOM.0, colors::BG_BOTTOM.1, colors::BG_BOTTOM.2);
+    let (top, bot) = (t.viewport_top, t.viewport_bottom);
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(rect.left_top(), top);
     mesh.colored_vertex(rect.right_top(), top);
@@ -911,7 +918,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let pos = pos2(rect.left() + 12.0, rect.bottom() - 46.0);
             let galley = painter.layout_no_wrap(msg, FontId::proportional(12.5), if err { t.error } else { t.text });
             let r = Rect::from_min_size(pos, galley.size() + vec2(16.0, 8.0));
-            painter.rect_filled(r, 4.0, Color32::from_white_alpha(230));
+            painter.rect_filled(r, 4.0, t.overlay);
             painter.galley(pos + vec2(8.0, 4.0), galley, t.text);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
         } else {
@@ -1081,9 +1088,9 @@ fn overlays(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     for (i, p) in sk.points.iter().enumerate() {
         let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)) else { continue };
         let det = ss.report.point_determined.get(i).copied().unwrap_or(false);
-        let c = if det { Color32::BLACK } else { Color32::from_rgb(30, 90, 200) };
+        let c = if det { t.sketch_point } else { t.sketch_point_free };
         if i == 0 {
-            painter.circle(sp, 3.5, Color32::from_rgb(240, 200, 60), Stroke::new(1.0, Color32::BLACK));
+            painter.circle(sp, 3.5, Color32::from_rgb(240, 200, 60), Stroke::new(1.0, t.body_edge));
         } else {
             painter.rect_filled(Rect::from_center_size(sp, vec2(5.0, 5.0)), 0.0, c);
         }
@@ -1104,7 +1111,7 @@ fn overlays(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         };
         let galley = painter.layout_no_wrap(text, FontId::proportional(12.0), t.text);
         let r = Rect::from_center_size(a, galley.size() + vec2(8.0, 4.0));
-        painter.rect(r, 2.0, Color32::from_white_alpha(235), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        painter.rect(r, 2.0, t.overlay, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
         painter.galley(r.min + vec2(4.0, 2.0), galley, t.text);
         let resp = ui.interact(r, ui.id().with(("dim", param.as_str())), Sense::click());
         if resp.double_clicked() || resp.clicked() && app.tool.is_none() {
@@ -1174,9 +1181,10 @@ fn glyph(painter: &egui::Painter, proj: &Proj, ss: &solvecraft_engine::doc::Solv
     };
     let Some(a) = anchor.and_then(|a| proj.to_screen(ss.plane.to_world(a))) else { return };
     let r = Rect::from_center_size(a + vec2(10.0, -10.0), vec2(13.0, 13.0));
-    painter.rect_filled(r, 2.0, Color32::from_rgb(255, 255, 255));
-    painter.rect_stroke(r, 2.0, Stroke::new(1.0, Color32::from_rgb(90, 150, 90)), egui::StrokeKind::Inside);
-    painter.text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional(10.0), Color32::from_rgb(40, 110, 40));
+    let t = Tokens::get();
+    painter.rect_filled(r, 2.0, t.glyph_bg);
+    painter.rect_stroke(r, 2.0, Stroke::new(1.0, t.glyph_edge), egui::StrokeKind::Inside);
+    painter.text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional(10.0), t.glyph_text);
 }
 
 fn cpu_render(app: &mut SolveApp, ctx: &egui::Context, painter: &egui::Painter, rect: Rect, proj: &Proj) {
@@ -1238,11 +1246,7 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         let pts: Vec<Pos2> = corners.iter().map(|p| to2(*p).0).collect();
         let poly_hover = hover.is_some_and(|h| point_in_poly(h, &pts));
         let shade = (0.75 + 0.25 * n.dot(b)) as f32;
-        painter.add(Shape::convex_polygon(
-            pts.clone(),
-            Color32::from_gray((236.0 * shade) as u8),
-            Stroke::new(1.0, Color32::from_rgb(140, 148, 160)),
-        ));
+        painter.add(Shape::convex_polygon(pts.clone(), t.cube_face.gamma_multiply(shade).to_opaque(), Stroke::new(1.0, t.cube_edge)));
         // Hover zone: the outer band of a face picks the edge or corner it borders.
         let zone = hover.filter(|_| poly_hover).and_then(|h| cube_zone(&pts, h));
         if let Some((zi, zj)) = zone {
@@ -1257,7 +1261,7 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         }
         let center = to2(n).0;
         if n.dot(b) > 0.35 {
-            painter.text(center, Align2::CENTER_CENTER, label, FontId::proportional(9.5), t.text);
+            painter.text(center, Align2::CENTER_CENTER, label, FontId::proportional(9.5), Color32::from_rgb(40, 44, 52));
         }
         if let Some((zi, zj)) = zone
             && ui.input(|i| i.pointer.primary_clicked())
@@ -1274,7 +1278,7 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     }
     let home = Rect::from_center_size(pos2(c.x - 52.0, c.y - 48.0), vec2(18.0, 18.0));
     let hr = ui.interact(home, ui.id().with("vc_home"), Sense::click());
-    icons::paint(&painter, home, "home", t.icon, if hr.hovered() { t.accent_soft } else { Color32::WHITE }, t.accent);
+    icons::paint(&painter, home, "home", t.icon, if hr.hovered() { t.accent_soft } else { t.overlay }, t.accent);
     if hr.on_hover_text("Home view").clicked() {
         app.animate_view("home");
     }
@@ -1345,7 +1349,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let w = items.len() as f32 * 30.0 + 10.0;
     let bar = Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 22.0), vec2(w, 30.0));
     let painter = ui.painter_at(rect);
-    painter.rect(bar, 6.0, Color32::from_white_alpha(235), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    painter.rect(bar, 6.0, t.overlay, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
     for (i, (icon, tip)) in items.iter().enumerate() {
         let br = Rect::from_min_size(pos2(bar.left() + 5.0 + i as f32 * 30.0, bar.top() + 2.0), vec2(26.0, 26.0));
         let resp = ui.interact(br, ui.id().with(("nav", *icon)), Sense::click());

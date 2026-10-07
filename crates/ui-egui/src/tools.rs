@@ -1,7 +1,7 @@
 //! Interactive sketch tools: click points on the sketch plane (or pick sketch entities) and the
 //! tool runs the matching command. Tools are UI state only; the work is done by commands.
 
-use egui::{Color32, Pos2, Shape, Stroke};
+use egui::{Pos2, Shape, Stroke};
 use serde_json::{Value, json};
 use solvecraft_engine::geom::Vec2;
 
@@ -265,7 +265,8 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let st = app.session.model.state();
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
-    let stroke = Stroke::new(1.5, Color32::from_rgb(30, 120, 230));
+    let tk = crate::theme::Tokens::get();
+    let stroke = Stroke::new(1.5, tk.rubber_band);
     if let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
     {
@@ -275,7 +276,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
             egui::Align2::LEFT_TOP,
             format!("{:.2}, {:.2}", hp.x, hp.y),
             egui::FontId::proportional(11.0),
-            Color32::from_rgb(60, 70, 90),
+            tk.text_dim,
         );
     }
     let Some((h, _)) = t.hover.clone() else { return };

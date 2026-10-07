@@ -95,6 +95,7 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             "renderer": if app.viewport.gpu.is_some() { "gpu" } else { "cpu" },
             "frame_ms": app.frame_ms,
             "build_ms": app.viewport.build_ms,
+            "preview": {"active": app.preview.active, "busy": app.preview.busy, "error": app.preview.error, "ms": app.preview.ms, "replaced": app.preview.replaced},
         })),
         "ui.set" => {
             let mut cur = serde_json::to_value(&app.ui).unwrap_or(json!({}));

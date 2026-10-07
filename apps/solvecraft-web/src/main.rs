@@ -28,7 +28,13 @@ mod web {
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
             self.0.ui(ui);
         }
+        fn save(&mut self, storage: &mut dyn eframe::Storage) {
+            storage.set_string(PREFS_KEY, self.0.prefs());
+        }
     }
+
+    /// Where the preferences (theme) are kept (the browser's local storage).
+    const PREFS_KEY: &str = "solvecraft.prefs";
 
     fn query() -> String {
         web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default()
@@ -54,6 +60,9 @@ mod web {
                     options,
                     Box::new(move |cc| {
                         let mut app = SolveApp::new(Session::default(), Services::default());
+                        if let Some(p) = cc.storage.and_then(|s| s.get_string(PREFS_KEY)) {
+                            app.load_prefs(&p);
+                        }
                         if let Some(rs) = &cc.wgpu_render_state {
                             app.set_wgpu(rs, DEPTH_BITS, 1);
                         }

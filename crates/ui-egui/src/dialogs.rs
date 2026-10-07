@@ -702,6 +702,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 if ui.add(egui::Button::new(close).min_size(vec2(70.0, 24.0))).clicked() {
                     cancel = true;
                 }
+                if app.preview.busy {
+                    ui.add(egui::Spinner::new().size(14.0)).on_hover_text("Updating the preview");
+                }
             });
         });
     // Keyboard: Enter applies (from a value field, or with nothing focused), Esc cancels.
