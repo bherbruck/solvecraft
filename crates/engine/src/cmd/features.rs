@@ -43,6 +43,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("hole")
         .key("H")
         .params("position: [x,y,z] on a face; direction?: [x,y,z] (default: into the face); diameter; depth? (default through all); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?"),
+    CommandSpec::new("FusionShellBodyCommand", "Shell", shell)
+        .at("SOLID", "MODIFY")
+        .icon("shell")
+        .params("faces: [[x,y,z] points on the faces to remove]; thickness: expr (inside); body?"),
+    CommandSpec::new("FusionDraftCommand", "Draft", draft)
+        .at("SOLID", "MODIFY")
+        .icon("draft")
+        .params("faces: [[x,y,z]]; angle: expr; neutral: XY|XZ|YZ|plane name|{origin, normal}; pull?: [x,y,z] (default: neutral plane normal); body?"),
     CommandSpec::new("ConstructionPlaneOffsetFromPlaneCommand", "Offset Plane", plane_offset)
         .at("SOLID", "CONSTRUCT")
         .icon("plane")
@@ -534,4 +542,32 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         other => return Err(bad(cmd, format!("unknown hole type `{other}`"))),
     };
     add_feature(s, p, FeatureKind::Hole { position, direction, diameter, depth, hole: kind })
+}
+
+fn face_points(p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
+    let a = p.get("faces").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`faces` must be a list of points"))?;
+    if a.is_empty() || a.len() > 1000 {
+        return Err(bad(cmd, "select 1…1000 faces"));
+    }
+    a.iter().map(|v| vec3(v).or_else(|| v.get("point").and_then(vec3)).ok_or_else(|| bad(cmd, "a face is a point [x, y, z] on it"))).collect()
+}
+
+fn shell(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionShellBodyCommand";
+    let faces = face_points(p, cmd)?;
+    let thickness = req_expr(cmd, p, "thickness")?;
+    check_expr(s, &thickness, Kind::Length, cmd, "thickness")?;
+    add_feature(s, p, FeatureKind::Shell { faces, thickness, body: str_(p, "body").map(str::to_string) })
+}
+
+fn draft(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionDraftCommand";
+    let faces = face_points(p, cmd)?;
+    let angle = req_expr(cmd, p, "angle")?;
+    check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
+    let neutral = plane_param(s, p.get("neutral"), cmd)?;
+    let (vals, _) = s.doc.param_values();
+    let pl = s.doc.resolve_plane(&vals, &neutral, 0)?;
+    let pull = p.get("pull").and_then(vec3).unwrap_or_else(|| pl.normal());
+    add_feature(s, p, FeatureKind::Draft { faces, angle, neutral, pull, body: str_(p, "body").map(str::to_string) })
 }

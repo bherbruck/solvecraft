@@ -224,6 +224,21 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
                 let axis = f.get("axis").map(|a| json!({"origin": a.get("origin").cloned().unwrap_or(json!([0, 0, 0])), "dir": a.get("dir")})).unwrap_or(Value::Null);
                 out.push(json!({"command": "PatternCircular", "params": {"features": f.get("features"), "axis": axis, "count": f.get("count"), "angle": f.get("total_angle").cloned().unwrap_or(json!(360)), "name": name}}));
             }
+            Some("shell") => {
+                let faces: Vec<Value> = f.get("faces_removed").and_then(Value::as_array).into_iter().flatten().filter_map(|x| x.get("point").cloned()).collect();
+                out.push(json!({"command": "FusionShellBodyCommand", "params": {"faces": faces, "thickness": f.get("inside_thickness"), "name": name}}));
+            }
+            Some("draft") => {
+                let faces: Vec<Value> = f.get("faces").and_then(Value::as_array).into_iter().flatten().filter_map(|x| x.get("point").cloned()).collect();
+                let np = f.get("neutral_plane").cloned().unwrap_or(Value::Null);
+                let n = np.get("plane_normal_outward").or(np.get("normal_at_point_on_face")).cloned().unwrap_or(json!([0, 0, 1]));
+                let neutral = json!({"origin": np.get("point").or(np.get("centroid")).cloned().unwrap_or(json!([0, 0, 0])), "normal": n.clone()});
+                let mut angle = f.get("angle").and_then(Value::as_f64).unwrap_or(0.0);
+                if f.get("flipped").and_then(Value::as_bool).unwrap_or(false) {
+                    angle = -angle;
+                }
+                out.push(json!({"command": "FusionDraftCommand", "params": {"faces": faces, "angle": angle, "neutral": neutral, "pull": n, "name": name}}));
+            }
             Some("hole") => {
                 let n = f.get("face").and_then(|fc| fc.get("plane_normal_outward").or(fc.get("normal_at_point_on_face"))).cloned();
                 let dir = n.and_then(|n| n.as_array().map(|a| a.iter().map(|x| -x.as_f64().unwrap_or(0.0)).collect::<Vec<f64>>()));

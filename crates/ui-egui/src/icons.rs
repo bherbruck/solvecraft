@@ -155,6 +155,14 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.line(&[(7.0, 8.0), (7.0, 16.0)], a);
             pen.line(&[(17.0, 8.0), (17.0, 16.0)], a);
         }
+        "shell" => {
+            pen.iso_box(3.0, 9.0, 10.0, 8.0, 9.0);
+            pen.poly(&[(6.0, 9.0), (13.0, 5.5), (18.0, 8.0), (11.0, 11.5)], Color32::WHITE, a);
+        }
+        "draft" => {
+            pen.poly(&[(4.0, 20.0), (20.0, 20.0), (17.0, 5.0), (7.0, 5.0)], pen.fill, ink);
+            pen.line(&[(20.0, 20.0), (20.0, 5.0)], a);
+        }
         "split" => {
             pen.poly(&[(3.0, 6.0), (21.0, 6.0), (21.0, 18.0), (3.0, 18.0)], pen.fill, ink);
             pen.line(&[(8.0, 2.0), (16.0, 22.0)], a);

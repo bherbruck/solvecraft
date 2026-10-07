@@ -170,6 +170,29 @@ fn tapered_extrudes() {
 }
 
 #[test]
+fn polyhedra_shell_and_draft() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(50.0, 40.0, 30.0)).unwrap();
+    let s = shell(&b, &[Vec3::new(25.0, 20.0, 30.0)], 2.0).unwrap();
+    let m = measure(&s).unwrap();
+    assert!(rel(m.volume, 60000.0 - 46.0 * 36.0 * 28.0) < 1e-6, "{}", m.volume);
+    assert_eq!(m.merged.faces, 11);
+    // Draft two side faces 5° in, about the bottom, pulling up.
+    let d = draft(&b, &[Vec3::new(0.0, 20.0, 15.0), Vec3::new(50.0, 20.0, 15.0)], &Plane::XY, Vec3::Z, 5f64.to_radians()).unwrap();
+    let t = 30.0 * 5f64.to_radians().tan();
+    assert!(rel(measure(&d).unwrap().volume, 40.0 * 30.0 * (50.0 + 50.0 - 2.0 * t) / 2.0) < 1e-6, "{}", measure(&d).unwrap().volume);
+    let tet = convex_polyhedron(&[
+        HalfSpace { n: Vec3::new(0.0, 0.0, -1.0), d: 0.0 },
+        HalfSpace { n: Vec3::new(-1.0, 0.0, 0.0), d: 0.0 },
+        HalfSpace { n: Vec3::new(0.0, -1.0, 0.0), d: 0.0 },
+        HalfSpace { n: Vec3::new(1.0, 1.0, 1.0).normalized().unwrap(), d: 6.0 / 3f64.sqrt() },
+    ])
+    .unwrap();
+    assert!(rel(measure(&tet).unwrap().volume, 36.0) < 1e-9);
+    let cyl = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 5.0).unwrap();
+    assert!(shell(&cyl, &[Vec3::new(0.0, 0.0, 5.0)], 1.0).is_err(), "curved faces");
+}
+
+#[test]
 #[ignore]
 fn debug_convergence() {
     let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 15.0), holes: vec![] }], 0.0, 50.0).unwrap().pop().unwrap();

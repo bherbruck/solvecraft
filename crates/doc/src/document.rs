@@ -228,6 +228,22 @@ pub enum FeatureKind {
         #[serde(default)]
         hole: HoleKind,
     },
+    /// Hollow a body leaving walls of `thickness`, removing the faces at the given points.
+    Shell {
+        faces: Vec<Vec3>,
+        thickness: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
+    /// Tilt faces (at the given points) about a neutral plane, leaning toward `pull`.
+    Draft {
+        faces: Vec<Vec3>,
+        angle: String,
+        neutral: PlaneRef,
+        pull: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
     /// A construction plane (sketch placement, split tool).
     ConstructionPlane {
         plane: PlaneRef,
@@ -331,6 +347,8 @@ impl FeatureKind {
             FeatureKind::Mirror { .. } => "MirrorFeature",
             FeatureKind::ConstructionPlane { .. } => "ConstructionPlane",
             FeatureKind::Hole { .. } => "HoleFeature",
+            FeatureKind::Shell { .. } => "ShellFeature",
+            FeatureKind::Draft { .. } => "DraftFeature",
             FeatureKind::Split { .. } => "SplitBodyFeature",
             FeatureKind::Move { .. } => "MoveFeature",
         }
@@ -353,6 +371,8 @@ impl FeatureKind {
             FeatureKind::Mirror { .. } => "Mirror",
             FeatureKind::ConstructionPlane { .. } => "Plane",
             FeatureKind::Hole { .. } => "Hole",
+            FeatureKind::Shell { .. } => "Shell",
+            FeatureKind::Draft { .. } => "Draft",
             FeatureKind::Split { .. } => "Split",
             FeatureKind::Move { .. } => "Move",
         }
@@ -393,6 +413,11 @@ impl FeatureKind {
                 PatternKind::Circular { count, angle, .. } => v.extend([count.as_str(), angle]),
             },
             FeatureKind::Mirror { plane, .. } => plane_exprs(plane, &mut v),
+            FeatureKind::Shell { thickness, .. } => v.push(thickness),
+            FeatureKind::Draft { angle, neutral, .. } => {
+                v.push(angle);
+                plane_exprs(neutral, &mut v);
+            }
             FeatureKind::Hole { diameter, depth, hole, .. } => {
                 v.push(diameter);
                 v.extend(depth.iter().map(String::as_str));

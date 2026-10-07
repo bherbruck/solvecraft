@@ -472,6 +472,26 @@ fn extend_for_coplanar(st: &ModelState, plane: &Plane, r: &Region2, lo: f64, hi:
     (lo2, hi2)
 }
 
+/// The body a face-based feature applies to: by name, or the one whose surface is nearest the
+/// first point.
+fn body_at(st: &ModelState, body: &Option<String>, points: &[Vec3]) -> Result<usize> {
+    if let Some(n) = body {
+        return st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")));
+    }
+    let p = points.first().ok_or_else(|| DocError::Invalid("no faces selected".into()))?;
+    st.bodies
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            let bb = b.mesh().bounds();
+            let q = Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
+            (i, q.dist(*p))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(i, _)| i)
+        .ok_or_else(|| DocError::Invalid("there is no body".into()))
+}
+
 /// The body a fillet/chamfer applies to: by name, or the one closest to the first edge point.
 fn blend_target(state: &ModelState, body: &Option<String>, edges: &[Vec3]) -> Result<usize> {
     if let Some(n) = body {
@@ -829,6 +849,27 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         FeatureKind::Hole { .. } => {
             let tools = feature_tools(vals, f, st)?;
             apply_op(st, f, tools, Operation::Cut, &[])
+        }
+        FeatureKind::Shell { faces, thickness, body } => {
+            let t = val(vals, thickness, Kind::Length)?;
+            let i = body_at(st, body, faces)?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let nb = kernel::shell(&mb.body, faces, t)?;
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody::new(mb.name, nb, mb.feature);
+            }
+            Ok(())
+        }
+        FeatureKind::Draft { faces, angle, neutral, pull, body } => {
+            let a = val(vals, angle, Kind::Angle)?;
+            let pl = doc.resolve_plane(vals, neutral, 0)?;
+            let i = body_at(st, body, faces)?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let nb = kernel::draft(&mb.body, faces, &pl, *pull, a)?;
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody::new(mb.name, nb, mb.feature);
+            }
+            Ok(())
         }
         FeatureKind::ConstructionPlane { plane } => {
             doc.resolve_plane(vals, plane, 0)?;
