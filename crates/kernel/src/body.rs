@@ -1,7 +1,7 @@
-use monstertruck_meshing::prelude::*;
-use monstertruck_modeling as mt;
 use serde::Serialize;
 use solvecraft_geom::{Mesh, Vec3};
+use truck_meshalgo::prelude::*;
+use truck_modeling as mt;
 
 use crate::{KernelError, Result, guard};
 
@@ -61,7 +61,7 @@ fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
 
 impl Body {
     pub(crate) fn new(mut solid: Solid) -> Result<Body> {
-        if solid.is_empty() {
+        if solid.boundaries().is_empty() {
             return Err(KernelError::Failed("empty result".into()));
         }
         // Orient outward: a closed solid must have positive volume.
@@ -214,6 +214,11 @@ impl Body {
             }
         }
         Ok(best)
+    }
+
+    /// Is the point inside the solid?
+    pub fn contains(&self, p: Vec3) -> bool {
+        self.tessellate(self.size() * 2e-3).map(|m| m.contains(p)).unwrap_or(false)
     }
 
     pub fn face_count(&self) -> usize {

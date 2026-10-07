@@ -28,10 +28,11 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"
 
 # geometry kernel (Apache-2.0; see plan/adr/0001-geometry-kernel.md). Only crates/kernel uses it.
-monstertruck-modeling = { version = "0.4.1", features = ["fillet"] }
-monstertruck-solid = "0.4.1"
-monstertruck-meshing = "0.4.1"
-monstertruck-io = "0.4.1"
+truck-modeling = "0.6"
+truck-shapeops = { version = "0.4", default-features = false }
+truck-meshalgo = { version = "0.4", default-features = false, features = ["tessellation", "analyzers"] }
+truck-stepio = { version = "0.3", default-features = false }
+truck-topology = "0.6"
 
 # images
 image = { version = "0.25", default-features = false, features = ["png"] }

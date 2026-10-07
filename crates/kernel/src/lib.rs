@@ -2,16 +2,17 @@
 //!
 //! Everything SolveCraft does with solids goes through this crate: building bodies from planar
 //! regions (extrude, revolve) and primitives, booleans, fillets and chamfers, tessellation,
-//! measurement and STEP export. The implementation uses the `monstertruck` crates (Apache-2.0,
-//! a maintained fork of `truck`; see `plan/adr/0001-geometry-kernel.md`), but no monstertruck
-//! type appears in the public API, so the kernel can be replaced without touching the rest of
-//! the workspace.
+//! measurement and STEP export. The implementation uses the `truck` crates (Apache-2.0; see
+//! `plan/adr/0001-geometry-kernel.md`) plus our own local operations (edge fillets and
+//! chamfers in `blend.rs`), but no truck type appears in the public API, so the kernel can be
+//! replaced without touching the rest of the workspace.
 //!
 //! Every call into the third-party kernel runs under [`guard`]: a panic inside it becomes a
 //! [`KernelError::Internal`] instead of taking the application down.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod blend;
 mod body;
 mod build;
 mod measure;
@@ -19,10 +20,11 @@ mod ops;
 mod step;
 mod topo;
 
+pub use blend::{chamfer, fillet};
 pub use body::{Body, EdgeInfo, FaceInfo};
 pub use build::{box_solid, cylinder, extrude, revolve, sphere, torus};
 pub use measure::{BodyMeasure, measure};
-pub use ops::{BoolOp, boolean, chamfer, fillet, transform};
+pub use ops::{BoolOp, boolean, transform};
 pub use step::step_export;
 pub use topo::{TopoCounts, merged_topology};
 

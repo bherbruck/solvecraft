@@ -1,8 +1,18 @@
 [package]
 name = "solvecraft-doc"
+description = "SolveCraft document model: parameters and expressions, sketches and features on a parametric timeline, incremental evaluation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+solvecraft-geom = { workspace = true }
+solvecraft-sketch = { workspace = true }
+solvecraft-kernel = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

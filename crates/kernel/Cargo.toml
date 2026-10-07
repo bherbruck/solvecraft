@@ -1,6 +1,6 @@
 [package]
 name = "solvecraft-kernel"
-description = "SolveCraft B-rep kernel boundary: solids, extrude/revolve/booleans/fillets, tessellation, measures and STEP, behind our own API"
+description = "SolveCraft B-rep kernel boundary: solids, extrude/revolve/booleans/fillets, tessellation, measures and STEP, behind our own API (implemented with truck)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,7 +13,8 @@ solvecraft-geom = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
-monstertruck-modeling = { workspace = true }
-monstertruck-solid = { workspace = true }
-monstertruck-meshing = { workspace = true }
-monstertruck-io = { workspace = true }
+truck-modeling = { workspace = true }
+truck-shapeops = { workspace = true }
+truck-meshalgo = { workspace = true }
+truck-stepio = { workspace = true }
+truck-topology = { workspace = true }

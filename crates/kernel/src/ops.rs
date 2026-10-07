@@ -1,10 +1,10 @@
-//! Operations on bodies: booleans, fillets, chamfers, rigid transforms.
+//! Operations on bodies: booleans and rigid transforms.
 
-use monstertruck_modeling as mt;
 use serde::{Deserialize, Serialize};
 use solvecraft_geom::Vec3;
+use truck_modeling as mt;
 
-use crate::body::{Body, Solid, v3};
+use crate::body::{Body, p3, v3};
 use crate::{KernelError, Result, guard};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,82 +15,73 @@ pub enum BoolOp {
     Intersect,
 }
 
-/// Boolean of two bodies. Retries with a few tolerances; the result may be empty (`Ok(None)`)
-/// for a cut that removes everything or an intersection of disjoint bodies.
+/// Shifts applied to both operands on retries. The boolean classifies some faces by casting a
+/// ray whose direction is derived from point coordinates; moving both solids (and the result
+/// back) leaves the geometry unchanged but changes those rays.
+const JITTER: [[f64; 3]; 4] = [[0.0, 0.0, 0.0], [0.1373, 0.2719, 0.3911], [-0.5127, 0.0833, 0.2291], [0.6911, -0.3337, -0.6127]];
+
+fn volume(b: &Body) -> f64 {
+    b.tessellate(b.size() * 2e-3).map(|m| m.measure().volume).unwrap_or(f64::NAN)
+}
+
+/// Boolean of two bodies. The result may be empty (`Ok(None)`) for a cut that removes
+/// everything or an intersection of disjoint bodies. Results are checked against volume bounds
+/// and retried with shifted copies and other tolerances when they fail or look wrong.
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     let size = a.size().max(b.size());
+    let (va, vb) = (volume(a), volume(b));
+    let slack = 2e-3 * (va + vb) + 1e-9;
+    let plausible = |v: f64| match op {
+        BoolOp::Union => v >= va.max(vb) - slack && v <= va + vb + slack,
+        BoolOp::Cut => v >= va - vb - slack && v <= va + slack,
+        BoolOp::Intersect => v <= va.min(vb) + slack,
+    };
     let mut last = String::new();
-    for k in [1e-4, 1e-3, 5e-5, 5e-3] {
-        let tol = (size * k).max(1e-6);
-        let r = guard("boolean", || {
-            let (sa, sb) = (a.deep_copy(), b.deep_copy());
-            let res = match op {
-                BoolOp::Union => monstertruck_solid::or(&sa, &sb, tol),
-                BoolOp::Cut => monstertruck_solid::difference(&sa, &sb, tol),
-                BoolOp::Intersect => monstertruck_solid::and(&sa, &sb, tol),
-            };
-            res.map_err(|e| KernelError::Failed(format!("{e:?}")))
-        });
-        match r {
-            Ok(s) if s.is_empty() => return Ok(None),
-            Ok(s) => {
-                let body = Body::new(s)?;
-                if body.tessellate(size * 1e-2).map(|m| m.measure().volume > 0.0).unwrap_or(false) {
-                    return Ok(Some(body));
+    let mut empty_votes = 0;
+    for (attempt, j) in JITTER.iter().enumerate() {
+        let shift = mt::Vector3::new(j[0], j[1], j[2]) * (size * 0.01);
+        for k in [5e-4, 2e-3] {
+            let tol = (size * k).max(1e-5);
+            let r = guard("boolean", || {
+                let (mut sa, mut sb) = (a.deep_copy(), b.deep_copy());
+                if attempt > 0 {
+                    sa = mt::builder::translated(&sa, shift);
+                    sb = mt::builder::translated(&sb, shift);
                 }
-                last = "degenerate result".into();
+                let res = match op {
+                    BoolOp::Union => truck_shapeops::or(&sa, &sb, tol),
+                    BoolOp::Cut => {
+                        sb.not();
+                        truck_shapeops::and(&sa, &sb, tol)
+                    }
+                    BoolOp::Intersect => truck_shapeops::and(&sa, &sb, tol),
+                };
+                let s = res.ok_or_else(|| KernelError::Failed("no result".into()))?;
+                Ok(if attempt > 0 { mt::builder::translated(&s, -shift) } else { s })
+            });
+            match r {
+                Ok(s) if s.boundaries().is_empty() || s.face_iter().next().is_none() => {
+                    empty_votes += 1;
+                    last = "empty result".into();
+                }
+                Ok(s) => match Body::new(s) {
+                    Ok(body) => {
+                        let v = volume(&body);
+                        if v > 0.0 && plausible(v) {
+                            return Ok(Some(body));
+                        }
+                        last = format!("implausible result volume {v:.4}");
+                    }
+                    Err(e) => last = e.to_string(),
+                },
+                Err(e) => last = e.to_string(),
             }
-            Err(e) => last = e.to_string(),
+        }
+        if empty_votes >= 2 && op != BoolOp::Union {
+            return Ok(None);
         }
     }
     Err(KernelError::Failed(format!("boolean {op:?}: {last}")))
-}
-
-fn blend(body: &Body, edges: &[Vec3], radius: f64, profile: mt::FilletProfile, what: &str) -> Result<Body> {
-    if !(radius.is_finite() && radius > 1e-6 && radius < 1e6) {
-        return Err(KernelError::Invalid(format!("{what} size must be positive")));
-    }
-    if edges.is_empty() {
-        return Err(KernelError::Invalid("no edges selected".into()));
-    }
-    let tol = (body.size() * 2e-3).max(1e-3);
-    let mut cur = body.clone();
-    // One edge at a time: re-find each edge on the current body by its reference point.
-    for p in edges {
-        let Some((idx, d)) = cur.nearest_edge(*p, tol)? else { return Err(KernelError::Invalid("body has no edges".into())) };
-        if d > cur.size() * 0.05 + 1e-3 {
-            return Err(KernelError::Invalid(format!("no edge near {:?}", [p.x, p.y, p.z])));
-        }
-        let mut solid = cur.deep_copy();
-        let shape = profile.clone();
-        let res = guard(what, || {
-            let edge = Body::unique_edges(&solid).into_iter().nth(idx).ok_or_else(|| KernelError::Invalid("edge index".into()))?;
-            let shell_i = solid
-                .boundaries()
-                .iter()
-                .position(|sh| sh.edge_iter().any(|e| e.id() == edge.id()))
-                .ok_or_else(|| KernelError::Failed("edge not in a shell".into()))?;
-            let mut shells = solid.boundaries().clone();
-            let shell = shells.get_mut(shell_i).ok_or_else(|| KernelError::Failed("shell".into()))?;
-            let opts = mt::FilletOptions { radius: mt::RadiusSpec::Constant(radius), profile: shape, ..Default::default() };
-            mt::fillet_edges(shell, &[edge], Some(&opts)).map_err(|e| KernelError::Failed(format!("{what}: {e:?}")))?;
-            solid = Solid::try_new(shells).map_err(|e| KernelError::Failed(format!("{what} left an open shell: {e:?}")))?;
-            Ok(())
-        });
-        res?;
-        cur = Body::new(solid)?;
-    }
-    Ok(cur)
-}
-
-/// Constant-radius fillet of the edges nearest to the given points.
-pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
-    blend(body, edges, radius, mt::FilletProfile::Round, "fillet")
-}
-
-/// Equal-distance chamfer of the edges nearest to the given points.
-pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
-    blend(body, edges, distance, mt::FilletProfile::Chamfer, "chamfer")
 }
 
 /// Rigid transform: rotate about `axis` through `origin` by `angle` radians, then translate.
@@ -102,7 +93,7 @@ pub fn transform(body: &Body, translate: Vec3, origin: Vec3, axis: Vec3, angle: 
         let mut s = body.deep_copy();
         if angle.abs() > 1e-12 {
             let ax = axis.normalized().ok_or_else(|| KernelError::Invalid("rotation axis".into()))?;
-            s = mt::builder::rotated(&s, crate::body::p3(origin), v3(ax), mt::Rad(angle));
+            s = mt::builder::rotated(&s, p3(origin), v3(ax), mt::Rad(angle));
         }
         if translate.len() > 0.0 {
             s = mt::builder::translated(&s, v3(translate));

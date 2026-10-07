@@ -174,7 +174,7 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
             if !faces.contains(&fi) {
                 faces.push(fi);
             }
-            let mut vix = |v: &monstertruck_modeling::Vertex| {
+            let mut vix = |v: &truck_modeling::Vertex| {
                 let k = format!("{:?}", v.id());
                 let n = vid.len();
                 let i = *vid.entry(k).or_insert(n);

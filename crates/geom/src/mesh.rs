@@ -109,6 +109,41 @@ impl Mesh {
         self.edges.extend(o.edges.iter().cloned());
     }
 
+    /// Number of triangles a ray crosses (for inside/outside tests on closed meshes).
+    pub fn ray_crossings(&self, o: Vec3, dir: Vec3) -> usize {
+        let mut n = 0;
+        for t in &self.triangles {
+            let Some([a, b, c]) = self.tri(t) else { continue };
+            let (e1, e2) = (b - a, c - a);
+            let p = dir.cross(e2);
+            let det = e1.dot(p);
+            if det.abs() < 1e-14 {
+                continue;
+            }
+            let inv = 1.0 / det;
+            let s = o - a;
+            let u = s.dot(p) * inv;
+            if !(0.0..1.0).contains(&u) {
+                continue;
+            }
+            let q = s.cross(e1);
+            let v = dir.dot(q) * inv;
+            if v < 0.0 || u + v >= 1.0 {
+                continue;
+            }
+            if e2.dot(q) * inv > 0.0 {
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// Point inside a closed mesh (majority vote of three skewed rays).
+    pub fn contains(&self, p: Vec3) -> bool {
+        let dirs = [Vec3::new(0.5773, 0.5774, 0.5776), Vec3::new(-0.6123, 0.3141, 0.7254), Vec3::new(0.2718, -0.8414, 0.4673)];
+        dirs.iter().filter(|d| self.ray_crossings(p, **d) % 2 == 1).count() >= 2
+    }
+
     /// Closest intersection of a ray with the mesh: (distance along `dir`, triangle index).
     pub fn raycast(&self, o: Vec3, dir: Vec3) -> Option<(f64, usize)> {
         let mut best: Option<(f64, usize)> = None;

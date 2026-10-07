@@ -1,8 +1,8 @@
 //! Building bodies: extrude and revolve planar regions, primitives.
 
-use monstertruck_modeling as mt;
 use mt::builder;
 use solvecraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use truck_modeling as mt;
 
 use crate::body::{Body, Solid, p3, v3};
 use crate::{KernelError, Result, guard};
@@ -33,20 +33,12 @@ fn wire(plane: &Plane, lp: &Loop2) -> Result<mt::Wire> {
                     return Err(KernelError::Invalid("zero-length arc".into()));
                 }
                 // Split big arcs so every piece is well conditioned.
-                let mid = plane.to_world(s.mid());
                 if sweep.abs() > std::f64::consts::PI * 1.5 {
-                    let vm = builder::vertex(p3(mid));
-                    let q1 = plane.to_world(s.point_at(0.25));
-                    let q3 = plane.to_world(s.point_at(0.75));
-                    edges.push(
-                        builder::try_circle_arc(a, &vm, mt::builder::CircularArcConstraint::ThroughPoint(p3(q1)))
-                            .map_err(|e| KernelError::Invalid(e.to_string()))?,
-                    );
-                    builder::try_circle_arc(&vm, b, mt::builder::CircularArcConstraint::ThroughPoint(p3(q3)))
-                        .map_err(|e| KernelError::Invalid(e.to_string()))?
+                    let vm = builder::vertex(p3(plane.to_world(s.mid())));
+                    edges.push(builder::circle_arc(a, &vm, p3(plane.to_world(s.point_at(0.25)))));
+                    builder::circle_arc(&vm, b, p3(plane.to_world(s.point_at(0.75))))
                 } else {
-                    builder::try_circle_arc(a, b, mt::builder::CircularArcConstraint::ThroughPoint(p3(mid)))
-                        .map_err(|e| KernelError::Invalid(e.to_string()))?
+                    builder::circle_arc(a, b, p3(plane.to_world(s.mid())))
                 }
             }
         };
@@ -61,7 +53,7 @@ pub(crate) fn face(plane: &Plane, r: &Region2) -> Result<mt::Face> {
     for h in &r.holes {
         wires.push(wire(plane, &h.ccw().reversed())?);
     }
-    guard("face", || mt::profile::attach_plane_normalized(wires).map_err(|e| KernelError::Invalid(format!("profile: {e}"))))
+    guard("face", || builder::try_attach_plane(&wires).map_err(|e| KernelError::Invalid(format!("profile: {e}"))))
 }
 
 fn region_ok(r: &Region2) -> Result<()> {
@@ -98,7 +90,7 @@ pub fn extrude(plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Resu
         region_ok(r)?;
         let base = plane.offset(lo);
         let f = face(&base, r)?;
-        let solid: Solid = guard("extrude", || Ok(builder::extrude(&f, v3(n * (hi - lo)))))?;
+        let solid: Solid = guard("extrude", || Ok(builder::tsweep(&f, v3(n * (hi - lo)))))?;
         out.push(Body::new(solid)?);
     }
     Ok(out)
@@ -130,16 +122,26 @@ pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: 
         if neg && pos {
             return Err(KernelError::Invalid("the profile crosses the revolve axis".into()));
         }
+        // Points on the axis (within solver tolerance) go exactly onto it, so the sweep does not
+        // create hair-thin faces.
+        let snap = |p: Vec2| {
+            let along = (p - axis_origin).dot(d);
+            let q = axis_origin + d * along;
+            if p.dist(q) < 1e-7 { q } else { p }
+        };
+        let snap_loop = |l: &Loop2| Loop2 {
+            segs: l
+                .segs
+                .iter()
+                .map(|s| match *s {
+                    Seg2::Line { a, b } => Seg2::Line { a: snap(a), b: snap(b) },
+                    arc => arc,
+                })
+                .collect(),
+        };
+        let r = &Region2 { outer: snap_loop(&r.outer), holes: r.holes.iter().map(snap_loop).collect() };
         let f = face(plane, r)?;
-        let full = angle.abs() >= std::f64::consts::TAU - 1e-9;
-        let solid: Solid = guard("revolve", || {
-            Ok(if full {
-                builder::revolve(&f, p3(o), v3(axis), builder::SweepAngle::Closed, 4)
-            } else {
-                let div = ((angle.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize).clamp(1, 8);
-                builder::revolve(&f, p3(o), v3(axis), builder::SweepAngle::Partial(mt::Rad(angle)), div)
-            })
-        })?;
+        let solid: Solid = guard("revolve", || Ok(builder::rsweep(&f, p3(o), v3(axis), mt::Rad(angle))))?;
         out.push(Body::new(solid)?);
     }
     Ok(out)
