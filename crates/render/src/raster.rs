@@ -73,7 +73,7 @@ fn shade(n: Vec3, view_dir: Vec3, base: [f64; 3]) -> [f64; 3] {
     let fill = n.dot(view_dir).max(0.0);
     let h = (key + view_dir).normalized().unwrap_or(view_dir);
     let spec = n.dot(h).max(0.0).powi(40) * 0.25;
-    let k = 0.28 + 0.52 * diff + 0.22 * fill;
+    let k = 0.42 + 0.38 * diff + 0.25 * fill;
     [(base[0] * k + spec).min(1.0), (base[1] * k + spec).min(1.0), (base[2] * k + spec).min(1.0)]
 }
 

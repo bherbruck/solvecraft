@@ -802,6 +802,10 @@ version = "0.1.0"
 [[package]]
 name = "solvecraft-cli"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "solvecraft-engine",
+]
 
 [[package]]
 name = "solvecraft-doc"
@@ -827,6 +831,7 @@ dependencies = [
  "solvecraft-geom",
  "solvecraft-io",
  "solvecraft-kernel",
+ "solvecraft-render",
  "solvecraft-sketch",
  "thiserror 2.0.21",
 ]

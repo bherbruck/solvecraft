@@ -14,6 +14,7 @@ solvecraft-sketch = { workspace = true }
 solvecraft-kernel = { workspace = true }
 solvecraft-doc = { workspace = true }
 solvecraft-io = { workspace = true }
+solvecraft-render = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

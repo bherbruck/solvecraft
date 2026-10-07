@@ -10,6 +10,7 @@
 
 pub mod cmd;
 pub mod params;
+pub mod view;
 
 use std::sync::Arc;
 
@@ -23,6 +24,7 @@ pub use solvecraft_doc as doc;
 pub use solvecraft_geom as geom;
 pub use solvecraft_io as io;
 pub use solvecraft_kernel as kernel;
+pub use solvecraft_render as render;
 pub use solvecraft_sketch as sketch;
 
 #[derive(Debug, thiserror::Error)]
