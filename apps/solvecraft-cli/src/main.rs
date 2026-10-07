@@ -1,13 +1,14 @@
 //! SolveCraft headless command line.
 //!
 //! ```text
-//! solvecraft-cli run <script.json|design.solvecraft> [--out FILE]... [--save FILE] [--quiet]
-//! solvecraft-cli eval <script.json|design.solvecraft>        (alias: inspect) measurements as JSON
+//! solvecraft-cli run <script.json|design.solvecraft|part.step> [--in design|part.step] [--out FILE]... [--save FILE] [--quiet]
+//! solvecraft-cli eval <script.json|design.solvecraft|part.step> (alias: inspect) measurements as JSON
 //! solvecraft-cli snapshot <script|design> --out shot.png [--width W] [--height H] [--view iso|front|top|…]
 //! solvecraft-cli exec <command> [json-params]                 run one command on an empty design
 //! solvecraft-cli commands                                     the command registry as JSON
 //! solvecraft-cli recipe <recipe.json>                         translate an oracle recipe to a script
 //! solvecraft-cli oracle <case-dir>...                         replay recipes and compare with measure.json
+//! solvecraft-cli step-corpus <case-dir>...                    import part.step and compare with measure.json
 //! solvecraft-cli mcp [--in design|script] [--connect HOST:PORT] MCP server on stdio (docs/mcp.md)
 //! ```
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -23,13 +24,15 @@ use solvecraft_engine::Session;
 use solvecraft_engine::render::{StandardView, render_png};
 
 const USAGE: &str = "usage:
-  solvecraft-cli run <script.json|design.solvecraft> [--out FILE]... [--save FILE] [--quiet] [--results]
-  solvecraft-cli eval <script.json|design.solvecraft>     (alias: inspect)
+  solvecraft-cli run <script.json|design.solvecraft|part.step> [--in design.solvecraft|part.step] [--out FILE]... [--save FILE] [--quiet] [--results]
+  solvecraft-cli run --in <design.solvecraft|part.step> [--out FILE]...
+  solvecraft-cli eval <script.json|design.solvecraft|part.step>     (alias: inspect; or --in FILE)
   solvecraft-cli snapshot <script|design> --out shot.png [--width W] [--height H] [--view iso|front|back|top|bottom|left|right]
   solvecraft-cli exec <command> [json-params]
   solvecraft-cli commands
   solvecraft-cli recipe <recipe.json>
   solvecraft-cli oracle <case-dir>... [--json]
+  solvecraft-cli step-corpus <case-dir>... [--json]
   solvecraft-cli mcp [--in design.solvecraft|script.json] [--connect 127.0.0.1:PORT]
 ";
 
@@ -49,6 +52,7 @@ fn main() -> ExitCode {
             recipe::to_script(&v).map(|s| println!("{}", pretty(&s)))
         }),
         Some("oracle") => oracle::run(&args[1..]),
+        Some("step-corpus") => oracle::step_corpus(&args[1..]),
         Some("mcp") => cmd_mcp(&args[1..]),
         Some("--version" | "-V") => {
             println!("solvecraft-cli {}", env!("CARGO_PKG_VERSION"));
@@ -74,10 +78,14 @@ pub fn read_json(path: &str) -> Result<Value, String> {
     serde_json::from_str(&s).map_err(|e| format!("{path}: {e}"))
 }
 
-/// A session from a design file, a command script, or an oracle recipe.
+/// A session from a design file, a STEP file, a command script, or an oracle recipe.
 pub fn load(path: &str) -> Result<Session, String> {
-    let v = read_json(path)?;
     let mut s = Session::default();
+    if solvecraft_engine::io::is_step_path(path) {
+        s.execute("doc.open", &json!({"path": path})).map_err(|e| e.to_string())?;
+        return Ok(s);
+    }
+    let v = read_json(path)?;
     if v.get("format").and_then(Value::as_str).is_some_and(|f| f.starts_with("solvecraft")) {
         s.execute("doc.open", &json!({"path": path})).map_err(|e| e.to_string())?;
     } else if v.get("features").is_some() && v.get("commands").is_none() {
@@ -97,17 +105,45 @@ fn flags<'a>(args: &'a [String], name: &str) -> Vec<&'a str> {
     args.windows(2).filter(|w| w[0] == name).map(|w| w[1].as_str()).collect()
 }
 
+/// The first argument that is not an option or an option's value.
+fn positional(args: &[String]) -> Option<&String> {
+    let mut i = 0;
+    while let Some(a) = args.get(i) {
+        if a.starts_with("--") {
+            i += if matches!(a.as_str(), "--quiet" | "--results") { 1 } else { 2 };
+            continue;
+        }
+        return Some(a);
+    }
+    None
+}
+
 fn cmd_run(args: &[String]) -> Result<(), String> {
-    let path = args.first().ok_or_else(|| USAGE.to_string())?;
+    let base = flag(args, "--in");
+    let path = positional(args);
+    if path.is_none() && base.is_none() {
+        return Err(USAGE.to_string());
+    }
+    // `--in` starts from a design or STEP file; the positional script then runs on top of it.
+    let mut s = match base {
+        Some(b) => load(b)?,
+        None => Session::default(),
+    };
     if args.iter().any(|a| a == "--results") {
         // Print every command's result (scripts only).
-        let v = read_json(path)?;
-        let mut s = Session::default();
+        let v = read_json(path.ok_or("--results needs a script")?)?;
         let r = s.run_script(&v).map_err(|e| e.to_string())?;
         println!("{}", pretty(&Value::Array(r)));
         return Ok(());
     }
-    let mut s = load(path)?;
+    match (base, path) {
+        (Some(_), Some(p)) => {
+            let v = read_json(p)?;
+            s.run_script(&v).map_err(|e| e.to_string())?;
+        }
+        (None, Some(p)) => s = load(p)?,
+        _ => {}
+    }
     for out in flags(args, "--out") {
         s.execute("ExportCommand", &json!({"path": out})).map_err(|e| e.to_string())?;
     }
@@ -122,7 +158,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
 }
 
 fn cmd_eval(args: &[String]) -> Result<(), String> {
-    let path = args.first().ok_or_else(|| USAGE.to_string())?;
+    let path = flag(args, "--in").or_else(|| positional(args).map(String::as_str)).ok_or_else(|| USAGE.to_string())?;
     let mut s = load(path)?;
     let m = s.execute("MeasureCommand", &json!({})).map_err(|e| e.to_string())?;
     let d = s.execute("document.inspect", &json!({})).map_err(|e| e.to_string())?;
