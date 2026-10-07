@@ -240,6 +240,7 @@ fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
     let mut kind = kind;
     super::component::to_active_frame(s, &mut kind);
     let id = s.doc_mut().add_feature(kind, name)?;
+    s.doc_mut().name_feature_inputs(id);
     let comp = s.active_component;
     if comp != 0
         && let Some(f) = s.doc_mut().feature_mut(id)

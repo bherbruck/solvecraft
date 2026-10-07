@@ -605,6 +605,9 @@ pub struct Feature {
     /// Names for the bodies this feature creates (in order); missing ones get `BodyN`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub body_names: Vec<String>,
+    /// Parameter names of the feature's inputs (see `FeatureKind::inputs`), e.g. `d3`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_names: Vec<String>,
     /// The component the feature (and what it makes) belongs to; 0 = the root.
     #[serde(default, skip_serializing_if = "is_root")]
     pub component: u64,
@@ -641,6 +644,12 @@ pub struct Document {
     /// Placements of components in their parents (each non-root component has at least one).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub occurrences: Vec<crate::Occurrence>,
+    /// Favourite parameters (by name).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub favorites: std::collections::BTreeSet<String>,
+    /// Comments of feature-input parameters (by name).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub param_comments: std::collections::BTreeMap<String, String>,
     /// Physical material per body (by body name); others use the default.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub materials: std::collections::BTreeMap<String, String>,
@@ -676,6 +685,8 @@ impl Document {
             occurrences: Vec::new(),
             body_components: Default::default(),
             materials: Default::default(),
+            favorites: Default::default(),
+            param_comments: Default::default(),
         }
     }
 
@@ -724,6 +735,12 @@ impl Document {
 
     pub fn from_json(s: &str) -> Result<Document> {
         let d: Document = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("document: {e}")))?;
+        // Feature inputs get parameter names (designs from before they had them).
+        let mut d = d;
+        let ids: Vec<u64> = d.features.iter().map(|f| f.id).collect();
+        for id in ids {
+            d.name_feature_inputs(id);
+        }
         // Designs from before occurrences: every component gets one, in place.
         let mut d = d;
         let missing: Vec<(u64, u64)> =
@@ -781,7 +798,7 @@ impl Document {
             Some(n) if !n.trim().is_empty() => n.trim().to_string(),
             _ => self.unique_name(kind.base_name()),
         };
-        let f = Feature { id, name, suppressed: false, body_names: Vec::new(), component: 0, kind };
+        let f = Feature { id, name, suppressed: false, body_names: Vec::new(), param_names: Vec::new(), component: 0, kind };
         match self.marker {
             Some(m) if m < self.features.len() => {
                 self.features.insert(m, f);
@@ -845,7 +862,7 @@ impl Document {
         let mut cs = name.chars();
         matches!(cs.next(), Some(c) if c.is_alphabetic() || c == '_')
             && cs.all(|c| c.is_alphanumeric() || c == '_')
-            && !matches!(name, "mm" | "cm" | "m" | "um" | "in" | "ft" | "deg" | "rad" | "pi" | "PI")
+            && !matches!(name, "mm" | "cm" | "m" | "um" | "in" | "inch" | "mil" | "yd" | "km" | "nm" | "ft" | "deg" | "rad" | "pi" | "PI")
             && name.len() <= 64
     }
 
@@ -856,6 +873,9 @@ impl Document {
         }
         if expr_s.len() > 4096 {
             return Err(DocError::Expr("expression too long".into()));
+        }
+        if self.features.iter().any(|f| f.param_names.iter().any(|n| n == name)) {
+            return Err(DocError::Invalid(format!("`{name}` is a feature's parameter")));
         }
         let mut next = self.clone();
         match next.params.iter_mut().find(|p| p.name == name) {
@@ -891,14 +911,7 @@ impl Document {
 
     /// Create the next free model parameter `dN` with the given expression and unit.
     pub fn new_model_param(&mut self, expr_s: &str, unit: &str) -> String {
-        let mut n = 1;
-        let name = loop {
-            let c = format!("d{n}");
-            if self.param(&c).is_none() {
-                break c;
-            }
-            n += 1;
-        };
+        let name = self.next_d_name();
         self.params.push(Param { name: name.clone(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true });
         name
     }
@@ -919,8 +932,7 @@ impl Document {
 
     /// Evaluate all parameters: values (mm / rad / unit-less) and errors by name.
     pub fn param_values(&self) -> (std::collections::BTreeMap<String, expr::Value>, std::collections::BTreeMap<String, String>) {
-        let list: Vec<(String, String, Kind)> = self.params.iter().map(|p| (p.name.clone(), p.expr.clone(), p.kind())).collect();
-        expr::eval_params(&list)
+        expr::eval_params(&self.all_param_exprs())
     }
 
     /// Evaluate an expression against the document's parameters.

@@ -73,7 +73,11 @@ fn unit(name: &str) -> Option<Value> {
         "cm" => Value::length(10.0),
         "m" => Value::length(1000.0),
         "um" => Value::length(0.001),
-        "in" => Value::length(25.4),
+        "in" | "inch" => Value::length(25.4),
+        "mil" => Value::length(0.0254),
+        "yd" => Value::length(914.4),
+        "km" => Value::length(1_000_000.0),
+        "nm" => Value::length(1e-6),
         "ft" => Value::length(304.8),
         "deg" => Value::angle(std::f64::consts::PI / 180.0),
         "rad" => Value::angle(1.0),
@@ -328,6 +332,43 @@ fn call(f: &str, args: &[Value]) -> Result<Value, DocError> {
             }
             Value { v: a.v.sqrt(), len: a.len / 2, ang: a.ang / 2 }
         }
+        "exp" => Value::num(num(one()?)?.exp()),
+        "ln" => Value::num(num(one()?)?.ln()),
+        "log" | "log10" => Value::num(num(one()?)?.log10()),
+        "sign" => {
+            let a = one()?;
+            Value::num(if a.v > 0.0 {
+                1.0
+            } else if a.v < 0.0 {
+                -1.0
+            } else {
+                0.0
+            })
+        }
+        "pow" => match args {
+            [a, b] => {
+                let e = num(*b)?;
+                if a.unitless() {
+                    Value::num(a.v.powf(e))
+                } else if (e - e.round()).abs() < 1e-12 && e.abs() <= 6.0 {
+                    let k = e.round() as i8;
+                    let (Some(len), Some(ang)) = (a.len.checked_mul(k), a.ang.checked_mul(k)) else {
+                        return Err(DocError::Expr("unit power too large".into()));
+                    };
+                    Value { v: a.v.powi(i32::from(k)), len, ang }
+                } else {
+                    return Err(DocError::Expr("pow of a unit needs a whole exponent".into()));
+                }
+            }
+            _ => return Err(DocError::Expr("`pow` takes two arguments".into())),
+        },
+        "hypot" => match args {
+            [a, b] => {
+                let s = add(*b, Value { v: 0.0, ..*a }, false)?;
+                Value { v: a.v.hypot(s.v), ..*a }
+            }
+            _ => return Err(DocError::Expr("`hypot` takes two arguments".into())),
+        },
         "abs" => {
             let a = one()?;
             Value { v: a.v.abs(), ..a }

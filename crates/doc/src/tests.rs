@@ -195,3 +195,69 @@ fn primitives_and_combine() {
     assert_eq!(st.bodies.len(), 1);
     assert!(rel(measure(&st.bodies[0].body).unwrap().volume, 1000.0 - std::f64::consts::PI * 40.0) < 1e-3);
 }
+
+#[test]
+fn hostile_expressions_never_panic() {
+    // A deterministic stream of nasty inputs: random tokens, deep nesting, huge numbers.
+    let toks = [
+        "(",
+        ")",
+        "+",
+        "-",
+        "*",
+        "/",
+        "^",
+        ",",
+        "1e308",
+        "0",
+        "-0",
+        "mm",
+        "deg",
+        "x",
+        "sqrt",
+        "pow",
+        "min",
+        "max",
+        "°",
+        "1.2.3",
+        "e",
+        "pi",
+        "in",
+        "nan",
+        "9999999999999999999999",
+    ];
+    let mut state: u64 = 0x9e3779b97f4a7c15;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for _ in 0..5000 {
+        let n = (next() % 24) as usize;
+        let s: String = (0..n).map(|_| toks[(next() % toks.len() as u64) as usize]).collect::<Vec<_>>().join(" ");
+        let _ = crate::expr::eval_with(&s, &|n| {
+            if n == "x" { Ok(crate::expr::Value::length(2.0)) } else { Err(crate::DocError::Expr("unknown".into())) }
+        });
+    }
+    let deep = format!("{}1{}", "(".repeat(5000), ")".repeat(5000));
+    assert!(crate::expr::eval_with(&deep, &|_| Err(crate::DocError::Expr("x".into()))).is_err());
+    assert!(crate::expr::eval_with("pow(2 mm, 3)", &|_| Err(crate::DocError::Expr("x".into()))).is_ok());
+    assert!(crate::expr::eval_with("pow(2 mm, 300)", &|_| Err(crate::DocError::Expr("x".into()))).is_err());
+}
+
+#[test]
+fn parameter_cycles_are_found() {
+    use crate::expr::Kind;
+    let list = vec![
+        ("a".to_string(), "b + 1".to_string(), Kind::Length),
+        ("b".to_string(), "c * 2".to_string(), Kind::Length),
+        ("c".to_string(), "a".to_string(), Kind::Length),
+        ("d".to_string(), "5".to_string(), Kind::Length),
+        ("e".to_string(), "d + e".to_string(), Kind::Length),
+    ];
+    let c = crate::cycles(&list);
+    assert_eq!(c.into_iter().collect::<Vec<_>>(), vec!["a", "b", "c", "e"]);
+    let (vals, errs) = crate::expr::eval_params(&list);
+    assert!(vals.contains_key("d") && errs.contains_key("a") && errs.contains_key("e"));
+}

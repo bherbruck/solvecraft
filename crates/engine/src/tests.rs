@@ -804,3 +804,40 @@ fn components_occurrences_and_world_placement() {
     let migrated = solvecraft_doc::Document::from_json(&old.to_string()).unwrap();
     assert_eq!(migrated.occurrences.len(), migrated.components.len());
 }
+
+#[test]
+fn feature_inputs_are_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "ChangeParameterCommand", json!({"name": "w", "expression": "15 mm", "comment": "width"}));
+    run(&mut s, "PrimitiveBox", json!({"length": 10, "width": "w", "height": "1 in", "name": "B"}));
+    let l = run(&mut s, "parameters.list", json!({}));
+    let rows = l["parameters"].as_array().unwrap();
+    let feat: Vec<&Value> = rows.iter().filter(|r| r["source"] == "feature").collect();
+    assert_eq!(feat.len(), 3, "{l}");
+    let height = feat.iter().find(|r| r["input"] == "Height").unwrap();
+    assert!((height["value"].as_f64().unwrap() - 25.4).abs() < 1e-9);
+    let length_name = feat.iter().find(|r| r["input"] == "Length").unwrap()["name"].as_str().unwrap().to_string();
+    // A feature parameter changes the feature; other expressions can use it.
+    run(&mut s, "ChangeParameterCommand", json!({"name": length_name, "expression": "2 * w"}));
+    assert!(rel(volume(&mut s), 30.0 * 15.0 * 25.4) < 1e-9);
+    run(&mut s, "ChangeParameterCommand", json!({"name": "t", "expression": format!("{length_name} / 3")}));
+    let t = run(&mut s, "parameters.list", json!({}))["parameters"].as_array().unwrap().iter().find(|r| r["name"] == "t").unwrap()["value"]
+        .as_f64()
+        .unwrap();
+    assert!((t - 10.0).abs() < 1e-9);
+    // Cycles are refused.
+    assert!(s.execute("ChangeParameterCommand", &json!({"name": "w", "expression": "t"})).is_err());
+    // Favourites, export and import.
+    run(&mut s, "parameters.favorite", json!({"name": "w"}));
+    assert_eq!(run(&mut s, "parameters.list", json!({"favorites": true}))["parameters"].as_array().unwrap().len(), 1);
+    let csv = run(&mut s, "parameters.export", json!({}))["text"].as_str().unwrap().to_string();
+    assert!(csv.contains("w,mm,15 mm,15,width,true"), "{csv}");
+    run(&mut s, "parameters.import", json!({"text": "name,unit,expression,comment\nw,mm,20 mm,wider\nnew_p,mm,\"w + 1\","}));
+    assert!(rel(volume(&mut s), 40.0 * 20.0 * 25.4) < 1e-9);
+    run(&mut s, "parameters.import", json!({"text": "[{\"name\": \"w\", \"expression\": \"12\"}]"}));
+    assert!(rel(volume(&mut s), 24.0 * 12.0 * 25.4) < 1e-9);
+    assert!(s.execute("parameters.import", &json!({"text": "name,expression\nw,1/"})).is_err());
+    // Saved and reloaded, the names stay.
+    let back = solvecraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(back.features[0].param_names, s.doc.features[0].param_names);
+}

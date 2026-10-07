@@ -9,11 +9,13 @@ mod assembly;
 mod document;
 mod eval;
 pub mod expr;
+mod params;
 pub mod project;
 
 pub use assembly::{IDENTITY, Mat, Occurrence, apply_point, apply_vector, is_identity, mat_inverse, mat_mul, rigid};
 pub use document::*;
 pub use eval::{FeatureResult, Model, ModelBody, ModelState, SolvedSketch, ThreadInfo, parse_metric_thread, world_state};
+pub use params::{ParamRow, cycles};
 pub use solvecraft_kernel as kernel;
 pub use solvecraft_sketch as sketch;
 

@@ -10,6 +10,13 @@ use crate::{EngineError, Result, Sel, Session, Snapshot};
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("UndoCommand", "Undo", undo).icon("undo").key("Ctrl+Z").noundo(),
     CommandSpec::new("RedoCommand", "Redo", redo).icon("redo").key("Ctrl+Y").noundo(),
+    CommandSpec::new("parameters.list", "List Parameters", params_list).noundo().params("favorites?: bool (only favourites)"),
+    CommandSpec::new("parameters.favorite", "Favourite Parameter", params_favorite).params("name, favorite?: bool (default true)"),
+    CommandSpec::new("parameters.export", "Export Parameters", params_export)
+        .noundo()
+        .params("format?: csv|json (default csv), path?: write to a file"),
+    CommandSpec::new("parameters.import", "Import Parameters", params_import)
+        .params("text: CSV (name,unit,expression,comment) or JSON [{name, expression, unit?, comment?}] | path"),
     CommandSpec::new("ChangeParameterCommand", "Change Parameters", change_param)
         .at("SOLID", "MODIFY")
         .icon("params")
@@ -76,7 +83,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let unit = str_(p, "unit");
     let comment = str_(p, "comment");
-    s.doc_mut().set_param(name, &e, unit, comment)?;
+    s.doc_mut().change_param(name, &e, unit, comment)?;
     s.refresh();
     let (vals, _) = s.doc.param_values();
     let v = vals.get(name).map(|v| v.v);
@@ -332,4 +339,58 @@ fn dependents(s: &mut Session, p: &Value) -> Result<Value> {
     let names = |ids: &[u64]| -> Vec<String> { ids.iter().filter(|x| **x != id).filter_map(|x| s.doc.feature(*x).map(|f| f.name.clone())).collect() };
     let broken: Vec<String> = newly_broken(&s.model, &after).into_iter().map(|(n, _)| n).collect();
     Ok(json!({"deleted_with_it": names(&gone), "would_fail": broken}))
+}
+
+fn params_list(s: &mut Session, p: &Value) -> Result<Value> {
+    let only_fav = bool_(p, "favorites").unwrap_or(false);
+    let rows: Vec<solvecraft_doc::ParamRow> = s.doc.param_rows().into_iter().filter(|r| !only_fav || r.favorite).collect();
+    let cycles = solvecraft_doc::cycles(&s.doc.all_param_exprs());
+    Ok(json!({"parameters": rows, "cycles": cycles}))
+}
+
+fn params_favorite(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "parameters.favorite";
+    let name = str_(p, "name").ok_or_else(|| bad(cmd, "`name` is required"))?;
+    let on = bool_(p, "favorite").unwrap_or(true);
+    s.doc_mut().set_favorite(name, on)?;
+    Ok(json!({"name": name, "favorite": on}))
+}
+
+fn params_export(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "parameters.export";
+    let text = match str_(p, "format").unwrap_or("csv") {
+        "csv" => s.doc.params_csv(),
+        "json" => {
+            let rows: Vec<Value> = s
+                .doc
+                .param_rows()
+                .into_iter()
+                .filter(|r| r.source == "user")
+                .map(|r| json!({"name": r.name, "expression": r.expression, "unit": r.unit, "value": r.value, "comment": r.comment, "favorite": r.favorite}))
+                .collect();
+            serde_json::to_string_pretty(&rows).map_err(|e| bad(cmd, e.to_string()))?
+        }
+        other => return Err(bad(cmd, format!("unknown format `{other}`"))),
+    };
+    if let Some(path) = str_(p, "path") {
+        std::fs::write(path, &text).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    }
+    Ok(json!({ "text": text }))
+}
+
+fn params_import(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "parameters.import";
+    let text = match (str_(p, "text"), str_(p, "path")) {
+        (Some(t), _) => t.to_string(),
+        (None, Some(path)) => {
+            let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+            if meta.len() > 16 << 20 {
+                return Err(bad(cmd, "file too large"));
+            }
+            std::fs::read_to_string(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
+        }
+        _ => return Err(bad(cmd, "give `text` or `path`")),
+    };
+    let names = s.doc_mut().import_params(&text)?;
+    Ok(json!({ "imported": names }))
 }
