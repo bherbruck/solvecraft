@@ -154,7 +154,12 @@ pub fn run(root: &Path, refresh: bool) -> Result<(), String> {
         md += &format!("| {t} | {p} | {l} | {n} | {:.0}% |\n", pct(*l, *n));
     }
     let plastic: Vec<&Entry> = catalog.iter().filter(|e| e.tab == "PLASTIC" && PLASTIC_SUBSET.contains(&e.id.as_str())).collect();
-    md += &format!("| PLASTIC | enclosure subset | {} | {} | {:.0}% |\n", plastic.iter().filter(|e| live(e)).count(), plastic.len(), pct(plastic.iter().filter(|e| live(e)).count(), plastic.len()));
+    md += &format!(
+        "| PLASTIC | enclosure subset | {} | {} | {:.0}% |\n",
+        plastic.iter().filter(|e| live(e)).count(),
+        plastic.len(),
+        pct(plastic.iter().filter(|e| live(e)).count(), plastic.len())
+    );
     md += "\n### Deferred tabs\n\n| Tab | Panel | Live | Total | % |\n|---|---|---:|---:|---:|\n";
     for (t, p, l, n) in groups.iter().filter(|g| !IN_SCOPE_TABS.contains(&g.0.as_str())) {
         md += &format!("| {t} | {p} | {l} | {n} | {:.0}% |\n", pct(*l, *n));
