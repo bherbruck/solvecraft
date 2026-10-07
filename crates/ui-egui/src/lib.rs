@@ -14,6 +14,7 @@ pub mod dialogs;
 pub mod gpu;
 pub mod icons;
 pub mod palette;
+pub mod preview;
 pub mod selection;
 pub mod theme;
 pub mod timeline;
@@ -87,6 +88,7 @@ pub struct SolveApp {
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
     pub palette: palette::Palette,
+    pub preview: preview::PreviewState,
     pub status: Option<(String, f64, bool)>,
     pub quit_requested: bool,
     pub frame_ms: f64,
@@ -113,6 +115,7 @@ impl SolveApp {
             tool: None,
             dialog: None,
             palette: palette::Palette::default(),
+            preview: preview::PreviewState::default(),
             status: None,
             quit_requested: false,
             frame_ms: 0.0,
@@ -387,6 +390,7 @@ impl SolveApp {
         if self.ui.show_browser {
             browser::browser(self, ui);
         }
+        preview::update(self, ui.ctx());
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             viewport::show(self, ui);
         });

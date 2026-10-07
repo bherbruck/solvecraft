@@ -26,6 +26,9 @@ pub struct GpuScene {
     pub lines: Vec<u8>,
     /// Lines drawn over everything (active sketch, highlights).
     pub overlay: Vec<u8>,
+    /// Translucent triangles pushed slightly back in depth, so they only show where nothing
+    /// coincides with them (removed material in a preview).
+    pub ghost: Vec<u8>,
 }
 
 impl GpuScene {
@@ -40,6 +43,12 @@ impl GpuScene {
             self.trans.extend_from_slice(&v.to_le_bytes());
         }
         self.trans.extend_from_slice(&c);
+    }
+    pub fn ghost_tri(&mut self, p: [f32; 3], n: [f32; 3], c: [u8; 4]) {
+        for v in p.iter().chain(&n) {
+            self.ghost.extend_from_slice(&v.to_le_bytes());
+        }
+        self.ghost.extend_from_slice(&c);
     }
     pub fn line(&mut self, a: [f32; 3], b: [f32; 3], c: [u8; 4], width: f32, on_top: bool) {
         let out = if on_top { &mut self.overlay } else { &mut self.lines };
@@ -60,6 +69,9 @@ pub struct ViewportCallback {
     /// The highlight scene and its key.
     pub hl_key: u64,
     pub hl_slot: SceneSlot,
+    /// The live preview scene and its key.
+    pub pv_key: u64,
+    pub pv_slot: SceneSlot,
     /// Column-major view-projection.
     pub view_proj: [[f32; 4]; 4],
     /// Direction toward the eye (for lighting).
@@ -80,6 +92,7 @@ struct Batches {
     trans: Option<Batch>,
     lines: Option<Batch>,
     overlays: Option<Batch>,
+    ghost: Option<Batch>,
 }
 
 impl Batches {
@@ -92,6 +105,7 @@ impl Batches {
             self.trans = upload(device, "sc_trans", &sc.trans, TRI_SIZE);
             self.lines = upload(device, "sc_lines", &sc.lines, LINE_SIZE);
             self.overlays = upload(device, "sc_overlay", &sc.overlay, LINE_SIZE);
+            self.ghost = upload(device, "sc_ghost", &sc.ghost, TRI_SIZE);
             self.key = Some(key);
         }
     }
@@ -102,6 +116,7 @@ struct Resources {
     /// Highlight triangles over the model (depth test ≤, no depth write).
     tri_hl: wgpu::RenderPipeline,
     trans: wgpu::RenderPipeline,
+    ghost: wgpu::RenderPipeline,
     line: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
@@ -109,6 +124,7 @@ struct Resources {
     linear_out: bool,
     model: Batches,
     highlight: Batches,
+    preview: Batches,
 }
 
 const SHADER: &str = r#"
@@ -161,6 +177,16 @@ fn fs_tri(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32>
     let spec = pow(max(dot(n, h), 0.0), 40.0) * 0.25;
     let k = 0.42 + 0.38 * diff + 0.25 * fill;
     return out_color(vec4<f32>(min(i.c.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), i.c.a));
+}
+
+@vertex
+fn vs_ghost(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: vec4<f32>) -> TOut {
+    var o: TOut;
+    o.pos = u.vp * vec4<f32>(p, 1.0);
+    o.pos.z = o.pos.z + u.screen.z * 4.0 * o.pos.w;
+    o.n = n;
+    o.c = c;
+    return o;
 }
 
 struct LOut {
@@ -282,6 +308,7 @@ impl Resources {
             tri: pipeline("sc_tris", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Less, true), None),
             tri_hl: pipeline("sc_tris_hl", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             trans: pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+            ghost: pipeline("sc_ghost", "vs_ghost", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             line: pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             overlay: pipeline("sc_overlay", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             uniform,
@@ -289,6 +316,7 @@ impl Resources {
             linear_out: t.format.is_srgb(),
             model: Batches::default(),
             highlight: Batches::default(),
+            preview: Batches::default(),
         }
     }
 }
@@ -327,6 +355,7 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         let Some(res) = resources.get_mut::<Resources>() else { return Vec::new() };
         res.model.take(device, self.key, &self.slot);
         res.highlight.take(device, self.hl_key, &self.hl_slot);
+        res.preview.take(device, self.pv_key, &self.pv_slot);
         queue.write_buffer(&res.uniform, 0, &uniform_bytes(self, self.size_px[0], self.size_px[1], res.linear_out));
         Vec::new()
     }
@@ -353,11 +382,14 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
                 pass.draw(0..6, 0..b.count);
             }
         };
-        let (m, h) = (&res.model, &res.highlight);
+        let (m, h, pv) = (&res.model, &res.highlight, &res.preview);
         tris(pass, &res.tri, &m.tris);
+        tris(pass, &res.tri, &pv.tris);
         tris(pass, &res.tri_hl, &h.tris);
         lines(pass, &res.line, &m.lines);
+        lines(pass, &res.line, &pv.lines);
         lines(pass, &res.line, &h.lines);
+        tris(pass, &res.ghost, &pv.ghost);
         tris(pass, &res.trans, &m.trans);
         tris(pass, &res.trans, &h.trans);
         lines(pass, &res.overlay, &m.overlays);

@@ -143,6 +143,7 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.ui.show_grid.hash(&mut h);
     app.ui.show_sketches.hash(&mut h);
     app.ui.hidden_bodies.hash(&mut h);
+    app.preview.replaced.hash(&mut h);
     app.session.active_sketch.hash(&mut h);
     let (minor, _) = grid_step(app.cam.half_height());
     minor.to_bits().hash(&mut h);
@@ -170,7 +171,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         }
     }
     for b in &st.bodies {
-        if app.ui.hidden_bodies.contains(&b.name) {
+        if app.ui.hidden_bodies.contains(&b.name) || app.preview.replaced.contains(&b.name) {
             continue;
         }
         let col = rgba(colors::BODY);
@@ -504,6 +505,7 @@ fn highlight_key(app: &SolveApp) -> u64 {
     serde_json::to_string(&app.highlighted()).unwrap_or_default().hash(&mut h);
     format!("{:?}", app.viewport.hover).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
+    app.preview.replaced.hash(&mut h);
     app.origin_visible().hash(&mut h);
     app.ui.hidden_origin.hash(&mut h);
     app.ui.hidden_bodies.hash(&mut h);
@@ -560,7 +562,8 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
     for x in &sel {
         match x {
             Sel::Face { body, index, .. } => {
-                if let Some(b) = st.body(body) {
+                // A live preview stands in for the body: its old faces would fight with it.
+                if let Some(b) = st.body(body).filter(|_| !app.preview.replaced.contains(body)) {
                     face_tris(&mut sc, &b.mesh(), *index, c4(t.sel_face), false);
                 }
             }
@@ -621,7 +624,10 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
     }
     // Hover (pre-highlight).
     match hover {
-        Some(Hit::Face { body, index, .. }) if !sel.iter().any(|x| matches!(x, Sel::Face { body: b, index: i, .. } if b == body && i == index)) => {
+        Some(Hit::Face { body, index, .. })
+            if !app.preview.replaced.contains(body)
+                && !sel.iter().any(|x| matches!(x, Sel::Face { body: b, index: i, .. } if b == body && i == index)) =>
+        {
             if let Some(b) = st.body(body) {
                 let k = t.hover_face_lift;
                 let c = colors::BODY;
@@ -821,6 +827,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             slot: app.viewport.slot.clone(),
             hl_key: app.viewport.hl_key,
             hl_slot: app.viewport.hl_slot.clone(),
+            pv_key: app.preview.key,
+            pv_slot: app.preview.slot.clone(),
             view_proj: proj.vp.to_f32(),
             back: proj.cam.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],

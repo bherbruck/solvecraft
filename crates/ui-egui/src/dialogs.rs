@@ -210,6 +210,22 @@ impl Dialog {
         }
     }
 
+    /// Does this dialog make a feature that can be previewed live?
+    pub fn previews(&self) -> bool {
+        matches!(
+            self.kind,
+            Kind::Extrude { .. }
+                | Kind::Revolve { .. }
+                | Kind::Fillet { .. }
+                | Kind::Shell { .. }
+                | Kind::Draft { .. }
+                | Kind::Mirror
+                | Kind::Hole { .. }
+                | Kind::Primitive { .. }
+                | Kind::Combine { .. }
+        )
+    }
+
     pub fn wants_picks(&self) -> bool {
         !self.inputs.is_empty()
     }
@@ -574,9 +590,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         }
                     }
                 }
-                if let Some(e) = &d.error {
+                if let Some(e) = d.error.as_ref().or(app.preview.error.as_ref()) {
                     ui.label("");
-                    ui.label(RichText::new(e.as_str()).color(t.error));
+                    ui.add(egui::Label::new(RichText::new(e.as_str()).color(t.error)).wrap());
                     ui.end_row();
                 }
             });
@@ -720,15 +736,20 @@ fn sels(d: &Dialog, i: usize) -> &[Sel] {
 }
 
 fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
-    let cmds = dialog_commands(app, d)?;
-    if let Some((id, _)) = d.editing {
-        let (cmd, params) = cmds.into_iter().next().ok_or("nothing to apply")?;
-        return app.run("timeline.redefine", json!({"feature": id, "command": cmd, "params": params})).map(drop);
-    }
-    for (cmd, params) in cmds {
+    for (cmd, params) in apply_commands(app, d)? {
         app.run(&cmd, params)?;
     }
     Ok(())
+}
+
+/// The commands OK runs (an edit rebuilds its feature in place); the live preview runs the same.
+pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
+    let cmds = dialog_commands(app, d)?;
+    if let Some((id, _)) = d.editing {
+        let (cmd, params) = cmds.into_iter().next().ok_or("nothing to apply")?;
+        return Ok(vec![("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params}))]);
+    }
+    Ok(cmds)
 }
 
 /// The commands (id, parameters) a dialog's OK runs.
@@ -932,22 +953,13 @@ fn face_sel(s: &Session, p: Vec3) -> Option<Sel> {
         let m = b.mesh();
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {
             let Some([a, bb, c]) = m.tri(t) else { continue };
-            let d = point_triangle_dist(p, a, bb, c);
+            let d = crate::preview::point_triangle_dist(p, a, bb, c);
             if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
                 best = Some((d, Sel::Face { body: b.name.clone(), index: *f as usize, point: p }));
             }
         }
     }
     best.filter(|(d, _)| *d < 1e-3 + 1e-6 * p.len()).map(|x| x.1)
-}
-
-fn point_triangle_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
-    let n = (b - a).cross(c - a);
-    let Some(nn) = n.normalized() else { return f64::INFINITY };
-    let h = (p - a).dot(nn);
-    let q = p - nn * h;
-    let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-12);
-    if inside { h.abs() } else { [(a, b), (b, c), (c, a)].iter().map(|(u, v)| p.dist_to_segment(*u, *v)).fold(f64::INFINITY, f64::min) }
 }
 
 fn plane_sel(s: &Session, pl: &PlaneRef) -> Option<Sel> {

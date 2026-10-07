@@ -473,3 +473,55 @@ fn step_insert_shell_and_errors() {
     assert!(d.execute("FusionImportCommandFromToolbar", &json!({"path": p.with_extension("stl").to_string_lossy()})).is_err());
     assert_eq!(*d.doc, *before);
 }
+
+fn body_volume(st: &solvecraft_doc::ModelState) -> f64 {
+    st.bodies.iter().map(|b| solvecraft_kernel::measure(&b.body).unwrap().volume).sum()
+}
+
+/// Previews evaluate on a scratch copy: the document, undo history and model are untouched.
+#[test]
+fn preview_has_no_side_effects() {
+    let mut s = Session::default();
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [40, 30]}));
+    run(&mut s, "SketchStop", json!({}));
+    let doc = s.doc.clone();
+    let (undo, rev) = (s.undo.len(), s.revision);
+    let p = s.preview(&[("Extrude".into(), json!({"distance": 15}))]).unwrap();
+    assert!(p.before.bodies.is_empty());
+    assert!(rel(body_volume(&p.after), 40.0 * 30.0 * 15.0) < 1e-9);
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!((s.undo.len(), s.revision), (undo, rev));
+    assert!(s.model.state().bodies.is_empty());
+    // Errors come back as errors and change nothing either.
+    assert!(s.preview(&[("Extrude".into(), json!({"distance": "nonsense"}))]).is_err());
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+
+    // Fillet preview on a real body.
+    run(&mut s, "Extrude", json!({"distance": 20}));
+    let (doc, undo) = (s.doc.clone(), s.undo.len());
+    let p = s.preview(&[("FusionFilletEdgesCommand".into(), json!({"edges": [[0, 0, 10]], "radius": 3}))]).unwrap();
+    let filleted = 24000.0 - (9.0 - PI * 9.0 / 4.0) * 20.0;
+    assert!(rel(body_volume(&p.after), filleted) < 2e-4);
+    assert!(rel(body_volume(&p.before), 24000.0) < 1e-9);
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!(s.undo.len(), undo);
+}
+
+/// Previewing an edit shows the rebuilt feature although the timeline is rolled back to it.
+#[test]
+fn preview_of_an_edit() {
+    let mut s = Session::default();
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [40, 30]}));
+    run(&mut s, "SketchStop", json!({}));
+    let r = run(&mut s, "Extrude", json!({"distance": 20}));
+    let fid = r["feature"].as_u64().unwrap();
+    let idx = s.doc.feature_index(fid).unwrap();
+    run(&mut s, "timeline.rollTo", json!({"position": idx}));
+    assert!(s.model.state().bodies.is_empty());
+    let doc = s.doc.clone();
+    let p = s.preview(&[("timeline.redefine".into(), json!({"feature": fid, "command": "Extrude", "params": {"distance": 10}}))]).unwrap();
+    assert!(rel(body_volume(&p.after), 12000.0) < 1e-9);
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+}

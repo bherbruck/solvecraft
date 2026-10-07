@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solvecraft_doc::{Document, Model};
+use solvecraft_doc::{Document, Model, ModelState};
 use solvecraft_geom::Vec3;
 
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
@@ -120,6 +120,16 @@ pub struct Snapshot {
     pub label: String,
     pub doc: Arc<Document>,
     pub active_sketch: Option<u64>,
+}
+
+/// What some commands would make, evaluated on a scratch copy of a session
+/// ([`Session::preview`]). The session itself is not changed.
+#[derive(Clone, Debug)]
+pub struct Preview {
+    /// The model now.
+    pub before: Arc<ModelState>,
+    /// The model after the commands.
+    pub after: Arc<ModelState>,
 }
 
 /// An editing session on one design.
@@ -238,6 +248,52 @@ impl Session {
                 Err(e)
             }
         }
+    }
+
+    /// A scratch copy of the session (same design and model, no history or log) to try
+    /// commands on without touching this one.
+    pub fn scratch(&self) -> Session {
+        Session {
+            doc: self.doc.clone(),
+            model: self.model.clone(),
+            undo: Vec::new(),
+            redo: Vec::new(),
+            active_sketch: self.active_sketch,
+            selection: Vec::new(),
+            path: None,
+            saved: self.saved.clone(),
+            log: Vec::new(),
+            revision: self.revision,
+        }
+    }
+
+    /// Live preview: run `commands` (id, parameters) on a scratch copy and return the model
+    /// before and after. Nothing in this session changes (document, undo history, selection).
+    /// A `timeline.redefine` is shown even while the timeline is rolled back to the feature
+    /// being edited.
+    pub fn preview(&self, commands: &[(String, Value)]) -> Result<Preview> {
+        self.scratch().preview_in_place(commands).map(|after| Preview { before: self.model.state(), after })
+    }
+
+    fn preview_in_place(mut self, commands: &[(String, Value)]) -> Result<Arc<ModelState>> {
+        if commands.is_empty() {
+            return Err(EngineError::Other("nothing to preview".into()));
+        }
+        for (id, params) in commands {
+            let r = self.execute(id, params)?;
+            if id == "timeline.redefine"
+                && let Some(fid) = r.get("feature").and_then(Value::as_u64)
+                && let Some(idx) = self.doc.feature_index(fid)
+                && self.doc.marker.is_some_and(|m| m <= idx)
+            {
+                self.doc_mut().marker = Some(idx + 1);
+                self.refresh();
+                if let Some(e) = self.model.result(fid).and_then(|r| r.error.clone()) {
+                    return Err(EngineError::Other(e));
+                }
+            }
+        }
+        Ok(self.model.state())
     }
 
     /// Run a script: a JSON array of `{"command": id, "params": {...}}` (or an object with a

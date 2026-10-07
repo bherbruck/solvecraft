@@ -51,6 +51,13 @@ pub struct Tokens {
     pub axis_z: Color32,
     /// Construction planes.
     pub construction_plane: Color32,
+    // ---- bodies and live previews ----
+    pub body: Color32,
+    pub body_edge: Color32,
+    /// New surface in a feature preview.
+    pub preview_add: Color32,
+    /// Removed material in a feature preview (translucent).
+    pub preview_cut: Color32,
     // ---- box selection ----
     pub box_window: Color32,
     pub box_crossing: Color32,
@@ -95,6 +102,10 @@ impl Tokens {
             axis_y: Color32::from_rgb(0, 255, 0),
             axis_z: Color32::from_rgb(2, 2, 248),
             construction_plane: Color32::from_rgba_unmultiplied_const(249, 184, 134, 70),
+            body: Color32::from_rgb(176, 186, 198),
+            body_edge: Color32::from_rgb(40, 44, 52),
+            preview_add: Color32::from_rgb(112, 160, 226),
+            preview_cut: Color32::from_rgba_unmultiplied_const(232, 84, 44, 110),
             box_window: Color32::from_rgb(38, 120, 218),
             box_crossing: Color32::from_rgb(40, 160, 80),
         }
