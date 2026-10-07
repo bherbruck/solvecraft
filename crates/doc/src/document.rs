@@ -866,31 +866,54 @@ impl Document {
         self.params.iter().find(|p| p.name == name)
     }
 
-    fn valid_name(name: &str) -> bool {
+    /// Why a name cannot be a parameter name (None = fine).
+    pub fn param_name_problem(name: &str) -> Option<String> {
         let mut cs = name.chars();
-        matches!(cs.next(), Some(c) if c.is_alphabetic() || c == '_')
-            && cs.all(|c| c.is_alphanumeric() || c == '_')
-            && !matches!(name, "mm" | "cm" | "m" | "um" | "in" | "inch" | "mil" | "yd" | "km" | "nm" | "ft" | "deg" | "rad" | "pi" | "PI")
-            && name.len() <= 64
+        if !matches!(cs.next(), Some(c) if c.is_alphabetic() || c == '_') || !cs.all(|c| c.is_alphanumeric() || c == '_') {
+            return Some(format!("`{name}` is not a valid parameter name (letters, digits and _, starting with a letter)"));
+        }
+        if name.len() > 64 {
+            return Some("parameter names are at most 64 characters".into());
+        }
+        if expr::is_reserved(name) {
+            return Some(format!("`{name}` is a unit, constant or function name"));
+        }
+        None
     }
 
-    /// Add or change a parameter. Fails if the result would not evaluate.
+    /// Add or change a parameter. Fails if the result would not evaluate. A new parameter
+    /// without a unit takes the unit of its value (mm, deg or none).
     pub fn set_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {
-        if !Self::valid_name(name) {
-            return Err(DocError::Invalid(format!("`{name}` is not a valid parameter name")));
+        if let Some(p) = Self::param_name_problem(name) {
+            return Err(DocError::Invalid(p));
         }
         if expr_s.len() > 4096 {
             return Err(DocError::Expr("expression too long".into()));
+        }
+        if expr_s.trim().is_empty() {
+            return Err(DocError::Expr("empty expression".into()));
+        }
+        if let Some(u) = unit
+            && expr::unit_info(u).is_none()
+        {
+            return Err(DocError::Expr(format!("unknown unit `{u}` (mm, cm, m, in, ft, deg, rad or none)")));
+        }
+        if comment.is_some_and(|c| c.len() > 4096) {
+            return Err(DocError::Invalid("comment too long".into()));
         }
         if self.features.iter().any(|f| f.param_names.iter().any(|n| n == name)) {
             return Err(DocError::Invalid(format!("`{name}` is a feature's parameter")));
         }
         let mut next = self.clone();
+        let inferred = match unit {
+            Some(u) => u.trim().to_string(),
+            None => next.infer_unit(expr_s),
+        };
         match next.params.iter_mut().find(|p| p.name == name) {
             Some(p) => {
-                p.expr = expr_s.to_string();
+                p.expr = expr_s.trim().to_string();
                 if let Some(u) = unit {
-                    p.unit = u.to_string();
+                    p.unit = u.trim().to_string();
                 }
                 if let Some(c) = comment {
                     p.comment = c.to_string();
@@ -902,8 +925,8 @@ impl Document {
                 }
                 next.params.push(Param {
                     name: name.into(),
-                    expr: expr_s.into(),
-                    unit: unit.unwrap_or("mm").into(),
+                    expr: expr_s.trim().into(),
+                    unit: inferred,
                     comment: comment.unwrap_or_default().into(),
                     model: false,
                 })
@@ -922,25 +945,6 @@ impl Document {
         let name = self.next_d_name();
         self.params.push(Param { name: name.clone(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true });
         name
-    }
-
-    /// Remove a user parameter (fails while something references it).
-    pub fn remove_param(&mut self, name: &str) -> Result<()> {
-        if self.param(name).is_none() {
-            return Err(DocError::Unknown(format!("parameter `{name}`")));
-        }
-        let mut probe = self.clone();
-        probe.params.retain(|p| p.name != name);
-        if probe.referenced_names().iter().any(|n| n == name) {
-            return Err(DocError::Invalid(format!("`{name}` is still used")));
-        }
-        *self = probe;
-        Ok(())
-    }
-
-    /// Evaluate all parameters: values (mm / rad / unit-less) and errors by name.
-    pub fn param_values(&self) -> (std::collections::BTreeMap<String, expr::Value>, std::collections::BTreeMap<String, String>) {
-        expr::eval_params(&self.all_param_exprs())
     }
 
     /// Evaluate an expression against the document's parameters.

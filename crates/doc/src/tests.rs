@@ -258,6 +258,9 @@ fn parameter_cycles_are_found() {
     ];
     let c = crate::cycles(&list);
     assert_eq!(c.into_iter().collect::<Vec<_>>(), vec!["a", "b", "c", "e"]);
-    let (vals, errs) = crate::expr::eval_params(&list);
+    let defs: Vec<crate::expr::ParamDef> =
+        list.iter().map(|(n, e, _)| crate::expr::ParamDef { name: n.clone(), expr: e.clone(), unit: "mm".into() }).collect();
+    let (vals, errs) = crate::expr::eval_params(&defs, 1.0);
+    assert!(errs["a"].contains("circular reference: a → b → c → a"), "{}", errs["a"]);
     assert!(vals.contains_key("d") && errs.contains_key("a") && errs.contains_key("e"));
 }

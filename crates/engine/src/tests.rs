@@ -288,6 +288,12 @@ fn hostile_params_never_panic() {
         "datum",
         "tolerance",
         "face",
+        "new_name",
+        "favorite",
+        "favorites",
+        "filter",
+        "kind",
+        "prefix",
     ];
     let mut internal = Vec::new();
     for spec in command_specs() {
@@ -299,6 +305,9 @@ fn hostile_params_never_panic() {
         }
         for v in hostile_values() {
             for k in keys {
+                if k == "path" && spec.id.starts_with("parameters.") {
+                    continue; // parameter files: covered by their own tests (no stray files)
+                }
                 let mut s = Session::default();
                 // A model with a sketch, a body and an active sketch, so most commands get far.
                 let _ = s.execute("PrimitiveBox", &json!({"length": 10, "width": 10, "height": 10}));

@@ -221,18 +221,23 @@ pub struct Model {
     pub last_recomputed: usize,
 }
 
-fn fingerprint(prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_back: bool) -> u64 {
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    prev.hash(&mut h);
-    rolled_back.hash(&mut h);
-    serde_json::to_string(f).unwrap_or_default().hash(&mut h);
+/// Parameters a feature uses directly (inputs and sketch dimensions), sorted.
+fn param_names(f: &Feature) -> Vec<String> {
     let mut names: Vec<String> = f.kind.expressions().iter().flat_map(|e| expr::references(e)).collect();
     if let FeatureKind::Sketch { sketch, .. } = &f.kind {
         names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
     }
     names.sort();
     names.dedup();
-    for n in names {
+    names
+}
+
+fn fingerprint(prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_back: bool) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    prev.hash(&mut h);
+    rolled_back.hash(&mut h);
+    serde_json::to_string(f).unwrap_or_default().hash(&mut h);
+    for n in param_names(f) {
         n.hash(&mut h);
         match vals.get(&n) {
             Some(v) => {
@@ -313,9 +318,14 @@ impl Model {
             let t0 = now();
             let mut next = (*state).clone();
             let mut warning = None;
-            let r = kernel::guard(&f.name, || {
-                eval_feature(doc, &vals, f, &mut next, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string()))
-            });
+            // A parameter with an error fails the features using it, with that error.
+            let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
+            let r = match bad_param {
+                Some(e) => Err(kernel::KernelError::Failed(e)),
+                None => kernel::guard(&f.name, || {
+                    eval_feature(doc, &vals, f, &mut next, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string()))
+                }),
+            };
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
             let error = match r {
                 Ok(()) => {

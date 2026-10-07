@@ -6,10 +6,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::expr::{self, Kind};
-use crate::{DocError, Document, FeatureKind, HoleKind, PatternKind, PlaneRef, Result};
+use crate::expr::{self, Kind, ParamDef, Value};
+use crate::{DocError, Document, FeatureKind, HoleKind, MAX_PARAMS, PatternKind, PlaneRef, Result};
 
 fn plane_inputs_mut<'a>(p: &'a mut PlaneRef, v: &mut Vec<(&'static str, &'a mut String, Kind)>) {
     match p {
@@ -144,6 +144,10 @@ impl FeatureKind {
 
     /// Read-only view of [`FeatureKind::inputs_mut`]: (label, expression, kind).
     pub fn inputs(&self) -> Vec<(&'static str, String, Kind)> {
+        // Imports have no inputs (and their STEP text is large: don't clone it).
+        if matches!(self, FeatureKind::Import { .. } | FeatureKind::MeshImport { .. }) {
+            return Vec::new();
+        }
         let mut c = self.clone();
         c.inputs_mut().into_iter().map(|(l, e, k)| (l, e.clone(), k)).collect()
     }
@@ -271,7 +275,7 @@ impl Document {
                 name: p.name.clone(),
                 expression: p.expr.clone(),
                 unit: p.unit.clone(),
-                value: value(&p.name, p.kind()),
+                value: self.param_display_value(&vals, &p.name),
                 error: errs.get(&p.name).cloned(),
                 comment: p.comment.clone(),
                 source: if p.model { "sketch" } else { "user" },
@@ -382,6 +386,261 @@ impl Document {
         }
         *self = next;
         Ok(names)
+    }
+}
+
+/// Something that uses a parameter.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ParamUser {
+    /// Another parameter's expression (a stored one or a feature input).
+    Parameter { name: String },
+    /// A feature input (`input` is its label, e.g. `Distance`).
+    Feature { feature: u64, name: String, input: String },
+    /// A sketch dimension (`constraint` is its id).
+    Dimension { feature: u64, name: String, constraint: String },
+}
+
+impl ParamUser {
+    pub fn describe(&self) -> String {
+        match self {
+            ParamUser::Parameter { name } => format!("parameter {name}"),
+            ParamUser::Feature { name, input, .. } => format!("{name} ({input})"),
+            ParamUser::Dimension { name, constraint, .. } => format!("{name} dimension {constraint}"),
+        }
+    }
+}
+
+/// Length unit of the document in mm (bare numbers of unit-less parameters next to lengths).
+fn doc_len(units: &str) -> f64 {
+    match expr::unit_info(units) {
+        Some((Kind::Length, s)) => s,
+        _ => 1.0,
+    }
+}
+
+impl Document {
+    /// Every parameter with its unit, for evaluation: stored parameters and named feature
+    /// inputs (mm / deg / none by their kind).
+    pub fn param_defs(&self) -> Vec<ParamDef> {
+        let mut v: Vec<ParamDef> =
+            self.params.iter().map(|p| ParamDef { name: p.name.clone(), expr: p.expr.clone(), unit: p.unit.clone() }).collect();
+        for f in &self.features {
+            for (name, (_, e, k)) in f.param_names.iter().zip(f.kind.inputs()) {
+                if !name.is_empty() {
+                    v.push(ParamDef { name: name.clone(), expr: e, unit: unit_of(k).into() });
+                }
+            }
+        }
+        v
+    }
+
+    /// Evaluate all parameters: values (mm / rad / unit-less) and errors by name. Errors name
+    /// the problem (`circular reference: a → b → a`, `cannot add a length and an angle`).
+    pub fn param_values(&self) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
+        expr::eval_params(&self.param_defs(), doc_len(&self.units))
+    }
+
+    /// A parameter's value in its own unit (e.g. 2 for a 50.8 mm parameter in inches).
+    pub fn param_display_value(&self, vals: &BTreeMap<String, Value>, name: &str) -> Option<f64> {
+        let v = vals.get(name)?;
+        let unit = match self.param(name) {
+            Some(p) => p.unit.clone(),
+            None => v.kind().map(|k| unit_of(k).to_string()).unwrap_or_default(),
+        };
+        Some(expr::value_in_unit(*v, &unit))
+    }
+
+    /// The unit for a new parameter with this expression: that of its value; a bare number is
+    /// a length (mm).
+    pub(crate) fn infer_unit(&self, e: &str) -> String {
+        let (vals, _) = self.param_values();
+        let v = expr::eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))));
+        match v.ok().and_then(|v| v.kind()) {
+            Some(Kind::Unitless) if !expr::references(e).is_empty() => String::new(),
+            Some(Kind::Angle) => "deg".into(),
+            _ => "mm".into(),
+        }
+    }
+
+    /// Everything that uses a parameter: other parameters (and feature inputs) whose
+    /// expressions refer to it, and the sketch dimensions it drives.
+    pub fn param_users(&self, name: &str) -> Vec<ParamUser> {
+        let mut out = Vec::new();
+        for p in &self.params {
+            if p.name != name && expr::references(&p.expr).iter().any(|r| r == name) {
+                out.push(ParamUser::Parameter { name: p.name.clone() });
+            }
+        }
+        for f in &self.features {
+            for (k, (label, e, _)) in f.kind.inputs().into_iter().enumerate() {
+                if expr::references(&e).iter().any(|r| r == name) {
+                    match f.param_names.get(k).filter(|n| !n.is_empty()) {
+                        Some(n) => out.push(ParamUser::Parameter { name: n.clone() }),
+                        None => out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: label.to_string() }),
+                    }
+                }
+            }
+            if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+                for c in &sketch.constraints {
+                    if c.param.as_deref() == Some(name) {
+                        out.push(ParamUser::Dimension { feature: f.id, name: f.name.clone(), constraint: c.id.clone() });
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Remove a stored parameter; refused while something uses it (the error lists the users).
+    pub fn remove_param(&mut self, name: &str) -> Result<()> {
+        if self.param(name).is_none() {
+            if self.features.iter().any(|f| f.param_names.iter().any(|n| n == name)) {
+                return Err(DocError::Invalid(format!("`{name}` is a feature's input: delete or edit the feature instead")));
+            }
+            return Err(DocError::Unknown(format!("parameter `{name}`")));
+        }
+        let users = self.param_users(name);
+        if !users.is_empty() {
+            let list: Vec<String> = users.iter().map(ParamUser::describe).collect();
+            return Err(DocError::Invalid(format!("`{name}` is used by {}", list.join(", "))));
+        }
+        self.params.retain(|p| p.name != name);
+        self.favorites.remove(name);
+        Ok(())
+    }
+
+    /// Rename a parameter (stored or a feature input); every expression, feature input,
+    /// dimension, favourite and comment that refers to it follows. Returns how many
+    /// references were updated.
+    pub fn rename_param(&mut self, old: &str, new: &str) -> Result<usize> {
+        let new = new.trim();
+        if !self.name_taken(old) {
+            return Err(DocError::Unknown(format!("parameter `{old}`")));
+        }
+        if old == new {
+            return Ok(0);
+        }
+        if let Some(p) = Self::param_name_problem(new) {
+            return Err(DocError::Invalid(p));
+        }
+        if self.name_taken(new) {
+            return Err(DocError::Invalid(format!("there is already a parameter `{new}`")));
+        }
+        let mut n = 0;
+        for p in &mut self.params {
+            if p.name == old {
+                p.name = new.to_string();
+            }
+            let r = expr::rename_reference(&p.expr, old, new);
+            if r != p.expr {
+                p.expr = r;
+                n += 1;
+            }
+        }
+        for f in &mut self.features {
+            for x in &mut f.param_names {
+                if x == old {
+                    *x = new.to_string();
+                }
+            }
+            for (_, e, _) in f.kind.inputs_mut() {
+                let r = expr::rename_reference(e, old, new);
+                if r != *e {
+                    *e = r;
+                    n += 1;
+                }
+            }
+            if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
+                for c in &mut sketch.constraints {
+                    if c.param.as_deref() == Some(old) {
+                        c.param = Some(new.to_string());
+                        n += 1;
+                    }
+                }
+            }
+        }
+        if self.favorites.remove(old) {
+            self.favorites.insert(new.to_string());
+        }
+        if let Some(c) = self.param_comments.remove(old) {
+            self.param_comments.insert(new.to_string(), c);
+        }
+        Ok(n)
+    }
+
+    /// Set a parameter's comment (stored parameters keep it, feature inputs in `param_comments`).
+    pub fn set_param_comment(&mut self, name: &str, comment: &str) -> Result<()> {
+        if comment.len() > 4096 {
+            return Err(DocError::Invalid("comment too long".into()));
+        }
+        if let Some(p) = self.params.iter_mut().find(|p| p.name == name) {
+            p.comment = comment.to_string();
+            return Ok(());
+        }
+        if !self.name_taken(name) {
+            return Err(DocError::Unknown(format!("parameter `{name}`")));
+        }
+        if comment.is_empty() {
+            self.param_comments.remove(name);
+        } else {
+            self.param_comments.insert(name.to_string(), comment.to_string());
+        }
+        Ok(())
+    }
+
+    /// Dependency edges: (user, parameter used). Users are parameter names, or
+    /// `Feature:<name>` for a feature whose inputs or dimensions use the parameter.
+    pub fn param_graph(&self) -> Vec<(String, String)> {
+        let mut out = expr::param_edges(&self.param_defs());
+        for f in &self.features {
+            let mut names: BTreeSet<String> = f.param_names.iter().filter(|n| !n.is_empty()).cloned().collect();
+            if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+                names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+            }
+            out.extend(names.into_iter().map(|n| (format!("Feature:{}", f.name), n)));
+        }
+        out
+    }
+
+    /// Features whose result depends on a parameter (directly or through other parameters).
+    pub fn features_using_param(&self, name: &str) -> Vec<u64> {
+        let defs = self.param_defs();
+        let mut affected: BTreeSet<String> = BTreeSet::from([name.to_string()]);
+        for _ in 0..defs.len().min(MAX_PARAMS * 2) {
+            let before = affected.len();
+            for d in &defs {
+                if expr::references(&d.expr).iter().any(|r| affected.contains(r)) {
+                    affected.insert(d.name.clone());
+                }
+            }
+            if affected.len() == before {
+                break;
+            }
+        }
+        let mut out = Vec::new();
+        for f in &self.features {
+            let mut hit = f.param_names.iter().any(|n| affected.contains(n));
+            hit |= f.kind.expressions().iter().any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
+            if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+                hit |= sketch.constraints.iter().any(|c| c.param.as_ref().is_some_and(|p| affected.contains(p)));
+            }
+            if hit {
+                out.push(f.id);
+            }
+        }
+        out
+    }
+
+    /// Add a user parameter (refused when the name exists).
+    pub fn add_user_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {
+        if self.name_taken(name.trim()) {
+            return Err(DocError::Invalid(format!("there is already a parameter `{}`", name.trim())));
+        }
+        if self.params.len() >= MAX_PARAMS {
+            return Err(DocError::Invalid("too many parameters".into()));
+        }
+        self.set_param(name.trim(), expr_s, unit, comment)
     }
 }
 

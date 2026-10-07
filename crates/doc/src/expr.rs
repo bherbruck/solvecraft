@@ -1,9 +1,10 @@
-//! Parameter expressions: `2 * width + 5 mm`, `angle / 2`, `sqrt(a^2 + b^2)`.
+//! Parameter expressions: `2 * width + 5 mm`, `angle / 2`, `sqrt(a^2 + b^2)`, `atan2(h; w)`.
 //!
 //! Values carry a simple dimension (powers of length and angle). Lengths are millimetres and
 //! angles radians internally. A unit-less number added to a dimensioned value takes that value's
-//! unit (`width + 5` adds 5 mm); a unit-less final result takes the expected unit's default
-//! (mm for lengths, degrees for angles). Trigonometric functions take an angle; a unit-less
+//! unit: the parameter's own unit when it has one (`width + 5` adds 5 in for an inch
+//! parameter), else millimetres and degrees. A unit-less final result takes the expected unit
+//! (`2` for an inch parameter is 2 in). Trigonometric functions take an angle; a unit-less
 //! argument is read as degrees.
 
 use std::collections::BTreeMap;
@@ -12,6 +13,7 @@ use crate::DocError;
 
 const MAX_LEN: usize = 4096;
 const MAX_DEPTH: usize = 64;
+const MAX_ARGS: usize = 64;
 
 /// What an expression must evaluate to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -24,11 +26,101 @@ pub enum Kind {
 
 impl Kind {
     pub fn from_unit(u: &str) -> Kind {
-        match u.trim() {
-            "deg" | "rad" | "°" => Kind::Angle,
-            "" | "none" | "unitless" => Kind::Unitless,
-            _ => Kind::Length,
+        unit_info(u).map(|(k, _)| k).unwrap_or(Kind::Length)
+    }
+    /// The unit a new parameter of this kind gets (`mm`, `deg` or none).
+    pub fn default_unit(self) -> &'static str {
+        match self {
+            Kind::Length => "mm",
+            Kind::Angle => "deg",
+            Kind::Unitless => "",
         }
+    }
+}
+
+/// Units a parameter or an expression may use: name, kind and size (mm or radians).
+pub const UNITS: [(&str, Kind, f64); 14] = [
+    ("mm", Kind::Length, 1.0),
+    ("cm", Kind::Length, 10.0),
+    ("m", Kind::Length, 1000.0),
+    ("um", Kind::Length, 0.001),
+    ("µm", Kind::Length, 0.001),
+    ("in", Kind::Length, 25.4),
+    ("inch", Kind::Length, 25.4),
+    ("ft", Kind::Length, 304.8),
+    ("yd", Kind::Length, 914.4),
+    ("km", Kind::Length, 1_000_000.0),
+    ("mil", Kind::Length, 0.0254),
+    ("nm", Kind::Length, 1e-6),
+    ("deg", Kind::Angle, std::f64::consts::PI / 180.0),
+    ("rad", Kind::Angle, 1.0),
+];
+
+/// Functions an expression may call (name, signature) — for autocomplete and help.
+pub const FUNCTIONS: [(&str, &str); 23] = [
+    ("sin", "sin(angle)"),
+    ("cos", "cos(angle)"),
+    ("tan", "tan(angle)"),
+    ("asin", "asin(x) → angle"),
+    ("acos", "acos(x) → angle"),
+    ("atan", "atan(x) → angle"),
+    ("atan2", "atan2(y, x) → angle"),
+    ("sqrt", "sqrt(x)"),
+    ("abs", "abs(x)"),
+    ("min", "min(a, b, …)"),
+    ("max", "max(a, b, …)"),
+    ("floor", "floor(x)"),
+    ("ceil", "ceil(x)"),
+    ("round", "round(x)"),
+    ("exp", "exp(x)"),
+    ("ln", "ln(x)"),
+    ("log", "log(x) (base 10)"),
+    ("log10", "log10(x)"),
+    ("sign", "sign(x)"),
+    ("hypot", "hypot(a, b)"),
+    ("pow", "pow(x, n)"),
+    ("trunc", "trunc(x)"),
+    ("mod", "mod(a, b)"),
+];
+
+/// Constants an expression may use.
+pub const CONSTANTS: [&str; 2] = ["pi", "PI"];
+
+/// Kind and size (mm or radians per unit) of a parameter's unit; empty means unit-less.
+pub fn unit_info(u: &str) -> Option<(Kind, f64)> {
+    match u.trim() {
+        "" | "none" | "unitless" => Some((Kind::Unitless, 1.0)),
+        "°" | "degree" | "degrees" => Some((Kind::Angle, std::f64::consts::PI / 180.0)),
+        t => UNITS.iter().find(|(n, _, _)| *n == t).map(|(_, k, s)| (*k, *s)),
+    }
+}
+
+/// How unit-less numbers are read: millimetres / degrees by default.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Defaults {
+    /// Millimetres per unit-less length number.
+    pub len: f64,
+    /// Radians per unit-less angle number.
+    pub ang: f64,
+}
+
+impl Default for Defaults {
+    fn default() -> Self {
+        Defaults { len: 1.0, ang: std::f64::consts::PI / 180.0 }
+    }
+}
+
+impl Defaults {
+    /// Defaults for a parameter with this unit (`in` reads bare numbers as inches); the
+    /// document's length unit covers the other kind.
+    pub fn for_unit(unit: &str, doc_len: f64) -> Defaults {
+        let mut d = Defaults { len: doc_len, ..Defaults::default() };
+        match unit_info(unit) {
+            Some((Kind::Length, s)) => d.len = s,
+            Some((Kind::Angle, s)) => d.ang = s,
+            _ => {}
+        }
+        d
     }
 }
 
@@ -50,39 +142,83 @@ impl Value {
     pub fn angle(rad: f64) -> Value {
         Value { v: rad, len: 0, ang: 1 }
     }
-    fn unitless(&self) -> bool {
+    pub fn unitless(&self) -> bool {
         self.len == 0 && self.ang == 0
     }
-    /// Convert to the expected kind (mm or radians).
+    /// The value's kind, if it is a plain length, angle or number.
+    pub fn kind(&self) -> Option<Kind> {
+        match (self.len, self.ang) {
+            (0, 0) => Some(Kind::Unitless),
+            (1, 0) => Some(Kind::Length),
+            (0, 1) => Some(Kind::Angle),
+            _ => None,
+        }
+    }
+    /// Convert to the expected kind (mm or radians); unit-less numbers are mm / degrees.
     pub fn to_kind(self, k: Kind) -> Result<f64, DocError> {
+        self.to_kind_in(k, Defaults::default())
+    }
+    /// Convert to the expected kind, reading a unit-less result in the given defaults.
+    pub fn to_kind_in(self, k: Kind, d: Defaults) -> Result<f64, DocError> {
         let out = match k {
             Kind::Length if self.len == 1 && self.ang == 0 => self.v,
-            Kind::Length if self.unitless() => self.v,
+            Kind::Length if self.unitless() => self.v * d.len,
             Kind::Angle if self.ang == 1 && self.len == 0 => self.v,
-            Kind::Angle if self.unitless() => self.v.to_radians(),
+            Kind::Angle if self.unitless() => self.v * d.ang,
             Kind::Unitless if self.unitless() => self.v,
-            _ => return Err(DocError::Expr(format!("wrong units for a {k:?} value"))),
+            _ => {
+                return Err(DocError::Expr(format!("expected {}, got {}", kind_word(k), self.describe())));
+            }
         };
         if out.is_finite() { Ok(out) } else { Err(DocError::Expr("result is not a finite number".into())) }
+    }
+    /// "a length", "an angle", "length²"…
+    pub fn describe(&self) -> String {
+        match self.kind() {
+            Some(k) => kind_word(k).to_string(),
+            None => {
+                let pow = |name: &str, n: i8| match n {
+                    0 => String::new(),
+                    1 => name.to_string(),
+                    _ => format!("{name}^{n}"),
+                };
+                let parts: Vec<String> = [pow("length", self.len), pow("angle", self.ang)].into_iter().filter(|s| !s.is_empty()).collect();
+                format!("a value in {}", parts.join("·"))
+            }
+        }
+    }
+}
+
+fn kind_word(k: Kind) -> &'static str {
+    match k {
+        Kind::Length => "a length",
+        Kind::Angle => "an angle",
+        Kind::Unitless => "a unit-less number",
+    }
+}
+
+/// A number in the given unit (e.g. 50.8 mm in `in` is 2); unknown units leave it as is.
+pub fn value_in_unit(v: Value, unit: &str) -> f64 {
+    match (unit_info(unit), v.kind()) {
+        (Some((Kind::Length, s)), Some(Kind::Length)) | (Some((Kind::Angle, s)), Some(Kind::Angle)) if s != 0.0 => v.v / s,
+        _ => v.v,
     }
 }
 
 fn unit(name: &str) -> Option<Value> {
-    Some(match name {
-        "mm" => Value::length(1.0),
-        "cm" => Value::length(10.0),
-        "m" => Value::length(1000.0),
-        "um" => Value::length(0.001),
-        "in" | "inch" => Value::length(25.4),
-        "mil" => Value::length(0.0254),
-        "yd" => Value::length(914.4),
-        "km" => Value::length(1_000_000.0),
-        "nm" => Value::length(1e-6),
-        "ft" => Value::length(304.8),
-        "deg" => Value::angle(std::f64::consts::PI / 180.0),
-        "rad" => Value::angle(1.0),
-        _ => return None,
+    UNITS.iter().find(|(n, _, _)| *n == name).map(|(_, k, s)| match k {
+        Kind::Angle => Value::angle(*s),
+        _ => Value::length(*s),
     })
+}
+
+fn is_constant(id: &str) -> bool {
+    CONSTANTS.contains(&id)
+}
+
+/// Is this a name the expression language reserves (unit, constant or function)?
+pub fn is_reserved(name: &str) -> bool {
+    unit(name).is_some() || is_constant(name) || FUNCTIONS.iter().any(|(f, _)| *f == name)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -92,41 +228,61 @@ enum Tok {
     Op(char),
 }
 
-fn lex(s: &str) -> Result<Vec<Tok>, DocError> {
+/// Tokens with their byte ranges in the source.
+fn lex_spans(s: &str) -> Result<Vec<(Tok, usize, usize)>, DocError> {
     if s.len() > MAX_LEN {
         return Err(DocError::Expr("expression too long".into()));
     }
-    let cs: Vec<char> = s.chars().collect();
+    let cs: Vec<(usize, char)> = s.char_indices().collect();
+    let at = |i: usize| cs.get(i).map(|x| x.0).unwrap_or(s.len());
     let mut i = 0;
     let mut out = Vec::new();
-    while let Some(&c) = cs.get(i) {
+    while let Some(&(_, c)) = cs.get(i) {
         if c.is_whitespace() {
             i += 1;
         } else if c.is_ascii_digit() || c == '.' {
             let st = i;
-            while cs.get(i).is_some_and(|c| c.is_ascii_digit() || *c == '.') {
+            while cs.get(i).is_some_and(|(_, c)| c.is_ascii_digit() || *c == '.') {
                 i += 1;
             }
-            // Exponent: 1e-3
-            if cs.get(i).is_some_and(|c| *c == 'e' || *c == 'E') && cs.get(i + 1).is_some_and(|c| c.is_ascii_digit() || *c == '-' || *c == '+') {
-                i += 2;
-                while cs.get(i).is_some_and(char::is_ascii_digit) {
-                    i += 1;
+            // Exponent: 1e-3 (but not `2em`).
+            if cs.get(i).is_some_and(|(_, c)| *c == 'e' || *c == 'E') {
+                let sign = cs.get(i + 1).is_some_and(|(_, c)| *c == '-' || *c == '+');
+                let digit_at = if sign { i + 2 } else { i + 1 };
+                if cs.get(digit_at).is_some_and(|(_, c)| c.is_ascii_digit()) {
+                    i = digit_at;
+                    while cs.get(i).is_some_and(|(_, c)| c.is_ascii_digit()) {
+                        i += 1;
+                    }
                 }
             }
-            let t: String = cs.get(st..i).map(|s| s.iter().collect()).unwrap_or_default();
-            out.push(Tok::Num(t.parse().map_err(|_| DocError::Expr(format!("bad number `{t}`")))?));
-        } else if c.is_alphabetic() || c == '_' {
+            let t = s.get(at(st)..at(i)).unwrap_or_default();
+            let v: f64 = t.parse().map_err(|_| DocError::Expr(format!("bad number `{t}`")))?;
+            out.push((Tok::Num(v), at(st), at(i)));
+        } else if c.is_alphabetic() || c == '_' || c == 'µ' {
             let st = i;
-            while cs.get(i).is_some_and(|c| c.is_alphanumeric() || *c == '_') {
+            while cs.get(i).is_some_and(|(_, c)| c.is_alphanumeric() || *c == '_') {
                 i += 1;
             }
-            out.push(Tok::Id(cs.get(st..i).map(|s| s.iter().collect()).unwrap_or_default()));
+            out.push((Tok::Id(s.get(at(st)..at(i)).unwrap_or_default().to_string()), at(st), at(i)));
         } else if c == '°' {
-            out.push(Tok::Id("deg".into()));
+            out.push((Tok::Id("deg".into()), at(i), at(i + 1)));
             i += 1;
-        } else if "+-*/^(),".contains(c) {
-            out.push(Tok::Op(c));
+        } else if c == '×' || c == '·' {
+            out.push((Tok::Op('*'), at(i), at(i + 1)));
+            i += 1;
+        } else if c == '÷' {
+            out.push((Tok::Op('/'), at(i), at(i + 1)));
+            i += 1;
+        } else if c == '−' {
+            out.push((Tok::Op('-'), at(i), at(i + 1)));
+            i += 1;
+        } else if c == ';' {
+            // Fusion separates function arguments with `;` in some locales.
+            out.push((Tok::Op(','), at(i), at(i + 1)));
+            i += 1;
+        } else if "+-*/^(),%".contains(c) {
+            out.push((Tok::Op(c), at(i), at(i + 1)));
             i += 1;
         } else {
             return Err(DocError::Expr(format!("unexpected `{c}`")));
@@ -135,19 +291,63 @@ fn lex(s: &str) -> Result<Vec<Tok>, DocError> {
     Ok(out)
 }
 
-/// Identifiers an expression refers to (excluding units and functions).
+fn lex(s: &str) -> Result<Vec<Tok>, DocError> {
+    Ok(lex_spans(s)?.into_iter().map(|(t, _, _)| t).collect())
+}
+
+/// Is the identifier token at `i` a reference to a parameter (not a call, unit or constant)?
+fn is_reference(toks: &[Tok], i: usize, id: &str) -> bool {
+    let is_call = matches!(toks.get(i + 1), Some(Tok::Op('(')));
+    !is_call && unit(id).is_none() && !is_constant(id)
+}
+
+/// Identifiers an expression refers to (excluding units, constants and functions).
 pub fn references(s: &str) -> Vec<String> {
     let Ok(toks) = lex(s) else { return Vec::new() };
     let mut out: Vec<String> = Vec::new();
     for (i, t) in toks.iter().enumerate() {
-        if let Tok::Id(id) = t {
-            let is_call = matches!(toks.get(i + 1), Some(Tok::Op('(')));
-            if !is_call && unit(id).is_none() && id != "pi" && id != "PI" && !out.contains(id) {
-                out.push(id.clone());
-            }
+        if let Tok::Id(id) = t
+            && is_reference(&toks, i, id)
+            && !out.contains(id)
+        {
+            out.push(id.clone());
         }
     }
     out
+}
+
+/// The expression with every reference to `old` renamed to `new` (text otherwise kept).
+pub fn rename_reference(s: &str, old: &str, new: &str) -> String {
+    let Ok(spans) = lex_spans(s) else { return s.to_string() };
+    let toks: Vec<Tok> = spans.iter().map(|(t, _, _)| t.clone()).collect();
+    let mut out = String::with_capacity(s.len());
+    let mut last = 0;
+    for (i, (t, a, b)) in spans.iter().enumerate() {
+        if let Tok::Id(id) = t
+            && id == old
+            && is_reference(&toks, i, id)
+        {
+            out.push_str(s.get(last..*a).unwrap_or_default());
+            out.push_str(new);
+            last = *b;
+        }
+    }
+    out.push_str(s.get(last..).unwrap_or_default());
+    out
+}
+
+/// Is the expression just a number (with an optional unit), like `20`, `20 mm` or `-1.5 in`?
+pub fn is_literal(s: &str) -> bool {
+    let Ok(toks) = lex(s) else { return false };
+    let toks: &[Tok] = match toks.first() {
+        Some(Tok::Op('-' | '+')) => toks.get(1..).unwrap_or_default(),
+        _ => &toks,
+    };
+    match toks {
+        [Tok::Num(_)] => true,
+        [Tok::Num(_), Tok::Id(u)] => unit(u).is_some(),
+        _ => false,
+    }
 }
 
 struct Parser<'a> {
@@ -155,6 +355,7 @@ struct Parser<'a> {
     pos: usize,
     lookup: &'a dyn Fn(&str) -> Result<Value, DocError>,
     depth: usize,
+    defaults: Defaults,
 }
 
 impl Parser<'_> {
@@ -176,7 +377,7 @@ impl Parser<'_> {
         while let Some(Tok::Op(c @ ('+' | '-'))) = self.peek().cloned() {
             self.pos += 1;
             let b = self.term()?;
-            a = add(a, b, c == '-')?;
+            a = add(a, b, c == '-', self.defaults)?;
         }
         self.depth -= 1;
         Ok(a)
@@ -188,17 +389,22 @@ impl Parser<'_> {
                 Some(Tok::Op('*')) => {
                     self.pos += 1;
                     let b = self.unary()?;
-                    a = mul(a, b, false);
+                    a = mul(a, b, false)?;
                 }
                 Some(Tok::Op('/')) => {
                     self.pos += 1;
                     let b = self.unary()?;
-                    a = mul(a, b, true);
+                    a = mul(a, b, true)?;
+                }
+                Some(Tok::Op('%')) => {
+                    self.pos += 1;
+                    let b = self.unary()?;
+                    a = modulo(a, b, self.defaults)?;
                 }
                 // Juxtaposition: `10 mm`, `2 width`.
                 Some(Tok::Id(_) | Tok::Num(_)) | Some(Tok::Op('(')) => {
                     let b = self.unary()?;
-                    a = mul(a, b, false);
+                    a = mul(a, b, false)?;
                 }
                 _ => return Ok(a),
             }
@@ -215,7 +421,10 @@ impl Parser<'_> {
             }
             Some(Tok::Op('+')) => {
                 self.pos += 1;
-                self.unary()
+                self.enter()?;
+                let v = self.unary()?;
+                self.depth -= 1;
+                Ok(v)
             }
             _ => self.power(),
         }
@@ -227,15 +436,7 @@ impl Parser<'_> {
             self.enter()?;
             let e = self.unary()?;
             self.depth -= 1;
-            if !e.unitless() {
-                return Err(DocError::Expr("exponent must be unit-less".into()));
-            }
-            let n = e.v;
-            let k = if (n - n.round()).abs() < 1e-12 && n.abs() < 16.0 { n.round() as i8 } else { 0 };
-            if !base.unitless() && k == 0 {
-                return Err(DocError::Expr("dimensioned values need a small integer exponent".into()));
-            }
-            return Ok(Value { v: base.v.powf(n), len: base.len.saturating_mul(k), ang: base.ang.saturating_mul(k) });
+            return pow(base, e);
         }
         Ok(base)
     }
@@ -255,20 +456,24 @@ impl Parser<'_> {
                     let mut args = Vec::new();
                     if !matches!(self.peek(), Some(Tok::Op(')'))) {
                         loop {
+                            if args.len() >= MAX_ARGS {
+                                return Err(DocError::Expr(format!("too many arguments to `{id}`")));
+                            }
                             args.push(self.expr()?);
                             match self.next() {
                                 Some(Tok::Op(',')) => continue,
                                 Some(Tok::Op(')')) => break,
-                                _ => return Err(DocError::Expr("bad function arguments".into())),
+                                _ => return Err(DocError::Expr(format!("missing `)` after the arguments of `{id}`"))),
                             }
                         }
                     } else {
                         self.pos += 1;
                     }
-                    return call(&id, &args);
+                    return call(&id, &args, self.defaults);
                 }
-                if id == "pi" || id == "PI" {
-                    return Ok(Value::num(std::f64::consts::PI));
+                match id.as_str() {
+                    "pi" | "PI" => return Ok(Value::num(std::f64::consts::PI)),
+                    _ => {}
                 }
                 if let Some(u) = unit(&id) {
                     return Ok(u);
@@ -281,115 +486,178 @@ impl Parser<'_> {
     }
 }
 
-fn add(a: Value, b: Value, sub: bool) -> Result<Value, DocError> {
+/// A unit-less number next to a dimensioned value, in that value's default unit.
+fn scale_bare(x: Value, len: i8, ang: i8, d: Defaults) -> f64 {
+    if !x.unitless() {
+        x.v
+    } else if len == 1 && ang == 0 {
+        x.v * d.len
+    } else if ang == 1 && len == 0 {
+        x.v * d.ang
+    } else {
+        x.v
+    }
+}
+
+fn add(a: Value, b: Value, sub: bool, d: Defaults) -> Result<Value, DocError> {
     let (len, ang) = if a.unitless() {
         (b.len, b.ang)
     } else if b.unitless() || (a.len == b.len && a.ang == b.ang) {
         (a.len, a.ang)
     } else {
-        return Err(DocError::Expr("cannot add values with different units".into()));
+        return Err(DocError::Expr(format!("cannot {} {} and {}", if sub { "subtract" } else { "add" }, a.describe(), b.describe())));
     };
-    // A unit-less operand next to an angle is in degrees.
-    let conv = |x: Value| if x.unitless() && ang == 1 && len == 0 { x.v.to_radians() } else { x.v };
-    let (x, y) = (conv(a), conv(b));
+    let (x, y) = (scale_bare(a, len, ang, d), scale_bare(b, len, ang, d));
     Ok(Value { v: if sub { x - y } else { x + y }, len, ang })
 }
 
-fn mul(a: Value, b: Value, div: bool) -> Value {
+fn dims(a: i8, b: i8, sub: bool) -> Result<i8, DocError> {
+    let r = if sub { a.checked_sub(b) } else { a.checked_add(b) };
+    r.filter(|x| x.abs() <= 16).ok_or_else(|| DocError::Expr("unit powers too large".into()))
+}
+
+fn mul(a: Value, b: Value, div: bool) -> Result<Value, DocError> {
     if div {
-        Value { v: a.v / b.v, len: a.len.saturating_sub(b.len), ang: a.ang.saturating_sub(b.ang) }
+        if b.v == 0.0 {
+            return Err(DocError::Expr("division by zero".into()));
+        }
+        Ok(Value { v: a.v / b.v, len: dims(a.len, b.len, true)?, ang: dims(a.ang, b.ang, true)? })
     } else {
-        Value { v: a.v * b.v, len: a.len.saturating_add(b.len), ang: a.ang.saturating_add(b.ang) }
+        Ok(Value { v: a.v * b.v, len: dims(a.len, b.len, false)?, ang: dims(a.ang, b.ang, false)? })
     }
 }
 
-fn call(f: &str, args: &[Value]) -> Result<Value, DocError> {
+fn modulo(a: Value, b: Value, d: Defaults) -> Result<Value, DocError> {
+    let (len, ang) = if a.unitless() { (b.len, b.ang) } else { (a.len, a.ang) };
+    if !(a.unitless() || b.unitless() || (a.len == b.len && a.ang == b.ang)) {
+        return Err(DocError::Expr(format!("cannot take {} modulo {}", a.describe(), b.describe())));
+    }
+    let (x, y) = (scale_bare(a, len, ang, d), scale_bare(b, len, ang, d));
+    if y == 0.0 {
+        return Err(DocError::Expr("modulo by zero".into()));
+    }
+    Ok(Value { v: x.rem_euclid(y), len, ang })
+}
+
+fn pow(base: Value, e: Value) -> Result<Value, DocError> {
+    if !e.unitless() {
+        return Err(DocError::Expr(format!("an exponent must be a unit-less number, not {}", e.describe())));
+    }
+    let n = e.v;
+    let k = if (n - n.round()).abs() < 1e-12 && n.abs() < 16.0 { n.round() as i8 } else { 0 };
+    if !base.unitless() && k == 0 {
+        return Err(DocError::Expr("a value with units needs a small whole-number exponent".into()));
+    }
+    Ok(Value { v: base.v.powf(n), len: dims(0, base.len.saturating_mul(k), false)?, ang: dims(0, base.ang.saturating_mul(k), false)? })
+}
+
+fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
     let one = || match args {
         [a] => Ok(*a),
         _ => Err(DocError::Expr(format!("`{f}` takes one argument"))),
+    };
+    let two = || match args {
+        [a, b] => Ok((*a, *b)),
+        _ => Err(DocError::Expr(format!("`{f}` takes two arguments"))),
     };
     let rad = |a: Value| {
         if a.ang == 1 && a.len == 0 {
             Ok(a.v)
         } else if a.unitless() {
-            Ok(a.v.to_radians())
+            Ok(a.v * d.ang)
         } else {
-            Err(DocError::Expr(format!("`{f}` needs an angle")))
+            Err(DocError::Expr(format!("`{f}` needs an angle, not {}", a.describe())))
         }
     };
-    let num = |a: Value| if a.unitless() { Ok(a.v) } else { Err(DocError::Expr(format!("`{f}` needs a unit-less value"))) };
+    let num = |a: Value| if a.unitless() { Ok(a.v) } else { Err(DocError::Expr(format!("`{f}` needs a unit-less number, not {}", a.describe()))) };
+    let same = |a: Value, b: Value| -> Result<(Value, Value), DocError> {
+        // Bring a bare number to the other operand's unit (as in `a + b`).
+        let z = add(a, Value { v: 0.0, ..b }, false, d)?;
+        let w = add(b, Value { v: 0.0, ..a }, false, d)?;
+        Ok((z, w))
+    };
+    let unit_fn = |x: f64, a: Value| Value { v: x, ..a };
     Ok(match f {
         "sin" => Value::num(rad(one()?)?.sin()),
         "cos" => Value::num(rad(one()?)?.cos()),
         "tan" => Value::num(rad(one()?)?.tan()),
-        "asin" => Value::angle(num(one()?)?.asin()),
-        "acos" => Value::angle(num(one()?)?.acos()),
+        "asin" | "acos" => {
+            let x = num(one()?)?;
+            if !(-1.0..=1.0).contains(&x) {
+                return Err(DocError::Expr(format!("`{f}` needs a number between -1 and 1")));
+            }
+            Value::angle(if f == "asin" { x.asin() } else { x.acos() })
+        }
         "atan" => Value::angle(num(one()?)?.atan()),
+        "atan2" => {
+            let (y, x) = two()?;
+            let (y, x) = same(y, x)?;
+            if y.len != x.len || y.ang != x.ang {
+                return Err(DocError::Expr("`atan2` needs two values with the same units".into()));
+            }
+            Value::angle(y.v.atan2(x.v))
+        }
         "sqrt" => {
             let a = one()?;
             if a.len % 2 != 0 || a.ang % 2 != 0 {
                 return Err(DocError::Expr("sqrt of an odd power of a unit".into()));
             }
+            if a.v < 0.0 {
+                return Err(DocError::Expr("sqrt of a negative number".into()));
+            }
             Value { v: a.v.sqrt(), len: a.len / 2, ang: a.ang / 2 }
         }
-        "exp" => Value::num(num(one()?)?.exp()),
-        "ln" => Value::num(num(one()?)?.ln()),
-        "log" | "log10" => Value::num(num(one()?)?.log10()),
-        "sign" => {
-            let a = one()?;
-            Value::num(if a.v > 0.0 {
-                1.0
-            } else if a.v < 0.0 {
-                -1.0
-            } else {
-                0.0
-            })
-        }
-        "pow" => match args {
-            [a, b] => {
-                let e = num(*b)?;
-                if a.unitless() {
-                    Value::num(a.v.powf(e))
-                } else if (e - e.round()).abs() < 1e-12 && e.abs() <= 6.0 {
-                    let k = e.round() as i8;
-                    let (Some(len), Some(ang)) = (a.len.checked_mul(k), a.ang.checked_mul(k)) else {
-                        return Err(DocError::Expr("unit power too large".into()));
-                    };
-                    Value { v: a.v.powi(i32::from(k)), len, ang }
-                } else {
-                    return Err(DocError::Expr("pow of a unit needs a whole exponent".into()));
-                }
-            }
-            _ => return Err(DocError::Expr("`pow` takes two arguments".into())),
-        },
-        "hypot" => match args {
-            [a, b] => {
-                let s = add(*b, Value { v: 0.0, ..*a }, false)?;
-                Value { v: a.v.hypot(s.v), ..*a }
-            }
-            _ => return Err(DocError::Expr("`hypot` takes two arguments".into())),
-        },
         "abs" => {
             let a = one()?;
-            Value { v: a.v.abs(), ..a }
+            unit_fn(a.v.abs(), a)
         }
-        "floor" | "ceil" | "round" => {
+        "sign" => Value::num(one()?.v.signum()),
+        "floor" | "ceil" | "round" | "trunc" => {
             let a = one()?;
-            let v = match f {
-                "floor" => a.v.floor(),
-                "ceil" => a.v.ceil(),
-                _ => a.v.round(),
+            // Round in the value's own default unit (round(2.4 in) = 2 in for an inch parameter).
+            let scale = scale_bare(Value::num(1.0), a.len, a.ang, d);
+            let x = if scale != 0.0 { a.v / scale } else { a.v };
+            let r = match f {
+                "floor" => x.floor(),
+                "ceil" => x.ceil(),
+                "trunc" => x.trunc(),
+                _ => x.round(),
             };
-            Value { v, ..a }
+            unit_fn(r * if scale != 0.0 { scale } else { 1.0 }, a)
+        }
+        "exp" => Value::num(num(one()?)?.exp()),
+        "ln" | "log" | "log10" => {
+            let x = num(one()?)?;
+            if x <= 0.0 {
+                return Err(DocError::Expr(format!("`{f}` needs a positive number")));
+            }
+            Value::num(if f == "ln" { x.ln() } else { x.log10() })
+        }
+        "hypot" => {
+            let (a, b) = two()?;
+            let (a, b) = same(a, b)?;
+            if a.len != b.len || a.ang != b.ang {
+                return Err(DocError::Expr("`hypot` needs two values with the same units".into()));
+            }
+            unit_fn(a.v.hypot(b.v), a)
+        }
+        "pow" => {
+            let (a, b) = two()?;
+            pow(a, b)?
+        }
+        "mod" => {
+            let (a, b) = two()?;
+            modulo(a, b, d)?
         }
         "min" | "max" => {
             let Some(first) = args.first().copied() else { return Err(DocError::Expr(format!("`{f}` needs arguments"))) };
             let mut acc = first;
             for a in args.iter().skip(1) {
-                let d = add(*a, Value { v: 0.0, ..acc }, false)?;
-                if (f == "min" && d.v < acc.v) || (f == "max" && d.v > acc.v) {
-                    acc = d;
+                let (x, y) = same(*a, acc)?;
+                if x.len != y.len || x.ang != y.ang {
+                    return Err(DocError::Expr(format!("`{f}` needs values with the same units")));
                 }
+                acc = if (f == "min" && x.v < y.v) || (f == "max" && x.v > y.v) { x } else { y };
             }
             acc
         }
@@ -397,13 +665,18 @@ fn call(f: &str, args: &[Value]) -> Result<Value, DocError> {
     })
 }
 
-/// Evaluate an expression; `lookup` resolves parameter names.
+/// Evaluate an expression; `lookup` resolves parameter names. Bare numbers are mm / degrees.
 pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> Result<Value, DocError> {
+    eval_with_defaults(s, lookup, Defaults::default())
+}
+
+/// Evaluate an expression reading bare numbers next to lengths / angles in `defaults`.
+pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>, defaults: Defaults) -> Result<Value, DocError> {
     let toks = lex(s)?;
     if toks.is_empty() {
         return Err(DocError::Expr("empty expression".into()));
     }
-    let mut p = Parser { toks, pos: 0, lookup, depth: 0 };
+    let mut p = Parser { toks, pos: 0, lookup, depth: 0, defaults };
     let v = p.expr()?;
     if p.pos < p.toks.len() {
         return Err(DocError::Expr(format!("unexpected input in `{s}`")));
@@ -414,73 +687,107 @@ pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> R
     Ok(v)
 }
 
-/// Evaluate all parameters (name → (expression, kind)) in dependency order.
-pub fn eval_params(params: &[(String, String, Kind)]) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
+/// One parameter to evaluate: name, expression and unit (`mm`, `in`, `deg`, empty…).
+#[derive(Clone, Debug)]
+pub struct ParamDef {
+    pub name: String,
+    pub expr: String,
+    pub unit: String,
+}
+
+/// Evaluate all parameters in dependency order: values (mm / rad / unit-less) and errors by
+/// name. Circular references are reported with their path (`a → b → a`). `doc_len` is the
+/// document's length unit in mm (bare numbers of unit-less-unit parameters next to lengths).
+pub fn eval_params(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
     let mut done: BTreeMap<String, Value> = BTreeMap::new();
     let mut errors: BTreeMap<String, String> = BTreeMap::new();
-    fn visit(
-        name: &str,
-        params: &[(String, String, Kind)],
-        done: &mut BTreeMap<String, Value>,
-        errors: &mut BTreeMap<String, String>,
-        stack: &mut Vec<String>,
-    ) -> Result<Value, DocError> {
-        if let Some(v) = done.get(name) {
+    let index: BTreeMap<&str, &ParamDef> = params.iter().map(|p| (p.name.as_str(), p)).collect();
+    struct Ctx<'a> {
+        index: BTreeMap<&'a str, &'a ParamDef>,
+        done: BTreeMap<String, Value>,
+        errors: BTreeMap<String, String>,
+        stack: Vec<String>,
+        doc_len: f64,
+    }
+    fn visit(name: &str, cx: &mut Ctx) -> Result<Value, DocError> {
+        if let Some(v) = cx.done.get(name) {
             return Ok(*v);
         }
-        if let Some(e) = errors.get(name) {
-            return Err(DocError::Expr(e.clone()));
+        if let Some(e) = cx.errors.get(name) {
+            return Err(DocError::Expr(format!("`{name}` has an error: {e}")));
         }
-        let Some((_, expr, kind)) = params.iter().find(|(n, _, _)| n == name) else {
+        let Some(p) = cx.index.get(name).copied() else {
             return Err(DocError::Expr(format!("unknown parameter `{name}`")));
         };
-        if stack.iter().any(|s| s == name) || stack.len() > 256 {
-            return Err(DocError::Expr(format!("circular reference through `{name}`")));
+        if let Some(at) = cx.stack.iter().position(|s| s == name) {
+            let mut path: Vec<&str> = cx.stack.iter().skip(at).map(String::as_str).collect();
+            path.push(name);
+            return Err(DocError::Expr(format!("circular reference: {}", path.join(" → "))));
         }
-        stack.push(name.to_string());
-        let r = {
-            let deps = references(expr);
-            let mut vals: BTreeMap<String, Value> = BTreeMap::new();
-            let mut err = None;
-            for d in deps {
-                match visit(&d, params, done, errors, stack) {
-                    Ok(v) => {
-                        vals.insert(d, v);
-                    }
-                    Err(e) => {
-                        err = Some(e);
-                        break;
-                    }
+        if cx.stack.len() > 512 {
+            return Err(DocError::Expr("parameters nested too deeply".into()));
+        }
+        let Some((kind, _)) = unit_info(&p.unit).or(Some((Kind::Length, 1.0))) else {
+            return Err(DocError::Expr(format!("unknown unit `{}`", p.unit)));
+        };
+        let defaults = Defaults::for_unit(&p.unit, cx.doc_len);
+        cx.stack.push(name.to_string());
+        let mut vals: BTreeMap<String, Value> = BTreeMap::new();
+        let mut err = None;
+        for d in references(&p.expr) {
+            match visit(&d, cx) {
+                Ok(v) => {
+                    vals.insert(d, v);
+                }
+                Err(e) => {
+                    err = Some(e);
+                    break;
                 }
             }
-            match err {
-                Some(e) => Err(e),
-                None => eval_with(expr, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")))).and_then(|v| {
-                    let x = v.to_kind(*kind)?;
-                    Ok(match kind {
-                        Kind::Length => Value::length(x),
-                        Kind::Angle => Value::angle(x),
-                        Kind::Unitless => Value::num(x),
+        }
+        cx.stack.pop();
+        let r = match err {
+            Some(e) => Err(e),
+            None => {
+                eval_with_defaults(&p.expr, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))), defaults)
+                    .and_then(|v| {
+                        let x = v.to_kind_in(kind, defaults)?;
+                        Ok(match kind {
+                            Kind::Length => Value::length(x),
+                            Kind::Angle => Value::angle(x),
+                            Kind::Unitless => Value::num(x),
+                        })
                     })
-                }),
             }
         };
-        stack.pop();
         match &r {
             Ok(v) => {
-                done.insert(name.to_string(), *v);
+                cx.done.insert(name.to_string(), *v);
             }
             Err(e) => {
-                errors.insert(name.to_string(), e.to_string());
+                let msg = e.to_string();
+                cx.errors.insert(name.to_string(), msg.strip_prefix("expression: ").unwrap_or(&msg).to_string());
             }
         }
         r
     }
-    for (n, _, _) in params {
-        let mut stack = Vec::new();
-        let _ = visit(n, params, &mut done, &mut errors, &mut stack);
+    let mut cx = Ctx { index, done: std::mem::take(&mut done), errors: std::mem::take(&mut errors), stack: Vec::new(), doc_len };
+    for p in params {
+        cx.stack.clear();
+        let _ = visit(&p.name, &mut cx);
     }
-    (done, errors)
+    (cx.done, cx.errors)
+}
+
+/// Dependency edges between parameters: (parameter, parameter it references).
+pub fn param_edges(params: &[ParamDef]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for p in params {
+        for r in references(&p.expr) {
+            out.push((p.name.clone(), r));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -495,6 +802,10 @@ mod tests {
             _ => Err(DocError::Expr(format!("unknown {n}"))),
         };
         eval_with(s, &look)?.to_kind(k)
+    }
+
+    fn def(n: &str, e: &str, u: &str) -> ParamDef {
+        ParamDef { name: n.into(), expr: e.into(), unit: u.into() }
     }
 
     #[test]
@@ -514,34 +825,122 @@ mod tests {
         assert!((ev("sin(30)", Kind::Unitless).unwrap() - 0.5).abs() < 1e-12);
         assert!((ev("2*pi", Kind::Unitless).unwrap() - std::f64::consts::TAU).abs() < 1e-12);
         assert_eq!(ev("max(1 mm, 3, 2)", Kind::Length).unwrap(), 3.0);
+        assert_eq!(ev("min(1 in, 30 mm)", Kind::Length).unwrap(), 25.4);
         assert_eq!(ev("1e-3 m", Kind::Length).unwrap(), 1.0);
+        assert_eq!(ev("1 ft - 1 in", Kind::Length).unwrap(), 304.8 - 25.4);
+        assert!((ev("atan2(1 mm, 1 mm)", Kind::Angle).unwrap() - std::f64::consts::FRAC_PI_4).abs() < 1e-12);
+        assert!((ev("atan2(1; 1)", Kind::Angle).unwrap() - std::f64::consts::FRAC_PI_4).abs() < 1e-12);
+        assert!((ev("exp(ln(5))", Kind::Unitless).unwrap() - 5.0).abs() < 1e-12);
+        assert!((ev("log(1000)", Kind::Unitless).unwrap() - 3.0).abs() < 1e-12);
+        assert_eq!(ev("floor(2.7) + ceil(0.2) + round(1.5) + abs(-1)", Kind::Unitless).unwrap(), 6.0);
+        assert!((ev("1 rad", Kind::Angle).unwrap() - 1.0).abs() < 1e-12);
+        assert!((ev("acos(0)", Kind::Angle).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        assert_eq!(ev("2 × 3 ÷ 4 − 1", Kind::Unitless).unwrap(), 0.5);
+        assert_eq!(ev("hypot(3 mm, 4 mm)", Kind::Length).unwrap(), 5.0);
+        assert_eq!(ev("7 % 4", Kind::Unitless).unwrap(), 3.0);
+        assert_eq!(ev("width^2 / width", Kind::Length).unwrap(), 40.0);
     }
 
     #[test]
     fn errors() {
         assert!(ev("width + ang", Kind::Length).is_err());
-        assert!(ev("width * width", Kind::Length).is_err());
+        let e = ev("10 mm + 5 deg", Kind::Length).unwrap_err().to_string();
+        assert!(e.contains("cannot add a length and an angle"), "{e}");
+        assert!(ev("width * width", Kind::Length).unwrap_err().to_string().contains("expected a length"));
         assert!(ev("nope", Kind::Length).is_err());
         assert!(ev("(1", Kind::Length).is_err());
         assert!(ev("1 / 0", Kind::Length).is_err());
         assert!(ev("", Kind::Length).is_err());
         assert!(ev("1 $ 2", Kind::Length).is_err());
+        assert!(ev("sqrt(-1)", Kind::Unitless).is_err());
+        assert!(ev("asin(2)", Kind::Angle).is_err());
+        assert!(ev("ln(0)", Kind::Unitless).is_err());
+        assert!(ev("sin(1 mm)", Kind::Unitless).is_err());
+        assert!(ev("atan2(1 mm, 1 deg)", Kind::Angle).is_err());
+        assert!(ev("10 ^ 400", Kind::Unitless).is_err());
+        assert!(ev("width ^ 1.5", Kind::Unitless).is_err());
+        assert!(ev("max()", Kind::Unitless).is_err());
+        assert!(ev("frob(1)", Kind::Unitless).is_err());
         let deep = "(".repeat(500) + "1" + &")".repeat(500);
         assert!(ev(&deep, Kind::Length).is_err());
         assert!(ev(&"-".repeat(500), Kind::Length).is_err());
+        assert!(ev(&"+".repeat(500), Kind::Length).is_err());
+        assert!(ev(&"width*".repeat(100), Kind::Length).is_err());
+        assert!(ev(&("2^".repeat(200) + "2"), Kind::Unitless).is_err());
+    }
+
+    /// Hostile input never panics: random strings over the expression alphabet.
+    #[test]
+    fn fuzz_never_panics() {
+        let alphabet: Vec<char> = "0123456789.eE+-*/^(),;% abcdmnpitrsgxw_°×÷−µ\u{0}\u{7f}é\"'".chars().collect();
+        let words = ["width", "sin(", "atan2(", "mm", "deg", "pi", "1e308", "1e-400", "(", ")", "^", "max(", "in", "count", ","];
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..20_000 {
+            let n = (rnd() % 40) as usize;
+            let mut s = String::new();
+            for _ in 0..n {
+                if rnd() % 4 == 0 {
+                    s.push_str(words[(rnd() % words.len() as u64) as usize]);
+                } else {
+                    s.push(alphabet[(rnd() % alphabet.len() as u64) as usize]);
+                }
+            }
+            for k in [Kind::Length, Kind::Angle, Kind::Unitless] {
+                let _ = ev(&s, k);
+            }
+            let _ = references(&s);
+            let _ = rename_reference(&s, "width", "w2");
+            let _ = is_literal(&s);
+        }
     }
 
     #[test]
     fn params_in_order_with_cycles() {
-        let p = vec![
-            ("b".to_string(), "a * 2".to_string(), Kind::Length),
-            ("a".to_string(), "10 mm".to_string(), Kind::Length),
-            ("x".to_string(), "y".to_string(), Kind::Length),
-            ("y".to_string(), "x + 1".to_string(), Kind::Length),
-        ];
-        let (v, e) = eval_params(&p);
+        let p = vec![def("b", "a * 2", "mm"), def("a", "10 mm", "mm"), def("x", "y", "mm"), def("y", "z + 1", "mm"), def("z", "x", "mm")];
+        let (v, e) = eval_params(&p, 1.0);
         assert_eq!(v.get("b").unwrap().v, 20.0);
-        assert!(e.contains_key("x") && e.contains_key("y"));
-        assert_eq!(references("2*width + sin(ang) + 3 mm"), vec!["width".to_string(), "ang".to_string()]);
+        assert!(e.contains_key("x") && e.contains_key("y") && e.contains_key("z"));
+        assert!(e["x"].contains("circular reference: x → y → z → x"), "{}", e["x"]);
+        assert_eq!(references("2*width + sin(ang) + 3 mm + pi"), vec!["width".to_string(), "ang".to_string()]);
+        let (_, e) = eval_params(&[def("s", "s", "mm")], 1.0);
+        assert!(e["s"].contains("s → s"));
+    }
+
+    #[test]
+    fn parameter_units() {
+        let p = vec![
+            def("a", "2", "in"),
+            def("b", "a + 1", "in"),
+            def("c", "b", "mm"),
+            def("t", "0.5", "rad"),
+            def("u", "t + 1", "rad"),
+            def("k", "3", ""),
+            def("bad", "a + t", "mm"),
+            def("mixed", "1 in + 2", "mm"),
+        ];
+        let (v, e) = eval_params(&p, 1.0);
+        assert!((v["a"].v - 50.8).abs() < 1e-9);
+        assert!((v["b"].v - 76.2).abs() < 1e-9);
+        assert!((v["c"].v - 76.2).abs() < 1e-9);
+        assert!((v["u"].v - 1.5).abs() < 1e-12);
+        assert_eq!(v["k"], Value::num(3.0));
+        assert!(e["bad"].contains("cannot add"));
+        assert!((v["mixed"].v - 27.4).abs() < 1e-9);
+        assert!((value_in_unit(v["b"], "in") - 3.0).abs() < 1e-12);
+        assert!((value_in_unit(Value::angle(std::f64::consts::PI), "deg") - 180.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rename_and_literals() {
+        assert_eq!(rename_reference("width*2 + widths + width(1) + sin(width)", "width", "w"), "w*2 + widths + width(1) + sin(w)");
+        assert_eq!(rename_reference("10 mm", "mm", "x"), "10 mm");
+        assert!(is_literal("20") && is_literal("-1.5 in") && is_literal("3 deg"));
+        assert!(!is_literal("d1") && !is_literal("2 * 3") && !is_literal("2 width"));
     }
 }

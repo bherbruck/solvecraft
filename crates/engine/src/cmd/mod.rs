@@ -11,6 +11,7 @@ mod file;
 mod inspect;
 mod measure_sel;
 pub(crate) use measure_sel::measure_items;
+mod parameters;
 mod sketch;
 mod sketch_constraints;
 mod sketch_create;
@@ -121,6 +122,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(features::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
+    v.extend(parameters::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v
