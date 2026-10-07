@@ -697,3 +697,36 @@ fn holes_at_sketch_points_threads_and_components() {
     assert_eq!(back.components.len(), 2);
     assert_eq!(back.body_components.len(), 1);
 }
+
+#[test]
+fn pipe_scale_offset_bounding_and_materials() {
+    let mut s = Session::default();
+    // Pipe along an L path (line, arc, line) on XZ.
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [30, 0]], "ids": ["l1"]}));
+    run(&mut s, "ArcCenterTwoPoint", json!({"center": [30, 10], "start": "l1.end", "end": [40, 10], "id": "a1"}));
+    run(&mut s, "DrawPolyline", json!({"points": ["a1.end", [40, 40]], "ids": ["l2"]}));
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "PrimitivePipe", json!({"path_sketch": "Path", "path": ["l1", "a1", "l2"], "diameter": 4, "wall": 1, "body_name": "Tube"}));
+    let len = 30.0 + PI * 10.0 / 2.0 + 30.0;
+    let v = volume(&mut s);
+    assert!(rel(v, PI * (4.0 - 1.0) * len) < 2e-3, "{v} vs {}", PI * 3.0 * len);
+    // Bounding solid around it; then scale a box and push one of its faces.
+    run(&mut s, "StockModelCommand", json!({"bodies": ["Tube"], "margin": 1, "body_name": "Stock"}));
+    let m = run(&mut s, "MeasureCommand", json!({"bodies": ["Stock"]}));
+    let bb = &m["bodies"][0]["bbox"];
+    assert!((bb["min"][1].as_f64().unwrap() + 3.0).abs() < 1e-6 && (bb["max"][1].as_f64().unwrap() - 41.0).abs() < 1e-6, "{bb}");
+    run(&mut s, "PrimitiveBox", json!({"corner": [100, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    run(&mut s, "ModifyScale", json!({"bodies": ["Cube"], "factor": 2, "origin": [100, 0, 0]}));
+    let vc = run(&mut s, "MeasureCommand", json!({"bodies": ["Cube"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(vc, 8000.0) < 1e-9, "{vc}");
+    run(&mut s, "FusionOffsetFacesCommand", json!({"faces": [[110, 10, 20]], "distance": 5}));
+    let vc = run(&mut s, "MeasureCommand", json!({"bodies": ["Cube"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(vc, 20.0 * 20.0 * 25.0) < 1e-9, "{vc}");
+    // Materials and mass.
+    run(&mut s, "PhysicalMaterialCommand", json!({"bodies": ["Cube"], "material": "aluminum"}));
+    let m = run(&mut s, "MeasureCommand", json!({"bodies": ["Cube"]}));
+    assert!((m["bodies"][0]["mass_g"].as_f64().unwrap() - 10_000.0 * 2.7 / 1000.0).abs() < 1e-6, "{m}");
+    assert_eq!(m["bodies"][0]["material"], "Aluminum");
+    assert!(s.execute("PhysicalMaterialCommand", &json!({"bodies": ["Cube"], "material": "unobtainium"})).is_err());
+}

@@ -48,6 +48,22 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("hole")
         .key("H")
         .params("position: [x,y,z] on a face | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch); direction?: [x,y,z] (default: into the face); diameter; depth? (default through all); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\" (cosmetic)"),
+    CommandSpec::new("PrimitivePipe", "Pipe", pipe)
+        .at("SOLID", "CREATE")
+        .icon("pipe")
+        .params("path_sketch: sketch; path: [curve ids in order]; diameter: expr; wall?: expr (hollow); operation?, targets?, name?, body_name?"),
+    CommandSpec::new("StockModelCommand", "Bounding Solid", bounding_solid)
+        .at("SOLID", "CREATE")
+        .icon("box")
+        .params("bodies?: [names] (default: all); margin?: expr; name?, body_name?"),
+    CommandSpec::new("ModifyScale", "Scale", scale)
+        .at("SOLID", "MODIFY")
+        .icon("scale")
+        .params("bodies: [names]; factor: expr | factors: [x, y, z] exprs; origin?: [x,y,z]"),
+    CommandSpec::new("FusionOffsetFacesCommand", "Offset Face", offset_face)
+        .at("SOLID", "MODIFY")
+        .icon("offset_face")
+        .params("faces: [[x,y,z] points on planar faces]; distance: expr (positive: outward); body?"),
     CommandSpec::new("FusionThreadCommand", "Thread", thread)
         .at("SOLID", "CREATE")
         .icon("thread")
@@ -782,4 +798,62 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     let t = v.get("feature").and_then(Value::as_u64).and_then(|id| st.threads.iter().find(|t| t.feature == id).cloned());
     Ok(json!({"feature": v.get("feature"), "name": v.get("name"), "thread": t}))
+}
+
+fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "PrimitivePipe";
+    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
+    let path = string_list(p, "path");
+    if path.is_empty() {
+        return Err(bad(cmd, "`path` must list curve ids"));
+    }
+    let diameter = req_expr(cmd, p, "diameter")?;
+    check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
+    let wall = expr(p, "wall");
+    if let Some(w) = &wall {
+        check_expr(s, w, Kind::Length, cmd, "wall")?;
+    }
+    add_feature(s, p, FeatureKind::Pipe { path_sketch, path, diameter, wall, operation: operation(p, cmd)?, targets: string_list(p, "targets") })
+}
+
+fn bounding_solid(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "StockModelCommand";
+    let margin = expr(p, "margin").unwrap_or_else(|| "0".into());
+    check_expr(s, &margin, Kind::Length, cmd, "margin")?;
+    add_feature(s, p, FeatureKind::BoundingSolid { bodies: string_list(p, "bodies"), margin })
+}
+
+fn scale(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ModifyScale";
+    let bodies = string_list(p, "bodies");
+    if bodies.is_empty() {
+        return Err(bad(cmd, "`bodies` must list bodies"));
+    }
+    let factors = match p.get("factors").and_then(Value::as_array) {
+        Some(a) if a.len() == 3 => {
+            let e: Vec<String> = a.iter().map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).collect();
+            for x in &e {
+                check_expr(s, x, Kind::Unitless, cmd, "factors")?;
+            }
+            Some([e[0].clone(), e[1].clone(), e[2].clone()])
+        }
+        Some(_) => return Err(bad(cmd, "`factors` must have three values")),
+        None => None,
+    };
+    let factor = match (&factors, expr(p, "factor")) {
+        (_, Some(f)) => f,
+        (Some(_), None) => "1".into(),
+        (None, None) => return Err(bad(cmd, "give `factor` or `factors`")),
+    };
+    check_expr(s, &factor, Kind::Unitless, cmd, "factor")?;
+    let origin = p.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
+    add_feature(s, p, FeatureKind::Scale { bodies, origin, factor, factors })
+}
+
+fn offset_face(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionOffsetFacesCommand";
+    let faces = face_points(p, cmd)?;
+    let distance = req_expr(cmd, p, "distance")?;
+    check_expr(s, &distance, Kind::Length, cmd, "distance")?;
+    add_feature(s, p, FeatureKind::OffsetFace { faces, distance, body: str_(p, "body").map(str::to_string) })
 }

@@ -289,6 +289,41 @@ pub enum FeatureKind {
         body: String,
         plane: PlaneRef,
     },
+    /// Scale bodies about a point (uniform, or per axis).
+    Scale {
+        bodies: Vec<String>,
+        #[serde(default)]
+        origin: Vec3,
+        factor: String,
+        /// Per-axis factors instead of `factor`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        factors: Option<[String; 3]>,
+    },
+    /// Move planar faces (at the given points) along their normals; the body keeps its shape.
+    OffsetFace {
+        faces: Vec<Vec3>,
+        distance: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
+    /// A box around bodies, grown by a margin.
+    BoundingSolid {
+        bodies: Vec<String>,
+        #[serde(default = "zero_expr")]
+        margin: String,
+    },
+    /// A tube along a chain of sketch curves (solid, or hollow with a wall thickness).
+    Pipe {
+        path_sketch: u64,
+        path: Vec<String>,
+        diameter: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wall: Option<String>,
+        #[serde(default)]
+        operation: Operation,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<String>,
+    },
     Move {
         bodies: Vec<String>,
         translate: [String; 3],
@@ -445,6 +480,10 @@ impl FeatureKind {
             FeatureKind::Draft { .. } => "DraftFeature",
             FeatureKind::Split { .. } => "SplitBodyFeature",
             FeatureKind::Move { .. } => "MoveFeature",
+            FeatureKind::Scale { .. } => "ScaleFeature",
+            FeatureKind::OffsetFace { .. } => "OffsetFacesFeature",
+            FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
+            FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::Import { .. } => "BaseFeature",
             FeatureKind::MeshImport { .. } => "MeshFeature",
         }
@@ -474,6 +513,10 @@ impl FeatureKind {
             FeatureKind::Draft { .. } => "Draft",
             FeatureKind::Split { .. } => "Split",
             FeatureKind::Move { .. } => "Move",
+            FeatureKind::Scale { .. } => "Scale",
+            FeatureKind::OffsetFace { .. } => "OffsetFace",
+            FeatureKind::BoundingSolid { .. } => "BoundingSolid",
+            FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
         }
@@ -531,6 +574,16 @@ impl FeatureKind {
                 }
             }
             FeatureKind::Thread { length, .. } => v.extend(length.iter().map(String::as_str)),
+            FeatureKind::Scale { factor, factors, .. } => {
+                v.push(factor);
+                v.extend(factors.iter().flatten().map(String::as_str));
+            }
+            FeatureKind::OffsetFace { distance, .. } => v.push(distance),
+            FeatureKind::BoundingSolid { margin, .. } => v.push(margin),
+            FeatureKind::Pipe { diameter, wall, .. } => {
+                v.push(diameter);
+                v.extend(wall.iter().map(String::as_str));
+            }
             FeatureKind::Move { translate, angle, .. } => {
                 v.extend(translate.iter().map(String::as_str));
                 if let Some(a) = angle {
@@ -559,6 +612,10 @@ pub struct Feature {
     pub kind: FeatureKind,
 }
 
+fn zero_expr() -> String {
+    "0".into()
+}
+
 fn is_root(c: &u64) -> bool {
     *c == 0
 }
@@ -581,6 +638,9 @@ pub struct Document {
     /// Components below the root, as a tree (by parent).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub components: Vec<Component>,
+    /// Physical material per body (by body name); others use the default.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub materials: std::collections::BTreeMap<String, String>,
     /// Bodies moved into another component than their feature's (by body name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub body_components: std::collections::BTreeMap<String, u64>,
@@ -611,7 +671,13 @@ impl Document {
             next_id: 1,
             components: Vec::new(),
             body_components: Default::default(),
+            materials: Default::default(),
         }
+    }
+
+    /// Density of a body's material (g/cm³).
+    pub fn density(&self, body: &str) -> f64 {
+        self.materials.get(body).and_then(|m| material_density(m)).unwrap_or(DEFAULT_DENSITY)
     }
 
     /// The component a body belongs to: where it was moved, else its feature's.
@@ -909,4 +975,29 @@ impl Document {
         }
         Ok(())
     }
+}
+
+/// Density of the default material (g/cm³), as Fusion's default.
+pub const DEFAULT_DENSITY: f64 = 1.29;
+
+/// Physical materials: name and density (g/cm³).
+pub const MATERIALS: [(&str, f64); 14] = [
+    ("Default", DEFAULT_DENSITY),
+    ("Steel", 7.85),
+    ("Stainless Steel", 8.0),
+    ("Aluminum", 2.70),
+    ("Brass", 8.50),
+    ("Copper", 8.96),
+    ("Titanium", 4.43),
+    ("Cast Iron", 7.20),
+    ("ABS Plastic", 1.06),
+    ("PLA", 1.24),
+    ("Nylon", 1.14),
+    ("Polycarbonate", 1.20),
+    ("Oak", 0.75),
+    ("Glass", 2.50),
+];
+
+pub fn material_density(name: &str) -> Option<f64> {
+    MATERIALS.iter().find(|(n, _)| n.eq_ignore_ascii_case(name.trim())).map(|(_, d)| *d)
 }

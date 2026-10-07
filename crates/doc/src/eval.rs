@@ -940,6 +940,34 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
             let segs = path_segments(ps, path, start)?;
             regions.iter().map(|r| kernel::sweep(&ss.plane, r, &segs).map_err(DocError::from)).collect()
         }
+        FeatureKind::Pipe { path_sketch, path, diameter, wall, .. } => {
+            let ps =
+                st.sketch(*path_sketch).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
+            let r = val(vals, diameter, Kind::Length)? / 2.0;
+            if !(r > 1e-6) {
+                return Err(DocError::Invalid("pipe diameter must be positive".into()));
+            }
+            let segs = path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?;
+            let first = segs.first().ok_or_else(|| DocError::Invalid("empty path".into()))?;
+            let (start, tangent) = match *first {
+                kernel::PathSeg::Line { a, b } => (a, b - a),
+                kernel::PathSeg::Arc { a, center, axis, .. } => (a, axis.cross(a - center)),
+            };
+            let t = tangent.normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
+            let plane = Plane::from_normal(start, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
+            let holes = match wall {
+                Some(w) => {
+                    let wt = val(vals, w, Kind::Length)?;
+                    if !(wt > 0.0 && wt < r) {
+                        return Err(DocError::Invalid("the wall must be thinner than the radius".into()));
+                    }
+                    vec![solvecraft_geom::Loop2::circle(Vec2::ZERO, r - wt).reversed()]
+                }
+                None => Vec::new(),
+            };
+            let region = Region2 { outer: solvecraft_geom::Loop2::circle(Vec2::ZERO, r), holes };
+            Ok(vec![kernel::sweep(&plane, &region, &segs)?])
+        }
         FeatureKind::Box { corner, length, width, height, .. } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
             Ok(vec![kernel::box_solid(*corner, *corner + s)?])
@@ -985,6 +1013,13 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
     {
         segs[0] = f.reversed();
     }
+    // No start given (a pipe): the first curve runs toward the second.
+    if !start.is_finite()
+        && let (Some(f), Some(n)) = (segs.first().copied(), segs.get(1).copied())
+        && (n.start().dist(f.start()) < 1e-6 || n.end().dist(f.start()) < 1e-6)
+    {
+        segs[0] = f.reversed();
+    }
     for i in 1..segs.len() {
         let prev_end = segs[i - 1].end();
         if segs[i].end().dist(prev_end) < segs[i].start().dist(prev_end) {
@@ -1015,6 +1050,7 @@ fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
         | FeatureKind::Sphere { operation, .. }
         | FeatureKind::Torus { operation, .. } => (*operation, Vec::new()),
         FeatureKind::Hole { .. } => (Operation::Cut, Vec::new()),
+        FeatureKind::Pipe { operation, targets, .. } => (*operation, targets.clone()),
         FeatureKind::Loft { operation, targets, .. } | FeatureKind::Sweep { operation, targets, .. } => (*operation, targets.clone()),
         _ => (Operation::NewBody, Vec::new()),
     }
@@ -1156,6 +1192,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             Ok(())
         }
         FeatureKind::Extrude { operation, targets, .. }
+        | FeatureKind::Pipe { operation, targets, .. }
         | FeatureKind::Revolve { operation, targets, .. }
         | FeatureKind::Loft { operation, targets, .. }
         | FeatureKind::Sweep { operation, targets, .. } => {
@@ -1289,6 +1326,59 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             if !keep_tools {
                 st.bodies.retain(|b| !tools.contains(&b.name));
             }
+            Ok(())
+        }
+        FeatureKind::Scale { bodies, origin, factor, factors } => {
+            let k = match factors {
+                Some(fs) => [val(vals, &fs[0], Kind::Unitless)?, val(vals, &fs[1], Kind::Unitless)?, val(vals, &fs[2], Kind::Unitless)?],
+                None => {
+                    let x = val(vals, factor, Kind::Unitless)?;
+                    [x, x, x]
+                }
+            };
+            if k.iter().any(|x| !(x.is_finite() && *x > 1e-9 && *x < 1e6)) {
+                return Err(DocError::Invalid("scale factors must be positive".into()));
+            }
+            let o = *origin;
+            // Column-major: scale about the origin.
+            let m = [
+                [k[0], 0.0, 0.0, 0.0],
+                [0.0, k[1], 0.0, 0.0],
+                [0.0, 0.0, k[2], 0.0],
+                [o.x * (1.0 - k[0]), o.y * (1.0 - k[1]), o.z * (1.0 - k[2]), 1.0],
+            ];
+            for n in bodies {
+                let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+                if let Some(mb) = st.bodies.get_mut(i) {
+                    let nb = kernel::transform_matrix(&mb.body, m)?;
+                    *mb = ModelBody::new(mb.name.clone(), nb, mb.feature);
+                }
+            }
+            Ok(())
+        }
+        FeatureKind::OffsetFace { faces, distance, body } => {
+            let d = val(vals, distance, Kind::Length)?;
+            let i = body_at(st, body, faces)?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let nb = kernel::offset_faces(&mb.body, faces, d)?;
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody::new(mb.name, nb, mb.feature);
+            }
+            Ok(())
+        }
+        FeatureKind::BoundingSolid { bodies, margin } => {
+            let m = val(vals, margin, Kind::Length)?;
+            let mut bb = solvecraft_geom::Aabb3::EMPTY;
+            for b in st.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)) {
+                bb = bb.union(&b.mesh().bounds());
+            }
+            if bb.is_empty() {
+                return Err(DocError::Invalid("no bodies to bound".into()));
+            }
+            let pad = Vec3::new(m, m, m);
+            let b = kernel::box_solid(bb.min - pad, bb.max + pad)?;
+            let name = unique_body_name(st, f.body_names.first().map(String::as_str).unwrap_or("Bounding"));
+            st.bodies.push(ModelBody::new(name, b, f.id));
             Ok(())
         }
         FeatureKind::Move { bodies, translate, rotate_axis, angle } => {

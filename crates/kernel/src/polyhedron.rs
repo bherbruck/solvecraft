@@ -460,3 +460,33 @@ fn solve3(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
     }
     Some(out)
 }
+
+/// Move the planar faces at the given points along their outward normals by `distance`
+/// (negative: into the body). The body's other faces follow (its topology is kept).
+pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
+    b.require_brep("offset faces")?;
+    if !distance.is_finite() || distance.abs() > 1e6 {
+        return Err(KernelError::Invalid("offset distance".into()));
+    }
+    let healed = Body::new(crate::heal::heal(b.deep_copy(), b.size()))?;
+    let size = healed.size();
+    let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
+    let mut chosen: Vec<usize> = Vec::new();
+    for p in at {
+        let near = mesh
+            .triangles
+            .iter()
+            .zip(&mesh.tri_face)
+            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (point_tri(*p, x, y, z), *f as usize)))
+            .min_by(|a, c| a.0.total_cmp(&c.0));
+        match near {
+            Some((d, f)) if d < size * 1e-3 + 1e-6 => {
+                if !chosen.contains(&f) {
+                    chosen.push(f);
+                }
+            }
+            _ => return Err(KernelError::Invalid(format!("no face at {:?}", [p.x, p.y, p.z]))),
+        }
+    }
+    offset_planar(&healed, |fi, _| if chosen.contains(&fi) { distance } else { 0.0 })
+}

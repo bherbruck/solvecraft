@@ -19,6 +19,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("model.edges", "List Edges", model_edges).noundo().params("body: name"),
     CommandSpec::new("model.faces", "List Faces", model_faces).noundo().params("body: name"),
     CommandSpec::new("model.threads", "List Threads", model_threads).noundo(),
+    CommandSpec::new("PhysicalMaterialCommand", "Physical Material", physical_material)
+        .at("SOLID", "MODIFY")
+        .icon("material")
+        .params("bodies: [names]; material: name (Steel, Aluminum, ABS Plastic, …; `material.list`)"),
+    CommandSpec::new("material.list", "List Materials", material_list).noundo(),
     CommandSpec::new("engine.commands", "List Commands", commands).noundo(),
 ];
 
@@ -43,7 +48,17 @@ pub fn measure_json(b: &solvecraft_doc::ModelBody) -> Value {
 fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let want = string_list(p, "bodies");
     let st = s.model.state();
-    let bodies: Vec<Value> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).map(measure_json).collect();
+    let mut bodies: Vec<Value> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).map(measure_json).collect();
+    // Mass from each body's material.
+    for b in &mut bodies {
+        let name = b["name"].as_str().unwrap_or_default().to_string();
+        if let Some(v) = b["volume_mm3"].as_f64() {
+            let rho = s.doc.density(&name);
+            b["material"] = json!(s.doc.materials.get(&name).cloned().unwrap_or_else(|| "Default".into()));
+            b["density_g_cm3"] = json!(rho);
+            b["mass_g"] = json!(v * rho / 1000.0);
+        }
+    }
     if !want.is_empty() && bodies.len() != want.len() {
         return Err(bad("MeasureCommand", "unknown body name"));
     }
@@ -52,7 +67,10 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let tf: u64 = bodies.iter().filter_map(|b| b["faces"].as_u64()).sum();
     let te: u64 = bodies.iter().filter_map(|b| b["edges"].as_u64()).sum();
     let tvx: u64 = bodies.iter().filter_map(|b| b["vertices"].as_u64()).sum();
-    Ok(json!({"body_count": bodies.len(), "bodies": bodies, "total": {"volume_mm3": tv, "area_mm2": ta, "faces": tf, "edges": te, "vertices": tvx}}))
+    let tm: f64 = bodies.iter().filter_map(|b| b["mass_g"].as_f64()).sum();
+    Ok(
+        json!({"body_count": bodies.len(), "bodies": bodies, "total": {"volume_mm3": tv, "area_mm2": ta, "mass_g": tm, "faces": tf, "edges": te, "vertices": tvx}}),
+    )
 }
 
 fn sketch_json(s: &Session, id: u64) -> Option<Value> {
@@ -211,4 +229,31 @@ fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
 fn model_threads(s: &mut Session, _p: &Value) -> Result<Value> {
     let st = s.model.state();
     Ok(json!({ "threads": st.threads }))
+}
+
+fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "PhysicalMaterialCommand";
+    let bodies = string_list(p, "bodies");
+    let material = str_(p, "material").ok_or_else(|| bad(cmd, "`material` must be a material name"))?;
+    let canonical = solvecraft_doc::MATERIALS
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(material.trim()))
+        .map(|(n, _)| n.to_string())
+        .ok_or_else(|| bad(cmd, format!("unknown material `{material}` (see material.list)")))?;
+    let st = s.model.state();
+    if bodies.is_empty() || bodies.iter().any(|b| st.body(b).is_none()) {
+        return Err(bad(cmd, "`bodies` must list existing bodies"));
+    }
+    for b in &bodies {
+        if canonical == "Default" {
+            s.doc_mut().materials.remove(b);
+        } else {
+            s.doc_mut().materials.insert(b.clone(), canonical.clone());
+        }
+    }
+    Ok(json!({"bodies": bodies, "material": canonical}))
+}
+
+fn material_list(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Ok(json!({"materials": solvecraft_doc::MATERIALS.iter().map(|(n, d)| json!({"name": n, "density_g_cm3": d})).collect::<Vec<_>>()}))
 }

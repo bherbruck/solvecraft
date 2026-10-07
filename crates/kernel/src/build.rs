@@ -554,28 +554,36 @@ pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> 
     if path.is_empty() || path.len() > 1000 {
         return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
     }
-    let w0 = wire(plane, &region.outer.ccw())?;
+    // The outer loop and each hole, swept along the path; the ends are capped with holes.
+    let mut starts = vec![wire(plane, &region.outer.ccw())?];
+    for h in &region.holes {
+        starts.push(wire(plane, &h.ccw().reversed())?);
+    }
     guard("sweep", || {
         let mut shell = mt::Shell::new();
-        let mut cur = w0.clone();
-        for seg in path {
-            let mut part: mt::Shell = match *seg {
-                PathSeg::Line { a, b } => builder::tsweep(&cur, v3(b - a)),
-                PathSeg::Arc { center, axis, angle, .. } => {
-                    let ax = axis.normalized().ok_or_else(|| KernelError::Invalid("arc axis".into()))?;
-                    builder::rsweep(&cur, p3(center), v3(ax), mt::Rad(angle))
-                }
-            };
-            let next = part
-                .extract_boundaries()
-                .into_iter()
-                .find(|w| w.edge_iter().all(|e| !cur.edge_iter().any(|c| c.id() == e.id())))
-                .ok_or_else(|| KernelError::Failed("sweep: lost the profile".into()))?;
-            shell.append(&mut part);
-            cur = next.inverse();
+        let mut ends = Vec::new();
+        for w0 in &starts {
+            let mut cur = w0.clone();
+            for seg in path {
+                let mut part: mt::Shell = match *seg {
+                    PathSeg::Line { a, b } => builder::tsweep(&cur, v3(b - a)),
+                    PathSeg::Arc { center, axis, angle, .. } => {
+                        let ax = axis.normalized().ok_or_else(|| KernelError::Invalid("arc axis".into()))?;
+                        builder::rsweep(&cur, p3(center), v3(ax), mt::Rad(angle))
+                    }
+                };
+                let next = part
+                    .extract_boundaries()
+                    .into_iter()
+                    .find(|w| w.edge_iter().all(|e| !cur.edge_iter().any(|c| c.id() == e.id())))
+                    .ok_or_else(|| KernelError::Failed("sweep: lost the profile".into()))?;
+                shell.append(&mut part);
+                cur = next.inverse();
+            }
+            ends.push(cur);
         }
         let faces: Vec<mt::Face> = shell.face_iter().cloned().collect();
-        cap_and_close(faces, std::slice::from_ref(&w0), std::slice::from_ref(&cur))
+        cap_and_close(faces, &starts, &ends)
     })
 }
 

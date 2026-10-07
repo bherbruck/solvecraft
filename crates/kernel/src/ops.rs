@@ -69,15 +69,15 @@ fn mismatch(a: &solvecraft_geom::Mesh, b: &solvecraft_geom::Mesh, result: &solve
     Some(bad as f64 / n.max(1) as f64)
 }
 
-/// Boolean of two bodies. The result may be empty (`Ok(None)`) for a cut that removes
-/// everything or an intersection of disjoint bodies. Results are checked against volume bounds
-/// and retried with shifted copies and other tolerances when they fail or look wrong.
 thread_local! {
     /// Set while a boolean runs on bodies whose coincident faces were pushed apart (no
     /// second round of pushing).
     static APART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// Boolean of two bodies. The result may be empty (`Ok(None)`) for a cut that removes
+/// everything or an intersection of disjoint bodies. Results are checked against volume bounds
+/// and retried with shifted copies and other tolerances when they fail or look wrong.
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     a.require_brep("a boolean")?;
     b.require_brep("a boolean")?;
