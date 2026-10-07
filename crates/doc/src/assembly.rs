@@ -69,13 +69,13 @@ pub fn mat_inverse(m: &Mat) -> Option<Mat> {
             _ => (0, 1),
         };
         let minor = a(r0, c0) * a(r1, c1) - a(r0, c1) * a(r1, c0);
-        let sign = if (r + c) % 2 == 0 { 1.0 } else { -1.0 };
+        let sign = if (r + c).is_multiple_of(2) { 1.0 } else { -1.0 };
         sign * minor / det
     };
     let mut out = IDENTITY;
-    for r in 0..3 {
-        for c in 0..3 {
-            out[c][r] = inv(r, c);
+    for (c, col) in out.iter_mut().enumerate().take(3) {
+        for (r, cell) in col.iter_mut().enumerate().take(3) {
+            *cell = inv(r, c);
         }
     }
     let t = Vec3::new(m[3][0], m[3][1], m[3][2]);
@@ -95,10 +95,8 @@ pub fn rigid(translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Mat {
         [t * k.x * k.z + s * k.y, t * k.y * k.z - s * k.x, t * k.z * k.z + c],
     ];
     let mut m = IDENTITY;
-    for col in 0..3 {
-        for row in 0..3 {
-            m[col][row] = r[col][row];
-        }
+    for (mc, rc) in m.iter_mut().zip(r) {
+        mc[..3].copy_from_slice(&rc);
     }
     let ro = apply_vector(&m, origin);
     let tr = origin - ro + translate;
