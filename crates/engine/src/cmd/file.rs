@@ -1,0 +1,85 @@
+//! Documents and files: new, open, save, export.
+
+use serde_json::{Value, json};
+use solvecraft_doc::Document;
+use solvecraft_io::Format;
+
+use super::CommandSpec;
+use crate::params::{bad, bool_, str_, string_list};
+use crate::{EngineError, Result, Session};
+
+pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("NewDocumentCommand", "New Design", new_doc).icon("new").key("Ctrl+N").noundo().params("name?"),
+    CommandSpec::new("doc.open", "Open", open).icon("open").key("Ctrl+O").noundo().params("path: .solvecraft design"),
+    CommandSpec::new("SaveDocumentCommand", "Save", save).icon("save").key("Ctrl+S").noundo().params("path? (default: current file)"),
+    CommandSpec::new("SaveDocumentAsCommand", "Save As", save_as).icon("save").noundo().params("path"),
+    CommandSpec::new("ExportCommand", "Export", export)
+        .icon("export")
+        .noundo()
+        .params("path; format?: stl|stla|obj|step (default from extension); bodies?: [names]"),
+    CommandSpec::new("FusionSaveAsSTLCommand", "Save As Mesh", save_stl).icon("export").noundo().params("path; bodies?: [names]; ascii?: bool"),
+];
+
+fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
+    let name = str_(p, "name").unwrap_or("Untitled");
+    *s = Session::new(Document::new(name));
+    Ok(json!({"name": name}))
+}
+
+fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
+    str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))
+}
+
+fn open(s: &mut Session, p: &Value) -> Result<Value> {
+    let path = path_arg(p, "doc.open")?;
+    let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if meta.len() as usize > solvecraft_io::MAX_DESIGN_BYTES {
+        return Err(EngineError::Other(format!("{path}: file too large")));
+    }
+    let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let doc = solvecraft_io::read_design(&bytes)?;
+    *s = Session::new(doc);
+    s.path = Some(path.to_string());
+    let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
+    Ok(json!({"path": path, "features": s.doc.features.len(), "errors": errors}))
+}
+
+fn write(s: &mut Session, path: &str) -> Result<Value> {
+    let bytes = solvecraft_io::write_design(&s.doc);
+    std::fs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    s.path = Some(path.to_string());
+    s.mark_saved();
+    Ok(json!({"path": path, "bytes": bytes.len()}))
+}
+
+fn save(s: &mut Session, p: &Value) -> Result<Value> {
+    let path = match str_(p, "path") {
+        Some(x) if !x.trim().is_empty() => x.to_string(),
+        _ => s.path.clone().ok_or_else(|| bad("SaveDocumentCommand", "the design has no file yet: give a `path`"))?,
+    };
+    write(s, &path)
+}
+
+fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
+    let path = path_arg(p, "SaveDocumentAsCommand")?.to_string();
+    write(s, &path)
+}
+
+fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Result<Value> {
+    let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
+    let bytes = solvecraft_io::export(&s.model.state(), bodies, format, &name)?;
+    std::fs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
+}
+
+fn export(s: &mut Session, p: &Value) -> Result<Value> {
+    let path = path_arg(p, "ExportCommand")?;
+    let format = Format::from_name(str_(p, "format").unwrap_or(path))?;
+    export_to(s, path, format, &string_list(p, "bodies"))
+}
+
+fn save_stl(s: &mut Session, p: &Value) -> Result<Value> {
+    let path = path_arg(p, "FusionSaveAsSTLCommand")?;
+    let f = if bool_(p, "ascii").unwrap_or(false) { Format::StlAscii } else { Format::StlBinary };
+    export_to(s, path, f, &string_list(p, "bodies"))
+}

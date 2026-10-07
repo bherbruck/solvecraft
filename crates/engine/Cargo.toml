@@ -1,8 +1,20 @@
 [package]
 name = "solvecraft-engine"
+description = "SolveCraft engine: the session, the command registry (everything is a command), undo/redo and selection"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+solvecraft-geom = { workspace = true }
+solvecraft-sketch = { workspace = true }
+solvecraft-kernel = { workspace = true }
+solvecraft-doc = { workspace = true }
+solvecraft-io = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
