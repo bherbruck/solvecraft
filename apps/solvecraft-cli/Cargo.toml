@@ -14,4 +14,5 @@ path = "src/main.rs"
 
 [dependencies]
 solvecraft-engine = { workspace = true }
+solvecraft-mcp = { workspace = true }
 serde_json = { workspace = true }

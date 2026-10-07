@@ -8,6 +8,7 @@
 //! solvecraft-cli commands                                     the command registry as JSON
 //! solvecraft-cli recipe <recipe.json>                         translate an oracle recipe to a script
 //! solvecraft-cli oracle <case-dir>...                         replay recipes and compare with measure.json
+//! solvecraft-cli mcp [--in design|script] [--connect HOST:PORT] MCP server on stdio (docs/mcp.md)
 //! ```
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -29,6 +30,7 @@ const USAGE: &str = "usage:
   solvecraft-cli commands
   solvecraft-cli recipe <recipe.json>
   solvecraft-cli oracle <case-dir>... [--json]
+  solvecraft-cli mcp [--in design.solvecraft|script.json] [--connect 127.0.0.1:PORT]
 ";
 
 fn main() -> ExitCode {
@@ -47,6 +49,7 @@ fn main() -> ExitCode {
             recipe::to_script(&v).map(|s| println!("{}", pretty(&s)))
         }),
         Some("oracle") => oracle::run(&args[1..]),
+        Some("mcp") => cmd_mcp(&args[1..]),
         Some("--version" | "-V") => {
             println!("solvecraft-cli {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -162,4 +165,18 @@ fn cmd_exec(args: &[String]) -> Result<(), String> {
     let v = s.execute(id, &p).map_err(|e| e.to_string())?;
     println!("{}", pretty(&v));
     Ok(())
+}
+
+/// MCP server on stdio: headless (optionally starting from a design or script) or bridged to
+/// a running app's control port. stdout carries only protocol messages.
+fn cmd_mcp(args: &[String]) -> Result<(), String> {
+    let backend: Box<dyn solvecraft_mcp::Backend> = match (flag(args, "--connect"), flag(args, "--in")) {
+        (Some(_), Some(_)) => return Err("mcp: use either --connect or --in, not both".into()),
+        (Some(addr), None) => Box::new(solvecraft_mcp::Remote::connect(addr).map_err(|e| format!("cannot connect to {addr}: {e}"))?),
+        (None, Some(path)) => Box::new(solvecraft_mcp::Headless::new(load(path)?)),
+        (None, None) => Box::new(solvecraft_mcp::Headless::default()),
+    };
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    solvecraft_mcp::Server::new(backend).serve(stdin.lock(), stdout.lock()).map_err(|e| e.to_string())
 }
