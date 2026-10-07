@@ -902,6 +902,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::tools::preview(app, tl, &painter, &proj);
     }
     crate::canvas::show(app, ui, &painter, &proj);
+    crate::sketch_dims::show(app, ui, &proj);
     view_cube(app, ui, rect);
     nav_bar(app, ui, rect);
     // Status chip.

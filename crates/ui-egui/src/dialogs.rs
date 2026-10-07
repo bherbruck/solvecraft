@@ -49,6 +49,12 @@ pub enum Kind {
         angle: String,
     },
     Mirror,
+    /// Move bodies by a distance along X, Y and Z.
+    Move {
+        x: String,
+        y: String,
+        z: String,
+    },
     Hole {
         diameter: String,
         depth: String,
@@ -148,6 +154,9 @@ impl Dialog {
             "MirrorCommand" => {
                 Dialog::new(Kind::Mirror, vec![SelInput::new("Bodies", BODIES, true), SelInput::new("Mirror plane", PLANES | PLANAR_FACES, false)])
             }
+            "FusionMoveCommand" => {
+                Dialog::new(Kind::Move { x: "0 mm".into(), y: "0 mm".into(), z: "10 mm".into() }, vec![SelInput::new("Bodies", BODIES, true)])
+            }
             "FusionHoleCommand" => Dialog::new(hole_defaults(), vec![SelInput::new("Position", FACES, true)]),
             "PrimitiveBox" => Dialog::new(
                 Kind::Primitive {
@@ -175,8 +184,21 @@ impl Dialog {
             "ChangeParameterCommand" => Dialog::new(Kind::Params { new_name: String::new(), new_expr: String::new() }, vec![]),
             _ => return None,
         };
-        // Pre-selection: what is selected now becomes the input (first input that takes it).
+        // Pre-selection: what is selected now becomes the input (first input that takes it); a
+        // face or edge stands for its body where bodies are wanted.
         for sel in &s.selection {
+            let as_body = match sel {
+                Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => Some(Sel::Body { name: body.clone() }),
+                _ => None,
+            };
+            if let Some(b) = as_body
+                && let Some(inp) = d.inputs.iter_mut().find(|i| i.accept == BODIES && (i.multi || i.items.is_empty()))
+            {
+                if !inp.items.contains(&b) {
+                    inp.items.push(b);
+                }
+                continue;
+            }
             if let Some(inp) = d.inputs.iter_mut().find(|i| fits(i.accept, sel) && (i.multi || i.items.is_empty())) {
                 inp.items.push(sel.clone());
             }
@@ -223,6 +245,7 @@ impl Dialog {
                 | Kind::Shell { .. }
                 | Kind::Draft { .. }
                 | Kind::Mirror
+                | Kind::Move { .. }
                 | Kind::Hole { .. }
                 | Kind::Primitive { .. }
                 | Kind::Combine { .. }
@@ -238,6 +261,7 @@ impl Dialog {
             Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Hole { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
+            Kind::Move { z, .. } => ("Z", ValueKind::Length, z),
             _ => return None,
         })
     }
@@ -384,6 +408,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Shell { .. } => "SHELL",
         Kind::Draft { .. } => "DRAFT",
         Kind::Mirror => "MIRROR",
+        Kind::Move { .. } => "MOVE",
         Kind::Hole { .. } => "HOLE",
         Kind::Primitive { cmd, .. } => match *cmd {
             "PrimitiveBox" => "BOX",
@@ -539,6 +564,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                     Kind::Mirror => {}
+                    Kind::Move { x, y, z } => {
+                        for (l, v) in [("X distance", x), ("Y distance", y), ("Z distance", z)] {
+                            ui.label(l);
+                            enter |= field(ui, v);
+                            ui.end_row();
+                        }
+                    }
                     Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle } => {
                         ui.label("Type");
                         combo(ui, "hole_kind", &HOLE_LABELS, kind);
@@ -904,6 +936,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             let plane = plane_value(s, sels(d, 1).first()).ok_or("the mirror plane must be a plane or a planar face")?;
             ("MirrorCommand", json!({"features": features, "plane": plane}))
+        }
+        Kind::Move { x, y, z } => {
+            need(0, "bodies")?;
+            ("FusionMoveCommand", json!({"bodies": body_names(0), "translate": [x, y, z]}))
         }
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle } => {
             need(0, "a face position")?;

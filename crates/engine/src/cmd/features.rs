@@ -65,6 +65,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane")
         .params("base: XY|XZ|YZ|plane name; axis: X|Y|Z|{origin, dir}; angle: expr; name?"),
     CommandSpec::new("FusionSplitBodyCommand", "Split Body", split_body).at("SOLID", "MODIFY").icon("split").params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal}"),
+    CommandSpec::new("FusionPressPullCommand", "Press Pull", press_pull)
+        .at("SOLID", "MODIFY")
+        .icon("presspull")
+        .key("Q")
+        .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet)"),
     CommandSpec::new("FusionMoveCommand", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr"),
 ];
 
@@ -316,6 +321,23 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
         out.push(edges.get(idx).ok_or_else(|| bad(cmd, format!("{body} has no edge {idx}")))?.mid);
     }
     Ok(out)
+}
+
+/// Press Pull: a face moves along its normal (an extrude that joins outward or cuts inward); an
+/// edge is rounded (a fillet).
+fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionPressPullCommand";
+    let distance = req_expr(cmd, p, "distance")?;
+    if p.get("edges").is_some() {
+        return fillet(s, &json!({"edges": p.get("edges"), "radius": distance}));
+    }
+    let face = p.get("face").ok_or_else(|| bad(cmd, "needs `face` or `edges`"))?;
+    let d = s.doc.eval(&distance, Kind::Length).map_err(|e| bad(cmd, format!("distance: {e}")))?;
+    if d.abs() < 1e-9 {
+        return Err(bad(cmd, "the distance must not be zero"));
+    }
+    let (dist, dir, op) = if d > 0.0 { (distance, "positive", "join") } else { (format!("-({distance})"), "negative", "cut") };
+    extrude(s, &json!({"face": face, "distance": dist, "direction": dir, "operation": op}))
 }
 
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {

@@ -17,6 +17,7 @@ pub mod icons;
 pub mod palette;
 pub mod preview;
 pub mod selection;
+pub mod sketch_dims;
 pub mod theme;
 pub mod timeline;
 pub mod toolbar;
@@ -184,6 +185,24 @@ impl SolveApp {
                 self.animate_to(c);
             }
             return;
+        }
+        // Press Pull: edges get a fillet, faces and profiles an extrude.
+        if id == "FusionPressPullCommand" {
+            let edges = self.session.selection.iter().any(|s| matches!(s, solvecraft_engine::Sel::Edge { .. }));
+            return self.start(if edges { "FusionFilletEdgesCommand" } else { "Extrude" });
+        }
+        // Construction toggle: selected sketch curves switch at once, otherwise pick them.
+        if id == "sketch.construction" {
+            let curves: Vec<String> = self
+                .session
+                .selection
+                .iter()
+                .filter_map(|s| if let solvecraft_engine::Sel::SketchCurve { id } = s { Some(id.clone()) } else { None })
+                .collect();
+            if !curves.is_empty() {
+                let _ = self.run(id, json!({ "curves": curves }));
+                return;
+            }
         }
         if let Some(t) = tools::Tool::for_command(id) {
             self.tool = Some(t);

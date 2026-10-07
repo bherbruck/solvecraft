@@ -147,6 +147,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.construction", "Normal/Construction", construction)
         .at("SKETCH", "CREATE")
         .icon("construction")
+        .key("X")
         .enabled(in_sketch)
         .params("curves: [ids], value?: bool (default toggles)"),
     CommandSpec::new("sketch.delete", "Delete Sketch Entities", sketch_delete)

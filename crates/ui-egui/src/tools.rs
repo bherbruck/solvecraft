@@ -26,6 +26,11 @@ pub struct Tool {
     pub hover: Option<(Vec2, Option<String>)>,
     /// Picked entity ids.
     pub picks: Vec<String>,
+    /// Inline dimension boxes for the shape being drawn, the point count they were made for,
+    /// and whether the first box should take the keyboard.
+    pub dims: Vec<crate::sketch_dims::DimBox>,
+    pub dims_stage: usize,
+    pub dims_focus: bool,
 }
 
 impl Tool {
@@ -61,7 +66,7 @@ impl Tool {
             "sketch.construction" => ("sketch.construction", Kind::Pick(1)),
             _ => return None,
         };
-        Some(Tool { cmd, kind, pts: Vec::new(), hover: None, picks: Vec::new() })
+        Some(Tool { cmd, kind, pts: Vec::new(), hover: None, picks: Vec::new(), dims: Vec::new(), dims_stage: usize::MAX, dims_focus: false })
     }
 }
 
@@ -102,24 +107,15 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
 pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
     let Some(mut tool) = app.tool.take() else { return };
     match tool.kind {
-        Kind::Draw(n) => {
-            if let Some(p) = sketch_point_at(app, proj, pos) {
-                tool.pts.push(p);
-            }
-            if tool.cmd == "DrawPolyline" {
-                if tool.pts.len() >= 2 {
-                    let (a, b) = (tool.pts[tool.pts.len() - 2].clone(), tool.pts[tool.pts.len() - 1].clone());
-                    if let Ok(v) = app.run("DrawPolyline", json!({"points": [arg(&a), arg(&b)], "infer": true})) {
-                        // Chain: the next segment starts at this one's end point.
-                        if let Some(id) = v["curves"].get(0).and_then(Value::as_str) {
-                            let last = tool.pts.len() - 1;
-                            tool.pts[last].1 = Some(format!("{id}.end"));
-                        }
-                    }
+        Kind::Draw(_) => {
+            if let Some(mut p) = sketch_point_at(app, proj, pos) {
+                // Typed values win over the cursor.
+                if tool.dims.iter().any(|b| b.locked) {
+                    p = (crate::sketch_dims::effective(app, &tool, p.0), None);
                 }
-            } else if n > 0 && tool.pts.len() >= n {
-                run_shape(app, &tool);
-                tool.pts.clear();
+                app.tool = Some(tool);
+                place(app, p);
+                return;
             }
         }
         Kind::Pick(n) => {
@@ -168,9 +164,47 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
     app.tool = Some(tool);
 }
 
-fn run_shape(app: &mut SolveApp, t: &Tool) {
+/// Put down the next point of the shape being drawn; the last point runs the command (with
+/// the typed values as dimension constraints).
+pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
+    let Some(mut tool) = app.tool.take() else { return };
+    let Kind::Draw(n) = tool.kind else {
+        app.tool = Some(tool);
+        return;
+    };
+    tool.pts.push(p);
+    if tool.cmd == "DrawPolyline" {
+        if tool.pts.len() >= 2 {
+            let (a, b) = (tool.pts[tool.pts.len() - 2].clone(), tool.pts[tool.pts.len() - 1].clone());
+            if let Ok(v) = app.run("DrawPolyline", json!({"points": [arg(&a), arg(&b)], "infer": true})) {
+                let curves: Vec<String> = v["curves"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(str::to_string)).collect();
+                dimension(app, &tool, &curves);
+                // Chain: the next segment starts at this one's end point.
+                if let Some(id) = curves.first() {
+                    let last = tool.pts.len() - 1;
+                    tool.pts[last].1 = Some(format!("{id}.end"));
+                }
+            }
+        }
+    } else if n > 0 && tool.pts.len() >= n {
+        let curves = run_shape(app, &tool);
+        dimension(app, &tool, &curves);
+        tool.pts.clear();
+    }
+    app.tool = Some(tool);
+}
+
+/// Typed values become dimension constraints on the new curves.
+fn dimension(app: &mut SolveApp, t: &Tool, curves: &[String]) {
+    for (ents, ty, value) in crate::sketch_dims::constraints(t, curves) {
+        let _ = app.run("SketchDimension", crate::sketch_dims::dimension_params(&ents, ty, &value));
+    }
+}
+
+fn run_shape(app: &mut SolveApp, t: &Tool) -> Vec<String> {
     let p = &t.pts;
     let d = |a: usize, b: usize| p[a].0.dist(p[b].0);
+    let sides = crate::sketch_dims::locked_value(app, t, "Sides").map_or(6, |v| v.round().clamp(3.0, 200.0) as usize);
     let params = match t.cmd {
         "ShapeRectangleTwoPoint" => json!({"p0": xy(&p[0]), "p1": xy(&p[1])}),
         "ShapeRectangleCenter" => json!({"center": xy(&p[0]), "corner": xy(&p[1])}),
@@ -182,18 +216,21 @@ fn run_shape(app: &mut SolveApp, t: &Tool) {
         "ArcCenterTwoPoint" => json!({"center": arg(&p[0]), "start": arg(&p[1]), "end": xy(&p[2])}),
         "ShapePolygonInscribed" | "ShapePolygonCircumscribed" => {
             let a = (p[1].0 - p[0].0).angle().to_degrees();
-            json!({"center": xy(&p[0]), "radius": d(0, 1), "sides": 6, "angle": a})
+            json!({"center": xy(&p[0]), "radius": d(0, 1), "sides": sides, "angle": a})
         }
-        "ShapePolygonEdge" => json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "sides": 6}),
+        "ShapePolygonEdge" => json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "sides": sides}),
         "ShapeSlotCenterToCenter" | "ShapeSlotOverall" => {
             let dir = (p[1].0 - p[0].0).normalized().unwrap_or(Vec2::X);
             let w = 2.0 * dir.cross(p[2].0 - p[0].0).abs();
             json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "width": w.max(1e-3)})
         }
         "DrawPoint" => json!({"point": xy(&p[0])}),
-        _ => return,
+        _ => return Vec::new(),
     };
-    let _ = app.run(t.cmd, params);
+    app.run(t.cmd, params)
+        .ok()
+        .map(|v| v["curves"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
 }
 
 fn run_pick(app: &mut SolveApp, t: &Tool) {
@@ -242,6 +279,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         );
     }
     let Some((h, _)) = t.hover.clone() else { return };
+    let h = crate::sketch_dims::effective(app, t, h);
     let pts: Vec<Vec2> = t.pts.iter().map(|p| p.0).collect();
     let line = |a: Vec2, b: Vec2| {
         if let (Some(x), Some(y)) = (to(a), to(b)) {

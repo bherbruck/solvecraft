@@ -26,6 +26,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         }
         Sel::Face { body, index, point } => (*point, crate::dialogs::planar_face(&app.session, body, *index).map(|(_, n)| n)),
         Sel::Edge { point, .. } | Sel::Vertex { point, .. } => (*point, None),
+        Sel::Body { name } => (st.body(name)?.mesh().bounds().center(), None),
         _ => return None,
     };
     // Only extrudes point along the normal.

@@ -526,6 +526,22 @@ fn preview_of_an_edit() {
     assert!(Arc::ptr_eq(&doc, &s.doc));
 }
 
+/// Press Pull: positive pulls a face out, negative pushes it in (a cut), edges get a fillet.
+#[test]
+fn press_pull() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "FusionPressPullCommand", json!({"face": [20, 15, 20], "distance": 5}));
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 25.0) < 1e-6);
+    run(&mut s, "FusionPressPullCommand", json!({"face": [20, 15, 25], "distance": "-10"}));
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 15.0) < 1e-6);
+    assert!(s.execute("FusionPressPullCommand", &json!({"face": [20, 15, 15], "distance": 0})).is_err());
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "FusionPressPullCommand", json!({"edges": [[0, 0, 7]], "distance": 3}));
+    assert!(rel(volume(&mut s), 24000.0 - (9.0 - PI * 9.0 / 4.0) * 20.0) < 2e-4);
+}
+
 /// Extruding a planar body face (press-pull style): the face boundary becomes a sketch profile.
 #[test]
 fn extrude_a_body_face() {
