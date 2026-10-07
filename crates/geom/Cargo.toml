@@ -1,0 +1,15 @@
+[package]
+name = "solvecraft-geom"
+description = "SolveCraft geometry foundation: vectors, planes, frames, meshes and their measures"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

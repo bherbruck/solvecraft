@@ -1,0 +1,17 @@
+[package]
+name = "solvecraft-sketch"
+description = "SolveCraft sketches: points, curves, geometric constraints and dimensions, the constraint solver, and profile detection"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solvecraft-geom = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -1,0 +1,66 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.90"
+authors = ["SolveCraft contributors"]
+repository = "https://github.com/storytold/solvecraft"
+
+[workspace.dependencies]
+# internal
+solvecraft-geom = { path = "crates/geom" }
+solvecraft-sketch = { path = "crates/sketch" }
+solvecraft-kernel = { path = "crates/kernel" }
+solvecraft-render = { path = "crates/render" }
+solvecraft-doc = { path = "crates/doc" }
+solvecraft-io = { path = "crates/io" }
+solvecraft-engine = { path = "crates/engine" }
+solvecraft-ui-egui = { path = "crates/ui-egui" }
+
+# foundation
+thiserror = "2"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+log = "0.4"
+
+# geometry kernel (Apache-2.0; see plan/adr/0001-geometry-kernel.md). Only crates/kernel uses it.
+monstertruck-modeling = { version = "0.4.1", features = ["fillet"] }
+monstertruck-solid = "0.4.1"
+monstertruck-meshing = "0.4.1"
+monstertruck-io = "0.4.1"
+
+# images
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# ui
+egui = "0.36"
+eframe = { version = "0.36", default-features = false }
+egui-wgpu = "0.36"
+rfd = "0.17"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+# `!(x > tol)` is our idiom for "not a usable number" (NaN-safe).
+neg_cmp_op_on_partial_ord = "allow"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+debug = 0
