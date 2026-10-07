@@ -763,3 +763,17 @@ fn coplanar_curved_booleans() {
     assert!(rel(measure(&i).unwrap().volume, half * 20.0) < 1e-3);
     println!("union {:?}", m.merged);
 }
+
+#[test]
+fn shell_non_convex() {
+    // An L-shaped block opened at the top of its tall part.
+    let base = box_solid(Vec3::ZERO, Vec3::new(60.0, 40.0, 10.0)).unwrap();
+    let tower = box_solid(Vec3::ZERO, Vec3::new(20.0, 40.0, 40.0)).unwrap();
+    let l = boolean(&base, &tower, BoolOp::Union).unwrap().unwrap();
+    let s = shell(&l, &[Vec3::new(10.0, 20.0, 40.0)], 2.0).unwrap();
+    // Outer volume minus the cavity (the L shrunk by 2, open upward).
+    let outer = 60.0 * 40.0 * 10.0 + 20.0 * 40.0 * 30.0;
+    let cavity = 56.0 * 36.0 * 6.0 + 16.0 * 36.0 * 32.0;
+    let v = measure(&s).unwrap().volume;
+    assert!(rel(v, outer - cavity) < 1e-6, "{v} vs {}", outer - cavity);
+}
