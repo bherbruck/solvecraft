@@ -284,3 +284,33 @@ fn text_makes_profiles_that_extrude_and_edit() {
     assert!(v > 40.0 && v < 200.0, "{v}");
     assert!(s.execute("MTextCmd", &json!({"text": "", "at": [0, 0]})).is_err());
 }
+
+#[test]
+fn blend_curve_joins_tangentially() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [10, 0]]}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "DrawPolyline", json!({"points": [[20, 10], [20, 20]]}))["curves"])[0].clone();
+    let r = run(&mut s, "BlendG1CurveSketchCmd", json!({"a": format!("{a}.end"), "b": format!("{b}.start")}));
+    assert_eq!(r["sketch"]["solved"], true, "{r}");
+    let sp = ids(&r["curves"])[0].clone();
+    let sk = sketch(&s);
+    let pts: Vec<Vec2> = sk.curves[sk.curve_index(&sp).unwrap()].kind.point_ids().iter().map(|i| sk.point(*i).unwrap()).collect();
+    // Leaves along +x, arrives going +y (control polygon end legs).
+    let d0 = (pts[1] - pts[0]).normalized().unwrap();
+    let d1 = (pts[3] - pts[2]).normalized().unwrap();
+    assert!(d0.y.abs() < 1e-6 && d0.x > 0.0, "{d0:?}");
+    assert!(d1.x.abs() < 1e-6 && d1.y > 0.0, "{d1:?}");
+}
+
+#[test]
+fn centerline_is_left_out_of_profiles() {
+    let mut s = new_sketch();
+    let r = run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [10, 10]}));
+    let l = ids(&r["curves"]);
+    let m = ids(&run(&mut s, "DrawPolyline", json!({"points": [[5, -5], [5, 15]]}))["curves"])[0].clone();
+    assert_eq!(profiles(&s).len(), 2);
+    run(&mut s, "sketch.centerline", json!({"curves": [m]}));
+    assert_eq!(profiles(&s).len(), 1);
+    assert!(s.execute("sketch.centerline", &json!({"curves": ["nope"]})).is_err());
+    let _ = l;
+}

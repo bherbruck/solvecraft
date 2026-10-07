@@ -286,7 +286,7 @@ impl Sketch {
                 LCurve::Conic(a, b, x, rho) => (CurveKind::Conic { a: point(self, a)?, b: point(self, b)?, apex: point(self, x)?, rho }, "k"),
             };
             let cid = self.fresh(prefix);
-            self.curves.push(Curve { id: cid, kind, construction: false, reversed: false, link: Some(id.to_string()) });
+            self.curves.push(Curve { id: cid, kind, construction: false, reversed: false, link: Some(id.to_string()), centerline: false });
         }
         for li in &lay.lone {
             point(self, *li)?;

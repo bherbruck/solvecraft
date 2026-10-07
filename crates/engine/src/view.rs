@@ -20,6 +20,7 @@ pub mod colors {
     pub const SKETCH_DONE: Rgb = Rgb(20, 20, 20);
     pub const SKETCH_CONSTRUCTION: Rgb = Rgb(230, 130, 40);
     pub const SKETCH_FIXED: Rgb = Rgb(20, 20, 20);
+    pub const SKETCH_CENTERLINE: Rgb = Rgb(200, 110, 60);
     /// Linked (projected) reference geometry.
     pub const SKETCH_PROJECTED: Rgb = Rgb(150, 60, 190);
     /// Linked geometry whose reference was lost.
@@ -71,6 +72,8 @@ pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool
     for (i, c) in sk.curves.iter().enumerate() {
         let col = if c.link.is_some() && !sk.is_text_curve(i) {
             if sk.is_lost_curve(i) { colors::SKETCH_LOST } else { colors::SKETCH_PROJECTED }
+        } else if c.centerline {
+            colors::SKETCH_CENTERLINE
         } else if c.construction {
             colors::SKETCH_CONSTRUCTION
         } else if !active {
@@ -81,7 +84,7 @@ pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool
             colors::SKETCH
         };
         for seg in sk.segs(i) {
-            out.push((seg.polyline(0.02).iter().map(|p| plane.to_world(*p)).collect(), col, c.construction));
+            out.push((seg.polyline(0.02).iter().map(|p| plane.to_world(*p)).collect(), col, c.construction || c.centerline));
         }
     }
     out

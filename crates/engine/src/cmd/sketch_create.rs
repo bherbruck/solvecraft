@@ -70,6 +70,14 @@ pub static COMMANDS: &[CommandSpec] =
             .icon("conic")
             .enabled(in_sketch)
             .params("start, end, apex: [x,y] or point refs; rho?: 0…1 (default 0.5: parabola)"),
+        CommandSpec::new("BlendG1CurveSketchCmd", "Blend Curve", blend)
+            .at("SKETCH", "MODIFY")
+            .icon("blend")
+            .enabled(in_sketch)
+            .params("a, b: end points of two curves (\"l1.end\", \"a2.start\"): a smooth (tangent) spline joining them"),
+        CommandSpec::new("sketch.centerline", "Centerline", centerline)
+            .enabled(in_sketch)
+            .params("curves: [line ids], value?: bool (default toggles): centerline line type (not in profiles; an axis)"),
         CommandSpec::new("MTextCmd", "Text", text)
             .at("SKETCH", "CREATE")
             .icon("text")
@@ -137,6 +145,58 @@ fn edit_text(s: &mut Session, p: &Value) -> Result<Value> {
     *doc.sketch_mut(id)? = sk;
     *s.doc_mut() = doc;
     Ok(json!({"link": l, "curves": curves}))
+}
+
+/// The curve ending at point `pi` and the direction leaving it there.
+fn end_of(sk: &Sketch, pi: usize) -> Option<(usize, Vec2)> {
+    sk.curves.iter().enumerate().filter(|(_, c)| !c.construction).find_map(|(i, _)| leaving_dir(sk, i, pi).map(|d| (i, d)))
+}
+
+fn blend(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "BlendG1CurveSketchCmd";
+    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+        let pa = req_parg(sk, p, "a", cmd)?.idx().ok_or_else(|| bad(cmd, "`a` must be the end point of a curve"))?;
+        let pb = req_parg(sk, p, "b", cmd)?.idx().ok_or_else(|| bad(cmd, "`b` must be the end point of a curve"))?;
+        let (ca, ta) = end_of(sk, pa).ok_or_else(|| bad(cmd, "no curve ends at `a`"))?;
+        let (cb, tb) = end_of(sk, pb).ok_or_else(|| bad(cmd, "no curve ends at `b`"))?;
+        let (qa, qb) = (sk.point(pa).unwrap_or_default(), sk.point(pb).unwrap_or_default());
+        let l = qa.dist(qb);
+        if l < 1e-9 || ca == cb && pa == pb {
+            return Err(bad(cmd, "the ends must differ"));
+        }
+        let first_new = sk.points.len();
+        let c1 = sk.add_point(qa + ta * (l / 3.0), None)?;
+        let c2 = sk.add_point(qb + tb * (l / 3.0), None)?;
+        let sp = sk.add_curve(CurveKind::Spline { pts: vec![pa, c1, c2, pb], control: true, degree: 3 }, None)?;
+        let cons = vec![add_c(sk, ConstraintKind::Tangent { a: ca, b: sp })?, add_c(sk, ConstraintKind::Tangent { a: cb, b: sp })?];
+        solve_new_only(sk, first_new);
+        Ok((ids_of(sk, &[sp]), cons))
+    })?;
+    Ok(result(out, info))
+}
+
+fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.centerline";
+    let ids = string_list(p, "curves");
+    if ids.is_empty() {
+        return Err(bad(cmd, "`curves` must list lines"));
+    }
+    let want = crate::params::bool_(p, "value");
+    let (n, info) = edit(s, p, cmd, false, |sk, _| {
+        for id in &ids {
+            let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+            let cu = sk.curves.get_mut(c).ok_or_else(|| bad(cmd, "curve"))?;
+            if !matches!(cu.kind, CurveKind::Line { .. }) {
+                return Err(bad(cmd, format!("`{id}` is not a line")));
+            }
+            cu.centerline = want.unwrap_or(!cu.centerline);
+            if cu.centerline {
+                cu.construction = false;
+            }
+        }
+        Ok(ids.len())
+    })?;
+    Ok(json!({"changed": n, "sketch": info}))
 }
 
 fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {

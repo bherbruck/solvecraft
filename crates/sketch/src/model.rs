@@ -136,6 +136,10 @@ pub struct Curve {
     /// points are fixed and a linked circle keeps its radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+    /// Centerline line type: like construction (not part of profiles), drawn dash-dot; marks
+    /// an axis (revolve, diameter dimensions).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub centerline: bool,
 }
 
 /// Geometric constraints and dimensions. Indices refer to `Sketch::points` (`p`, `q`) or
@@ -484,7 +488,7 @@ impl Sketch {
             return Err(SketchError::Invalid("line needs two distinct points".into()));
         }
         let id = self.curve_id(id, "l")?;
-        self.curves.push(Curve { id, kind: CurveKind::Line { a, b }, construction: false, reversed: false, link: None });
+        self.curves.push(Curve { id, kind: CurveKind::Line { a, b }, construction: false, reversed: false, link: None, centerline: false });
         Ok(self.curves.len() - 1)
     }
 
@@ -513,7 +517,7 @@ impl Sketch {
             Some(i) if i < self.points.len() => i,
             _ => self.own_point(&id, "center", center)?,
         };
-        self.curves.push(Curve { id, kind: CurveKind::Circle { c, r }, construction: false, reversed: false, link: None });
+        self.curves.push(Curve { id, kind: CurveKind::Circle { c, r }, construction: false, reversed: false, link: None, centerline: false });
         Ok(self.curves.len() - 1)
     }
 
@@ -539,7 +543,7 @@ impl Sketch {
             Some(i) if i < n && i != a => i,
             _ => self.own_point(&id, "end", p1)?,
         };
-        self.curves.push(Curve { id, kind: CurveKind::Arc { c, a, b }, construction: false, reversed: false, link: None });
+        self.curves.push(Curve { id, kind: CurveKind::Arc { c, a, b }, construction: false, reversed: false, link: None, centerline: false });
         Ok(self.curves.len() - 1)
     }
 
@@ -715,7 +719,7 @@ impl Sketch {
             }
         };
         let id = self.curve_id(id, prefix)?;
-        self.curves.push(Curve { id, kind, construction: false, reversed: false, link: None });
+        self.curves.push(Curve { id, kind, construction: false, reversed: false, link: None, centerline: false });
         Ok(self.curves.len() - 1)
     }
 

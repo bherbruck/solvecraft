@@ -107,7 +107,7 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
     // Analytic shapes of the profile curves.
     let mut shapes: Vec<(usize, Shape)> = Vec::new();
     for (ci, c) in sk.curves.iter().enumerate() {
-        if c.construction {
+        if c.construction || c.centerline {
             continue;
         }
         match c.kind {

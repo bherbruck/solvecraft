@@ -169,7 +169,7 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64]) -> Result<(Vec<usize>, Vec<u
     let mut pieces = vec![ci];
     let mut push = |sk: &mut Sketch, kind: CurveKind, prefix: &str| -> Result<()> {
         let id = sk.fresh(prefix);
-        sk.curves.push(Curve { id, kind, construction, reversed: false, link: None });
+        sk.curves.push(Curve { id, kind, construction, reversed: false, link: None, centerline: false });
         pieces.push(sk.curves.len() - 1);
         Ok(())
     };
@@ -827,7 +827,14 @@ fn copy_through(
             }
         };
         let id = sk.fresh(prefix);
-        sk.curves.push(Curve { id, kind, construction: cu.construction, reversed: if flip { !cu.reversed } else { cu.reversed }, link: None });
+        sk.curves.push(Curve {
+            id,
+            kind,
+            construction: cu.construction,
+            reversed: if flip { !cu.reversed } else { cu.reversed },
+            link: None,
+            centerline: false,
+        });
         made.push(sk.curves.len() - 1);
     }
     Ok((made, map))
