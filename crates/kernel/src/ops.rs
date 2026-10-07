@@ -72,6 +72,12 @@ fn mismatch(a: &solvecraft_geom::Mesh, b: &solvecraft_geom::Mesh, result: &solve
 /// Boolean of two bodies. The result may be empty (`Ok(None)`) for a cut that removes
 /// everything or an intersection of disjoint bodies. Results are checked against volume bounds
 /// and retried with shifted copies and other tolerances when they fail or look wrong.
+thread_local! {
+    /// Set while a boolean runs on bodies whose coincident faces were pushed apart (no
+    /// second round of pushing).
+    static APART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     a.require_brep("a boolean")?;
     b.require_brep("a boolean")?;
@@ -94,6 +100,18 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         bounds && consistent
     };
     let mut last = String::new();
+    // Coincident faces make the intersection fail after many retries; push them apart first.
+    if !APART.with(|c| c.get()) && crate::coplanar::has_coincident_faces(a, b) {
+        APART.with(|c| c.set(true));
+        let r = crate::coplanar::boolean_apart(a, b, op);
+        APART.with(|c| c.set(false));
+        if let Some(Ok(Some(body))) = r {
+            let v = volume(&body);
+            if v > 0.0 && plausible(v, &body) {
+                return Ok(Some(body));
+            }
+        }
+    }
     let mut empty_votes = 0;
     for (attempt, j) in JITTER.iter().enumerate() {
         let shift = mt::Vector3::new(j[0], j[1], j[2]) * (size * 0.01);
@@ -139,9 +157,6 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         }
     }
     // Coincident planar faces: push them apart (exactly) and try again.
-    thread_local! {
-        static APART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    }
     if !APART.with(|c| c.get()) {
         APART.with(|c| c.set(true));
         let r = crate::coplanar::boolean_apart(a, b, op);

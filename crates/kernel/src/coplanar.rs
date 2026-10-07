@@ -201,6 +201,13 @@ fn slab_beyond(n: Vec3, d: f64, depth: f64, extent: f64) -> Result<Body> {
     crate::extrude(&pl, &[r], 0.0, depth)?.pop().ok_or_else(|| KernelError::Failed("slab".into()))
 }
 
+/// Do the bodies have planar faces in a common plane?
+pub(crate) fn has_coincident_faces(a: &Body, b: &Body) -> bool {
+    let tol = (a.size().max(b.size()) * 1e-7).max(1e-9);
+    let (pa, pb) = (planes(a), planes(b));
+    pa.iter().any(|(_, x)| pb.iter().any(|(_, y)| x.n.dot(y.n).abs() > 1.0 - 1e-9 && (x.d - y.d * x.n.dot(y.n)).abs() < tol * 10.0))
+}
+
 /// Retry a failed boolean with coincident planar faces pushed apart. `None` when there are no
 /// coincident faces or the faces can't be pushed.
 pub(crate) fn boolean_apart(a: &Body, b: &Body, op: BoolOp) -> Option<Result<Option<Body>>> {
