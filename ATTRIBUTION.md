@@ -31,3 +31,9 @@ Generated-in-code assets are original and have no file to list:
 | crates/mcp/src/server.rs, crates/mcp/src/backend.rs (JSON-RPC framing, MCP lifecycle, control-port bridge) | CADCraft `crates/mcp/src/{server,backend}.rs` | MIT OR Apache-2.0 |
 | crates/mcp/src/tools.rs (tool schema helpers and argument checking) | CADCraft `crates/mcp/src/tools.rs`, GridCraft `crates/mcp/src/tools.rs` | MIT OR Apache-2.0 |
 | LICENSE-MIT, LICENSE-APACHE (licence text) | CADCraft | — |
+
+## Vendored third-party code
+
+| Directory | Source | Licence | Changes |
+|---|---|---|---|
+| vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; trace macro (vendor/README.md) |

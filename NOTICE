@@ -8,7 +8,9 @@ Third-party material
 Software dependencies are listed in Cargo.lock. The geometry kernel builds on the truck crates
 (truck-modeling, truck-shapeops, truck-meshalgo, truck-stepio, truck-topology and their
 dependencies, https://github.com/ricosjp/truck), licensed under the Apache License 2.0 and used
-unmodified as libraries.
+as libraries. truck-shapeops 0.4.0 is vendored in vendor/truck-shapeops with SolveCraft
+modifications (listed in vendor/README.md and marked in the source); its licence is in
+vendor/truck-shapeops/LICENSE. Copyright (c) RICOS Co. Ltd.
 
 Some code is adapted from sibling projects in the storytold family (CADCraft, GridCraft), which are
 licensed MIT OR Apache-2.0; ATTRIBUTION.md lists the files.

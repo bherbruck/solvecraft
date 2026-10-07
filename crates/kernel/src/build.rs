@@ -140,6 +140,14 @@ pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: 
                 .collect(),
         };
         let r = &Region2 { outer: snap_loop(&r.outer), holes: r.holes.iter().map(snap_loop).collect() };
+        // A half disc on the axis revolved fully is a sphere: build it without poles.
+        if angle.abs() >= std::f64::consts::TAU - 1e-9
+            && r.holes.is_empty()
+            && let Some((c, rad)) = half_disc(&r.outer, axis_origin, d)
+        {
+            out.push(sphere_patches(plane.to_world(c), rad)?);
+            continue;
+        }
         // A full revolution of a profile with one edge on the axis: sweep the rest of the loop
         // as a cone-like shell (no zero-area faces, which booleans can't handle).
         if angle.abs() >= std::f64::consts::TAU - 1e-9
@@ -191,19 +199,7 @@ pub fn cylinder(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Body
 
 /// Sphere: revolve a half disc.
 pub fn sphere(center: Vec3, radius: f64) -> Result<Body> {
-    let radius = finite(radius, "radius")?;
-    if radius <= 1e-6 {
-        return Err(KernelError::Invalid("radius must be positive".into()));
-    }
-    let plane = Plane { origin: center, ..Plane::XZ };
-    let half = Loop2 {
-        segs: vec![
-            Seg2::Arc { center: Vec2::ZERO, radius, start: -std::f64::consts::FRAC_PI_2, sweep: std::f64::consts::PI },
-            Seg2::Line { a: Vec2::new(0.0, radius), b: Vec2::new(0.0, -radius) },
-        ],
-    };
-    let mut v = revolve(&plane, &[Region2 { outer: half, holes: vec![] }], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?;
-    v.pop().ok_or_else(|| KernelError::Failed("sphere".into()))
+    sphere_patches(center, radius)
 }
 
 /// Torus about the Z axis through `center`.
@@ -313,6 +309,23 @@ pub fn extrude_tapered(plane: &Plane, region: &Region2, length: f64, dir_sign: f
 }
 
 /// Revolve 360° a loop that has exactly one line segment on the axis, without degenerate faces.
+/// A loop made of a half circle and its diameter on the axis: (centre, radius).
+fn half_disc(lp: &Loop2, axis_origin: Vec2, d: Vec2) -> Option<(Vec2, f64)> {
+    let on_axis = |p: Vec2| d.cross(p - axis_origin).abs() < 1e-7 * (1.0 + p.len());
+    let mut arcs = Vec::new();
+    for s in &lp.segs {
+        match *s {
+            Seg2::Line { a, b } if on_axis(a) && on_axis(b) => {}
+            Seg2::Arc { center, radius, sweep, .. } if on_axis(center) => arcs.push((center, radius, sweep)),
+            _ => return None,
+        }
+    }
+    let (c, r, _) = *arcs.first()?;
+    let total: f64 = arcs.iter().map(|a| a.2.abs()).sum();
+    let same = arcs.iter().all(|(c2, r2, _)| c2.dist(c) < 1e-7 * (1.0 + r) && (r2 - r).abs() < 1e-7 * (1.0 + r));
+    (same && (total - std::f64::consts::PI).abs() < 1e-6).then_some((c, r))
+}
+
 fn revolve_touching_axis(plane: &Plane, lp: &Loop2, axis_origin: Vec2, d: Vec2) -> Result<Option<Body>> {
     let on_axis = |p: Vec2| d.cross(p - axis_origin).abs() < 1e-9;
     let n = lp.segs.len();
@@ -653,4 +666,78 @@ fn uniform_wire(plane: &Plane, lp: &Loop2) -> Result<mt::Wire> {
         edges.push(mt::Edge::new(a, b, mt::Curve::BSplineCurve(curve)));
     }
     Ok(edges.into())
+}
+
+/// A sphere as six patches (the cube's faces projected onto it) on revolved surfaces whose poles
+/// and seams lie outside each patch. No face has a singular point, which the boolean needs; the
+/// patches are one analytic sphere, so measured topology counts it as one face.
+pub fn sphere_patches(center: Vec3, radius: f64) -> Result<Body> {
+    sphere_patches_rotated(center, radius, [Vec3::X, Vec3::Y, Vec3::Z])
+}
+
+/// [`sphere_patches`] with the patch layout turned to the frame `rot` (orthonormal columns).
+pub fn sphere_patches_rotated(center: Vec3, radius: f64, rot: [Vec3; 3]) -> Result<Body> {
+    let radius = finite(radius, "radius")?;
+    let turn = |v: Vec3| rot[0] * v.x + rot[1] * v.y + rot[2] * v.z;
+    if radius <= 1e-6 || !center.is_finite() {
+        return Err(KernelError::Invalid("radius must be positive".into()));
+    }
+    let k = radius / 3f64.sqrt();
+    let corner = |sx: f64, sy: f64, sz: f64| center + turn(Vec3::new(sx * k, sy * k, sz * k));
+    // Cube faces: outward direction, rotation axis for the patch's surface (perpendicular to it),
+    // and the four corner sign triples counter-clockwise seen from outside.
+    let faces: [(Vec3, Vec3, [[f64; 3]; 4]); 6] = [
+        (Vec3::X, Vec3::Z, [[1.0, -1.0, -1.0], [1.0, 1.0, -1.0], [1.0, 1.0, 1.0], [1.0, -1.0, 1.0]]),
+        (-Vec3::X, Vec3::Z, [[-1.0, 1.0, -1.0], [-1.0, -1.0, -1.0], [-1.0, -1.0, 1.0], [-1.0, 1.0, 1.0]]),
+        (Vec3::Y, Vec3::Z, [[1.0, 1.0, -1.0], [-1.0, 1.0, -1.0], [-1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]),
+        (-Vec3::Y, Vec3::Z, [[-1.0, -1.0, -1.0], [1.0, -1.0, -1.0], [1.0, -1.0, 1.0], [-1.0, -1.0, 1.0]]),
+        (Vec3::Z, Vec3::X, [[-1.0, -1.0, 1.0], [1.0, -1.0, 1.0], [1.0, 1.0, 1.0], [-1.0, 1.0, 1.0]]),
+        (-Vec3::Z, Vec3::X, [[-1.0, 1.0, -1.0], [1.0, 1.0, -1.0], [1.0, -1.0, -1.0], [-1.0, -1.0, -1.0]]),
+    ];
+    guard("sphere", || {
+        let key = |s: [f64; 3]| ((s[0] > 0.0) as usize) | (((s[1] > 0.0) as usize) << 1) | (((s[2] > 0.0) as usize) << 2);
+        let mut verts: std::collections::HashMap<usize, mt::Vertex> = std::collections::HashMap::new();
+        let mut vert = |s: [f64; 3]| verts.entry(key(s)).or_insert_with(|| builder::vertex(p3(corner(s[0], s[1], s[2])))).clone();
+        let mut edges: std::collections::HashMap<(usize, usize), mt::Edge> = std::collections::HashMap::new();
+        let mut out: Vec<mt::Face> = Vec::new();
+        for (dir, axis, cs) in faces {
+            let (dir, axis) = (turn(dir), turn(axis));
+            let mut wire: Vec<mt::Edge> = Vec::new();
+            for i in 0..4 {
+                let (a, b) = (cs[i], cs[(i + 1) % 4]);
+                let (ka, kb) = (key(a), key(b));
+                let e = match edges.get(&(ka.min(kb), ka.max(kb))) {
+                    Some(e) => e.clone(),
+                    None => {
+                        let (lo, hi) = if ka < kb { (a, b) } else { (b, a) };
+                        let (va, vb) = (vert(lo), vert(hi));
+                        let mid = (corner(lo[0], lo[1], lo[2]) + corner(hi[0], hi[1], hi[2])) * 0.5 - center;
+                        let transit = center + mid.normalized().unwrap_or(dir) * radius;
+                        let e = builder::circle_arc(&va, &vb, p3(transit));
+                        edges.insert((ka.min(kb), ka.max(kb)), e.clone());
+                        e
+                    }
+                };
+                wire.push(if ka < kb { e } else { e.inverse() });
+            }
+            // The meridian runs pole to pole through the side away from the patch.
+            let (np, sp, back) = (center + axis * radius, center - axis * radius, center - dir * radius);
+            let meridian = builder::circle_arc(&builder::vertex(p3(np)), &builder::vertex(p3(sp)), p3(back));
+            let mut surface =
+                mt::Surface::RevolutedCurve(mt::Processor::new(mt::RevolutedCurve::by_revolution(meridian.oriented_curve(), p3(center), v3(axis))));
+            // Outward normal at the patch centre.
+            let probe = p3(center + dir * radius);
+            use mt::{ParametricSurface3D, SearchParameter};
+            if let Some((u, v)) = surface.search_parameter(probe, mt::SPHint2D::None, 100) {
+                let n = surface.normal(u, v);
+                if mt::InnerSpace::dot(n, v3(dir)) < 0.0 {
+                    mt::Invertible::invert(&mut surface);
+                }
+            }
+            out.push(mt::Face::new(vec![wire.into()], surface));
+        }
+        let shell: mt::Shell = out.into();
+        let solid = Solid::try_new(vec![shell]).map_err(|e| KernelError::Failed(format!("sphere: {e}")))?;
+        Body::new(solid)
+    })
 }

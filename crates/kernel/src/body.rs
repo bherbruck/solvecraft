@@ -37,17 +37,16 @@ pub struct FaceInfo {
 type MeshedShell = truck_topology::Shell<mt::Point3, PolylineCurve<mt::Point3>, Option<PolygonMesh>>;
 
 /// Triangulate each shell (not the solid: truck's solid constructor panics on the open or
-/// non-manifold shells an import can produce). Faces whose boundary is not exactly on the
-/// surface (imported geometry within the file's tolerance) fail the exact parameter search;
-/// such shells are meshed again projecting onto the surface.
+/// non-manifold shells an import can produce). Boundaries that lie on their surface only within
+/// tolerance (imports, boolean results) are projected onto it.
 fn mesh_shells(solid: &Solid, tol: f64) -> Vec<MeshedShell> {
     solid
         .boundaries()
         .iter()
-        .map(|sh| {
-            let m = sh.triangulation(tol);
-            if m.face_iter().any(|f| f.surface().is_none()) { sh.robust_triangulation(tol) } else { m }
-        })
+        // The robust search tries the exact one first, so exact geometry costs nothing extra; a
+        // face can also come back as an empty mesh rather than none (boolean results with
+        // approximate intersection curves), so always use it.
+        .map(|sh| sh.robust_triangulation(tol))
         .collect()
 }
 

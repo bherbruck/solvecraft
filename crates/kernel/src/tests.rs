@@ -247,6 +247,20 @@ fn planar_booleans_with_coincident_faces() {
 }
 
 #[test]
+fn sphere_booleans() {
+    let s = sphere(Vec3::ZERO, 15.0).unwrap();
+    let m = measure(&s).unwrap();
+    assert!(rel(m.volume, 4.0 / 3.0 * PI * 3375.0) < 1e-3, "{}", m.volume);
+    assert_eq!((m.merged.faces, m.merged.edges), (1, 0));
+    // A ball cut out of the top face of a slab (oracle 14).
+    let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
+    let c = boolean(&b, &s, BoolOp::Cut).unwrap().unwrap();
+    let m = measure(&c).unwrap();
+    assert!(rel(m.volume, 50.0 * 50.0 * 20.0 - 2.0 / 3.0 * PI * 3375.0) < 1e-3, "{}", m.volume);
+    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (7, 13, 9));
+}
+
+#[test]
 #[ignore]
 fn debug_convergence() {
     let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 15.0), holes: vec![] }], 0.0, 50.0).unwrap().pop().unwrap();
@@ -454,5 +468,134 @@ fn debug_cbore_seq() {
         );
         let c2 = boolean(&b, &t2, BoolOp::Cut).unwrap().unwrap();
         println!("  swapped: {:?}", boolean(&c2, &t1, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume)));
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_truck_sphere() {
+    use truck_modeling::{self as mt, builder};
+    let mk = |c: Vec3, r: f64, axis: Vec3| -> Body {
+        let ax = axis.normalized().unwrap();
+        let side = ax.any_perp();
+        let v0 = builder::vertex(crate::body::p3(c + ax * r));
+        let arc = builder::rsweep(&v0, crate::body::p3(c), crate::body::v3(side), mt::Rad(PI));
+        let shell = builder::rsweep(&arc, crate::body::p3(c), crate::body::v3(ax), mt::Rad(2.0 * PI));
+        Body::new(mt::Solid::new(vec![shell])).unwrap()
+    };
+    let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
+    for (name, axis) in [("z", Vec3::Z), ("x", Vec3::X), ("diag", Vec3::new(0.3, 0.5, 0.8))] {
+        let sp = mk(Vec3::ZERO, 15.0, axis);
+        println!("{name}: faces {} vol {}", sp.face_count(), measure(&sp).unwrap().volume);
+        for op in [BoolOp::Cut, BoolOp::Intersect, BoolOp::Union] {
+            let r = guard("t", || {
+                let (sa, mut sb) = (b.deep_copy(), sp.deep_copy());
+                let res = match op {
+                    BoolOp::Cut => {
+                        sb.not();
+                        truck_shapeops::and(&sa, &sb, 0.01)
+                    }
+                    BoolOp::Intersect => truck_shapeops::and(&sa, &sb, 0.01),
+                    BoolOp::Union => truck_shapeops::or(&sa, &sb, 0.01),
+                };
+                Ok(res.map(|s| s.face_iter().count()))
+            });
+            println!("  {op:?}: {r:?}");
+        }
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_sphere_patches() {
+    let sp = crate::build::sphere_patches(Vec3::ZERO, 15.0).unwrap();
+    let m = measure(&sp).unwrap();
+    println!("vol {} want {} area {} merged {:?}", m.volume, 4.0 / 3.0 * PI * 3375.0, m.area, m.merged);
+    let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
+    for op in [BoolOp::Cut, BoolOp::Intersect, BoolOp::Union] {
+        let r = boolean(&b, &sp, op).map(|o| {
+            o.map(|x| {
+                let m = measure(&x).unwrap();
+                (m.volume, m.merged)
+            })
+        });
+        println!("{op:?}: {r:?}");
+    }
+    let c = box_solid(Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
+    let a = 0.3f64;
+    let (ca, sa) = (a.cos(), a.sin());
+    let b2 = 0.5f64;
+    let (cb, sb) = (b2.cos(), b2.sin());
+    // Rz(a) * Rx(b)
+    let rot = [Vec3::new(ca, sa, 0.0), Vec3::new(-sa * cb, ca * cb, sb), Vec3::new(sa * sb, -ca * sb, cb)];
+    for (name, s2) in [
+        ("plain", crate::build::sphere_patches(Vec3::ZERO, 25.0).unwrap()),
+        ("turned", crate::build::sphere_patches_rotated(Vec3::ZERO, 25.0, rot).unwrap()),
+    ] {
+        println!("{name} vol {}", measure(&s2).unwrap().volume);
+        println!(
+            "{name} cube and sphere: {:?}",
+            boolean(&c, &s2, BoolOp::Intersect).map(|o| o.map(|x| {
+                let m = measure(&x).unwrap();
+                (m.volume, m.merged)
+            }))
+        );
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_sphere_cases() {
+    let s = crate::build::sphere_patches(Vec3::ZERO, 25.0).unwrap();
+    let cases = [
+        ("one plane", Vec3::new(-100.0, -100.0, -100.0), Vec3::new(100.0, 100.0, 20.0)),
+        ("two planes", Vec3::new(-100.0, -100.0, -20.0), Vec3::new(100.0, 100.0, 20.0)),
+        ("three", Vec3::new(-100.0, -100.0, -20.0), Vec3::new(20.0, 100.0, 20.0)),
+        ("four", Vec3::new(-100.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)),
+        ("five", Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 100.0)),
+        ("cube", Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)),
+        ("cube big sphere-ish", Vec3::new(-24.0, -24.0, -24.0), Vec3::new(24.0, 24.0, 24.0)),
+        ("cube off", Vec3::new(-20.3, -19.7, -20.1), Vec3::new(19.9, 20.2, 19.8)),
+    ];
+    for (name, lo, hi) in cases {
+        let b = box_solid(lo, hi).unwrap();
+        for op in [BoolOp::Intersect, BoolOp::Cut] {
+            let r = boolean(&b, &s, op).map(|o| o.map(|x| measure(&x).unwrap().volume));
+            println!("{name} {op:?}: {:?}", r.map_err(|e| e.to_string().chars().take(60).collect::<String>()));
+        }
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_sphere_rotations() {
+    let b = box_solid(Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
+    for k in 0..8 {
+        let (a, c) = (0.37 * k as f64 + 0.1, 0.61 * k as f64 + 0.2);
+        let (ca, sa, cc, sc) = (a.cos(), a.sin(), c.cos(), c.sin());
+        let rot = [Vec3::new(ca, sa, 0.0), Vec3::new(-sa * cc, ca * cc, sc), Vec3::new(sa * sc, -ca * sc, cc)];
+        let s = crate::build::sphere_patches_rotated(Vec3::ZERO, 25.0, rot).unwrap();
+        let r = guard("t", || {
+            let res = truck_shapeops::and(&b.deep_copy(), &s.deep_copy(), 0.01);
+            Ok(res.map(|x| x.face_iter().count()))
+        });
+        println!("rot {k}: {r:?}");
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_cube_sphere_measure() {
+    let b = box_solid(Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
+    let s = crate::build::sphere_patches(Vec3::ZERO, 25.0).unwrap();
+    let r = guard("t", || Ok(truck_shapeops::and(&b.deep_copy(), &s.deep_copy(), 0.05))).unwrap().unwrap();
+    let body = Body::new(r).unwrap();
+    for tol in [0.5, 0.1, 0.02] {
+        let m = body.tessellate(tol).unwrap();
+        let mm = m.measure();
+        println!("tol {tol}: vol {} area {} tris {}", mm.volume, mm.area, m.triangles.len());
+    }
+    for f in body.faces(0.05).unwrap() {
+        println!("face {} area {:.2} c {:?} planar {:?}", f.index, f.area, f.centroid, f.plane_normal.is_some());
     }
 }

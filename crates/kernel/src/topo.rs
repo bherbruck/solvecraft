@@ -135,23 +135,10 @@ fn classify(pts: &[Vec3], nrm: &[Vec3], tol: f64, id: usize) -> Surf {
             }
         }
     }
-    // Sphere: points equidistant from the point where normals meet.
-    let c_est = {
-        let mut acc = Vec3::ZERO;
-        let mut k = 0.0;
-        for (p, n) in pts.iter().zip(nrm) {
-            // Assume radius from the first pair.
-            let r0 = (p0 - *p).len() / ((n0 - *n).len().max(1e-12));
-            if r0.is_finite() && r0 > 0.0 && (n0 - *n).len() > 0.1 {
-                acc += *p - *n * r0;
-                k += 1.0;
-            }
-        }
-        (k > 0.0).then(|| acc / k)
-    };
-    if let Some(c) = c_est {
-        let r = pts.iter().map(|p| p.dist(c)).sum::<f64>() / pts.len().max(1) as f64;
-        if pts.iter().all(|p| (p.dist(c) - r).abs() < tol.max(r * 2e-3)) {
+    // Sphere: algebraic least-squares fit |p|² = 2c·p + k, then every point at the same distance.
+    if let Some((c, r)) = fit_sphere(pts) {
+        let spread = pts.iter().map(|p| p.dist(p0)).fold(0.0, f64::max);
+        if spread > tol && pts.iter().all(|p| (p.dist(c) - r).abs() < tol.max(r * 2e-3)) && r < spread * 1e4 {
             return Surf::Sphere { c, r };
         }
     }
@@ -276,6 +263,47 @@ pub fn seam_flags(b: &Body, mesh: &Mesh) -> Vec<bool> {
             _ => false,
         })
         .collect()
+}
+
+/// Least-squares sphere through points: centre and radius.
+fn fit_sphere(pts: &[Vec3]) -> Option<(Vec3, f64)> {
+    if pts.len() < 4 {
+        return None;
+    }
+    // Centre the data for conditioning.
+    let m = pts.iter().fold(Vec3::ZERO, |a, p| a + *p) / pts.len() as f64;
+    let mut a = [[0.0f64; 5]; 4];
+    for p in pts {
+        let q = *p - m;
+        let row = [2.0 * q.x, 2.0 * q.y, 2.0 * q.z, 1.0];
+        let rhs = q.dot(q);
+        for i in 0..4 {
+            for j in 0..4 {
+                a[i][j] += row[i] * row[j];
+            }
+            a[i][4] += row[i] * rhs;
+        }
+    }
+    for col in 0..4 {
+        let piv = (col..4).max_by(|x, y| a[*x][col].abs().total_cmp(&a[*y][col].abs()))?;
+        if a[piv][col].abs() < 1e-18 {
+            return None;
+        }
+        a.swap(col, piv);
+        for r in 0..4 {
+            if r != col {
+                let f = a[r][col] / a[col][col];
+                let prow = a[col];
+                for (x, v) in a[r].iter_mut().zip(prow) {
+                    *x -= f * v;
+                }
+            }
+        }
+    }
+    let c = Vec3::new(a[0][4] / a[0][0], a[1][4] / a[1][1], a[2][4] / a[2][2]);
+    let k = a[3][4] / a[3][3];
+    let r2 = k + c.dot(c);
+    (r2 > 0.0 && r2.is_finite()).then(|| (c + m, r2.sqrt()))
 }
 
 fn classify_faces(mesh: &Mesh, nf: usize, tol: f64) -> Vec<Surf> {
