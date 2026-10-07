@@ -34,6 +34,23 @@ pub struct FaceInfo {
     pub plane_normal: Option<Vec3>,
 }
 
+type MeshedShell = truck_topology::Shell<mt::Point3, PolylineCurve<mt::Point3>, Option<PolygonMesh>>;
+
+/// Triangulate each shell (not the solid: truck's solid constructor panics on the open or
+/// non-manifold shells an import can produce). Faces whose boundary is not exactly on the
+/// surface (imported geometry within the file's tolerance) fail the exact parameter search;
+/// such shells are meshed again projecting onto the surface.
+fn mesh_shells(solid: &Solid, tol: f64) -> Vec<MeshedShell> {
+    solid
+        .boundaries()
+        .iter()
+        .map(|sh| {
+            let m = sh.triangulation(tol);
+            if m.face_iter().any(|f| f.surface().is_none()) { sh.robust_triangulation(tol) } else { m }
+        })
+        .collect()
+}
+
 pub(crate) fn p3(v: Vec3) -> mt::Point3 {
     mt::Point3::new(v.x, v.y, v.z)
 }
@@ -65,7 +82,7 @@ impl Body {
             return Err(KernelError::Failed("empty result".into()));
         }
         // Orient outward: a closed solid must have positive volume.
-        let v = guard("orient", || Ok(solid.triangulation(1.0).to_polygon().volume()))?;
+        let v = guard("orient", || Ok(mesh_shells(&solid, 1.0).iter().map(|s| s.to_polygon().volume()).sum::<f64>()))?;
         if v < 0.0 {
             solid.not();
         }
@@ -98,9 +115,9 @@ impl Body {
         let tol = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
         let tol = tol.max(self.size() * 1e-6);
         guard("tessellate", || {
-            let meshed = self.solid.triangulation(tol);
+            let meshed = mesh_shells(&self.solid, tol);
             let mut out = Mesh::default();
-            for (fi, face) in meshed.face_iter().enumerate() {
+            for (fi, face) in meshed.iter().flat_map(|s| s.face_iter()).enumerate() {
                 let Some(pm) = face.surface() else { continue };
                 let flip = !face.orientation();
                 let base = u32::try_from(out.positions.len()).unwrap_or(u32::MAX);
@@ -142,7 +159,7 @@ impl Body {
                 }
             }
             let mut seen = std::collections::HashMap::new();
-            for e in meshed.edge_iter() {
+            for e in meshed.iter().flat_map(|s| s.edge_iter()) {
                 if seen.contains_key(&e.id()) {
                     continue;
                 }
@@ -152,7 +169,7 @@ impl Body {
             }
             // Which faces each edge bounds.
             out.edge_faces = vec![Vec::new(); out.edges.len()];
-            for (fi, face) in meshed.face_iter().enumerate() {
+            for (fi, face) in meshed.iter().flat_map(|s| s.face_iter()).enumerate() {
                 for e in face.edge_iter() {
                     if let Some(slot) = seen.get(&e.id()).and_then(|i| out.edge_faces.get_mut(*i)) {
                         let f = u32::try_from(fi).unwrap_or(u32::MAX);

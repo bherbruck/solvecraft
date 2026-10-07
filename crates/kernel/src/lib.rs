@@ -2,7 +2,7 @@
 //!
 //! Everything SolveCraft does with solids goes through this crate: building bodies from planar
 //! regions (extrude, revolve) and primitives, booleans, fillets and chamfers, tessellation,
-//! measurement and STEP export. The implementation uses the `truck` crates (Apache-2.0; see
+//! measurement and STEP export and import. The implementation uses the `truck` crates (Apache-2.0; see
 //! `plan/adr/0001-geometry-kernel.md`) plus our own local operations (edge fillets and
 //! chamfers in `blend.rs`), but no truck type appears in the public API, so the kernel can be
 //! replaced without touching the rest of the workspace.
@@ -20,6 +20,7 @@ mod ops;
 mod polybool;
 mod polyhedron;
 mod step;
+mod step_in;
 mod topo;
 
 pub use blend::{chamfer, fillet};
@@ -30,6 +31,7 @@ pub use ops::{BoolOp, boolean, split_by_plane, transform, transform_matrix};
 pub use polybool::planar_boolean;
 pub use polyhedron::{HalfSpace, convex_polyhedron, draft, shell};
 pub use step::step_export;
+pub use step_in::{ImportedBody, StepImport, StepNode, step_import};
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
