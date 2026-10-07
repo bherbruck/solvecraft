@@ -151,6 +151,9 @@ pub struct Session {
     pub auto_project: bool,
     /// The component new sketches and features go into (0 = the root).
     pub active_component: u64,
+    /// Occurrence moves not captured yet (Capture Position keeps them, a recompute drops them).
+    pub pending_moves: std::collections::BTreeMap<u64, solvecraft_doc::Mat>,
+    world_cache: std::sync::Mutex<Option<(u64, Arc<solvecraft_doc::ModelState>)>>,
 }
 
 const MAX_UNDO: usize = 200;
@@ -180,6 +183,8 @@ impl Session {
             revision: 1,
             auto_project: true,
             active_component: 0,
+            pending_moves: Default::default(),
+            world_cache: Default::default(),
         }
     }
 
@@ -204,6 +209,37 @@ impl Session {
     }
 
     /// Re-evaluate the model after a document change.
+    /// The model placed in the world through component occurrences (and uncaptured moves): what
+    /// to display, measure, pick and export. The same as `model.state()` without components.
+    pub fn world_state(&self) -> Arc<solvecraft_doc::ModelState> {
+        let st = self.model.state();
+        if self.doc.occurrences.is_empty() {
+            return st;
+        }
+        if let Ok(c) = self.world_cache.lock()
+            && let Some((rev, w)) = c.as_ref()
+            && *rev == self.revision
+        {
+            return w.clone();
+        }
+        let w = if self.pending_moves.is_empty() {
+            solvecraft_doc::world_state(&self.doc, &st)
+        } else {
+            let mut d = (*self.doc).clone();
+            for o in &mut d.occurrences {
+                if let Some(m) = self.pending_moves.get(&o.id) {
+                    o.transform = *m;
+                }
+            }
+            solvecraft_doc::world_state(&d, &st)
+        };
+        let w = Arc::new(w);
+        if let Ok(mut c) = self.world_cache.lock() {
+            *c = Some((self.revision, w.clone()));
+        }
+        w
+    }
+
     pub fn refresh(&mut self) {
         self.model.evaluate(&self.doc);
         self.revision += 1;
@@ -272,6 +308,8 @@ impl Session {
             revision: self.revision,
             auto_project: self.auto_project,
             active_component: self.active_component,
+            pending_moves: self.pending_moves.clone(),
+            world_cache: Default::default(),
         }
     }
 

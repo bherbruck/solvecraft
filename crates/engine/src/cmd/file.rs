@@ -160,7 +160,7 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Result<Value> {
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
-    let bytes = solvecraft_io::export(&s.model.state(), bodies, format, &name)?;
+    let bytes = solvecraft_io::export(&s.world_state(), bodies, format, &name)?;
     std::fs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
 }

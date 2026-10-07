@@ -236,6 +236,9 @@ fn check_expr(s: &Session, e: &str, kind: Kind, cmd: &str, what: &str) -> Result
 /// Add a feature, evaluate, and report its result (an evaluation error fails the command).
 fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
     let name = str_(p, "name");
+    // Commands speak world coordinates; the feature is authored in the active component.
+    let mut kind = kind;
+    super::component::to_active_frame(s, &mut kind);
     let id = s.doc_mut().add_feature(kind, name)?;
     let comp = s.active_component;
     if comp != 0

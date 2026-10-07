@@ -1443,3 +1443,58 @@ fn unique_body_name(st: &ModelState, base: &str) -> String {
     }
     (2..).map(|i| format!("{base} ({i})")).find(|n| st.body(n).is_none()).unwrap_or_else(|| base.to_string())
 }
+
+/// The model placed in the world: each component's bodies, sketches and threads through every
+/// occurrence of it (bodies of the first placement keep their names; further instances get the
+/// occurrence path in brackets). Without components this is the model itself.
+pub fn world_state(doc: &Document, st: &ModelState) -> ModelState {
+    if doc.occurrences.is_empty() {
+        return st.clone();
+    }
+    let comp_of_feature = |id: u64| doc.feature(id).map(|f| f.component).unwrap_or(0);
+    let first_path = |comp: u64| -> Vec<u64> {
+        let mut path = Vec::new();
+        let mut c = comp;
+        for _ in 0..1000 {
+            if c == 0 {
+                break;
+            }
+            let Some(o) = doc.occurrence_of(c) else { break };
+            path.insert(0, o.id);
+            c = o.parent;
+        }
+        path
+    };
+    let mut out = ModelState { body_counter: st.body_counter, ..Default::default() };
+    for (comp, path, m) in doc.placements() {
+        let primary = path == first_path(comp);
+        let label = || -> String {
+            path.iter().filter_map(|id| doc.occurrences.iter().find(|o| o.id == *id)).map(|o| o.name.as_str()).collect::<Vec<_>>().join("/")
+        };
+        let ident = crate::is_identity(&m);
+        for b in st.bodies.iter().filter(|b| doc.body_component(&b.name, b.feature) == comp) {
+            let name = if primary { b.name.clone() } else { format!("{} ({})", b.name, label()) };
+            let body = if ident { b.body.clone() } else { kernel::transform_matrix(&b.body, m).unwrap_or_else(|_| b.body.clone()) };
+            out.bodies.push(ModelBody::new(name, body, b.feature));
+        }
+        if primary {
+            for s in st.sketches.iter().filter(|s| comp_of_feature(s.feature) == comp) {
+                let mut s2 = s.clone();
+                if !ident {
+                    let p = &s.plane;
+                    if let Some(np) = Plane::new(crate::apply_point(&m, p.origin), crate::apply_vector(&m, p.x), crate::apply_vector(&m, p.y)) {
+                        s2.plane = np;
+                    }
+                }
+                out.sketches.push(s2);
+            }
+            for t in st.threads.iter().filter(|t| comp_of_feature(t.feature) == comp) {
+                let mut t2 = t.clone();
+                t2.axis_point = crate::apply_point(&m, t.axis_point);
+                t2.axis = crate::apply_vector(&m, t.axis);
+                out.threads.push(t2);
+            }
+        }
+    }
+    out
+}

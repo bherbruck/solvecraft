@@ -638,6 +638,9 @@ pub struct Document {
     /// Components below the root, as a tree (by parent).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub components: Vec<Component>,
+    /// Placements of components in their parents (each non-root component has at least one).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub occurrences: Vec<crate::Occurrence>,
     /// Physical material per body (by body name); others use the default.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub materials: std::collections::BTreeMap<String, String>,
@@ -670,6 +673,7 @@ impl Document {
             marker: None,
             next_id: 1,
             components: Vec::new(),
+            occurrences: Vec::new(),
             body_components: Default::default(),
             materials: Default::default(),
         }
@@ -706,6 +710,7 @@ impl Document {
             }
         };
         self.components.push(Component { id, name, parent });
+        self.add_occurrence(id, parent, crate::IDENTITY)?;
         Ok(id)
     }
 
@@ -719,6 +724,13 @@ impl Document {
 
     pub fn from_json(s: &str) -> Result<Document> {
         let d: Document = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("document: {e}")))?;
+        // Designs from before occurrences: every component gets one, in place.
+        let mut d = d;
+        let missing: Vec<(u64, u64)> =
+            d.components.iter().filter(|c| !d.occurrences.iter().any(|o| o.component == c.id)).map(|c| (c.id, c.parent)).collect();
+        for (c, p) in missing {
+            d.add_occurrence(c, p, crate::IDENTITY)?;
+        }
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
         }

@@ -47,7 +47,7 @@ pub fn measure_json(b: &solvecraft_doc::ModelBody) -> Value {
 
 fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let want = string_list(p, "bodies");
-    let st = s.model.state();
+    let st = s.world_state();
     let mut bodies: Vec<Value> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).map(measure_json).collect();
     // Mass from each body's material.
     for b in &mut bodies {
@@ -197,7 +197,7 @@ fn body_of<'a>(st: &'a solvecraft_doc::ModelState, p: &Value, cmd: &str) -> Resu
 }
 
 fn model_edges(s: &mut Session, p: &Value) -> Result<Value> {
-    let st = s.model.state();
+    let st = s.world_state();
     let b = body_of(&st, p, "model.edges")?;
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let edges: Vec<Value> = b
@@ -210,7 +210,7 @@ fn model_edges(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
-    let st = s.model.state();
+    let st = s.world_state();
     let b = body_of(&st, p, "model.faces")?;
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let faces: Vec<Value> = b
@@ -227,7 +227,7 @@ fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn model_threads(s: &mut Session, _p: &Value) -> Result<Value> {
-    let st = s.model.state();
+    let st = s.world_state();
     Ok(json!({ "threads": st.threads }))
 }
 

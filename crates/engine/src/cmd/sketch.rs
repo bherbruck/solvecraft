@@ -354,7 +354,9 @@ fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let (vals, _) = s.doc.param_values();
     s.doc.resolve_plane(&vals, &plane, 0)?;
     let name = str_(p, "name");
-    let id = s.doc_mut().add_feature(FeatureKind::Sketch { plane, sketch: Sketch::new() }, name)?;
+    let mut kind = FeatureKind::Sketch { plane, sketch: Sketch::new() };
+    super::component::to_active_frame(s, &mut kind);
+    let id = s.doc_mut().add_feature(kind, name)?;
     let comp = s.active_component;
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.component = comp;

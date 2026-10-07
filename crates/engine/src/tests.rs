@@ -733,3 +733,69 @@ fn pipe_scale_offset_bounding_and_materials() {
     assert_eq!(m["bodies"][0]["material"], "Aluminum");
     assert!(s.execute("PhysicalMaterialCommand", &json!({"bodies": ["Cube"], "material": "unobtainium"})).is_err());
 }
+
+#[test]
+fn components_occurrences_and_world_placement() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10, "body_name": "Base"}));
+    // A component, active: its box is authored in its frame.
+    let c = run(&mut s, "FusionCreateNewComponentCommand", json!({"name": "Arm"}));
+    let (cid, occ) = (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap());
+    run(&mut s, "PrimitiveBox", json!({"corner": [20, 0, 0], "length": 10, "width": 4, "height": 4, "body_name": "ArmBody"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let bbox = |s: &mut Session, b: &str| run(s, "MeasureCommand", json!({ "bodies": [b] }))["bodies"][0]["bbox"].clone();
+    assert_eq!(bbox(&mut s, "ArmBody")["min"][0], 20.0);
+    // Move the occurrence: the world placement follows, the authoring model doesn't change.
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 50, 0]}));
+    assert!((bbox(&mut s, "ArmBody")["min"][1].as_f64().unwrap() - 50.0).abs() < 1e-9);
+    assert_eq!(s.model.state().body("ArmBody").unwrap().mesh().bounds().min.y, 0.0);
+    // A fillet picked in the world, while the component is active, lands on its edge.
+    run(&mut s, "component.activate", json!({"component": "Arm"}));
+    run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [[25, 54, 4]], "radius": 1}));
+    let v = run(&mut s, "MeasureCommand", json!({"bodies": ["ArmBody"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(v, 160.0 - (1.0 - PI / 4.0) * 10.0) < 1e-4, "{v}");
+    run(&mut s, "component.activate", json!({"component": 0}));
+    // Instances share the contents; a copy is independent.
+    run(&mut s, "occurrence.copy", json!({"component": cid, "translate": [0, 20, 0]}));
+    let w = s.world_state();
+    assert_eq!(w.bodies.len(), 3, "{:?}", w.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let pn = run(&mut s, "component.paste_new", json!({"component": cid, "translate": [0, -30, 0]}));
+    assert_eq!(pn["features"].as_array().map(|a| a.len()), Some(2));
+    assert_eq!(s.world_state().bodies.len(), 4);
+    // Ground stops moves; pending moves show until captured or reverted.
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ}));
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "translate": [1, 0, 0]})).is_err());
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 0, 5], "capture": false}));
+    assert!((bbox(&mut s, "ArmBody")["min"][2].as_f64().unwrap() - 5.0).abs() < 1e-9);
+    run(&mut s, "AsBuiltPositionsCmd", json!({}));
+    assert!(bbox(&mut s, "ArmBody")["min"][2].as_f64().unwrap().abs() < 1e-9);
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 0, 5], "capture": false}));
+    run(&mut s, "SnapshotCmd", json!({}));
+    assert!(s.pending_moves.is_empty());
+    assert!((bbox(&mut s, "ArmBody")["min"][2].as_f64().unwrap() - 5.0).abs() < 1e-9);
+    // Bodies and sketches move between components.
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Base"], "component": "Arm"}));
+    let l = run(&mut s, "component.list", json!({}));
+    let arm = l["components"].as_array().unwrap().iter().find(|x| x["id"] == cid).unwrap().clone();
+    assert!(arm["bodies"].as_array().unwrap().iter().any(|b| b == "Base"), "{arm}");
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "S1"}));
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "component.move_sketches", json!({"sketches": ["S1"], "component": cid}));
+    assert_eq!(s.doc.find_feature("S1").unwrap().component, cid);
+    // Undo/redo and the timeline work with features in components.
+    run(&mut s, "UndoCommand", json!({}));
+    assert_eq!(s.doc.find_feature("S1").unwrap().component, 0);
+    run(&mut s, "RedoCommand", json!({}));
+    run(&mut s, "timeline.rollTo", json!({"position": 1}));
+    // Only Base is left; it now lives in Arm, which is placed twice (original and instance).
+    assert_eq!(s.world_state().bodies.len(), 2);
+    run(&mut s, "timeline.rollTo", json!({}));
+    // Saved and loaded; older designs get occurrences.
+    let back = solvecraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(back.occurrences.len(), s.doc.occurrences.len());
+    let mut old: serde_json::Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    old.as_object_mut().unwrap().remove("occurrences");
+    let migrated = solvecraft_doc::Document::from_json(&old.to_string()).unwrap();
+    assert_eq!(migrated.occurrences.len(), migrated.components.len());
+}

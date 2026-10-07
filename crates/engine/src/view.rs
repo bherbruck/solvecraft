@@ -37,7 +37,7 @@ pub mod colors {
 
 /// Bounds of everything visible.
 pub fn bounds(s: &Session) -> Aabb3 {
-    let st = s.model.state();
+    let st = s.world_state();
     let mut b = Aabb3::EMPTY;
     for body in &st.bodies {
         b = b.union(&body.mesh().bounds());
@@ -92,7 +92,7 @@ pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool
 
 /// The scene for a headless render.
 pub fn scene(s: &Session, cam: &Camera) -> Scene {
-    let st = s.model.state();
+    let st = s.world_state();
     let mut sc = Scene { background: Some((colors::BG_TOP, colors::BG_BOTTOM)), ..Default::default() };
     let b = bounds(s);
     sc.radius = (b.diagonal() * 0.5).max(cam.half_height()).max(10.0) + b.center().dist(cam.target);
