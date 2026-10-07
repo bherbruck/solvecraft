@@ -301,7 +301,122 @@ pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     blend(body, edges, radius, Shape::Round, "fillet")
 }
 
-/// Equal-distance chamfer of the edges nearest to the given points.
+/// Equal-distance chamfer of the edges nearest to the given points. Each edge is cut with a
+/// prism whose only face inside the body is the chamfer plane (so neighbouring chamfers meet in
+/// a mitre); the local operation is the fallback.
 pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
-    blend(body, edges, distance, Shape::Flat, "chamfer")
+    if !(distance.is_finite() && distance > 1e-6 && distance < 1e6) {
+        return Err(KernelError::Invalid("chamfer size must be positive".into()));
+    }
+    if edges.is_empty() || edges.len() > 1000 {
+        return Err(KernelError::Invalid("select 1…1000 edges".into()));
+    }
+    // All cutters at once (their union mitres the corners), else one edge at a time.
+    let tools: Result<Vec<Body>> = edges.iter().enumerate().map(|(i, p)| chamfer_tool(body, *p, distance, i)).collect();
+    if let Ok(tools) = tools {
+        let mut acc: Option<Body> = None;
+        let mut ok = true;
+        for t in tools {
+            let next = match &acc {
+                None => Some(t),
+                Some(a) => crate::ops::boolean(a, &t, crate::BoolOp::Union).ok().flatten(),
+            };
+            if next.is_none() {
+                ok = false;
+                break;
+            }
+            acc = next;
+        }
+        if ok
+            && let Some(tool) = acc
+            && let Ok(Some(r)) = crate::ops::boolean(body, &tool, crate::BoolOp::Cut)
+        {
+            return Ok(r);
+        }
+    }
+    let mut cur = body.clone();
+    for p in edges {
+        cur = match chamfer_tool(&cur, *p, distance, 0).and_then(|t| crate::ops::boolean(&cur, &t, crate::BoolOp::Cut)) {
+            Ok(Some(b)) => b,
+            _ => blend(&cur, std::slice::from_ref(p), distance, Shape::Flat, "chamfer")?,
+        };
+    }
+    Ok(cur)
+}
+
+/// Geometry of a straight convex edge between two planar faces.
+struct EdgeFrame {
+    p0: Vec3,
+    p1: Vec3,
+    d: Vec3,
+    n1: Vec3,
+    n2: Vec3,
+    t1: Vec3,
+    t2: Vec3,
+}
+
+fn edge_frame(cur: &Body, p: Vec3) -> Result<EdgeFrame> {
+    let size = cur.size();
+    let tol = (size * 2e-3).max(1e-3);
+    let Some((idx, dist)) = cur.nearest_edge(p, tol)? else { return Err(KernelError::Invalid("the body has no edges".into())) };
+    if dist > size * 0.05 + 1e-3 {
+        return Err(KernelError::Invalid(format!("no edge near {:?}", [p.x, p.y, p.z])));
+    }
+    let solid = &*cur.solid;
+    let edge = Body::unique_edges(solid).into_iter().nth(idx).ok_or_else(|| KernelError::Invalid("edge index".into()))?;
+    if !matches!(edge.curve(), mt::Curve::Line(_)) {
+        return Err(unsupported("only straight edges"));
+    }
+    let faces: Vec<&mt::Face> = solid.face_iter().filter(|f| f.edge_iter().any(|e| e.id() == edge.id())).collect();
+    let [f1, f2] = faces[..] else { return Err(unsupported("the edge is not between two faces")) };
+    let (Some(n1), Some(n2)) = (plane_normal(f1), plane_normal(f2)) else { return Err(unsupported("both faces next to the edge must be planar")) };
+    let (p0, p1) = (vtx(edge.absolute_front()), vtx(edge.absolute_back()));
+    let d = (p1 - p0).normalized().ok_or_else(|| KernelError::Failed("zero-length edge".into()))?;
+    let mut t1 = n1.cross(d);
+    if t1.dot(n2) > 0.0 {
+        t1 = -t1;
+    }
+    let mut t2 = n2.cross(d);
+    if t2.dot(n1) > 0.0 {
+        t2 = -t2;
+    }
+    if n1.dot(t2) > 1e-9 || n2.dot(t1) > 1e-9 || t1.dot(t2) < -1.0 + 1e-6 {
+        return Err(unsupported("only convex edges"));
+    }
+    Ok(EdgeFrame { p0, p1, d, n1, n2, t1, t2 })
+}
+
+/// The prism that cuts a chamfer of size `s` on the edge nearest `p`. `k` varies the parts that
+/// stay outside the body so that neighbouring cutters don't share edges.
+pub(crate) fn chamfer_tool(cur: &Body, p: Vec3, s: f64, k: usize) -> Result<Body> {
+    let f = edge_frame(cur, p)?;
+    let size = cur.size();
+    let len = f.p0.dist(f.p1);
+    let ext = (s * 2.0).max(size * 0.01) * (1.0 + 0.093 * (k % 5) as f64);
+    // Cross-section at p0 - d*ext, in a plane with normal d.
+    let base = f.p0 - f.d * ext;
+    let plane = solvecraft_geom::Plane::from_normal(base, f.d).ok_or_else(|| KernelError::Failed("chamfer plane".into()))?;
+    let a = base + f.t1 * s;
+    let b = base + f.t2 * s;
+    let ab = (a - b).normalized().ok_or_else(|| KernelError::Failed("chamfer".into()))?;
+    let out = (f.n1 + f.n2).normalized().ok_or_else(|| KernelError::Failed("chamfer".into()))?;
+    let vary = 1.0 + 0.137 * (k % 7) as f64;
+    let reach = (s * 4.0 + size * 0.02) * vary;
+    let a_ext = a + ab * (s * 0.5 + reach * 0.05);
+    let b_ext = b - ab * (s * 0.5 + reach * 0.07);
+    let e_far = base + out * reach;
+    // The material beyond both ends must be empty (the cutter runs past them).
+    let mid = (a + b + base) / 3.0;
+    for probe in [mid + f.d * (ext * 0.5), mid + f.d * (len + ext * 1.5)] {
+        if cur.contains(probe) {
+            return Err(unsupported("chamfers ending at a concave corner"));
+        }
+    }
+    let loc: Vec<solvecraft_geom::Vec2> = [a_ext, b_ext, e_far].iter().map(|q| plane.to_local(*q)).collect();
+    let mut lp = solvecraft_geom::Loop2::polygon(&loc);
+    if lp.signed_area() < 0.0 {
+        lp = lp.reversed();
+    }
+    let region = solvecraft_geom::Region2 { outer: lp, holes: vec![] };
+    crate::build::extrude(&plane, &[region], 0.0, len + 2.0 * ext)?.pop().ok_or_else(|| KernelError::Failed("chamfer tool".into()))
 }

@@ -264,3 +264,34 @@ fn debug_coplanar_union_rate() {
     }
     println!("ok {ok}/60");
 }
+
+#[test]
+fn chamfer_top_loop_mitres() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let edges = [Vec3::new(0.0, 15.0, 20.0), Vec3::new(20.0, 0.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(20.0, 30.0, 20.0)];
+    let c = chamfer(&b, &edges, 2.0).unwrap();
+    let m = measure(&c).unwrap();
+    assert!(rel(m.volume, 23730.666667) < 1e-6, "{}", m.volume);
+    assert_eq!(m.merged.faces, 10);
+}
+
+#[test]
+#[ignore]
+fn debug_chamfer_cut() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    // Prism along x: triangle in the YZ plane beyond the top-front edge.
+    let plane = Plane { origin: Vec3::new(-5.0, 0.0, 0.0), x: Vec3::Y, y: Vec3::Z };
+    let tri = Loop2::polygon(&[Vec2::new(2.3, 20.3), Vec2::new(-0.3, 17.7), Vec2::new(10.0, 30.0)]);
+    let tri = if tri.signed_area() < 0.0 { tri.reversed() } else { tri };
+    let tool = extrude(&plane, &[Region2 { outer: tri, holes: vec![] }], 0.0, 50.0).unwrap().pop().unwrap();
+    println!("tool vol {}", measure(&tool).unwrap().volume);
+    let r = boolean(&b, &tool, BoolOp::Cut).unwrap().unwrap();
+    let m = measure(&r).unwrap();
+    println!("cut: {} faces {} {:?}", m.volume, m.faces, m.merged);
+    for f in r.faces(0.01).unwrap() {
+        println!("face {} area {:.3} c {:?} n {:?}", f.index, f.area, f.centroid, f.plane_normal);
+    }
+    for tol in [0.1, 0.01, 0.001] {
+        println!("tess {tol}: {}", r.tessellate(tol).unwrap().measure().volume);
+    }
+}

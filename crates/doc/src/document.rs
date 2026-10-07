@@ -39,6 +39,10 @@ pub enum PlaneRef {
     Custom { plane: Plane },
     /// Another plane offset along its normal by an expression.
     Offset { base: Box<PlaneRef>, distance: String },
+    /// Another plane rotated about a line (in world coordinates) by an angle expression.
+    AtAngle { base: Box<PlaneRef>, axis_origin: Vec3, axis_dir: Vec3, angle: String },
+    /// A construction plane feature (by name).
+    Construction { name: String },
 }
 
 /// Which closed profiles of a sketch a feature uses.
@@ -202,6 +206,25 @@ pub enum FeatureKind {
         #[serde(default)]
         keep_tools: bool,
     },
+    /// Copies of other features' results (rectangular or circular).
+    Pattern {
+        features: Vec<String>,
+        pattern: PatternKind,
+    },
+    /// Mirror copies of other features' results in a plane.
+    Mirror {
+        features: Vec<String>,
+        plane: PlaneRef,
+    },
+    /// A construction plane (sketch placement, split tool).
+    ConstructionPlane {
+        plane: PlaneRef,
+    },
+    /// Split a body with a plane into two bodies.
+    Split {
+        body: String,
+        plane: PlaneRef,
+    },
     Move {
         bodies: Vec<String>,
         translate: [String; 3],
@@ -210,6 +233,47 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         angle: Option<String>,
     },
+}
+
+/// Pattern layouts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PatternKind {
+    Rectangular {
+        dir1: Vec3,
+        count1: String,
+        spacing1: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dir2: Option<Vec3>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        count2: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spacing2: Option<String>,
+    },
+    Circular {
+        origin: Vec3,
+        axis: Vec3,
+        count: String,
+        /// Total angle (360 deg = evenly around).
+        angle: String,
+    },
+}
+
+fn plane_exprs<'a>(p: &'a PlaneRef, v: &mut Vec<&'a str>) {
+    let mut p = p;
+    for _ in 0..64 {
+        match p {
+            PlaneRef::Offset { base, distance } => {
+                v.push(distance);
+                p = base;
+            }
+            PlaneRef::AtAngle { base, angle, .. } => {
+                v.push(angle);
+                p = base;
+            }
+            _ => break,
+        }
+    }
 }
 
 fn z_axis() -> Vec3 {
@@ -230,6 +294,11 @@ impl FeatureKind {
             FeatureKind::Sphere { .. } => "SphereFeature",
             FeatureKind::Torus { .. } => "TorusFeature",
             FeatureKind::Combine { .. } => "CombineFeature",
+            FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPatternFeature",
+            FeatureKind::Pattern { .. } => "CircularPatternFeature",
+            FeatureKind::Mirror { .. } => "MirrorFeature",
+            FeatureKind::ConstructionPlane { .. } => "ConstructionPlane",
+            FeatureKind::Split { .. } => "SplitBodyFeature",
             FeatureKind::Move { .. } => "MoveFeature",
         }
     }
@@ -246,6 +315,11 @@ impl FeatureKind {
             FeatureKind::Sphere { .. } => "Sphere",
             FeatureKind::Torus { .. } => "Torus",
             FeatureKind::Combine { .. } => "Combine",
+            FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPattern",
+            FeatureKind::Pattern { .. } => "CircularPattern",
+            FeatureKind::Mirror { .. } => "Mirror",
+            FeatureKind::ConstructionPlane { .. } => "Plane",
+            FeatureKind::Split { .. } => "Split",
             FeatureKind::Move { .. } => "Move",
         }
     }
@@ -253,12 +327,8 @@ impl FeatureKind {
     pub fn expressions(&self) -> Vec<&str> {
         let mut v: Vec<&str> = Vec::new();
         match self {
-            FeatureKind::Sketch { plane, .. } => {
-                let mut p = plane;
-                while let PlaneRef::Offset { base, distance } = p {
-                    v.push(distance);
-                    p = base;
-                }
+            FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } | FeatureKind::Split { plane, .. } => {
+                plane_exprs(plane, &mut v)
             }
             FeatureKind::Extrude { extent, .. } => {
                 v.push(&extent.distance);
@@ -280,6 +350,15 @@ impl FeatureKind {
             FeatureKind::Sphere { radius, .. } => v.push(radius),
             FeatureKind::Torus { major, minor, .. } => v.extend([major.as_str(), minor]),
             FeatureKind::Combine { .. } => {}
+            FeatureKind::Pattern { pattern, .. } => match pattern {
+                PatternKind::Rectangular { count1, spacing1, count2, spacing2, .. } => {
+                    v.extend([count1.as_str(), spacing1]);
+                    v.extend(count2.iter().map(String::as_str));
+                    v.extend(spacing2.iter().map(String::as_str));
+                }
+                PatternKind::Circular { count, angle, .. } => v.extend([count.as_str(), angle]),
+            },
+            FeatureKind::Mirror { plane, .. } => plane_exprs(plane, &mut v),
             FeatureKind::Move { translate, angle, .. } => {
                 v.extend(translate.iter().map(String::as_str));
                 if let Some(a) = angle {
@@ -561,6 +640,18 @@ impl Document {
                 let b = self.resolve_plane(vals, base, depth + 1)?;
                 Ok(b.offset(Self::eval_in(vals, distance, Kind::Length)?))
             }
+            PlaneRef::AtAngle { base, axis_origin, axis_dir, angle } => {
+                let b = self.resolve_plane(vals, base, depth + 1)?;
+                let a = Self::eval_in(vals, angle, Kind::Angle)?;
+                let d = axis_dir.normalized().ok_or_else(|| DocError::Invalid("rotation axis".into()))?;
+                let rot = |v: Vec3| v * a.cos() + d.cross(v) * a.sin() + d * (d.dot(v) * (1.0 - a.cos()));
+                let o = *axis_origin + rot(b.origin - *axis_origin);
+                Plane::new(o, rot(b.x), rot(b.y)).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
+            }
+            PlaneRef::Construction { name } => match self.find_feature(name).map(|f| &f.kind) {
+                Some(FeatureKind::ConstructionPlane { plane }) => self.resolve_plane(vals, plane, depth + 1),
+                _ => Err(DocError::Unknown(format!("construction plane `{name}`"))),
+            },
         }
     }
 

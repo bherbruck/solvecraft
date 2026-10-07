@@ -126,6 +126,36 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.poly(&[(3.0, 8.0), (14.0, 8.0), (14.0, 19.0), (3.0, 19.0)], pen.fill, ink);
             pen.poly(&[(9.0, 4.0), (21.0, 4.0), (21.0, 15.0), (9.0, 15.0)], pen.fill.gamma_multiply(0.75), a);
         }
+        "pattern_rect" => {
+            for (x, y) in [(4.0, 4.0), (14.0, 4.0), (4.0, 14.0), (14.0, 14.0)] {
+                pen.poly(
+                    &[(x, y), (x + 6.0, y), (x + 6.0, y + 6.0), (x, y + 6.0)],
+                    if x == 4.0 && y == 4.0 { pen.fill } else { Color32::TRANSPARENT },
+                    if x == 4.0 && y == 4.0 { ink } else { a },
+                );
+            }
+        }
+        "pattern_circ" => {
+            for i in 0..6 {
+                let t = i as f32 / 6.0 * std::f32::consts::TAU;
+                pen.circle(
+                    12.0 + 7.5 * t.cos(),
+                    12.0 + 7.5 * t.sin(),
+                    2.4,
+                    if i == 0 { pen.fill } else { Color32::TRANSPARENT },
+                    if i == 0 { ink } else { a },
+                );
+            }
+        }
+        "split" => {
+            pen.poly(&[(3.0, 6.0), (21.0, 6.0), (21.0, 18.0), (3.0, 18.0)], pen.fill, ink);
+            pen.line(&[(8.0, 2.0), (16.0, 22.0)], a);
+        }
+        "mirror" => {
+            pen.line(&[(12.0, 2.0), (12.0, 22.0)], ink);
+            pen.poly(&[(3.0, 7.0), (9.0, 10.0), (9.0, 17.0), (3.0, 17.0)], pen.fill, ink);
+            pen.poly(&[(21.0, 7.0), (15.0, 10.0), (15.0, 17.0), (21.0, 17.0)], Color32::TRANSPARENT, a);
+        }
         "move" => {
             for (dx, dy) in [(0.0, -1.0), (0.0, 1.0), (-1.0, 0.0), (1.0, 0.0)] {
                 pen.arrow((12.0, 12.0), (12.0 + 9.0 * dx, 12.0 + 9.0 * dy), a);

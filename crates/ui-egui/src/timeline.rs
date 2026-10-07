@@ -19,6 +19,11 @@ fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Sphere { .. } => "sphere",
         FeatureKind::Torus { .. } => "torus",
         FeatureKind::Combine { .. } => "combine",
+        FeatureKind::Pattern { pattern: solvecraft_engine::doc::PatternKind::Rectangular { .. }, .. } => "pattern_rect",
+        FeatureKind::Pattern { .. } => "pattern_circ",
+        FeatureKind::Mirror { .. } => "mirror",
+        FeatureKind::ConstructionPlane { .. } => "plane",
+        FeatureKind::Split { .. } => "split",
         FeatureKind::Move { .. } => "move",
     }
 }

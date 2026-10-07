@@ -286,10 +286,13 @@ fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
     let base = match p.get("plane") {
         None => PlaneRef::Origin { name: "XY".into() },
         Some(Value::String(n)) => {
-            if Plane::named(n).is_none() {
-                return Err(bad(cmd, format!("unknown plane `{n}` (XY, XZ or YZ)")));
+            if Plane::named(n).is_some() {
+                PlaneRef::Origin { name: n.to_ascii_uppercase() }
+            } else if matches!(s.doc.find_feature(n).map(|f| &f.kind), Some(FeatureKind::ConstructionPlane { .. })) {
+                PlaneRef::Construction { name: n.clone() }
+            } else {
+                return Err(bad(cmd, format!("unknown plane `{n}` (XY, XZ, YZ or a construction plane)")));
             }
-            PlaneRef::Origin { name: n.to_ascii_uppercase() }
         }
         Some(v @ Value::Object(o)) => {
             if let Some(fp) = o.get("face").and_then(vec3) {

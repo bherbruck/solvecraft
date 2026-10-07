@@ -464,21 +464,9 @@ fn revolve_axis(ss: &SolvedSketch, axis: &AxisRef) -> Result<(Vec2, Vec2)> {
     }
 }
 
-fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+/// The tool bodies a feature adds or removes (extrude, revolve, primitives), in the current state.
+fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Vec<Body>> {
     match &f.kind {
-        FeatureKind::Sketch { plane, sketch } => {
-            let plane = doc.resolve_plane(vals, plane, 0)?;
-            let mut sk = sketch.clone();
-            doc.apply_dimension_values(vals, &mut sk)?;
-            let report = solve(&mut sk);
-            if !report.ok() {
-                *warning = Some(format!("the sketch constraints conflict ({})", report.failing.join(", ")));
-            }
-            let profiles = find_profiles(&sk);
-            st.sketches.retain(|s| s.feature != f.id);
-            st.sketches.push(SolvedSketch { feature: f.id, name: f.name.clone(), plane, sketch: sk, report, profiles });
-            Ok(())
-        }
         FeatureKind::Extrude { sketch, profiles, extent, operation, targets } => {
             let ss = st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?.clone();
             let regions = solvecraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
@@ -490,9 +478,10 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 }
                 let sign = if extent.direction == crate::Direction::Negative { -1.0 } else { 1.0 };
                 let (len, sign) = if d < 0.0 { (-d, -sign) } else { (d, sign) };
-                let tools =
-                    regions.iter().map(|r| kernel::extrude_tapered(&ss.plane, r, len, sign, taper)).collect::<std::result::Result<Vec<_>, _>>()?;
-                return apply_op(st, f, tools, *operation, targets);
+                return Ok(regions
+                    .iter()
+                    .map(|r| kernel::extrude_tapered(&ss.plane, r, len, sign, taper))
+                    .collect::<std::result::Result<Vec<_>, _>>()?);
             }
             let off = match &extent.start_offset {
                 Some(e) => val(vals, e, Kind::Length)?,
@@ -511,15 +500,209 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 let (l2, h2) = extend_for_coplanar(st, &ss.plane, r, lo + off, hi + off, *operation, targets);
                 tools.extend(kernel::extrude(&ss.plane, std::slice::from_ref(r), l2, h2)?);
             }
-            apply_op(st, f, tools, *operation, targets)
+            Ok(tools)
         }
-        FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets } => {
+        FeatureKind::Revolve { sketch, profiles, axis, angle, .. } => {
             let ss = st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?.clone();
             let regions = solvecraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
             let (o, d) = revolve_axis(&ss, axis)?;
             let ang = val(vals, angle, Kind::Angle)?;
-            let tools = kernel::revolve(&ss.plane, &regions, o, d, ang)?;
+            Ok(kernel::revolve(&ss.plane, &regions, o, d, ang)?)
+        }
+        FeatureKind::Box { corner, length, width, height, .. } => {
+            let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
+            Ok(vec![kernel::box_solid(*corner, *corner + s)?])
+        }
+        FeatureKind::Cylinder { base, axis, radius, height, .. } => {
+            Ok(vec![kernel::cylinder(*base, *axis, val(vals, radius, Kind::Length)?, val(vals, height, Kind::Length)?)?])
+        }
+        FeatureKind::Sphere { center, radius, .. } => Ok(vec![kernel::sphere(*center, val(vals, radius, Kind::Length)?)?]),
+        FeatureKind::Torus { center, major, minor, .. } => {
+            Ok(vec![kernel::torus(*center, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?])
+        }
+        _ => Err(DocError::Invalid(format!("{} cannot be patterned or mirrored yet", f.name))),
+    }
+}
+
+/// Operation and targets of a feature that makes tools.
+fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
+    match &f.kind {
+        FeatureKind::Extrude { operation, targets, .. } | FeatureKind::Revolve { operation, targets, .. } => (*operation, targets.clone()),
+        FeatureKind::Box { operation, .. }
+        | FeatureKind::Cylinder { operation, .. }
+        | FeatureKind::Sphere { operation, .. }
+        | FeatureKind::Torus { operation, .. } => (*operation, Vec::new()),
+        _ => (Operation::NewBody, Vec::new()),
+    }
+}
+
+type Mat = [[f64; 4]; 4];
+
+fn translation(t: Vec3) -> Mat {
+    [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [t.x, t.y, t.z, 1.0]]
+}
+
+/// Rotation by `ang` about the line through `o` with direction `a` (column-major).
+fn rotation(o: Vec3, a: Vec3, ang: f64) -> Mat {
+    let a = a.normalized().unwrap_or(Vec3::Z);
+    let (c, s) = (ang.cos(), ang.sin());
+    let t = 1.0 - c;
+    let r = [
+        [t * a.x * a.x + c, t * a.x * a.y + s * a.z, t * a.x * a.z - s * a.y],
+        [t * a.x * a.y - s * a.z, t * a.y * a.y + c, t * a.y * a.z + s * a.x],
+        [t * a.x * a.z + s * a.y, t * a.y * a.z - s * a.x, t * a.z * a.z + c],
+    ];
+    // p' = R (p - o) + o
+    let ro = Vec3::new(
+        r[0][0] * o.x + r[1][0] * o.y + r[2][0] * o.z,
+        r[0][1] * o.x + r[1][1] * o.y + r[2][1] * o.z,
+        r[0][2] * o.x + r[1][2] * o.y + r[2][2] * o.z,
+    );
+    let tr = o - ro;
+    [[r[0][0], r[0][1], r[0][2], 0.0], [r[1][0], r[1][1], r[1][2], 0.0], [r[2][0], r[2][1], r[2][2], 0.0], [tr.x, tr.y, tr.z, 1.0]]
+}
+
+/// Reflection in a plane (column-major).
+fn mirror_matrix(pl: &Plane) -> Mat {
+    let n = pl.normal();
+    let d = pl.origin.dot(n);
+    let m = |i: usize, j: usize| {
+        let (ni, nj) = ([n.x, n.y, n.z][i], [n.x, n.y, n.z][j]);
+        (if i == j { 1.0 } else { 0.0 }) - 2.0 * ni * nj
+    };
+    // p' = p - 2 (p·n - d) n
+    [
+        [m(0, 0), m(0, 1), m(0, 2), 0.0],
+        [m(1, 0), m(1, 1), m(1, 2), 0.0],
+        [m(2, 0), m(2, 1), m(2, 2), 0.0],
+        [2.0 * d * n.x, 2.0 * d * n.y, 2.0 * d * n.z, 1.0],
+    ]
+}
+
+const MAX_INSTANCES: usize = 1000;
+
+fn pattern_transforms(vals: &BTreeMap<String, Value>, p: &crate::PatternKind) -> Result<Vec<Mat>> {
+    let count = |e: &str| -> Result<usize> {
+        let n = val(vals, e, Kind::Unitless)?.round();
+        if !(1.0..=MAX_INSTANCES as f64).contains(&n) {
+            return Err(DocError::Invalid(format!("pattern count must be 1…{MAX_INSTANCES}")));
+        }
+        Ok(n as usize)
+    };
+    let mut out = Vec::new();
+    match p {
+        crate::PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2 } => {
+            let (n1, s1) = (count(count1)?, val(vals, spacing1, Kind::Length)?);
+            let d1 = dir1.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
+            let (n2, s2, d2) = match (dir2, count2, spacing2) {
+                (Some(d), Some(c), Some(sp)) => {
+                    (count(c)?, val(vals, sp, Kind::Length)?, d.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?)
+                }
+                _ => (1, 0.0, Vec3::Y),
+            };
+            if n1 * n2 > MAX_INSTANCES {
+                return Err(DocError::Invalid("too many pattern instances".into()));
+            }
+            for i in 0..n1 {
+                for j in 0..n2 {
+                    if i == 0 && j == 0 {
+                        continue;
+                    }
+                    out.push(translation(d1 * (s1 * i as f64) + d2 * (s2 * j as f64)));
+                }
+            }
+        }
+        crate::PatternKind::Circular { origin, axis, count: c, angle } => {
+            let n = count(c)?;
+            let total = val(vals, angle, Kind::Angle)?;
+            let full = (total.abs() - std::f64::consts::TAU).abs() < 1e-9;
+            let step = if full {
+                total / n as f64
+            } else if n > 1 {
+                total / (n - 1) as f64
+            } else {
+                0.0
+            };
+            for i in 1..n {
+                out.push(rotation(*origin, *axis, step * i as f64));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Apply transformed copies of the tools of `features` (patterns, mirrors).
+fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, features: &[String], mats: &[Mat]) -> Result<()> {
+    if features.is_empty() {
+        return Err(DocError::Invalid("no features selected".into()));
+    }
+    for name in features {
+        let src = doc.find_feature(name).ok_or_else(|| DocError::Unknown(format!("feature `{name}`")))?;
+        let tools = feature_tools(vals, src, st)?;
+        let (op, targets) = feature_op(src);
+        let mut copies = Vec::new();
+        for m in mats {
+            for t in &tools {
+                copies.push(kernel::transform_matrix(t, *m)?);
+            }
+        }
+        // New bodies from a pattern join their source when they touch it (as one feature would).
+        apply_op(st, f, copies, op, &targets)?;
+    }
+    Ok(())
+}
+
+fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+    match &f.kind {
+        FeatureKind::Sketch { plane, sketch } => {
+            let plane = doc.resolve_plane(vals, plane, 0)?;
+            let mut sk = sketch.clone();
+            doc.apply_dimension_values(vals, &mut sk)?;
+            let report = solve(&mut sk);
+            if !report.ok() {
+                *warning = Some(format!("the sketch constraints conflict ({})", report.failing.join(", ")));
+            }
+            let profiles = find_profiles(&sk);
+            st.sketches.retain(|s| s.feature != f.id);
+            st.sketches.push(SolvedSketch { feature: f.id, name: f.name.clone(), plane, sketch: sk, report, profiles });
+            Ok(())
+        }
+        FeatureKind::Extrude { operation, targets, .. } | FeatureKind::Revolve { operation, targets, .. } => {
+            let tools = feature_tools(vals, f, st)?;
             apply_op(st, f, tools, *operation, targets)
+        }
+        FeatureKind::ConstructionPlane { plane } => {
+            doc.resolve_plane(vals, plane, 0)?;
+            Ok(())
+        }
+        FeatureKind::Split { body, plane } => {
+            let pl = doc.resolve_plane(vals, plane, 0)?;
+            let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Unknown(format!("body `{body}`"))) };
+            let parts = kernel::split_by_plane(&mb.body, &pl)?;
+            if parts.len() < 2 {
+                return Err(DocError::Invalid("the plane does not split the body".into()));
+            }
+            let mut it = parts.into_iter();
+            if let (Some(first), Some(slot)) = (it.next(), st.bodies.get_mut(i)) {
+                *slot = ModelBody::new(mb.name.clone(), first, mb.feature);
+            }
+            for (k, b) in it.enumerate() {
+                let mut name = format!("{} ({})", mb.name, k + 1);
+                while st.body(&name).is_some() {
+                    name.push('\'');
+                }
+                st.bodies.push(ModelBody::new(name, b, f.id));
+            }
+            Ok(())
+        }
+        FeatureKind::Pattern { features, pattern } => {
+            let mats = pattern_transforms(vals, pattern)?;
+            replay(doc, vals, f, st, features, &mats)
+        }
+        FeatureKind::Mirror { features, plane } => {
+            let pl = doc.resolve_plane(vals, plane, 0)?;
+            replay(doc, vals, f, st, features, &[mirror_matrix(&pl)])
         }
         FeatureKind::Fillet { edges, radius, body } | FeatureKind::Chamfer { edges, distance: radius, body } => {
             let r = val(vals, radius, Kind::Length)?;

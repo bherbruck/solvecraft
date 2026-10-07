@@ -29,6 +29,24 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("edges: [[x,y,z] point on edge | {body, index}]; radius: expr; body?"),
     CommandSpec::new("FusionChamferCommand", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; body?"),
     CommandSpec::new("FusionCombineCommand", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool"),
+    CommandSpec::new("PatternRectangular", "Rectangular Pattern", pattern_rect)
+        .at("SOLID", "CREATE")
+        .icon("pattern_rect")
+        .params("features: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?"),
+    CommandSpec::new("PatternCircular", "Circular Pattern", pattern_circ)
+        .at("SOLID", "CREATE")
+        .icon("pattern_circ")
+        .params("features: [names]; axis: X|Y|Z | {origin, dir}; count; angle? (default 360 deg)"),
+    CommandSpec::new("MirrorCommand", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names]; plane: XY|XZ|YZ | {origin, x_dir, y_dir}"),
+    CommandSpec::new("ConstructionPlaneOffsetFromPlaneCommand", "Offset Plane", plane_offset)
+        .at("SOLID", "CONSTRUCT")
+        .icon("plane")
+        .params("base: XY|XZ|YZ|plane name; offset: expr; name?"),
+    CommandSpec::new("ConstructionPlaneAtAngleCommand", "Plane at Angle", plane_angle)
+        .at("SOLID", "CONSTRUCT")
+        .icon("plane")
+        .params("base: XY|XZ|YZ|plane name; axis: X|Y|Z|{origin, dir}; angle: expr; name?"),
+    CommandSpec::new("FusionSplitBodyCommand", "Split Body", split_body).at("SOLID", "MODIFY").icon("split").params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal}"),
     CommandSpec::new("FusionMoveCommand", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr"),
 ];
 
@@ -328,4 +346,139 @@ fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, a, Kind::Angle, cmd, "angle")?;
     }
     add_feature(s, p, FeatureKind::Move { bodies, translate: t, rotate_axis: p.get("axis").and_then(vec3), angle })
+}
+
+fn source_features(s: &Session, p: &Value, cmd: &str) -> Result<Vec<String>> {
+    let names = string_list(p, "features");
+    if names.is_empty() {
+        return Err(bad(cmd, "`features` must list features to copy"));
+    }
+    for n in &names {
+        if s.doc.find_feature(n).is_none() {
+            return Err(bad(cmd, format!("no feature `{n}`")));
+        }
+    }
+    Ok(names)
+}
+
+fn axis_line(p: &Value, cmd: &str) -> Result<(Vec3, Vec3)> {
+    match p.get("axis") {
+        Some(Value::String(a)) => match a.to_ascii_uppercase().as_str() {
+            "X" => Ok((Vec3::ZERO, Vec3::X)),
+            "Y" => Ok((Vec3::ZERO, Vec3::Y)),
+            "Z" => Ok((Vec3::ZERO, Vec3::Z)),
+            _ => Err(bad(cmd, "axis must be X, Y, Z or {origin, dir}")),
+        },
+        Some(o @ Value::Object(_)) => {
+            let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
+            let dir = o.get("dir").and_then(vec3).and_then(|d| d.normalized()).ok_or_else(|| bad(cmd, "axis needs a non-zero `dir`"))?;
+            Ok((origin, dir))
+        }
+        _ => Err(bad(cmd, "`axis` is required")),
+    }
+}
+
+fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "PatternRectangular";
+    let features = source_features(s, p, cmd)?;
+    let dir1 = p.get("dir1").and_then(vec3).ok_or_else(|| bad(cmd, "`dir1` must be [x, y, z]"))?;
+    let count1 = req_expr(cmd, p, "count1")?;
+    let spacing1 = req_expr(cmd, p, "spacing1")?;
+    check_expr(s, &count1, Kind::Unitless, cmd, "count1")?;
+    check_expr(s, &spacing1, Kind::Length, cmd, "spacing1")?;
+    let dir2 = p.get("dir2").and_then(vec3);
+    let (count2, spacing2) = (expr(p, "count2"), expr(p, "spacing2"));
+    if let Some(c) = &count2 {
+        check_expr(s, c, Kind::Unitless, cmd, "count2")?;
+    }
+    if let Some(c) = &spacing2 {
+        check_expr(s, c, Kind::Length, cmd, "spacing2")?;
+    }
+    let pattern = solvecraft_doc::PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2 };
+    add_feature(s, p, FeatureKind::Pattern { features, pattern })
+}
+
+fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "PatternCircular";
+    let features = source_features(s, p, cmd)?;
+    let (origin, axis) = axis_line(p, cmd)?;
+    let count = req_expr(cmd, p, "count")?;
+    check_expr(s, &count, Kind::Unitless, cmd, "count")?;
+    let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
+    check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
+    let pattern = solvecraft_doc::PatternKind::Circular { origin, axis, count, angle };
+    add_feature(s, p, FeatureKind::Pattern { features, pattern })
+}
+
+fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "MirrorCommand";
+    let features = source_features(s, p, cmd)?;
+    let plane = match p.get("plane") {
+        Some(Value::String(n)) if solvecraft_geom::Plane::named(n).is_some() => solvecraft_doc::PlaneRef::Origin { name: n.to_ascii_uppercase() },
+        Some(o @ Value::Object(_)) => {
+            let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
+            let pl = match (o.get("x_dir").and_then(vec3), o.get("y_dir").and_then(vec3), o.get("normal").and_then(vec3)) {
+                (Some(x), Some(y), _) => solvecraft_geom::Plane::new(origin, x, y),
+                (_, _, Some(n)) => solvecraft_geom::Plane::from_normal(origin, n),
+                _ => None,
+            };
+            solvecraft_doc::PlaneRef::Custom { plane: pl.ok_or_else(|| bad(cmd, "plane needs x_dir and y_dir, or normal"))? }
+        }
+        _ => return Err(bad(cmd, "`plane` must be XY, XZ, YZ or {origin, normal}")),
+    };
+    add_feature(s, p, FeatureKind::Mirror { features, plane })
+}
+
+/// A plane reference from a parameter: an origin plane, a construction plane name, or an
+/// explicit plane `{origin, x_dir, y_dir}` / `{origin, normal}`.
+pub fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solvecraft_doc::PlaneRef> {
+    use solvecraft_doc::PlaneRef;
+    match v {
+        Some(Value::String(n)) if solvecraft_geom::Plane::named(n).is_some() => Ok(PlaneRef::Origin { name: n.to_ascii_uppercase() }),
+        Some(Value::String(n)) => match s.doc.find_feature(n).map(|f| &f.kind) {
+            Some(FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { name: n.clone() }),
+            _ => Err(bad(cmd, format!("no plane `{n}`"))),
+        },
+        Some(o @ Value::Object(_)) => {
+            let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
+            let pl = match (o.get("x_dir").and_then(vec3), o.get("y_dir").and_then(vec3), o.get("normal").and_then(vec3)) {
+                (Some(x), Some(y), _) => solvecraft_geom::Plane::new(origin, x, y),
+                (_, _, Some(n)) => solvecraft_geom::Plane::from_normal(origin, n),
+                _ => None,
+            };
+            Ok(PlaneRef::Custom { plane: pl.ok_or_else(|| bad(cmd, "plane needs x_dir and y_dir, or normal"))? })
+        }
+        _ => Err(bad(cmd, "`plane` must be XY, XZ, YZ, a construction plane name or {origin, normal}")),
+    }
+}
+
+fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ConstructionPlaneOffsetFromPlaneCommand";
+    let base = plane_param(s, p.get("base"), cmd)?;
+    let d = req_expr(cmd, p, "offset")?;
+    check_expr(s, &d, Kind::Length, cmd, "offset")?;
+    add_feature(s, p, FeatureKind::ConstructionPlane { plane: solvecraft_doc::PlaneRef::Offset { base: Box::new(base), distance: d } })
+}
+
+fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ConstructionPlaneAtAngleCommand";
+    let base = plane_param(s, p.get("base"), cmd)?;
+    let (axis_origin, axis_dir) = axis_line(p, cmd)?;
+    let angle = req_expr(cmd, p, "angle")?;
+    check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
+    add_feature(
+        s,
+        p,
+        FeatureKind::ConstructionPlane { plane: solvecraft_doc::PlaneRef::AtAngle { base: Box::new(base), axis_origin, axis_dir, angle } },
+    )
+}
+
+fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionSplitBodyCommand";
+    let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
+    if s.model.state().body(&body).is_none() {
+        return Err(bad(cmd, format!("no body `{body}`")));
+    }
+    let plane = plane_param(s, p.get("plane"), cmd)?;
+    add_feature(s, p, FeatureKind::Split { body, plane })
 }

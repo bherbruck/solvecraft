@@ -24,7 +24,7 @@ pub use blend::{chamfer, fillet};
 pub use body::{Body, EdgeInfo, FaceInfo};
 pub use build::{box_solid, cylinder, extrude, extrude_tapered, revolve, sphere, torus};
 pub use measure::{BodyMeasure, measure};
-pub use ops::{BoolOp, boolean, transform};
+pub use ops::{BoolOp, boolean, split_by_plane, transform, transform_matrix};
 pub use step::step_export;
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 

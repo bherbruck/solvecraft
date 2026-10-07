@@ -209,6 +209,41 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
                     "sketch": profile_sketch(f), "profiles": profiles_of(f), "axis": axis,
                     "angle": f.get("angle").cloned().unwrap_or(json!("360 deg")), "operation": op(f), "name": name, "body_names": bodies}}));
             }
+            Some("rectangular_pattern") => {
+                let d1 = f.get("direction1").cloned().unwrap_or(Value::Null);
+                let d2 = f.get("direction2").cloned().unwrap_or(Value::Null);
+                let mut p = json!({"features": f.get("features"), "dir1": d1.get("axis"), "count1": d1.get("count"), "spacing1": d1.get("spacing"), "name": name});
+                if !d2.is_null() {
+                    p["dir2"] = d2.get("axis").cloned().unwrap_or(Value::Null);
+                    p["count2"] = d2.get("count").cloned().unwrap_or(Value::Null);
+                    p["spacing2"] = d2.get("spacing").cloned().unwrap_or(Value::Null);
+                }
+                out.push(json!({"command": "PatternRectangular", "params": p}));
+            }
+            Some("circular_pattern") => {
+                let axis = f.get("axis").map(|a| json!({"origin": a.get("origin").cloned().unwrap_or(json!([0, 0, 0])), "dir": a.get("dir")})).unwrap_or(Value::Null);
+                out.push(json!({"command": "PatternCircular", "params": {"features": f.get("features"), "axis": axis, "count": f.get("count"), "angle": f.get("total_angle").cloned().unwrap_or(json!(360)), "name": name}}));
+            }
+            Some("construction_plane") => match f.get("method").and_then(Value::as_str) {
+                Some("offset") => out.push(json!({"command": "ConstructionPlaneOffsetFromPlaneCommand", "params": {"base": f.get("base"), "offset": f.get("offset"), "name": name}})),
+                _ => {
+                    // Use the resulting plane as recorded.
+                    let (o, n) = (f.get("result_origin").cloned().unwrap_or(json!([0, 0, 0])), f.get("result_normal").cloned().unwrap_or(Value::Null));
+                    if n.is_null() {
+                        return Err(format!("recipe: construction plane method {:?} without result_normal", f.get("method")));
+                    }
+                    out.push(json!({"command": "ConstructionPlaneOffsetFromPlaneCommand", "params": {"base": {"origin": o, "normal": n}, "offset": 0, "name": name}}));
+                }
+            },
+            Some("split_body") => out.push(json!({"command": "FusionSplitBodyCommand", "params": {"body": f.get("body"), "plane": f.get("tool"), "name": name}})),
+            Some("mirror") => {
+                let pl = f.get("plane").cloned().unwrap_or(Value::Null);
+                let plane = match pl.get("ref").and_then(Value::as_str) {
+                    Some(r @ ("XY" | "XZ" | "YZ")) => json!(r),
+                    _ => json!({"origin": pl.get("origin").cloned().unwrap_or(json!([0, 0, 0])), "normal": pl.get("normal")}),
+                };
+                out.push(json!({"command": "MirrorCommand", "params": {"features": f.get("features"), "plane": plane, "name": name}}));
+            }
             Some("fillet") => {
                 out.push(json!({"command": "FusionFilletEdgesCommand", "params": {"edges": edge_points(f), "radius": f.get("radius"), "name": name}}))
             }

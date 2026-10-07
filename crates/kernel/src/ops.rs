@@ -84,6 +84,20 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     Err(KernelError::Failed(format!("boolean {op:?}: {last}")))
 }
 
+/// Affine transform by a column-major 4×4 matrix (rotations, translations, reflections).
+pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
+    if m.iter().flatten().any(|x| !x.is_finite()) {
+        return Err(KernelError::Invalid("non-finite transform".into()));
+    }
+    guard("transform", || {
+        let mat = mt::Matrix4::new(
+            m[0][0], m[0][1], m[0][2], m[0][3], m[1][0], m[1][1], m[1][2], m[1][3], m[2][0], m[2][1], m[2][2], m[2][3], m[3][0], m[3][1], m[3][2],
+            m[3][3],
+        );
+        Body::new(mt::builder::transformed(&body.deep_copy(), mat))
+    })
+}
+
 /// Rigid transform: rotate about `axis` through `origin` by `angle` radians, then translate.
 pub fn transform(body: &Body, translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Body> {
     if !(translate.is_finite() && origin.is_finite() && angle.is_finite()) {
@@ -100,4 +114,33 @@ pub fn transform(body: &Body, translate: Vec3, origin: Vec3, axis: Vec3, angle: 
         }
         Body::new(s)
     })
+}
+
+/// Split a body with a plane: the parts on the positive and the negative side of the plane
+/// (only the non-empty ones).
+pub fn split_by_plane(body: &Body, plane: &solvecraft_geom::Plane) -> Result<Vec<Body>> {
+    let size = body.size();
+    let mut bb = solvecraft_geom::Aabb3::EMPTY;
+    for v in body.solid.vertex_iter() {
+        bb.add(crate::body::from_p3(v.point()));
+    }
+    let reach = (bb.diagonal() + plane.origin.dist(bb.center())) * 2.0 + size;
+    let c = plane.to_local(bb.center());
+    let sq = solvecraft_geom::Region2 {
+        outer: solvecraft_geom::Loop2::polygon(&[
+            solvecraft_geom::Vec2::new(c.x - reach, c.y - reach),
+            solvecraft_geom::Vec2::new(c.x + reach, c.y - reach),
+            solvecraft_geom::Vec2::new(c.x + reach, c.y + reach),
+            solvecraft_geom::Vec2::new(c.x - reach, c.y + reach),
+        ]),
+        holes: vec![],
+    };
+    let mut out = Vec::new();
+    for (lo, hi) in [(0.0, reach), (-reach, 0.0)] {
+        let half = crate::build::extrude(plane, std::slice::from_ref(&sq), lo, hi)?.pop().ok_or_else(|| KernelError::Failed("half space".into()))?;
+        if let Some(part) = boolean(body, &half, BoolOp::Intersect)? {
+            out.push(part);
+        }
+    }
+    Ok(out)
 }
