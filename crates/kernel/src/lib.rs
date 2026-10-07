@@ -15,6 +15,7 @@
 mod blend;
 mod body;
 mod build;
+mod coplanar;
 mod heal;
 mod loopblend;
 mod measure;

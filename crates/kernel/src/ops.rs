@@ -138,6 +138,27 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
             return Ok(None);
         }
     }
+    // Coincident planar faces: push them apart (exactly) and try again.
+    thread_local! {
+        static APART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    if !APART.with(|c| c.get()) {
+        APART.with(|c| c.set(true));
+        let r = crate::coplanar::boolean_apart(a, b, op);
+        APART.with(|c| c.set(false));
+        match r {
+            Some(Ok(Some(body))) => {
+                let v = volume(&body);
+                if v > 0.0 && plausible(v, &body) {
+                    return Ok(Some(body));
+                }
+                last = format!("{last}; faces pushed apart gave an implausible volume {v:.4}");
+            }
+            Some(Ok(None)) => {}
+            Some(Err(e)) => last = format!("{last}; {e}"),
+            None => {}
+        }
+    }
     // Coincident faces defeat the B-rep boolean; bodies with only planar faces have an exact
     // polygon fallback.
     match crate::polybool::planar_boolean(a, b, op) {

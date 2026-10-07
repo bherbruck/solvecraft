@@ -725,3 +725,41 @@ fn debug_heal_sphere_cut() {
         }
     }
 }
+
+#[test]
+#[ignore]
+fn debug_coplanar_cylinder_union() {
+    let a = box_solid(Vec3::ZERO, Vec3::new(40.0, 40.0, 20.0)).unwrap();
+    let c = cylinder(Vec3::new(40.0, 20.0, 0.0), Vec3::Z, 12.0, 40.0).unwrap();
+    for op in [BoolOp::Union, BoolOp::Cut, BoolOp::Intersect] {
+        let r = guard("t", || {
+            let (sa, mut sb) = (a.deep_copy(), c.deep_copy());
+            Ok(match op {
+                BoolOp::Union => truck_shapeops::or(&sa, &sb, 0.05),
+                BoolOp::Cut => {
+                    sb.not();
+                    truck_shapeops::and(&sa, &sb, 0.05)
+                }
+                BoolOp::Intersect => truck_shapeops::and(&sa, &sb, 0.05),
+            }
+            .map(|s| s.face_iter().count()))
+        });
+        println!("{op:?}: {r:?}");
+    }
+}
+
+#[test]
+fn coplanar_curved_booleans() {
+    // A box and a cylinder standing on the same plane, the cylinder's axis on the box's side.
+    let a = box_solid(Vec3::ZERO, Vec3::new(40.0, 40.0, 20.0)).unwrap();
+    let c = cylinder(Vec3::new(40.0, 20.0, 0.0), Vec3::Z, 12.0, 40.0).unwrap();
+    let half = PI * 144.0 / 2.0;
+    let u = boolean(&a, &c, BoolOp::Union).unwrap().unwrap();
+    let m = measure(&u).unwrap();
+    assert!(rel(m.volume, 32000.0 + half * 40.0 + half * 20.0) < 1e-3, "{}", m.volume);
+    let cut = boolean(&a, &c, BoolOp::Cut).unwrap().unwrap();
+    assert!(rel(measure(&cut).unwrap().volume, 32000.0 - half * 20.0) < 1e-3);
+    let i = boolean(&a, &c, BoolOp::Intersect).unwrap().unwrap();
+    assert!(rel(measure(&i).unwrap().volume, half * 20.0) < 1e-3);
+    println!("union {:?}", m.merged);
+}

@@ -9,7 +9,7 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 |---|---|
 | Where are we? | **M0 done; M1/M2 in progress.** Sketch with solver, extrude (taper, two-sided, through all), revolve, fillet/chamfer, holes, patterns, mirror, shell, draft, loft, sweep, split, construction planes, parameters that rebuild the timeline, STEP/STL export, desktop and browser (wasm) app with Fusion-style selection (hover/selected highlights, origin planes, click-to-pick sketch planes, multi-select, window/crossing box selection, animated view cube), CLI, MCP server, oracle harness. |
 | Command parity (SOLID + SKETCH toolbar) | **57 / 291 (20%)** — [docs/parity.md](docs/parity.md) |
-| Fusion oracle | **28 / 29 parts match** Fusion's measurements — [docs/oracle.md](docs/oracle.md) |
+| Fusion oracle | **29 / 29 parts match** Fusion's measurements — [docs/oracle.md](docs/oracle.md) |
 | Tests | 85 (solver, profiles, kernel booleans/blends/measures, expressions, timeline, file formats, camera, engine end-to-end, hostile-input fuzz over every command) |
 | Gates | `cargo xtask ci`: fmt, clippy -D warnings, tests, asset attribution, layering, wasm32 build — green |
 | Weighted parity estimate | **≈ 5%** of Fusion's Design workspace by importance (sketch + basic solids are the core, but surfaces, assemblies, sheet metal, CAM, drawings are untouched) |
@@ -38,8 +38,9 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 - Fillets and chamfers: straight edges (convex or concave) between planar faces with perpendicular
   planar end faces; whole smooth loops of a planar face (pocket floors, plate outlines); every edge
   of a convex planar body (sphere corners). Other corner configurations are not supported yet.
-- Booleans of curved bodies with coincident faces can fail (planar ones have an exact fallback);
-  fully internal voids are not supported. Spheres are built from six pole-free patches so they
+- Coincident planar faces are pushed apart exactly when their neighbours stand perpendicular
+  (extruded and box-like parts); other coincident configurations can still fail. Fully internal
+  voids are not supported. Spheres are built from six pole-free patches so they
   combine reliably.
 - Mass properties come from fine tessellation (curved faces within ~1e-4 relative).
 - STEP import reads solids (B-rep with analytic and B-spline geometry), units, product names,
