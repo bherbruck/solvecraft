@@ -1,0 +1,315 @@
+//! ASCII DXF (the public AutoCAD DXF reference): the ENTITIES section's LINE, CIRCLE, ARC,
+//! LWPOLYLINE, POLYLINE/VERTEX, POINT, ELLIPSE, SPLINE, TEXT and MTEXT, scaled to millimetres by
+//! `$INSUNITS`. Blocks are not expanded. The writer emits an R12-style file of lines, circles,
+//! arcs and points (free-form curves as polylines).
+
+use solvecraft_geom::Vec2;
+
+use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
+use crate::{IoError, Result};
+
+/// Group code / value pairs.
+fn pairs(text: &str) -> Vec<(i32, String)> {
+    let mut out = Vec::new();
+    let mut lines = text.lines();
+    while let (Some(c), Some(v)) = (lines.next(), lines.next()) {
+        let Ok(code) = c.trim().parse::<i32>() else { continue };
+        out.push((code, v.trim().to_string()));
+    }
+    out
+}
+
+fn units_scale(p: &[(i32, String)]) -> f64 {
+    // $INSUNITS: 1 in, 2 ft, 4 mm, 5 cm, 6 m, 0 unitless (taken as mm).
+    let i = p.iter().position(|(c, v)| *c == 9 && v == "$INSUNITS");
+    match i.and_then(|i| p.get(i + 1)).and_then(|(_, v)| v.parse::<i32>().ok()) {
+        Some(1) => 25.4,
+        Some(2) => 304.8,
+        Some(5) => 10.0,
+        Some(6) => 1000.0,
+        _ => 1.0,
+    }
+}
+
+#[derive(Default)]
+struct Ent {
+    kind: String,
+    f: Vec<(i32, f64)>,
+    s: Vec<(i32, String)>,
+}
+
+impl Ent {
+    fn get(&self, code: i32) -> Option<f64> {
+        self.f.iter().find(|(c, _)| *c == code).map(|(_, v)| *v)
+    }
+    fn all(&self, code: i32) -> Vec<f64> {
+        self.f.iter().filter(|(c, _)| *c == code).map(|(_, v)| *v).collect()
+    }
+    fn text(&self, code: i32) -> Option<&str> {
+        self.s.iter().find(|(c, _)| *c == code).map(|(_, v)| v.as_str())
+    }
+}
+
+/// Read the entities of an ASCII DXF file.
+pub fn read_dxf(text: &str) -> Result<Vec<Geom2>> {
+    if text.len() > MAX_DRAWING_BYTES {
+        return Err(IoError::Invalid("the DXF file is too large".into()));
+    }
+    if text.starts_with("AutoCAD Binary DXF") {
+        return Err(IoError::Invalid("binary DXF is not supported; save as ASCII DXF".into()));
+    }
+    let p = pairs(text);
+    let k = units_scale(&p);
+    // Entities of the ENTITIES section.
+    let start = p.iter().position(|(c, v)| *c == 2 && v == "ENTITIES").ok_or_else(|| IoError::Invalid("no ENTITIES section".into()))?;
+    let mut ents: Vec<Ent> = Vec::new();
+    for (c, v) in p.iter().skip(start + 1) {
+        if *c == 0 {
+            if v == "ENDSEC" || v == "EOF" {
+                break;
+            }
+            ents.push(Ent { kind: v.clone(), ..Default::default() });
+            if ents.len() > MAX_ENTITIES {
+                return Err(IoError::Invalid("too many entities".into()));
+            }
+            continue;
+        }
+        let Some(e) = ents.last_mut() else { continue };
+        let numeric = matches!(*c, 10..=59 | 60..=99 | 140..=147 | 210..=239);
+        match v.parse::<f64>() {
+            Ok(x) if numeric && x.is_finite() && x.abs() < 1e12 => e.f.push((*c, x)),
+            _ => e.s.push((*c, v.clone())),
+        }
+    }
+    let pt = |x: f64, y: f64| Vec2::new(x * k, y * k);
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < ents.len() {
+        let Some(e) = ents.get(i) else { break };
+        i += 1;
+        match e.kind.as_str() {
+            "LINE" => {
+                if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (e.get(10), e.get(20), e.get(11), e.get(21)) {
+                    out.push(Geom2::Line(pt(x0, y0), pt(x1, y1)));
+                }
+            }
+            "POINT" => {
+                if let (Some(x), Some(y)) = (e.get(10), e.get(20)) {
+                    out.push(Geom2::Point(pt(x, y)));
+                }
+            }
+            "CIRCLE" => {
+                if let (Some(x), Some(y), Some(r)) = (e.get(10), e.get(20), e.get(40)) {
+                    out.push(Geom2::Circle(pt(x, y), r * k));
+                }
+            }
+            "ARC" => {
+                if let (Some(x), Some(y), Some(r), Some(a0), Some(a1)) = (e.get(10), e.get(20), e.get(40), e.get(50), e.get(51)) {
+                    let c = pt(x, y);
+                    let at = |deg: f64| c + Vec2::from_angle(deg.to_radians()) * (r * k);
+                    out.push(Geom2::Arc { c, a: at(a0), b: at(a1) });
+                }
+            }
+            "LWPOLYLINE" => {
+                let ys = e.all(20);
+                // Bulges follow their vertex: walk the pairs in order.
+                let mut verts: Vec<(Vec2, f64)> = Vec::new();
+                let mut xi = 0;
+                for (c, v) in &e.f {
+                    match *c {
+                        10 => {
+                            if let Some(y) = ys.get(xi) {
+                                verts.push((pt(*v, *y), 0.0));
+                            }
+                            xi += 1;
+                        }
+                        42 => {
+                            if let Some(last) = verts.last_mut() {
+                                last.1 = *v;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                let closed = e.get(70).is_some_and(|f| (f as i64) & 1 == 1);
+                polyline(&verts, closed, &mut out);
+            }
+            "POLYLINE" => {
+                let closed = e.get(70).is_some_and(|f| (f as i64) & 1 == 1);
+                let mut verts = Vec::new();
+                while let Some(v) = ents.get(i) {
+                    if v.kind != "VERTEX" {
+                        break;
+                    }
+                    if let (Some(x), Some(y)) = (v.get(10), v.get(20)) {
+                        verts.push((pt(x, y), v.get(42).unwrap_or(0.0)));
+                    }
+                    i += 1;
+                }
+                if ents.get(i).is_some_and(|x| x.kind == "SEQEND") {
+                    i += 1;
+                }
+                polyline(&verts, closed, &mut out);
+            }
+            "ELLIPSE" => {
+                if let (Some(x), Some(y), Some(mx), Some(my), Some(ratio)) = (e.get(10), e.get(20), e.get(11), e.get(21), e.get(40)) {
+                    let c = pt(x, y);
+                    let major = c + Vec2::new(mx, my) * k;
+                    let a = Vec2::new(mx, my).len() * k;
+                    let (t0, t1) = (e.get(41).unwrap_or(0.0), e.get(42).unwrap_or(std::f64::consts::TAU));
+                    if (t1 - t0 - std::f64::consts::TAU).abs() < 1e-9 || (t1 - t0).abs() < 1e-12 {
+                        out.push(Geom2::Ellipse { c, major, minor: a * ratio });
+                    } else {
+                        // Partial ellipse: a fit spline through samples.
+                        let u = (major - c) / a.max(1e-12);
+                        let v = u.perp() * (a * ratio);
+                        let mut sweep = t1 - t0;
+                        while sweep <= 0.0 {
+                            sweep += std::f64::consts::TAU;
+                        }
+                        let n = 16;
+                        let pts = (0..=n)
+                            .map(|j| {
+                                let t = t0 + sweep * j as f64 / n as f64;
+                                c + u * (a * t.cos()) + v * t.sin()
+                            })
+                            .collect();
+                        out.push(Geom2::Spline { pts, control: false, degree: 3 });
+                    }
+                }
+            }
+            "SPLINE" => {
+                let degree = e.get(71).unwrap_or(3.0).clamp(1.0, 7.0) as u8;
+                let (fx, fy) = (e.all(11), e.all(21));
+                let (cx, cy) = (e.all(10), e.all(20));
+                if fx.len() >= 2 && fx.len() == fy.len() {
+                    out.push(Geom2::Spline { pts: fx.iter().zip(&fy).map(|(x, y)| pt(*x, *y)).collect(), control: false, degree: 3 });
+                } else if cx.len() >= 2 && cx.len() == cy.len() {
+                    out.push(Geom2::Spline { pts: cx.iter().zip(&cy).map(|(x, y)| pt(*x, *y)).collect(), control: true, degree });
+                }
+            }
+            "TEXT" | "MTEXT" => {
+                if let (Some(x), Some(y), Some(h), Some(t)) = (e.get(10), e.get(20), e.get(40), e.text(1)) {
+                    // MTEXT paragraph codes: keep the plain text.
+                    let t = t.replace("\\P", "\n");
+                    out.push(Geom2::Text { text: t, at: pt(x, y), height: h * k, angle: e.get(50).unwrap_or(0.0).to_radians() });
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+fn polyline(verts: &[(Vec2, f64)], closed: bool, out: &mut Vec<Geom2>) {
+    let n = verts.len();
+    let segs = if closed { n } else { n.saturating_sub(1) };
+    for j in 0..segs {
+        let (Some((p0, b)), Some((p1, _))) = (verts.get(j), verts.get((j + 1) % n)) else { continue };
+        if p0.dist(*p1) < 1e-12 {
+            continue;
+        }
+        if let Some(g) = bulge_arc(*p0, *p1, *b) {
+            out.push(g);
+        }
+    }
+}
+
+/// Write 2D geometry (millimetres) as an R12-style ASCII DXF.
+pub fn write_dxf(geom: &[Geom2]) -> String {
+    let mut s = String::new();
+    let mut w = |c: i32, v: &str| {
+        s.push_str(&format!("{c}\n{v}\n"));
+    };
+    w(0, "SECTION");
+    w(2, "HEADER");
+    w(9, "$INSUNITS");
+    w(70, "4");
+    w(0, "ENDSEC");
+    w(0, "SECTION");
+    w(2, "ENTITIES");
+    let f = |x: f64| format!("{x:.9}");
+    for g in geom {
+        match g {
+            Geom2::Point(p) => {
+                w(0, "POINT");
+                w(8, "0");
+                w(10, &f(p.x));
+                w(20, &f(p.y));
+            }
+            Geom2::Line(a, b) => {
+                w(0, "LINE");
+                w(8, "0");
+                w(10, &f(a.x));
+                w(20, &f(a.y));
+                w(11, &f(b.x));
+                w(21, &f(b.y));
+            }
+            Geom2::Circle(c, r) => {
+                w(0, "CIRCLE");
+                w(8, "0");
+                w(10, &f(c.x));
+                w(20, &f(c.y));
+                w(40, &f(*r));
+            }
+            Geom2::Arc { c, a, b } => {
+                w(0, "ARC");
+                w(8, "0");
+                w(10, &f(c.x));
+                w(20, &f(c.y));
+                w(40, &f(c.dist(*a)));
+                w(50, &f((*a - *c).angle().to_degrees()));
+                w(51, &f((*b - *c).angle().to_degrees()));
+            }
+            Geom2::Text { text, at, height, angle } => {
+                w(0, "TEXT");
+                w(8, "0");
+                w(10, &f(at.x));
+                w(20, &f(at.y));
+                w(40, &f(*height));
+                w(50, &f(angle.to_degrees()));
+                w(1, &text.replace('\n', " "));
+            }
+            // Free-form curves are written by the caller as polylines (lines).
+            Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Conic { .. } => {}
+        }
+    }
+    w(0, "ENDSEC");
+    w(0, "EOF");
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trip_and_polyline_bulges() {
+        let g = vec![
+            Geom2::Line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)),
+            Geom2::Circle(Vec2::new(5.0, 5.0), 2.0),
+            Geom2::Arc { c: Vec2::ZERO, a: Vec2::new(3.0, 0.0), b: Vec2::new(0.0, 3.0) },
+        ];
+        let back = read_dxf(&write_dxf(&g)).unwrap();
+        assert_eq!(back.len(), 3);
+        match &back[2] {
+            Geom2::Arc { c, a, b } => {
+                assert!(c.dist(Vec2::ZERO) < 1e-6 && a.dist(Vec2::new(3.0, 0.0)) < 1e-6 && b.dist(Vec2::new(0.0, 3.0)) < 1e-6);
+            }
+            x => panic!("{x:?}"),
+        }
+        // A closed LWPOLYLINE slot: two lines and two half circles (bulge 1), in inches.
+        let dxf = "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n1\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n4\n70\n1\n10\n0\n20\n0\n10\n2\n20\n0\n42\n1\n10\n2\n20\n1\n10\n0\n20\n1\n42\n1\n0\nENDSEC\n0\nEOF\n";
+        let g = read_dxf(dxf).unwrap();
+        assert_eq!(g.len(), 4, "{g:?}");
+        match &g[1] {
+            Geom2::Arc { c, a, .. } => {
+                assert!(c.dist(Vec2::new(50.8, 12.7)) < 1e-9, "{c:?}");
+                assert!((c.dist(*a) - 12.7).abs() < 1e-9);
+            }
+            x => panic!("{x:?}"),
+        }
+        assert!(read_dxf("garbage").is_err());
+        assert!(read_dxf("AutoCAD Binary DXF\r\n").is_err());
+    }
+}

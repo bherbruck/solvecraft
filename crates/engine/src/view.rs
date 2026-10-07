@@ -90,6 +90,15 @@ pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool
     out
 }
 
+/// Should sketch point `i` be drawn? Text outlines' points are not (they are not picked or
+/// constrained individually).
+pub fn sketch_point_visible(sk: &Sketch, i: usize) -> bool {
+    match sk.points.get(i).and_then(|p| p.link.as_deref()) {
+        Some(l) => sk.link(l).is_none_or(|l| l.kind != solvecraft_sketch::LinkKind::Text),
+        None => true,
+    }
+}
+
 /// The scene for a headless render.
 pub fn scene(s: &Session, cam: &Camera) -> Scene {
     let st = s.world_state();

@@ -7,7 +7,7 @@ use solvecraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use super::sketch::{add_c, dof_now, edit, reject_redundant};
 use super::{CommandSpec, in_sketch};
-use crate::params::{bad, num, req_vec2, string_list, vec2};
+use crate::params::{bad, num, req_vec2, str_, string_list, vec2};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -21,6 +21,21 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("c_polygon")
         .enabled(in_sketch)
         .params("lines: [line ids] of a closed chain: equal sides with every corner on one circle (a regular polygon)"),
+    CommandSpec::new("SketchAutoConstraintAndDimCmd", "AutoConstrain", auto_constrain)
+        .at("SKETCH", "CONSTRAINTS")
+        .icon("auto_constrain")
+        .enabled(in_sketch)
+        .params("tolerance?: mm (default 0.01), angle_tolerance?: deg (default 1), dimensions?: bool (default true): infer constraints, then dimension until fully constrained"),
+    CommandSpec::new("SketchAutoConstraintAndDimFromDatumCmd", "AutoConstrain from datum", auto_constrain_datum)
+        .at("SKETCH", "CONSTRAINTS")
+        .icon("auto_constrain")
+        .enabled(in_sketch)
+        .params("datum: point ref (default origin); like AutoConstrain with positions measured from the datum"),
+    CommandSpec::new("SketchAutoConstrainAndFinish", "Finish with AutoConstrain", auto_constrain_finish)
+        .at("SKETCH", "FINISH SKETCH")
+        .icon("finish")
+        .enabled(in_sketch)
+        .params("like AutoConstrain, then Finish Sketch"),
     CommandSpec::new("sketch.glyphs", "Constraint Glyphs", glyphs)
         .enabled(in_sketch)
         .noundo()
@@ -90,6 +105,161 @@ fn c_polygon(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(cons)
     })?;
     Ok(json!({"constraints": out, "sketch": info}))
+}
+
+/// Most constraints AutoConstrain tries.
+const MAX_TRIALS: usize = 2000;
+
+/// Add `k` if it removes a degree of freedom and the sketch still solves; else leave the
+/// sketch as it was. Returns the new dof when kept.
+fn try_add(sk: &mut Sketch, doc: &mut solvecraft_doc::Document, k: ConstraintKind, dof: usize, dim: bool) -> Option<usize> {
+    let saved = sk.clone();
+    let param = if dim {
+        let v = k.value()?;
+        let e = if k.is_angle() { format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6) } else { format!("{} mm", (v * 1e6).round() / 1e6) };
+        Some(doc.new_model_param(&e, if k.is_angle() { "deg" } else { "mm" }))
+    } else {
+        None
+    };
+    if sk.add_constraint(k, param.clone()).is_err() {
+        if let Some(pn) = &param {
+            let _ = doc.remove_param(pn);
+        }
+        return None;
+    }
+    let mut trial = sk.clone();
+    let rep = solvecraft_sketch::solve(&mut trial);
+    if rep.ok() && rep.dof < dof {
+        *sk = trial;
+        return Some(rep.dof);
+    }
+    *sk = saved;
+    if let Some(pn) = &param {
+        let _ = doc.remove_param(pn);
+    }
+    None
+}
+
+fn run_auto(sk: &mut Sketch, doc: &mut solvecraft_doc::Document, p: &Value, datum: usize) -> (Vec<String>, usize) {
+    use ConstraintKind::*;
+    let tol = num(p, "tolerance").filter(|t| *t > 0.0).unwrap_or(0.01);
+    let atol = num(p, "angle_tolerance").filter(|t| *t > 0.0).unwrap_or(1.0).to_radians();
+    let dims = crate::params::bool_(p, "dimensions").unwrap_or(true);
+    let n0 = sk.constraints.len();
+    let mut dof = dof_now(sk);
+    let mut trials = 0;
+    let mut attempt = |sk: &mut Sketch, doc: &mut solvecraft_doc::Document, k: ConstraintKind, dim: bool, dof: &mut usize| {
+        if *dof == 0 || trials >= MAX_TRIALS {
+            return;
+        }
+        trials += 1;
+        if let Some(d) = try_add(sk, doc, k, *dof, dim) {
+            *dof = d;
+        }
+    };
+    // Coincident points.
+    let np = sk.points.len();
+    for i in 0..np {
+        for j in (i + 1)..np {
+            let (Some(a), Some(b)) = (sk.point(i), sk.point(j)) else { continue };
+            if a.dist(b) <= tol {
+                attempt(sk, doc, Coincident { p: i, q: j }, false, &mut dof);
+            }
+        }
+    }
+    // Horizontal / vertical lines, tangent line–arc and arc–arc joints.
+    let nc = sk.curves.len();
+    for i in 0..nc {
+        if let Some(CurveKind::Line { a, b }) = sk.curves.get(i).map(|c| c.kind.clone())
+            && let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b))
+        {
+            let ang = (pb - pa).angle();
+            let off_h = ang.sin().abs().asin();
+            let off_v = ang.cos().abs().asin();
+            if off_h <= atol {
+                attempt(sk, doc, Horizontal { l: i }, false, &mut dof);
+            } else if off_v <= atol {
+                attempt(sk, doc, Vertical { l: i }, false, &mut dof);
+            }
+        }
+    }
+    for i in 0..nc {
+        for j in (i + 1)..nc {
+            let (Some(ci), Some(cj)) = (sk.curves.get(i), sk.curves.get(j)) else { continue };
+            let round = |k: &CurveKind| matches!(k, CurveKind::Arc { .. } | CurveKind::Circle { .. });
+            if !(round(&ci.kind) || round(&cj.kind)) {
+                continue;
+            }
+            let (Some((a0, a1)), Some((b0, b1))) = (ci.kind.ends(), cj.kind.ends()) else { continue };
+            let Some(sh) = [a0, a1].into_iter().find(|x| *x == b0 || *x == b1) else { continue };
+            let dir = |c: usize| -> Option<Vec2> {
+                let k = sk.curves.get(c)?.kind.clone();
+                let q = sk.point(sh)?;
+                match k {
+                    CurveKind::Line { a, b } => (sk.point(b)? - sk.point(a)?).normalized(),
+                    CurveKind::Arc { c, .. } => (q - sk.point(c)?).perp().normalized(),
+                    _ => None,
+                }
+            };
+            if let (Some(u), Some(v)) = (dir(i), dir(j))
+                && u.cross(v).abs() <= atol.sin()
+            {
+                attempt(sk, doc, Tangent { a: i, b: j }, false, &mut dof);
+            }
+        }
+    }
+    if dims {
+        for i in 0..nc {
+            let k = match sk.curves.get(i).map(|c| (c.kind.clone(), c.construction)) {
+                Some((CurveKind::Circle { r, .. }, false)) => Diameter { c: i, value: 2.0 * r },
+                Some((CurveKind::Arc { .. }, false)) => Radius { c: i, value: sk.radius(i).unwrap_or(1.0) },
+                Some((CurveKind::Line { a, b }, false)) => {
+                    Length { l: i, value: sk.point(a).zip(sk.point(b)).map(|(x, y)| x.dist(y)).unwrap_or(1.0) }
+                }
+                _ => continue,
+            };
+            attempt(sk, doc, k, true, &mut dof);
+        }
+        // Positions from the datum.
+        let d = sk.point(datum).unwrap_or_default();
+        for i in 0..sk.points.len() {
+            if i == datum {
+                continue;
+            }
+            let Some(q) = sk.point(i) else { continue };
+            attempt(sk, doc, DistanceX { p: datum, q: i, value: (q.x - d.x).abs() }, true, &mut dof);
+            attempt(sk, doc, DistanceY { p: datum, q: i, value: (q.y - d.y).abs() }, true, &mut dof);
+        }
+    }
+    let added = sk.constraints.iter().skip(n0).map(|c| c.id.clone()).collect();
+    (added, dof)
+}
+
+fn auto(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    let ((added, dof), info) = edit(s, p, cmd, false, |sk, doc| {
+        let datum = match str_(p, "datum") {
+            Some(r) => sk.resolve_point(r).ok_or_else(|| bad(cmd, format!("unknown point `{r}`")))?,
+            None => 0,
+        };
+        // Values of existing dimensions must be applied before judging degrees of freedom.
+        let (vals, _) = doc.param_values();
+        doc.apply_dimension_values(&vals, sk)?;
+        Ok(run_auto(sk, doc, p, datum))
+    })?;
+    Ok(json!({"added": added, "dof": dof, "sketch": info}))
+}
+
+fn auto_constrain(s: &mut Session, p: &Value) -> Result<Value> {
+    auto(s, p, "SketchAutoConstraintAndDimCmd")
+}
+fn auto_constrain_datum(s: &mut Session, p: &Value) -> Result<Value> {
+    auto(s, p, "SketchAutoConstraintAndDimFromDatumCmd")
+}
+fn auto_constrain_finish(s: &mut Session, p: &Value) -> Result<Value> {
+    let r = auto(s, p, "SketchAutoConstrainAndFinish")?;
+    s.active_sketch = None;
+    s.revision += 1;
+    Ok(r)
 }
 
 /// Where a constraint's glyph goes (sketch coordinates): beside the middle of its first curve,

@@ -111,3 +111,25 @@ fn glyphs_and_snaps() {
     let sn = run(&mut s, "sketch.snap", json!({"at": [40, 10.4], "from": [30, 10], "radius": 1}));
     assert!(sn["snaps"].as_array().unwrap().iter().any(|x| x["type"] == "horizontal"), "{sn}");
 }
+
+#[test]
+fn auto_constrain_fully_constrains_a_rough_sketch() {
+    let mut s = new_sketch();
+    // A slightly crooked closed rectangle and a circle inside.
+    run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [40, 0.004], [40.003, 30], [0, 30.002]], "closed": true}));
+    run(&mut s, "CircleCenterRadius", json!({"center": [20, 15], "radius": 5}));
+    let r = run(&mut s, "SketchAutoConstraintAndDimCmd", json!({}));
+    assert_eq!(r["dof"], 0, "{r}");
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert_eq!(si["fully_constrained"], true, "{si}");
+    let names: Vec<String> = si["constraints"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap().to_string()).collect();
+    assert!(names.iter().filter(|n| *n == "Horizontal").count() >= 2, "{names:?}");
+    assert!(names.iter().any(|n| n == "DiameterDimension"), "{names:?}");
+    // From a datum, and finishing.
+    let mut s = new_sketch();
+    run(&mut s, "DrawPoint", json!({"point": [5, 5], "id": "d"}));
+    run(&mut s, "DrawPolyline", json!({"points": [[10, 10], [20, 10]]}));
+    let r = run(&mut s, "SketchAutoConstrainAndFinish", json!({"datum": "d"}));
+    assert!(s.active_sketch.is_none());
+    assert!(r["added"].as_array().unwrap().len() >= 3, "{r}");
+}

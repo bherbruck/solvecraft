@@ -285,10 +285,15 @@ fn hostile_params_never_panic() {
         "lines",
         "driven",
         "from",
+        "datum",
+        "tolerance",
     ];
     let mut internal = Vec::new();
     for spec in command_specs() {
-        if matches!(spec.id, "doc.open" | "SaveDocumentCommand" | "SaveDocumentAsCommand" | "ExportCommand" | "FusionSaveAsSTLCommand") {
+        if matches!(
+            spec.id,
+            "doc.open" | "SaveDocumentCommand" | "SaveDocumentAsCommand" | "ExportCommand" | "FusionSaveAsSTLCommand" | "sketch.export_dxf"
+        ) {
             continue; // file system side effects are covered by their own tests
         }
         for v in hostile_values() {

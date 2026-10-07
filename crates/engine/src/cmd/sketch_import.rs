@@ -1,0 +1,220 @@
+//! Sketch drawing exchange: Insert DXF, Insert SVG and sketch DXF export.
+
+use std::collections::HashMap;
+
+use serde_json::{Value, json};
+use solvecraft_geom::Vec2;
+use solvecraft_io::{Geom2, MAX_DRAWING_BYTES};
+use solvecraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
+
+use super::CommandSpec;
+use super::sketch::{edit, ids_of};
+use crate::params::{bad, num, str_, vec2};
+use crate::{EngineError, Result, Session};
+
+pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("ImportDxfFileCommand", "Insert DXF", insert_dxf)
+        .at("SKETCH", "INSERT")
+        .icon("dxf")
+        .params("path | text: ASCII DXF; at?: [x,y] offset, scale?; plane?: (when no sketch is active, a new sketch on it; default XY)"),
+    CommandSpec::new("SketchImportSVG", "Insert SVG", insert_svg)
+        .at("SKETCH", "INSERT")
+        .icon("svg")
+        .params("path | text: SVG; at?: [x,y] offset, scale?; plane?: (when no sketch is active, a new sketch on it; default XY)"),
+    CommandSpec::new("sketch.export_dxf", "Save As DXF", export_dxf)
+        .noundo()
+        .params("sketch?: id|name (default active); path?: file to write (else the DXF text is returned)"),
+];
+
+fn source_text(p: &Value, cmd: &str) -> Result<String> {
+    if let Some(t) = str_(p, "text") {
+        if t.len() > MAX_DRAWING_BYTES {
+            return Err(bad(cmd, "the drawing is too large"));
+        }
+        return Ok(t.to_string());
+    }
+    let path = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "give `path` or `text`"))?;
+    let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if meta.len() as usize > MAX_DRAWING_BYTES {
+        return Err(EngineError::Other(format!("{path}: file too large")));
+    }
+    let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+/// Add imported geometry to a sketch, sharing end points that meet.
+fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
+    let q = 1e-6;
+    let mut map: HashMap<(i64, i64), usize> = HashMap::new();
+    let mut pt = |sk: &mut Sketch, p: Vec2| -> Result<usize> {
+        let p = f(p);
+        let key = ((p.x / q).round() as i64, (p.y / q).round() as i64);
+        if let Some(i) = map.get(&key) {
+            return Ok(*i);
+        }
+        let i = sk.add_point(p, None)?;
+        map.insert(key, i);
+        Ok(i)
+    };
+    let mut curves = Vec::new();
+    let mut texts = Vec::new();
+    for g in geom {
+        let made = match g {
+            Geom2::Point(p) => {
+                pt(sk, *p)?;
+                None
+            }
+            Geom2::Line(a, b) => {
+                let (a, b) = (pt(sk, *a)?, pt(sk, *b)?);
+                (a != b).then_some(CurveKind::Line { a, b })
+            }
+            Geom2::Circle(c, r) => Some(CurveKind::Circle { c: pt(sk, *c)?, r: r * k }),
+            Geom2::Arc { c, a, b } => {
+                let (c, a, b) = (pt(sk, *c)?, pt(sk, *a)?, pt(sk, *b)?);
+                (a != b && c != a).then_some(CurveKind::Arc { c, a, b })
+            }
+            Geom2::Ellipse { c, major, minor } => Some(CurveKind::Ellipse { c: pt(sk, *c)?, m: pt(sk, *major)?, r: minor * k }),
+            Geom2::Spline { pts, control, degree } => {
+                let mut idx = Vec::new();
+                for p in pts.iter().take(solvecraft_sketch::MAX_SPLINE_POINTS) {
+                    let i = pt(sk, *p)?;
+                    if idx.last() != Some(&i) {
+                        idx.push(i);
+                    }
+                }
+                (idx.len() >= 2).then_some(CurveKind::Spline { pts: idx, control: *control, degree: *degree })
+            }
+            Geom2::Conic { a, apex, b, rho } => {
+                let (a, x, b) = (pt(sk, *a)?, pt(sk, *apex)?, pt(sk, *b)?);
+                (a != b && x != a && x != b).then_some(CurveKind::Conic { a, b, apex: x, rho: *rho })
+            }
+            Geom2::Text { text, at, height, angle } => {
+                texts.push(Geom2::Text { text: text.clone(), at: f(*at), height: height * k, angle: *angle });
+                None
+            }
+        };
+        if let Some(kind) = made
+            && let Ok(c) = sk.add_curve(kind, None)
+        {
+            curves.push(c);
+        }
+    }
+    Ok((curves, texts))
+}
+
+fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
+    let text = source_text(p, cmd)?;
+    let geom = if svg { solvecraft_io::read_svg(&text) } else { solvecraft_io::read_dxf(&text) }.map_err(|e| bad(cmd, e.to_string()))?;
+    if geom.is_empty() {
+        return Err(bad(cmd, "the drawing has no geometry SolveCraft reads"));
+    }
+    let k = num(p, "scale").filter(|k| *k > 1e-9 && *k < 1e6).unwrap_or(1.0);
+    let off = p.get("at").and_then(vec2).unwrap_or(Vec2::ZERO);
+    let mut created = None;
+    if s.active_sketch.is_none() {
+        let mut cp = json!({"plane": p.get("plane").cloned().unwrap_or(json!("XY")), "project_edges": false});
+        if let Some(n) = str_(p, "name") {
+            cp["name"] = json!(n);
+        }
+        let r = (super::find_command("SketchCreate").ok_or_else(|| bad(cmd, "SketchCreate"))?.run)(s, &cp)?;
+        created = r.get("sketch").and_then(Value::as_u64);
+    }
+    let f = move |q: Vec2| q * k + off;
+    let ((curves, texts), info) = edit(s, p, cmd, false, |sk, _| {
+        let (cs, texts) = add_geometry(sk, &geom, &f, k)?;
+        Ok((ids_of(sk, &cs), texts))
+    })?;
+    // Text becomes sketch text.
+    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch"))?;
+    let mut n_text = 0;
+    for t in texts {
+        if let Geom2::Text { text, at, height, angle } = t {
+            let mut doc = (*s.doc).clone();
+            let mut sk = doc.sketch(id)?.clone();
+            if super::sketch_project::add_link(s, &doc, id, &mut sk, LinkKind::Text, LinkSource::Text { text, at, height, angle }).is_ok() {
+                *doc.sketch_mut(id)? = sk;
+                *s.doc_mut() = doc;
+                n_text += 1;
+            }
+        }
+    }
+    Ok(json!({"sketch": id, "created_sketch": created, "curves": curves.len(), "texts": n_text, "info": info}))
+}
+
+fn insert_dxf(s: &mut Session, p: &Value) -> Result<Value> {
+    insert(s, p, "ImportDxfFileCommand", false)
+}
+
+fn insert_svg(s: &mut Session, p: &Value) -> Result<Value> {
+    insert(s, p, "SketchImportSVG", true)
+}
+
+fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.export_dxf";
+    let id = match p.get("sketch") {
+        Some(Value::Number(n)) => n.as_u64(),
+        Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
+        _ => s.active_sketch,
+    }
+    .ok_or_else(|| bad(cmd, "no such sketch (and none is active)"))?;
+    let st = s.model.state();
+    let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
+    let sk = &ss.sketch;
+    let mut geom = Vec::new();
+    for (i, c) in sk.curves.iter().enumerate() {
+        if c.construction {
+            continue;
+        }
+        let pt = |k: usize| sk.point(k).unwrap_or_default();
+        match &c.kind {
+            CurveKind::Line { a, b } => geom.push(Geom2::Line(pt(*a), pt(*b))),
+            CurveKind::Circle { c, r } => geom.push(Geom2::Circle(pt(*c), *r)),
+            CurveKind::Arc { c, a, b } => geom.push(Geom2::Arc { c: pt(*c), a: pt(*a), b: pt(*b) }),
+            _ => {
+                let poly = sk.polyline(i);
+                geom.extend(poly.windows(2).map(|w| Geom2::Line(w[0], w[1])));
+            }
+        }
+    }
+    let text = solvecraft_io::write_dxf(&geom);
+    if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
+        std::fs::write(path, &text).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        return Ok(json!({"path": path, "entities": geom.len()}));
+    }
+    Ok(json!({"dxf": text, "entities": geom.len()}))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    #[test]
+    fn dxf_and_svg_round_trip_into_sketches() {
+        let mut s = Session::default();
+        s.execute("SketchCreate", &json!({"plane": "XY"})).unwrap();
+        s.execute("ShapeRectangleTwoPoint", &json!({"p0": [0, 0], "p1": [30, 20]})).unwrap();
+        s.execute("CircleCenterRadius", &json!({"center": [10, 10], "radius": 4})).unwrap();
+        let out = s.execute("sketch.export_dxf", &json!({})).unwrap();
+        let dxf = out["dxf"].as_str().unwrap().to_string();
+        s.execute("SketchStop", &json!({})).unwrap();
+        // Insert it again as a new sketch, offset: same profiles.
+        let r = s.execute("ImportDxfFileCommand", &json!({"text": dxf, "at": [100, 0]})).unwrap();
+        assert_eq!(r["curves"], 5, "{r}");
+        let id = r["sketch"].as_u64().unwrap();
+        let ss = s.model.state().sketch(id).unwrap().clone();
+        let mut areas: Vec<f64> = ss.profiles.iter().map(|p| p.area).collect();
+        areas.sort_by(|a, b| a.total_cmp(b));
+        assert_eq!(areas.len(), 2, "{areas:?}");
+        assert!((areas[1] - (600.0 - std::f64::consts::PI * 16.0)).abs() < 1e-6, "{areas:?}");
+        // SVG with a path and text, into the active sketch.
+        let svg =
+            r#"<svg width="40mm" height="40mm" viewBox="0 0 40 40"><path d="M0 0 H40 V40 H0 Z"/><text x="5" y="20" font-size="10">Hi</text></svg>"#;
+        let r = s.execute("SketchImportSVG", &json!({"text": svg})).unwrap();
+        assert_eq!(r["curves"], 4, "{r}");
+        assert_eq!(r["texts"], 1, "{r}");
+        assert!(s.execute("SketchImportSVG", &json!({"text": "<svg></svg>"})).is_err());
+        assert!(s.execute("ImportDxfFileCommand", &json!({"path": "/nonexistent.dxf"})).is_err());
+    }
+}

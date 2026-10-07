@@ -5,8 +5,14 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod dxf;
+mod sketch2d;
+mod svg;
 mod threemf;
 
+pub use dxf::{read_dxf, write_dxf};
+pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
+pub use svg::read_svg;
 pub use threemf::{MAX_3MF_BYTES, MeshObject, model_xml, read_3mf, weld, write_3mf};
 
 use solvecraft_doc::{Document, ModelState};
