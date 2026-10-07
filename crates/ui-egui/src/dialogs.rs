@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use solvecraft_engine::Sel;
 use solvecraft_engine::Session;
 use solvecraft_engine::doc::expr::Kind as ValueKind;
-use solvecraft_engine::doc::{AxisRef, Direction, FeatureKind, HoleKind, Operation, PlaneRef, ProfileSel};
+use solvecraft_engine::doc::{AxisRef, Direction, FeatureKind, HoleKind, Operation, PatternKind, PlaneRef, ProfileSel};
 use solvecraft_engine::geom::Vec3;
 
 use crate::SolveApp;
@@ -1059,8 +1059,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::PatternRect { count, spacing, count2, spacing2 } => {
             need(0, "objects")?;
-            need(1, "a direction (an axis or a sketch line)")?;
-            let (_, d1) = sels(d, 1).first().and_then(|x| axis_of(app, x)).ok_or("the direction must be an axis or a sketch line")?;
+            let kept = d.extra.get("dir1").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
+            let d1 = match (sels(d, 1).first(), kept) {
+                (Some(x), _) => axis_of(app, x).ok_or("the direction must be an axis or a sketch line")?.1,
+                (None, Some(k)) => k,
+                (None, None) => return Err("select a direction (an axis or a sketch line) first".into()),
+            };
             let mut p = json!({"features": source_features(s, &body_names(0)), "dir1": pt(d1), "count1": count, "spacing1": spacing});
             if let Some((_, d2)) = sels(d, 2).first().and_then(|x| axis_of(app, x)) {
                 p["dir2"] = pt(d2);
@@ -1071,8 +1075,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::PatternCirc { count, angle } => {
             need(0, "objects")?;
-            need(1, "an axis")?;
             let axis = match sels(d, 1).first() {
+                None if d.extra.contains_key("axis") => d.extra.get("axis").cloned().unwrap_or(Value::Null),
                 Some(Sel::Axis { name }) => json!(name),
                 Some(x) => {
                     let (o, dir) = axis_of(app, x).ok_or("the axis must be an origin axis or a sketch line")?;
@@ -1296,6 +1300,11 @@ fn op_index(o: &Operation) -> usize {
     }
 }
 
+/// The origin axis a unit direction runs along (either way), if any.
+fn world_axis(d: Vec3) -> Option<String> {
+    [("X", Vec3::X), ("Y", Vec3::Y), ("Z", Vec3::Z)].into_iter().find(|(_, a)| d.cross(*a).len() < 1e-9 && d.dot(*a) > 0.0).map(|(n, _)| n.to_string())
+}
+
 fn pt3(v: Vec3) -> Value {
     json!([v.x, v.y, v.z])
 }
@@ -1473,6 +1482,102 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = plane_sel(s, plane).into_iter().collect();
+            }
+            d
+        }
+        FeatureKind::Pattern { features, pattern } => {
+            let ids: Vec<u64> = features.iter().filter_map(|n| s.doc.find_feature(n).map(|f| f.id)).collect();
+            let bodies: Vec<Sel> = st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect();
+            let mut d = match pattern {
+                PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2 } => {
+                    let mut d = start("PatternRectangular")?;
+                    d.kind = Kind::PatternRect {
+                        count: count1.clone(),
+                        spacing: spacing1.clone(),
+                        count2: count2.clone().unwrap_or_else(|| "1".into()),
+                        spacing2: spacing2.clone().unwrap_or_else(|| "20 mm".into()),
+                    };
+                    // Directions along the origin axes show as those axes; others are kept as is.
+                    for (i, (key, dir)) in [("dir1", Some(*dir1)), ("dir2", *dir2)].into_iter().enumerate() {
+                        let Some(dir) = dir else { continue };
+                        match world_axis(dir) {
+                            Some(name) => {
+                                if let Some(inp) = d.inputs.get_mut(i + 1) {
+                                    inp.items = vec![Sel::Axis { name }];
+                                }
+                            }
+                            None => {
+                                d.extra.insert(key.into(), pt3(dir));
+                            }
+                        }
+                    }
+                    d
+                }
+                PatternKind::Circular { origin, axis, count, angle } => {
+                    let mut d = start("PatternCircular")?;
+                    d.kind = Kind::PatternCirc { count: count.clone(), angle: angle.clone() };
+                    match world_axis(*axis).filter(|_| origin.len() < 1e-9) {
+                        Some(name) => {
+                            if let Some(inp) = d.inputs.get_mut(1) {
+                                inp.items = vec![Sel::Axis { name }];
+                            }
+                        }
+                        None => {
+                            d.extra.insert("axis".into(), json!({"origin": pt3(*origin), "dir": pt3(*axis)}));
+                        }
+                    }
+                    d
+                }
+            };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = bodies;
+            }
+            d
+        }
+        FeatureKind::Loft { sections, operation, targets } => {
+            let mut d = start("SolidLoft")?;
+            d.kind = Kind::Loft { operation: op_index(operation) };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = sections
+                    .iter()
+                    .flat_map(|sec| {
+                        let idx = st.sketch(sec.sketch).map(|ss| profile_indices(ss, &sec.profiles)).unwrap_or_default();
+                        idx.into_iter().map(move |index| Sel::Profile { sketch: sec.sketch, index })
+                    })
+                    .collect();
+            }
+            if !targets.is_empty() {
+                d.extra.insert("targets".into(), json!(targets));
+            }
+            d
+        }
+        FeatureKind::Sweep { sketch, profiles, path, operation, targets, .. } => {
+            let mut d = start("Sweep")?;
+            d.kind = Kind::Sweep { operation: op_index(operation) };
+            let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
+            if let Some(inp) = d.inputs.get_mut(0) {
+                inp.items = items.into_iter().map(|index| Sel::Profile { sketch: *sketch, index }).collect();
+            }
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = path.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+            }
+            if !targets.is_empty() {
+                d.extra.insert("targets".into(), json!(targets));
+            }
+            d
+        }
+        FeatureKind::Move { bodies, translate, rotate_axis, angle } => {
+            let mut d = start("FusionMoveCommand")?;
+            let [x, y, z] = translate.clone();
+            d.kind = Kind::Move { x, y, z };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect();
+            }
+            if let Some(a) = rotate_axis {
+                d.extra.insert("axis".into(), pt3(*a));
+            }
+            if let Some(a) = angle {
+                d.extra.insert("angle".into(), json!(a));
             }
             d
         }
