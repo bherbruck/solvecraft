@@ -21,7 +21,8 @@ commands:
                   xtask/data/fusion-catalog.tsv from plan/fusion/menu-tree.json)
   oracle          replay plan/fusion/oracle/*/recipe.json and compare with measure.json;
                   writes docs/oracle.md
-  ci              fmt --check, clippy -D warnings, test, assets, layers (stops at first failure)
+  wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
+  ci              fmt --check, clippy -D warnings, test, assets, layers, wasm (stops at first failure)
 ";
 
 fn main() -> ExitCode {
@@ -33,6 +34,7 @@ fn main() -> ExitCode {
         Some("parity") => parity::run(&root(), rest.contains(&"--refresh")),
         Some("oracle") => cmd_oracle(),
         Some("ci") => cmd_ci(),
+        Some("wasm") => cmd_wasm(),
         Some("-h" | "--help" | "help") | None => {
             print!("{USAGE}");
             Ok(())
@@ -161,6 +163,23 @@ fn cmd_oracle() -> Result<(), String> {
     Ok(())
 }
 
+/// Never break wasm: every layered crate (everything below the apps) and the web app must
+/// build for the browser.
+fn cmd_wasm() -> Result<(), String> {
+    let crates = layers::from_metadata(&metadata()?)?;
+    let mut set: Vec<String> =
+        crates.iter().filter(|c| matches!(layers::classify(&c.name), Some(layers::Class::Layer(_)))).map(|c| c.name.clone()).collect();
+    set.push("solvecraft-web".into());
+    let mut c = cargo();
+    c.args(["check", "--target", "wasm32-unknown-unknown"]);
+    for p in &set {
+        c.args(["-p", p]);
+    }
+    run(c, &format!("cargo check --target wasm32-unknown-unknown ({} crates)", set.len()))?;
+    println!("wasm: {} crates build for wasm32-unknown-unknown", set.len());
+    Ok(())
+}
+
 fn cmd_ci() -> Result<(), String> {
     let mut c = cargo();
     c.args(["fmt", "--all", "--", "--check"]);
@@ -173,6 +192,7 @@ fn cmd_ci() -> Result<(), String> {
     run(c, "cargo test")?;
     assets::run(&root())?;
     cmd_layers()?;
+    cmd_wasm()?;
     eprintln!("ci: all gates passed");
     Ok(())
 }

@@ -115,8 +115,8 @@ fn fingerprint(prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_ba
     h.finish()
 }
 
-fn now() -> std::time::Instant {
-    std::time::Instant::now()
+fn now() -> web_time::Instant {
+    web_time::Instant::now()
 }
 
 impl Model {

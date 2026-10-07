@@ -45,10 +45,13 @@ cargo run --release -p solvecraft -- --sample          # desktop app with a samp
 cargo run --release -p solvecraft-cli -- commands      # the command registry
 cargo run --release -p solvecraft-cli -- run examples/bracket.json --out bracket.step
 cargo run --release -p solvecraft-cli -- snapshot examples/bracket.json --out bracket.png
-cargo xtask ci                                          # fmt, clippy, tests, assets, layers
+cargo xtask ci                                          # fmt, clippy, tests, assets, layers, wasm
 ```
 
 Windows builds: `cargo xwin build --release --target x86_64-pc-windows-msvc -p solvecraft`.
+
+In the browser: `cd apps/solvecraft-web && trunk build --release --public-url ./` (WebGPU, or
+WebGL2 with `?webgl`; `?sample` opens the sample part).
 
 ## Scripts
 

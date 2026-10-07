@@ -3084,6 +3084,7 @@ dependencies = [
  "solvecraft-kernel",
  "solvecraft-sketch",
  "thiserror 2.0.21",
+ "web-time",
 ]
 
 [[package]]
@@ -3173,6 +3174,21 @@ dependencies = [
  "serde",
  "serde_json",
  "solvecraft-engine",
+ "web-time",
+]
+
+[[package]]
+name = "solvecraft-web"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "log",
+ "solvecraft-engine",
+ "solvecraft-ui-egui",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
