@@ -1,0 +1,14 @@
+{"commands": [
+  {"command": "ChangeParameterCommand", "params": {"name": "width", "expression": "60 mm"}},
+  {"command": "ChangeParameterCommand", "params": {"name": "thickness", "expression": "6 mm"}},
+  {"command": "SketchCreate", "params": {"plane": "XZ", "name": "Profile"}},
+  {"command": "DrawPolyline", "params": {"points": [[0, 0], [40, 0], [40, 6], [6, 6], [6, 30], [0, 30]], "closed": true, "ids": ["a", "b", "c", "d", "e", "f"]}},
+  {"command": "SketchStop", "params": {}},
+  {"command": "Extrude", "params": {"distance": "width", "direction": "negative", "body_name": "Bracket"}},
+  {"command": "FusionFilletEdgesCommand", "params": {"edges": [[40, 30, 6]], "radius": 2}},
+  {"command": "SketchCreate", "params": {"plane": "XY", "name": "Holes"}},
+  {"command": "CircleCenterRadius", "params": {"center": [25, 15], "diameter": 8}},
+  {"command": "CircleCenterRadius", "params": {"center": [25, 45], "diameter": 8}},
+  {"command": "SketchStop", "params": {}},
+  {"command": "Extrude", "params": {"distance": "thickness", "operation": "cut"}}
+]}
