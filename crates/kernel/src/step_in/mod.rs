@@ -576,6 +576,38 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Check a STEP file's structure: it parses, no entity id is defined twice, every reference
+/// names a defined entity, and ids are dense (`#1`…`#n`). Returns the entity count.
+pub fn step_validate(text: &str) -> std::result::Result<usize, String> {
+    let ex = p21::parse(text)?;
+    if let Some(d) = ex.duplicates.first() {
+        return Err(format!("{} duplicate entity ids (first #{d})", ex.duplicates.len()));
+    }
+    fn refs(p: &Param, out: &mut Vec<u64>) {
+        match p {
+            Param::Ref(r) => out.push(*r),
+            Param::List(v) | Param::Typed(_, v) => v.iter().for_each(|x| refs(x, out)),
+            _ => {}
+        }
+    }
+    let mut ids: Vec<&u64> = ex.entities.keys().collect();
+    ids.sort();
+    for id in &ids {
+        let mut out = Vec::new();
+        if let Some(e) = ex.get(**id) {
+            e.records.iter().flat_map(|r| &r.params).for_each(|p| refs(p, &mut out));
+        }
+        if let Some(r) = out.iter().find(|r| ex.get(**r).is_none()) {
+            return Err(format!("#{id} refers to undefined #{r}"));
+        }
+    }
+    let n = ex.entities.len();
+    if ids.last().is_some_and(|m| **m != n as u64) || ids.first().is_some_and(|m| **m != 1) {
+        return Err(format!("entity ids are not dense: {n} entities, #{}…#{}", ids.first().map_or(0, |x| **x), ids.last().map_or(0, |x| **x)));
+    }
+    Ok(n)
+}
+
 /// Recent imports, so a file read for a command and then evaluated in the timeline is only
 /// read once.
 static RECENT: std::sync::Mutex<Vec<(u64, usize, std::sync::Arc<StepImport>)>> = std::sync::Mutex::new(Vec::new());

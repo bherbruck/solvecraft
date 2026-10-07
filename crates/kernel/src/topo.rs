@@ -239,6 +239,9 @@ pub fn seam_flags(b: &Body, mesh: &Mesh) -> Vec<bool> {
     let tol = (b.size() * 1e-4).max(1e-6);
     let surfs = classify_faces(mesh, nf, tol);
     let verts = face_vertices(mesh, nf);
+    // Faces cut from one surface (an imported face split where it wraps around a closed
+    // surface) carry the very same surface: the edge between them is a seam.
+    let surf_keys: Vec<String> = solid.face_iter().map(|f| format!("{:?}", f.surface())).collect();
     let mut faces_of: HashMap<String, Vec<usize>> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for (fi, f) in solid.face_iter().enumerate() {
@@ -258,7 +261,8 @@ pub fn seam_flags(b: &Body, mesh: &Mesh) -> Vec<bool> {
         .enumerate()
         .map(|(ei, k)| match faces_of.get(k).map(Vec::as_slice) {
             Some([a, b2]) => {
-                !matches!(surfs.get(*a), Some(Surf::Plane { .. })) && same_surface(&surfs, &verts, mesh.edges.get(ei), *a, *b2, tol * 10.0)
+                (!matches!(surfs.get(*a), Some(Surf::Plane { .. })) && same_surface(&surfs, &verts, mesh.edges.get(ei), *a, *b2, tol * 10.0))
+                    || (surf_keys.get(*a).is_some_and(|k| Some(k) == surf_keys.get(*b2)) && !matches!(surfs.get(*a), Some(Surf::Plane { .. })))
             }
             _ => false,
         })

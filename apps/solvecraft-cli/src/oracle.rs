@@ -44,7 +44,35 @@ fn check_case(dir: &str) -> Value {
     num("faces", got["total"]["faces"].as_f64(), want["total"]["faces"].as_f64(), 0.0);
     num("edges", got["total"]["edges"].as_f64(), want["total"]["edges"].as_f64(), 0.0);
     num("vertices", got["total"]["vertices"].as_f64(), want["total"]["vertices"].as_f64(), 0.0);
+    // Our STEP export of the rebuilt part: well formed, and read back with no warnings and the
+    // same volume.
+    let (ok, note) = step_export_check(&s, got["total"]["volume_mm3"].as_f64().unwrap_or(0.0));
+    pass &= ok;
+    checks.push(json!({"check": "step_export", "got": note, "want": "valid, re-imports cleanly", "ok": ok}));
     json!({"case": name, "pass": pass, "checks": checks})
+}
+
+/// Export the session's bodies as STEP, validate the file and import it again.
+fn step_export_check(s: &solvecraft_engine::Session, volume: f64) -> (bool, String) {
+    let st = s.model.state();
+    let bytes = match solvecraft_engine::io::export(&st, &[], solvecraft_engine::io::Format::Step, "oracle") {
+        Ok(b) => b,
+        Err(e) => return (false, format!("export: {e}")),
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    if let Err(e) = solvecraft_engine::kernel::step_validate(&text) {
+        return (false, format!("invalid: {e}"));
+    }
+    match solvecraft_engine::kernel::step_import(&text) {
+        Ok(imp) if !imp.warnings.is_empty() => (false, format!("warnings: {}", imp.warnings.join("; "))),
+        Ok(imp) if imp.bodies.len() != st.bodies.len() => (false, format!("{} bodies back of {}", imp.bodies.len(), st.bodies.len())),
+        Ok(imp) => {
+            let v: f64 = imp.bodies.iter().filter_map(|b| solvecraft_engine::kernel::measure(&b.body).ok()).map(|m| m.volume).sum();
+            let ok = (v - volume).abs() <= REL_TOL * volume.abs().max(1.0);
+            (ok, format!("re-imported volume {v:.3}"))
+        }
+        Err(e) => (false, format!("import: {e}")),
+    }
 }
 
 /// Import a case's `part.step` (as File → Open does) and compare with Fusion's measurements:

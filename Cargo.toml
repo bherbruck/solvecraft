@@ -81,3 +81,5 @@ debug = 0
 # truck-shapeops with SolveCraft fixes (Apache-2.0, see vendor/truck-shapeops and ATTRIBUTION.md).
 [patch.crates-io]
 truck-shapeops = { path = "vendor/truck-shapeops" }
+truck-stepio = { path = "vendor/truck-stepio" }
+truck-meshalgo = { path = "vendor/truck-meshalgo" }

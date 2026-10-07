@@ -209,7 +209,7 @@ impl Builder {
             .flat_map(|e| {
                 let c = e.curve();
                 let (t0, t1) = c.range_tuple();
-                (0..8).map(move |i| c.subs(t0 + (t1 - t0) * i as f64 / 8.0)).collect::<Vec<_>>()
+                (0..=8).map(move |i| c.subs(t0 + (t1 - t0) * i as f64 / 8.0)).collect::<Vec<_>>()
             })
             .collect();
         // Seam edges: used twice by the face's loops.
@@ -235,6 +235,27 @@ impl Builder {
             let sense = p.get(3).and_then(Param::as_bool).unwrap_or(true);
             guard("step surface", || geom::surface(cx, sid, &extent, &seam, sense, 0).map_err(crate::KernelError::Failed))
                 .map_err(|e| e.to_string())?
+        };
+        // Loops on a surface of revolution start away from the axis: a pole (cone apex, sphere
+        // pole) has no definite rotation parameter, and the mesher takes the first point's
+        // parameter as the anchor for the rest of the loop.
+        let wires: Vec<mt::Wire> = match &surface {
+            mt::Surface::RevolutedCurve(rc) => {
+                let (o, a) = (rc.entity().origin(), rc.entity().axis());
+                let dist = |e: &mt::Edge| {
+                    let v = e.front().point() - o;
+                    (v - a * v.dot(a)).magnitude()
+                };
+                wires
+                    .into_iter()
+                    .map(|w| {
+                        let edges: Vec<mt::Edge> = w.edge_iter().cloned().collect();
+                        let start = edges.iter().enumerate().max_by(|x, y| dist(x.1).total_cmp(&dist(y.1))).map(|(i, _)| i).unwrap_or(0);
+                        edges.iter().skip(start).chain(edges.iter().take(start)).cloned().collect::<Vec<_>>().into()
+                    })
+                    .collect()
+            }
+            _ => wires,
         };
         match mt::Face::try_new(wires.clone(), surface.clone()) {
             Ok(f) => Ok(f),

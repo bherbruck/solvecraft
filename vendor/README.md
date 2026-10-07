@@ -13,3 +13,26 @@ Changes:
   the nearest parameter when the exact search fails (intersection curves are approximations).
 - `lib.rs`: `tr!` reports where an operation gives up when `SHAPEOPS_TRACE` is set; compiler
   warnings no longer fail the build.
+
+## truck-stepio 0.3.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
+
+Only the writer (`out`) is used; SolveCraft reads STEP with its own reader.
+
+Changes:
+- `out/geometry.rs`: an `INTERSECTION_CURVE`'s second surface was written at the first
+  surface's entity index, so every boolean-made edge produced duplicate entity ids.
+- `out/geometry.rs`: surfaces of revolution carry the right `same_sense`: truck's revolution
+  has the same parameterisation and normal as ISO 10303-42 (the writer flipped it), and a
+  mirroring transform reverses the normal.
+- `lib.rs`: compiler warnings no longer fail the build. Example and test targets are dropped
+  (their sources are not vendored).
+
+## truck-meshalgo 0.4.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
+
+Changes:
+- `tessellation/triangulation.rs`: parameter searches that land outside a surface's bounded,
+  non-periodic domain are rejected (a hinted B-spline search can run off and extrapolate to
+  thousands of parameter units, and meshing that grid never finishes); the last-resort nearest
+  search is clamped into the domain.
+- `lib.rs`: compiler warnings no longer fail the build. Example, test and bench targets are
+  dropped (their sources are not vendored).

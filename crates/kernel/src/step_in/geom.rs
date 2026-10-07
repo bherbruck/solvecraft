@@ -611,6 +611,55 @@ fn tube_angle(f: &Frame, big: f64, p: mt::Point3) -> f64 {
     z.atan2(rho - big)
 }
 
+/// A straight profile of a surface of revolution, bounded by the face: boundary points are
+/// turned into the profile's meridian plane and projected onto the line, and the line stops at
+/// the axis (beyond it the surface would fold over itself).
+fn revolved_line(p: mt::Point3, d: mt::Vector3, o: mt::Point3, axis: mt::Vector3, extent: &[mt::Point3]) -> R<mt::Curve> {
+    let radial = |q: mt::Point3| {
+        let v = q - o;
+        v - axis * v.dot(axis)
+    };
+    // The meridian half-plane of the profile.
+    let e = {
+        let r = radial(p);
+        let r2 = radial(p + d);
+        let r = if r.magnitude() >= r2.magnitude() { r } else { r2 };
+        if r.magnitude() < 1e-12 {
+            return Err("profile line on the axis".into());
+        }
+        r / r.magnitude()
+    };
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for q in extent {
+        let v = q - o;
+        let h = v.dot(axis);
+        let r = radial(*q).magnitude();
+        let t = (o + axis * h + e * r - p).dot(d);
+        lo = lo.min(t);
+        hi = hi.max(t);
+    }
+    if !(lo.is_finite() && hi.is_finite()) {
+        return Err("surface of revolution without extent".into());
+    }
+    let m = (hi - lo) * 0.02 + 1e-6;
+    let (mut lo, mut hi) = (lo - m, hi + m);
+    // Where the line meets the axis (radial component along e vanishes).
+    let de = d.dot(e);
+    if de.abs() > 1e-12 {
+        let t_axis = -(p - o).dot(e) / de;
+        // The meridian half-plane has a non-negative radius along `e`.
+        if de > 0.0 {
+            lo = lo.max(t_axis);
+        } else {
+            hi = hi.min(t_axis);
+        }
+    }
+    if hi - lo <= 1e-12 {
+        return Err("degenerate surface of revolution".into());
+    }
+    Ok(mt::Curve::Line(mt::Line(p + d * lo, p + d * hi)))
+}
+
 fn revolved(curve: mt::Curve, o: mt::Point3, axis: mt::Vector3) -> mt::Surface {
     mt::Surface::RevolutedCurve(mt::Processor::new(mt::RevolutedCurve::by_revolution(curve, o, axis)))
 }
@@ -802,8 +851,12 @@ pub(crate) fn surface(cx: &Ctx, id: u64, extent: &[mt::Point3], seam: &[mt::Poin
         "SURFACE_OF_REVOLUTION" => {
             let g = curve(cx, p.get(1).and_then(Param::as_ref_id).ok_or("revolution without profile")?, depth + 1)?;
             let (o, axis) = axis1(cx, p.get(2).and_then(Param::as_ref_id).ok_or("revolution without axis")?)?;
+            let profile = match &g {
+                CurveGeo::Line { p, d } => revolved_line(*p, *d, o, axis, extent)?,
+                _ => bounded_curve(&g, extent)?,
+            };
             // Reversed sense: turn the other way round the axis.
-            Ok(revolved(bounded_curve(&g, extent)?, o, axis * sign))
+            Ok(revolved(profile, o, axis * sign))
         }
         "SURFACE_OF_LINEAR_EXTRUSION" => {
             let g = curve(cx, p.get(1).and_then(Param::as_ref_id).ok_or("extrusion without profile")?, depth + 1)?;
