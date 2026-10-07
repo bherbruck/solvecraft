@@ -630,7 +630,9 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert!(crate::mesh_body(&pos, &[[0, 1, 99]]).is_err());
     assert!(crate::mesh_body(&[Vec3::new(f64::NAN, 0.0, 0.0)], &[[0, 0, 0]]).is_err());
     assert!(crate::mesh_body(&pos, &[[0, 0, 1]]).is_err());
+}
 
+#[test]
 fn concave_fillet() {
     // An L made of a base and a wall (one solid), fillet the inside corner.
     let base = box_solid(Vec3::ZERO, Vec3::new(80.0, 50.0, 8.0)).unwrap();
