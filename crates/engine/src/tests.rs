@@ -282,6 +282,9 @@ fn hostile_params_never_panic() {
         "apex",
         "rho",
         "text",
+        "lines",
+        "driven",
+        "from",
     ];
     let mut internal = Vec::new();
     for spec in command_specs() {

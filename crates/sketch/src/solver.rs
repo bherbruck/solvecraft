@@ -157,6 +157,43 @@ impl State<'_> {
             _ => Vec::new(),
         }
     }
+    fn ends(&self, c: usize) -> Option<(usize, usize)> {
+        self.sk.curves.get(c)?.kind.ends()
+    }
+    /// Length along an arc (counter-clockwise from its start).
+    fn arc_length(&self, c: usize) -> f64 {
+        match self.sk.curves.get(c).map(|c| &c.kind) {
+            Some(CurveKind::Arc { c: ci, a, b }) => {
+                let (cc, pa, pb) = (self.p(*ci), self.p(*a), self.p(*b));
+                let mut sw = (pb - cc).angle() - (pa - cc).angle();
+                while sw <= 1e-12 {
+                    sw += std::f64::consts::TAU;
+                }
+                cc.dist(pa) * sw
+            }
+            _ => 0.0,
+        }
+    }
+    /// Curvature vector of a curve at its point `p` (towards the centre of curvature).
+    fn curvature_at(&self, c: usize, p: usize) -> Vec2 {
+        let Some(kind) = self.sk.curves.get(c).map(|c| &c.kind) else { return Vec2::ZERO };
+        match kind {
+            CurveKind::Line { .. } | CurveKind::Ellipse { .. } => Vec2::ZERO,
+            CurveKind::Circle { .. } | CurveKind::Arc { .. } => {
+                let (cc, r) = self.round(c);
+                (cc - self.p(p)) / (r * r).max(1e-24)
+            }
+            CurveKind::Spline { pts, control, degree } => {
+                let q: Vec<Vec2> = pts.iter().map(|i| self.p(*i)).collect();
+                let at_end = pts.last() == Some(&p) && pts.first() != Some(&p);
+                crate::curves::end_curvature(&|t| crate::curves::spline_point(&q, *control, *degree, t), at_end)
+            }
+            CurveKind::Conic { a, b, apex, rho } => {
+                let (pa, pb, px) = (self.p(*a), self.p(*b), self.p(*apex));
+                crate::curves::end_curvature(&|t| crate::curves::conic_point(pa, px, pb, *rho, t), p == *b)
+            }
+        }
+    }
     /// Unit tangent of any curve at its point `p` (an end point for open free-form curves).
     fn tangent_at(&self, c: usize, p: usize) -> Option<Vec2> {
         match self.sk.curves.get(c).map(|c| &c.kind)? {
@@ -214,7 +251,7 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         PointOnCurve { p, c } => {
             let pp = s.p(p);
             if s.is_freeform(c) {
-                out.push(crate::curves::polyline_dist(&s.poly(c), pp));
+                out.push(crate::curves::polyline_signed_dist(&s.poly(c), pp));
             } else if s.is_line(c) {
                 let (a, b) = s.line(c);
                 out.push(line_dist(pp, a, b));
@@ -253,15 +290,17 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
                 // Without a shared end point: the curves touch (closest approach zero).
                 let (f, o) = if s.is_freeform(a) { (a, b) } else { (b, a) };
                 let poly = s.poly(f);
+                // Signed gap at the closest approach (smooth through zero, unlike its size).
+                let closest = |v: &mut dyn Iterator<Item = f64>| v.fold(f64::INFINITY, |m: f64, x| if x.abs() < m.abs() { x } else { m });
                 let d = if s.is_line(o) {
                     let (p0, p1) = s.line(o);
-                    poly.iter().map(|q| line_dist(*q, p0, p1).abs()).fold(f64::INFINITY, f64::min)
+                    closest(&mut poly.iter().map(|q| line_dist(*q, p0, p1)))
                 } else if s.is_freeform(o) {
                     let other = s.poly(o);
-                    poly.iter().map(|q| crate::curves::polyline_dist(&other, *q)).fold(f64::INFINITY, f64::min)
+                    closest(&mut poly.iter().map(|q| crate::curves::polyline_signed_dist(&other, *q)))
                 } else {
                     let (cc, r) = s.round(o);
-                    poly.iter().map(|q| (q.dist(cc) - r).abs()).fold(f64::INFINITY, f64::min)
+                    closest(&mut poly.iter().map(|q| q.dist(cc) - r))
                 };
                 out.push(if d.is_finite() { d } else { 0.0 });
             } else if la || lb {
@@ -327,7 +366,61 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             let target = if flip { value + std::f64::consts::PI } else { value };
             out.push(wrap_angle(ang - target) * scale.max(1e-6));
         }
+        Smooth { a, b } => {
+            let shared = match (s.ends(a), s.ends(b)) {
+                (Some((a0, a1)), Some((b0, b1))) => [a0, a1].into_iter().find(|x| *x == b0 || *x == b1),
+                _ => None,
+            };
+            let Some(p) = shared else {
+                out.extend([0.0, 0.0, 0.0]);
+                return;
+            };
+            match (s.tangent_at(a, p), s.tangent_at(b, p)) {
+                (Some(u), Some(v)) => out.push(u.cross(v) * 10.0),
+                _ => out.push(0.0),
+            }
+            let k = s.curvature_at(a, p) - s.curvature_at(b, p);
+            out.extend([k.x * 100.0, k.y * 100.0]);
+        }
+        ArcLength { c, value } => out.push(s.arc_length(c) - value),
+        LinearDiameter { p, l, value } => {
+            let (a, b) = s.line(l);
+            out.push(2.0 * line_dist(s.p(p), a, b).abs() - value);
+        }
     }
+}
+
+/// Measured value of a dimension (for driven dimensions).
+fn measure(s: &State, k: &ConstraintKind) -> Option<f64> {
+    use ConstraintKind::*;
+    Some(match *k {
+        Distance { p, q, .. } => s.p(p).dist(s.p(q)),
+        DistanceX { p, q, .. } => (s.p(q).x - s.p(p).x).abs(),
+        DistanceY { p, q, .. } => (s.p(q).y - s.p(p).y).abs(),
+        PointLineDistance { p, l, .. } => {
+            let (a, b) = s.line(l);
+            line_dist(s.p(p), a, b).abs()
+        }
+        Length { l, .. } => {
+            let (a, b) = s.line(l);
+            a.dist(b)
+        }
+        Radius { c, .. } => s.round(c).1,
+        Diameter { c, .. } => 2.0 * s.round(c).1,
+        Angle { a, b, flip, .. } => {
+            let (a0, a1) = s.line(a);
+            let (b0, b1) = s.line(b);
+            let (da, db) = (a1 - a0, b1 - b0);
+            let ang = da.cross(db).atan2(da.dot(db)) - if flip { std::f64::consts::PI } else { 0.0 };
+            ang.rem_euclid(std::f64::consts::TAU)
+        }
+        ArcLength { c, .. } => s.arc_length(c),
+        LinearDiameter { p, l, .. } => {
+            let (a, b) = s.line(l);
+            2.0 * line_dist(s.p(p), a, b).abs()
+        }
+        _ => return None,
+    })
 }
 
 /// One residual block: implicit arc radius equality, a user constraint, or a tangency at a known
@@ -445,6 +538,15 @@ fn block_vars(sk: &Sketch, lay: &Layout, b: &Block) -> Vec<usize> {
                 curve(&mut v, l);
             }
             Fix { .. } => {}
+            Smooth { a, b } => {
+                curve(&mut v, a);
+                curve(&mut v, b);
+            }
+            ArcLength { c, .. } => curve(&mut v, c),
+            LinearDiameter { p, l, .. } => {
+                pt(&mut v, p);
+                curve(&mut v, l);
+            }
         },
         Block::TangentAt(_, k, p) => {
             pt(&mut v, *p);
@@ -553,11 +655,13 @@ fn lm(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], vars: &[usize],
             }
         }
         let mut improved = false;
+        // Damping floor: variables the residuals barely see must not take huge steps.
+        let floor = (0..n).map(|i| a.get(i, i)).fold(0.0_f64, f64::max) * 1e-4;
         for _ in 0..30 {
             let mut m = a.clone();
             for i in 0..n {
                 let d = a.get(i, i);
-                m.add(i, i, lambda * (d + 1e-9) + 1e-12);
+                m.add(i, i, lambda * (d.max(floor) + 1e-9) + 1e-12);
             }
             let rhs: Vec<f64> = g.iter().map(|v| -v).collect();
             let Some(step) = lin_solve(m, rhs) else {
@@ -625,6 +729,9 @@ pub fn solve(sk: &mut Sketch) -> SolveReport {
         }
     }
     for (i, c) in sk.constraints.iter().enumerate() {
+        if c.driven {
+            continue;
+        }
         let bl = match touch_point(sk, &c.kind) {
             Some(p) => Block::TangentAt(i, &c.kind, p),
             None => Block::User(i, &c.kind),
@@ -725,6 +832,17 @@ pub fn solve(sk: &mut Sketch) -> SolveReport {
         Some(v) => vdet(Some(v)) && vdet(Some(v + 1)),
         None => true,
     };
+    // Driven dimensions measure the solved geometry.
+    let fixed_lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0 };
+    let measured: Vec<Option<f64>> =
+        sk.constraints.iter().map(|c| if c.driven { measure(&State { sk, lay: &fixed_lay, x: &[] }, &c.kind) } else { None }).collect();
+    for (c, m) in sk.constraints.iter_mut().zip(measured) {
+        if let Some(v) = m
+            && v.is_finite()
+        {
+            c.kind.set_value(v);
+        }
+    }
     let point_determined: Vec<bool> = (0..sk.points.len()).map(pdet).collect();
     let curve_determined =
         sk.curves.iter().enumerate().map(|(i, c)| c.kind.point_ids().into_iter().all(pdet) && vdet(lay.rvar.get(i).copied().flatten())).collect();

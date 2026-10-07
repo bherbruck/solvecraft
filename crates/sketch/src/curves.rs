@@ -94,38 +94,73 @@ fn hermite(p0: Vec2, p1: Vec2, t0: Vec2, t1: Vec2, s: f64) -> Vec2 {
     p0 * (2.0 * s3 - 3.0 * s2 + 1.0) + t0 * (s3 - 2.0 * s2 + s) + p1 * (-2.0 * s3 + 3.0 * s2) + t1 * (s3 - s2)
 }
 
-/// Clamped uniform B-spline of `degree` over control points `p`, sampled.
-fn bspline_polyline(p: &[Vec2], degree: usize) -> Vec<Vec2> {
+/// Clamped uniform B-spline of `degree` over control points `p` at `t` in [0, 1] (de Boor).
+fn bspline_at(p: &[Vec2], degree: usize, t: f64) -> Vec2 {
     let n = p.len();
     let k = degree.min(n.saturating_sub(1)).max(1);
-    // Knots: k+1 zeros, uniform interior, k+1 ones.
     let spans = n - k;
     let mut knots = vec![0.0; k + 1];
     for i in 1..spans {
         knots.push(i as f64 / spans as f64);
     }
     knots.extend(std::iter::repeat_n(1.0, k + 1));
-    let total = SPAN_SAMPLES * spans;
-    (0..=total)
-        .map(|i| {
-            let t = i as f64 / total as f64;
-            // De Boor.
-            let mut s = k;
-            while s + 1 < n && knots.get(s + 1).is_some_and(|x| *x <= t) {
-                s += 1;
-            }
-            let mut d: Vec<Vec2> = (0..=k).map(|j| p.get(j + s - k).copied().unwrap_or_default()).collect();
-            for r in 1..=k {
-                for j in (r..=k).rev() {
-                    let i0 = j + s - k;
-                    let (lo, hi) = (knots.get(i0).copied().unwrap_or(0.0), knots.get(i0 + k + 1 - r).copied().unwrap_or(1.0));
-                    let a = if hi - lo > 1e-15 { (t - lo) / (hi - lo) } else { 0.0 };
-                    d[j] = d[j - 1] * (1.0 - a) + d[j] * a;
-                }
-            }
-            d[k]
-        })
-        .collect()
+    let mut s = k;
+    while s + 1 < n && knots.get(s + 1).is_some_and(|x| *x <= t) {
+        s += 1;
+    }
+    let mut d: Vec<Vec2> = (0..=k).map(|j| p.get(j + s - k).copied().unwrap_or_default()).collect();
+    for r in 1..=k {
+        for j in (r..=k).rev() {
+            let i0 = j + s - k;
+            let (lo, hi) = (knots.get(i0).copied().unwrap_or(0.0), knots.get(i0 + k + 1 - r).copied().unwrap_or(1.0));
+            let a = if hi - lo > 1e-15 { (t - lo) / (hi - lo) } else { 0.0 };
+            d[j] = d[j - 1] * (1.0 - a) + d[j] * a;
+        }
+    }
+    d[k]
+}
+
+/// Clamped uniform B-spline of `degree` over control points `p`, sampled.
+fn bspline_polyline(p: &[Vec2], degree: usize) -> Vec<Vec2> {
+    let n = p.len();
+    let k = degree.min(n.saturating_sub(1)).max(1);
+    let total = SPAN_SAMPLES * (n - k);
+    (0..=total).map(|i| bspline_at(p, degree, i as f64 / total as f64)).collect()
+}
+
+/// Point of a spline at global parameter `t` in [0, 1].
+pub fn spline_point(p: &[Vec2], control: bool, degree: u8, t: f64) -> Vec2 {
+    let t = t.clamp(0.0, 1.0);
+    if p.len() < 2 {
+        return p.first().copied().unwrap_or_default();
+    }
+    if control {
+        return bspline_at(p, degree.clamp(1, 7) as usize, t);
+    }
+    let spans = fit_spans(p);
+    let n = spans.len().max(1);
+    let x = t * n as f64;
+    let i = (x.floor() as usize).min(n - 1);
+    match spans.get(i) {
+        Some((p0, p1, t0, t1)) => hermite(*p0, *p1, *t0, *t1, x - i as f64),
+        None => p[0],
+    }
+}
+
+/// Curvature vector (towards the centre of curvature, magnitude 1/radius) of a parametric
+/// curve at an end (`at_end`), by one-sided second-order differences.
+pub fn end_curvature(f: &dyn Fn(f64) -> Vec2, at_end: bool) -> Vec2 {
+    let h = 1e-3;
+    let (t0, sgn) = if at_end { (1.0, -1.0) } else { (0.0, 1.0) };
+    let (f0, f1, f2, f3) = (f(t0), f(t0 + sgn * h), f(t0 + sgn * 2.0 * h), f(t0 + sgn * 3.0 * h));
+    let d1 = (f0 * -3.0 + f1 * 4.0 - f2) / (2.0 * h) * sgn;
+    let d2 = (f0 * 2.0 - f1 * 5.0 + f2 * 4.0 - f3) / (h * h);
+    let l2 = d1.len2();
+    if l2 < 1e-24 {
+        return Vec2::ZERO;
+    }
+    let t = d1 / l2.sqrt();
+    (d2 - t * t.dot(d2)) / l2
 }
 
 /// Polyline of a spline through (`control == false`) or over (`control`) the points.
@@ -161,20 +196,20 @@ pub fn spline_end_tangent(p: &[Vec2], control: bool, at_end: bool) -> Option<Vec
     if at_end { spans.last().and_then(|s| s.3.normalized()) } else { spans.first().and_then(|s| s.2.normalized()) }
 }
 
-/// Distance from `q` to a polyline.
-pub fn polyline_dist(poly: &[Vec2], q: Vec2) -> f64 {
-    let mut best = f64::INFINITY;
+/// Signed distance from `q` to a polyline (positive on the left of the nearest segment).
+pub fn polyline_signed_dist(poly: &[Vec2], q: Vec2) -> f64 {
+    let mut best = (f64::INFINITY, 1.0);
     for w in poly.windows(2) {
         let (a, b) = (w[0], w[1]);
         let d = b - a;
         let l2 = d.len2();
         let t = if l2 > 0.0 { ((q - a).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
-        best = best.min(q.dist(a + d * t));
+        let dist = q.dist(a + d * t);
+        if dist < best.0 {
+            best = (dist, if d.cross(q - a) >= 0.0 { 1.0 } else { -1.0 });
+        }
     }
-    if poly.len() == 1 {
-        best = poly[0].dist(q);
-    }
-    best
+    best.0 * best.1
 }
 
 #[cfg(test)]
@@ -193,6 +228,20 @@ mod tests {
         assert!(spline_polyline(&line, false, 3).iter().all(|q| (q.x - q.y).abs() < 1e-9));
         let t = spline_end_tangent(&line, false, false).unwrap();
         assert!((t.x - t.y).abs() < 1e-9);
+    }
+
+    #[test]
+    fn end_curvature_of_a_circle_quarter() {
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let rho = w / (1.0 + w);
+        let (a, x, b) = (Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0));
+        let k = end_curvature(&|t| conic_point(a, x, b, rho, t), false);
+        assert!(k.dist(Vec2::new(-0.1, 0.0)) < 1e-5, "{k:?}");
+        let k1 = end_curvature(&|t| conic_point(a, x, b, rho, t), true);
+        assert!(k1.dist(Vec2::new(0.0, -0.1)) < 1e-5, "{k1:?}");
+        // Fit splines have natural (straight) ends.
+        let p = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 5.0), Vec2::new(20.0, 0.0)];
+        assert!(end_curvature(&|t| spline_point(&p, false, 3, t), false).len() < 1e-3);
     }
 
     #[test]

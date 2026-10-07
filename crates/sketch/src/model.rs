@@ -248,6 +248,23 @@ pub enum ConstraintKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
     },
+    /// Curvature continuity (G2) where curves `a` and `b` share an end point: tangent and
+    /// equal curvature.
+    Smooth {
+        a: usize,
+        b: usize,
+    },
+    /// Length along an arc.
+    ArcLength {
+        c: usize,
+        value: f64,
+    },
+    /// Twice the distance from point `p` to line `l` (a diameter about a centerline).
+    LinearDiameter {
+        p: usize,
+        l: usize,
+        value: f64,
+    },
 }
 
 impl ConstraintKind {
@@ -264,6 +281,8 @@ impl ConstraintKind {
             | Length { value, .. }
             | Radius { value, .. }
             | Diameter { value, .. }
+            | ArcLength { value, .. }
+            | LinearDiameter { value, .. }
             | Angle { value, .. } => Some(value),
             _ => None,
         }
@@ -278,6 +297,8 @@ impl ConstraintKind {
             | Length { value, .. }
             | Radius { value, .. }
             | Diameter { value, .. }
+            | ArcLength { value, .. }
+            | LinearDiameter { value, .. }
             | Angle { value, .. } => *value = v,
             _ => {}
         }
@@ -305,6 +326,9 @@ impl ConstraintKind {
             Radius { .. } => "RadialDimension",
             Diameter { .. } => "DiameterDimension",
             Angle { .. } => "AngularDimension",
+            Smooth { .. } => "Smooth",
+            ArcLength { .. } => "ArcLengthDimension",
+            LinearDiameter { .. } => "LinearDiameterDimension",
         }
     }
     fn indices(&self) -> (Vec<usize>, Vec<usize>) {
@@ -322,6 +346,9 @@ impl ConstraintKind {
             Midpoint { p, l } | PointLineDistance { p, l, .. } => (vec![p], vec![l]),
             Symmetric { p, q, l } => (vec![p, q], vec![l]),
             Fix { p } => (vec![p], vec![]),
+            Smooth { a, b } => (vec![], vec![a, b]),
+            ArcLength { c, .. } => (vec![], vec![c]),
+            LinearDiameter { p, l, .. } => (vec![p], vec![l]),
         }
     }
     fn remap(&mut self, pmap: &dyn Fn(usize) -> Option<usize>, cmap: &dyn Fn(usize) -> Option<usize>) -> bool {
@@ -369,6 +396,15 @@ impl ConstraintKind {
                 fc(l);
             }
             Fix { p } => fp(p),
+            Smooth { a, b } => {
+                fc(a);
+                fc(b);
+            }
+            ArcLength { c, .. } => fc(c),
+            LinearDiameter { p, l, .. } => {
+                fp(p);
+                fc(l);
+            }
         }
         ok && ok2
     }
@@ -382,6 +418,9 @@ pub struct Constraint {
     /// For dimensions: the model parameter that drives the value (e.g. `d1`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub param: Option<String>,
+    /// A driven (reference) dimension: it measures, it does not constrain.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub driven: bool,
 }
 
 /// A 2D sketch. Point 0 is always the fixed sketch origin (id `origin`).
@@ -553,7 +592,7 @@ impl Sketch {
         }
         self.validate(&kind)?;
         let id = self.fresh("k");
-        self.constraints.push(Constraint { id: id.clone(), kind, param });
+        self.constraints.push(Constraint { id: id.clone(), kind, param, driven: false });
         Ok(id)
     }
 
@@ -577,8 +616,27 @@ impl Sketch {
         let need_line = |i: usize| if is_line(i) { Ok(()) } else { Err(SketchError::WrongKind(name(i), "needs a line".into())) };
         let need_round = |i: usize| if is_round(i) { Ok(()) } else { Err(SketchError::WrongKind(name(i), "needs a circle or arc".into())) };
         match *k {
-            Horizontal { l } | Vertical { l } | Length { l, .. } | Midpoint { l, .. } | Symmetric { l, .. } | PointLineDistance { l, .. } => {
-                need_line(l)?
+            Horizontal { l }
+            | Vertical { l }
+            | Length { l, .. }
+            | Midpoint { l, .. }
+            | Symmetric { l, .. }
+            | PointLineDistance { l, .. }
+            | LinearDiameter { l, .. } => need_line(l)?,
+            ArcLength { c, .. } => {
+                if !matches!(self.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. })) {
+                    return Err(SketchError::WrongKind(name(c), "arc length needs an arc".into()));
+                }
+            }
+            Smooth { a, b } => {
+                let ends = |i: usize| self.curves.get(i).and_then(|c| c.kind.ends());
+                let shared = match (ends(a), ends(b)) {
+                    (Some((a0, a1)), Some((b0, b1))) => a0 == b0 || a0 == b1 || a1 == b0 || a1 == b1,
+                    _ => false,
+                };
+                if !shared || a == b {
+                    return Err(SketchError::Invalid("curvature continuity needs two curves sharing an end point".into()));
+                }
             }
             Parallel { a, b } | Perpendicular { a, b } | Collinear { a, b } | Angle { a, b, .. } => {
                 need_line(a)?;

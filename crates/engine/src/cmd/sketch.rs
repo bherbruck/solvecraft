@@ -786,11 +786,31 @@ fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
 // Constraints
 
 fn constrain(s: &mut Session, p: &Value, cmd: &str, f: impl FnOnce(&Sketch) -> Result<ConstraintKind>) -> Result<Value> {
+    let mut before = None;
     let (id, info) = edit(s, p, cmd, true, |sk, _| {
         let k = f(sk)?;
+        before = Some(dof_now(sk));
         add_c(sk, k)
     })?;
+    reject_redundant(before, &info, cmd)?;
     Ok(json!({"constraint": id, "sketch": info}))
+}
+
+/// Degrees of freedom of a sketch as it is.
+pub(super) fn dof_now(sk: &Sketch) -> usize {
+    solve(&mut sk.clone()).dof
+}
+
+/// A constraint that removes no degree of freedom over-constrains the sketch (Fusion refuses
+/// it); the caller's edit is rolled back by returning the error.
+pub(super) fn reject_redundant(before: Option<usize>, info: &Value, cmd: &str) -> Result<()> {
+    let after = info.get("dof").and_then(Value::as_u64).map(|d| d as usize);
+    if let (Some(b), Some(a)) = (before, after)
+        && a >= b
+    {
+        return Err(bad(cmd, "that would over-constrain the sketch (it is already determined by other constraints)"));
+    }
+    Ok(())
 }
 
 fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
@@ -962,7 +982,10 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let value = expr(p, "value");
     let text_at = p.get("text_at").and_then(vec2);
+    let driven = bool_(p, "driven").unwrap_or(false);
+    let mut before = None;
     let ((param, kind_name, current), info) = edit(s, p, cmd, true, |sk, doc| {
+        before = Some(dof_now(sk));
         let ent = |r: &str| -> Result<(Option<usize>, Option<usize>)> {
             if let Some(c) = sk.curve_index(r) {
                 return Ok((None, Some(c)));
@@ -992,8 +1015,12 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                     _ => (ConstraintKind::Length { l: c, value: a.dist(b) }, a.dist(b)),
                 }
             }
+            ((None, Some(c)), None) if ty == "arc_length" || ty == "arclength" => {
+                let len = arc_len(sk, c).ok_or_else(|| bad(cmd, "arc length needs an arc"))?;
+                (ConstraintKind::ArcLength { c, value: len }, len)
+            }
             ((None, Some(c)), None) => {
-                let r = sk.radius(c).unwrap_or(1.0);
+                let r = sk.radius(c).ok_or_else(|| bad(cmd, "cannot dimension that curve"))?;
                 let diameter = ty == "diameter" || (ty != "radius" && is_circle(c));
                 if diameter { (ConstraintKind::Diameter { c, value: 2.0 * r }, 2.0 * r) } else { (ConstraintKind::Radius { c, value: r }, r) }
             }
@@ -1009,17 +1036,27 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 let (a, b) = line_pts(sk, l).unwrap_or_default();
                 let pq = sk.point(q).unwrap_or_default();
                 let d = (b - a).normalized().map(|d| d.cross(pq - a).abs()).unwrap_or(0.0);
-                (ConstraintKind::PointLineDistance { p: q, l, value: d }, d)
+                if diameter_about(sk, l, &ty) {
+                    (ConstraintKind::LinearDiameter { p: q, l, value: 2.0 * d }, 2.0 * d)
+                } else {
+                    (ConstraintKind::PointLineDistance { p: q, l, value: d }, d)
+                }
             }
             ((None, Some(a)), Some((None, Some(b)))) if is_line(a) && is_line(b) => {
                 let (a0, a1) = line_pts(sk, a).unwrap_or_default();
                 let (b0, b1) = line_pts(sk, b).unwrap_or_default();
                 let (da, db) = (a1 - a0, b1 - b0);
                 if da.cross(db).abs() < 1e-9 * da.len() * db.len() && ty != "angle" {
-                    // Parallel lines: distance between them.
+                    // Parallel lines: distance between them (a diameter about a centerline).
+                    let (a, b, b0) = if sk.curves.get(a).is_some_and(|c| c.centerline) { (a, b, b0) } else { (b, a, a0) };
                     let (bq, _) = line_ends(sk, b);
-                    let d = da.normalized().map(|d| d.cross(b0 - a0).abs()).unwrap_or(0.0);
-                    (ConstraintKind::PointLineDistance { p: bq, l: a, value: d }, d)
+                    let (a0, a1) = line_pts(sk, a).unwrap_or_default();
+                    let d = (a1 - a0).normalized().map(|d| d.cross(b0 - a0).abs()).unwrap_or(0.0);
+                    if diameter_about(sk, a, &ty) {
+                        (ConstraintKind::LinearDiameter { p: bq, l: a, value: 2.0 * d }, 2.0 * d)
+                    } else {
+                        (ConstraintKind::PointLineDistance { p: bq, l: a, value: d }, d)
+                    }
                 } else {
                     match text_at {
                         Some(t) => angle_by_sector(a, b, (a0, a1), (b0, b1), t).ok_or_else(|| bad(cmd, "cannot place that angle"))?,
@@ -1038,6 +1075,16 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(bad(cmd, "cannot dimension that combination of entities")),
         };
         let is_angle = k.is_angle();
+        if driven {
+            // A reference dimension: measures, no parameter.
+            let name = k.name();
+            let id = sk.add_constraint(k, None)?;
+            if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == id) {
+                c.driven = true;
+            }
+            before = None;
+            return Ok((String::new(), name, cur));
+        }
         let (unit, default_expr) =
             if is_angle { ("deg", format!("{} deg", round6(cur.to_degrees()))) } else { ("mm", format!("{} mm", round6(cur))) };
         let e = value.clone().unwrap_or(default_expr);
@@ -1052,8 +1099,27 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         sk.add_constraint(k, Some(pname.clone()))?;
         Ok((pname, name, cur))
     })?;
+    if driven {
+        return Ok(json!({"param": Value::Null, "driven": true, "type": kind_name, "measured": current, "sketch": info}));
+    }
+    if reject_redundant(before, &info, cmd).is_err() {
+        return Err(bad(cmd, "that dimension would over-constrain the sketch; add it as a driven (reference) dimension with driven: true"));
+    }
     let v = s.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
     Ok(json!({"param": param, "type": kind_name, "expression": v, "measured": current, "sketch": info}))
+}
+
+/// Dimension a point (or a parallel line) to line `l` as a diameter: when `l` is a centerline
+/// (unless a plain distance was asked for) or when a diameter was asked for.
+fn diameter_about(sk: &Sketch, l: usize, ty: &str) -> bool {
+    ty == "diameter" || (ty == "auto" && sk.curves.get(l).is_some_and(|c| c.centerline))
+}
+
+fn arc_len(sk: &Sketch, c: usize) -> Option<f64> {
+    match sk.segs(c).first()? {
+        solvecraft_geom::Seg2::Arc { radius, sweep, .. } if matches!(sk.curves.get(c)?.kind, CurveKind::Arc { .. }) => Some(radius * sweep),
+        _ => None,
+    }
 }
 
 /// The angle dimension between two lines whose sector contains `t` (the text position): returns
