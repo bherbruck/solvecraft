@@ -142,6 +142,7 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
         "constraints": constraints,
         "profiles": profiles,
         "links": sk.links,
+        "wires": sk.wires.iter().map(|w| json!({"id": w.id, "points": w.pts.len(), "start": w.pts.first(), "end": w.pts.last(), "link": w.link})).collect::<Vec<_>>(),
     }))
 }
 

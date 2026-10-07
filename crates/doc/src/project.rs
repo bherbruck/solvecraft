@@ -24,6 +24,8 @@ const MAX_CHAIN: usize = 4000;
 #[derive(Clone, Debug)]
 pub struct Resolved {
     pub geom: Vec<LinkGeom>,
+    /// 3D curves (world coordinates).
+    pub wires: Vec<Vec<Vec3>>,
     pub source: LinkSource,
     /// The reference was not exactly where it was and was re-found on the nearest geometry.
     pub moved: bool,
@@ -34,6 +36,12 @@ pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, 
     let lost = |what: &str| DocError::Invalid(format!("{what} no longer exists"));
     let mut moved = false;
     let mut source = src.clone();
+    let mut wires: Vec<Vec<Vec3>> = Vec::new();
+    // Included curves that leave the sketch plane stay 3D.
+    let off_plane = |pts: &[Vec3]| {
+        let size = pts.iter().fold(1.0_f64, |m, p| m.max(p.len()));
+        pts.iter().any(|p| plane.height(*p).abs() > size * 1e-7)
+    };
     let geom = match src {
         LinkSource::Edge { body, at } => {
             let (bi, mesh) = body_mesh(st, body, *at)?;
@@ -48,6 +56,10 @@ pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, 
             let pts = mesh.edges.get(e).cloned().unwrap_or_default();
             match kind {
                 LinkKind::Intersect => section_of_polyline(plane, &pts),
+                LinkKind::Include if off_plane(&pts) => {
+                    wires.push(pts);
+                    Vec::new()
+                }
                 _ => fit_world(plane, &pts),
             }
         }
@@ -112,8 +124,57 @@ pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, 
                     let pts: Vec<Vec3> = ss.sketch.segs(ci).iter().flat_map(|s| s.polyline(1e-3)).map(|p| ss.plane.to_world(p)).collect();
                     section_of_polyline(plane, &pts)
                 }
+                LinkKind::Include => {
+                    let pts: Vec<Vec3> = ss.sketch.polyline(ci).iter().map(|p| ss.plane.to_world(*p)).collect();
+                    if off_plane(&pts) {
+                        wires.push(pts);
+                        Vec::new()
+                    } else {
+                        project_sketch_curve(&ss.sketch, &ss.plane, ci, plane)
+                    }
+                }
                 _ => project_sketch_curve(&ss.sketch, &ss.plane, ci, plane),
             }
+        }
+        LinkSource::OnSurface { sketch, curve, body, at } => {
+            let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;
+            let ci = ss.sketch.curve_index(curve).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
+            let pts: Vec<Vec3> = ss.sketch.polyline(ci).iter().map(|p| ss.plane.to_world(*p)).collect();
+            let (bi, mesh) = body_mesh(st, body, *at)?;
+            let (f, q, d) = nearest_face(&mesh, *at).ok_or_else(|| lost("the face"))?;
+            let size = mesh.bounds().diagonal().max(1e-9);
+            if d > size * 0.25 {
+                return Err(lost("the face"));
+            }
+            let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
+            source = LinkSource::OnSurface { sketch: *sketch, curve: curve.clone(), body: name, at: q };
+            wires = crate::project3d::onto_face(&mesh, f, &pts, plane.normal());
+            Vec::new()
+        }
+        LinkSource::Intersection { a, b } => {
+            let (ma, fa) = crate::project3d::mesh_of(st, a).ok_or_else(|| lost(&a.describe()))?;
+            let (mb, fb) = crate::project3d::mesh_of(st, b).ok_or_else(|| lost(&b.describe()))?;
+            wires = crate::project3d::mesh_intersection(&ma, fa, &mb, fb);
+            Vec::new()
+        }
+        LinkSource::Iso { body, at, dir } => {
+            let (bi, mesh) = body_mesh(st, body, *at)?;
+            let (f, q, d) = nearest_face(&mesh, *at).ok_or_else(|| lost("the face"))?;
+            let size = mesh.bounds().diagonal().max(1e-9);
+            if d > size * 0.25 {
+                return Err(lost("the face"));
+            }
+            let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
+            source = LinkSource::Iso { body: name, at: q, dir: dir.clone() };
+            wires = crate::project3d::iso_curve(&mesh, f, q, dir);
+            Vec::new()
+        }
+        LinkSource::Spun { body, origin, dir } => {
+            let b = st.body(body).ok_or_else(|| lost(&format!("body {body}")))?;
+            let pts = crate::project3d::spun_outline(&b.mesh(), *origin, *dir, plane);
+            let mut g = Vec::new();
+            fit_chain(&pts, Some(b.mesh().bounds().diagonal().max(1e-9) * 2e-3), &mut g);
+            g
         }
         LinkSource::SketchPoint { sketch, point } => {
             let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;
@@ -144,10 +205,10 @@ pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, 
             plane_trace(plane, &other).into_iter().collect()
         }
     };
-    if geom.is_empty() {
+    if geom.is_empty() && wires.is_empty() {
         return Err(DocError::Invalid(format!("the {} projects to nothing on this sketch plane", src.describe())));
     }
-    Ok(Resolved { geom: merge_split_circles(geom), source, moved })
+    Ok(Resolved { geom: merge_split_circles(geom), wires, source, moved })
 }
 
 /// Re-resolve every link of a sketch (in place). Returns warnings for lost, moved or rebuilt
@@ -159,6 +220,7 @@ pub fn refresh_links(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelS
         match resolve(doc, vals, st, plane, l.kind, &l.source) {
             Ok(r) => {
                 sk.set_link_source(&l.id, r.source);
+                let _ = sk.set_link_wires(&l.id, &r.wires);
                 match sk.update_link(&l.id, &r.geom) {
                     Ok(true) => warn.push(format!("projected {} changed shape and was rebuilt", l.source.describe())),
                     Ok(false) if r.moved => warn.push(format!("projected {} was re-found on the nearest geometry", l.source.describe())),
@@ -382,7 +444,7 @@ fn silhouette(plane: &Plane, m: &Mesh) -> Vec<LinkGeom> {
 }
 
 /// Section of a mesh (or one of its faces) with the sketch plane.
-fn section(plane: &Plane, m: &Mesh, face: Option<u32>) -> Vec<LinkGeom> {
+pub(crate) fn section(plane: &Plane, m: &Mesh, face: Option<u32>) -> Vec<LinkGeom> {
     let size = m.bounds().diagonal().max(1e-9);
     let q = size * 1e-7;
     let key = |p: Vec3| ((p.x / q).round() as i64, (p.y / q).round() as i64, (p.z / q).round() as i64);

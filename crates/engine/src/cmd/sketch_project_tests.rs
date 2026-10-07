@@ -195,3 +195,106 @@ fn drawing_on_a_model_vertex_projects_it() {
     let si = inspect(&mut s);
     assert!(si["constraints"].as_array().unwrap().iter().any(|c| c["type"] == "point_on_curve"), "{si}");
 }
+
+#[test]
+fn fit_curves_to_a_mesh_section() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveCylinder", json!({"base": [0, 0, 0], "radius": 7, "height": 30}));
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "offset": 10}));
+    let name = s.model.state().bodies[0].name.clone();
+    let r = run(&mut s, "FitCurvesToSectionCommand", json!({"body": name}));
+    assert_eq!(r["curves"].as_array().unwrap().len(), 1, "{r}");
+    let si = inspect(&mut s);
+    assert!(si["links"].as_array().unwrap().is_empty());
+    let c = &si["curves"][0];
+    assert_eq!(c["type"], "circle");
+    assert!(c.get("link").is_none());
+    assert!(s.execute("FitCurvesToSectionCommand", &json!({"body": "nope"})).is_err());
+}
+
+#[test]
+fn three_d_sketch_curves() {
+    let mut s = Session::default();
+    // Include keeps an out-of-plane edge 3D.
+    run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    let r = run(&mut s, "Include3DGeometry", json!({"refs": [{"edge": [10, 10, 5]}]}));
+    let st = s.model.state();
+    let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.wires.len(), 1, "{r}");
+    assert!((sk.wires[0].pts.iter().map(|p| p.z).fold(0.0, f64::max) - 10.0).abs() < 1e-9);
+    run(&mut s, "SketchStop", json!({}));
+
+    // Project a line onto a sphere along the sketch normal.
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveSphere", json!({"center": [0, 0, 0], "radius": 20}));
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "offset": 50}));
+    let l = ids(&run(&mut s, "DrawPolyline", json!({"points": [[-10, 0], [10, 0]]}))["curves"])[0].clone();
+    run(&mut s, "SketchStop", json!({}));
+    let src = s.doc.features.last().unwrap().id;
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    let r = run(&mut s, "ProjectToSurface", json!({"curves": [{"sketch": src, "curve": l}], "face": [0, 0, 20]}));
+    let wid = r["links"][0]["wires"][0].as_str().unwrap().to_string();
+    let st = s.model.state();
+    let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
+    let w = &sk.wires[sk.wire_index(&wid).unwrap()];
+    assert!(w.pts.len() > 20);
+    for p in &w.pts {
+        assert!((p.len() - 20.0).abs() < 0.1, "{p:?}");
+        assert!(p.z > 0.0);
+    }
+    // Delete the wire.
+    run(&mut s, "sketch.delete", json!({"entities": [wid]}));
+    assert!(s.model.state().sketch(s.active_sketch.unwrap()).unwrap().sketch.wires.is_empty());
+    run(&mut s, "SketchStop", json!({}));
+
+    // Two crossing cylinders meet in 3D curves.
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveCylinder", json!({"base": [0, 0, -20], "radius": 5, "height": 40}));
+    run(&mut s, "PrimitiveCylinder", json!({"base": [-20, 0, 0], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}));
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    let r = run(&mut s, "IntersectionCurve", json!({"a": {"body": names[0]}, "b": {"body": names[1]}}));
+    assert!(!r["wires"].as_array().unwrap().is_empty(), "{r}");
+    let st = s.model.state();
+    let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
+    for w in &sk.wires {
+        for p in &w.pts {
+            assert!(((p.x * p.x + p.y * p.y).sqrt() - 5.0).abs() < 0.1, "{p:?}");
+            assert!(((p.y * p.y + p.z * p.z).sqrt() - 4.0).abs() < 0.1, "{p:?}");
+        }
+    }
+    run(&mut s, "SketchStop", json!({}));
+
+    // Spun profile of a cylinder about Z, on the XZ plane: a straight outline 6 from the axis.
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveCylinder", json!({"base": [0, 0, 0], "radius": 6, "height": 20}));
+    let name = s.model.state().bodies[0].name.clone();
+    run(&mut s, "SketchCreate", json!({"plane": "XZ"}));
+    let r = run(&mut s, "SpunProfileCmd", json!({"body": name, "axis": "Z"}));
+    let si = inspect(&mut s);
+    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == r["curves"][0]).unwrap().clone();
+    assert_eq!(c["type"], "line", "{c}");
+    assert!((c["start_at"][0].as_f64().unwrap().abs() - 6.0).abs() < 1e-3, "{c}");
+}
+
+#[test]
+fn isoparametric_curves_of_a_cylinder() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveCylinder", json!({"base": [0, 0, 0], "radius": 6, "height": 20}));
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    // u: around (a circle at z = 10); v: along (a line from z 0 to 20).
+    let r = run(&mut s, "SketchIsoparametricCurve", json!({"face": [6, 0, 10]}));
+    let st = s.model.state();
+    let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
+    let w = &sk.wires[sk.wire_index(r["wires"][0].as_str().unwrap()).unwrap()];
+    assert!(w.pts.iter().all(|p| (p.z - 10.0).abs() < 1e-6 && ((p.x * p.x + p.y * p.y).sqrt() - 6.0).abs() < 1e-3), "{:?}", &w.pts[..3]);
+    let r = run(&mut s, "SketchIsoparametricCurve", json!({"face": [6, 0, 10], "direction": "v"}));
+    let st = s.model.state();
+    let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
+    let w = &sk.wires[sk.wire_index(r["wires"][0].as_str().unwrap()).unwrap()];
+    let zs: Vec<f64> = w.pts.iter().map(|p| p.z).collect();
+    assert!(zs.iter().cloned().fold(f64::MIN, f64::max) > 19.9 && zs.iter().cloned().fold(f64::MAX, f64::min) < 0.1, "{zs:?}");
+    assert!(w.pts.iter().all(|p| (p.x - 6.0).abs() < 1e-3 && p.y.abs() < 1e-3));
+}

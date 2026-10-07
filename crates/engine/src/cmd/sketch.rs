@@ -1245,6 +1245,8 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 points.push(q);
             } else if sk.constraints.iter().any(|c| &c.id == id) {
                 cons.push(id.clone());
+            } else if sk.wire_index(id).is_some() {
+                sk.remove_wires(std::slice::from_ref(id));
             } else if sk.link(id).is_some() {
                 curves.extend(sk.link_curves(id));
                 points.extend(sk.link_points(id));

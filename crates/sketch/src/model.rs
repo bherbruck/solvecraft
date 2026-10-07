@@ -432,6 +432,9 @@ pub struct Sketch {
     /// Links to geometry outside the sketch (projections, intersections, includes).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<crate::link::Link>,
+    /// 3D curves (world coordinates) carried by the sketch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wires: Vec<crate::wire::Wire>,
     /// Next number per id prefix (`l` → l1, l2…).
     #[serde(default)]
     counters: std::collections::BTreeMap<String, u64>,
@@ -450,6 +453,7 @@ impl Sketch {
             curves: Vec::new(),
             constraints: Vec::new(),
             links: Vec::new(),
+            wires: Vec::new(),
             counters: Default::default(),
         }
     }
@@ -471,6 +475,7 @@ impl Sketch {
             || self.curves.iter().any(|c| c.id == id)
             || self.constraints.iter().any(|c| c.id == id)
             || self.links.iter().any(|l| l.id == id)
+            || self.wires.iter().any(|w| w.id == id)
     }
 
     pub fn point_index(&self, id: &str) -> Option<usize> {

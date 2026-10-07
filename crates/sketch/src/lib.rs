@@ -16,6 +16,7 @@ mod profiles;
 mod shape;
 mod solver;
 mod text;
+mod wire;
 
 pub use curves::{MAX_SPLINE_POINTS, conic_point, ellipse_point, end_curvature, spline_end_tangent, spline_point, spline_polyline};
 pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES};
@@ -24,6 +25,7 @@ pub use profiles::{Profile, find_drawn_profiles, find_profiles, merge_regions};
 pub use shape::{Shape, intersections};
 pub use solver::{SolveReport, SolveStatus, solve};
 pub use text::{MAX_TEXT_CHARS, text_geometry};
+pub use wire::{MAX_WIRE_POINTS, Wire};
 
 #[cfg(test)]
 mod tests;

@@ -55,6 +55,16 @@ pub enum LinkSource {
     /// An origin plane (`XY`, `XZ`, `YZ`) or a construction plane (by name): its trace on the
     /// sketch plane.
     Plane { name: String },
+    /// A curve of a sketch projected onto a body face (through `at`) along the normal of the
+    /// sketch that holds the link: a 3D curve.
+    OnSurface { sketch: u64, curve: String, body: String, at: Vec3 },
+    /// Where two bodies or faces (`Body` / `Face` sources) meet: 3D curves.
+    Intersection { a: Box<LinkSource>, b: Box<LinkSource> },
+    /// An isoparametric curve of the face through `at`: `dir` is `u` (around a curved face),
+    /// `v` (along it) or an explicit direction `[x, y, z]` (as text).
+    Iso { body: String, at: Vec3, dir: String },
+    /// The outline of a body spun about an axis (world line), laid into the sketch plane.
+    Spun { body: String, origin: Vec3, dir: Vec3 },
     /// Text: baseline start `at` (sketch coordinates), capital height and angle (radians).
     Text {
         text: String,
@@ -78,6 +88,10 @@ impl LinkSource {
             LinkSource::Origin => "origin".into(),
             LinkSource::Axis { name } => format!("{name} axis"),
             LinkSource::Plane { name } => format!("{name} plane"),
+            LinkSource::OnSurface { curve, .. } => format!("{curve} on a face"),
+            LinkSource::Intersection { a, b } => format!("intersection of {} and {}", a.describe(), b.describe()),
+            LinkSource::Spun { body, .. } => format!("spun profile of {body}"),
+            LinkSource::Iso { body, .. } => format!("isoparametric curve of {body}"),
             LinkSource::Text { text, .. } => format!("text \"{}\"", text.chars().take(20).collect::<String>()),
         }
     }
@@ -513,6 +527,11 @@ impl Sketch {
                 p.fixed = false;
             }
         }
+        for w in &mut self.wires {
+            if w.link.as_deref() == Some(id) {
+                w.link = None;
+            }
+        }
         self.links.retain(|l| l.id != id);
         Ok(())
     }
@@ -523,7 +542,9 @@ impl Sketch {
             return;
         }
         let used = |id: &str, sk: &Sketch| {
-            sk.curves.iter().any(|c| c.link.as_deref() == Some(id)) || sk.points.iter().any(|p| p.link.as_deref() == Some(id))
+            sk.curves.iter().any(|c| c.link.as_deref() == Some(id))
+                || sk.points.iter().any(|p| p.link.as_deref() == Some(id))
+                || sk.wires.iter().any(|w| w.link.as_deref() == Some(id))
         };
         let keep: Vec<bool> = self.links.iter().map(|l| used(&l.id, self)).collect();
         let mut k = keep.iter();

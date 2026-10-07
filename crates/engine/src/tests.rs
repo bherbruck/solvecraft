@@ -287,6 +287,7 @@ fn hostile_params_never_panic() {
         "from",
         "datum",
         "tolerance",
+        "face",
     ];
     let mut internal = Vec::new();
     for spec in command_specs() {

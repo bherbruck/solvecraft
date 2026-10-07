@@ -23,6 +23,31 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("include")
         .enabled(in_sketch)
         .params("refs: like Project (edges, vertices, sketch curves and points); curves out of the sketch plane are flattened onto it"),
+    CommandSpec::new("ProjectToSurface", "Project To Surface", project_to_surface)
+        .at("SKETCH", "CREATE")
+        .icon("project_surface")
+        .enabled(in_sketch)
+        .params("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?: projected along the active sketch's normal onto the face, as linked 3D curves"),
+    CommandSpec::new("IntersectionCurve", "Intersection Curve", intersection_curve)
+        .at("SKETCH", "CREATE")
+        .icon("intersection_curve")
+        .enabled(in_sketch)
+        .params("a, b: {body} | {face: [x,y,z], body?}: where they meet, as linked 3D curves"),
+    CommandSpec::new("SpunProfileCmd", "Spun Profile", spun_profile)
+        .at("SKETCH", "CREATE")
+        .icon("spun")
+        .enabled(in_sketch)
+        .params("body: name, axis: a line of the active sketch (curve id) | X|Y|Z: the body's outline revolved about the axis, in the sketch plane"),
+    CommandSpec::new("SketchIsoparametricCurve", "Isoparametric Curve", iso_curve)
+        .at("SKETCH", "CREATE")
+        .icon("iso_curve")
+        .enabled(in_sketch)
+        .params("face: [x,y,z] point on the face (the curve passes through it), body?, direction?: u|v|[x,y,z] (default u): linked 3D curve"),
+    CommandSpec::new("FitCurvesToSectionCommand", "Fit Curves to Mesh Section", fit_section)
+        .at("SKETCH", "CREATE")
+        .icon("fit_section")
+        .enabled(in_sketch)
+        .params("body: name (a mesh or solid body): its section with the sketch plane, fitted with lines and arcs, as normal (unlinked) geometry"),
     CommandSpec::new("sketch.break_link", "Break Link", break_link)
         .enabled(in_sketch)
         .params("link?: link id (j1) | entities?: [curve or point ids]: linked geometry becomes normal sketch geometry"),
@@ -116,7 +141,7 @@ pub(super) fn add_link(s: &Session, doc: &Document, id: u64, sk: &mut Sketch, ki
     let (vals, _) = doc.param_values();
     let st = s.model.state_before(id);
     let r = resolve(doc, &vals, &st, &plane, kind, &src)?;
-    Ok(sk.add_link(kind, r.source, &r.geom)?)
+    Ok(sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?)
 }
 
 fn link_json(sk: &Sketch, link: &str) -> Value {
@@ -160,6 +185,106 @@ fn intersect_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     run_links(s, p, "Include3DGeometry", LinkKind::Include)
+}
+
+/// Add one link from `src` to the active sketch and report it.
+fn one_link(s: &mut Session, cmd: &str, kind: LinkKind, src: LinkSource) -> Result<Value> {
+    let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    let mut doc = (*s.doc).clone();
+    let mut sk = doc.sketch(id)?.clone();
+    refresh(s, &doc, id, &mut sk);
+    let what = src.describe();
+    let l = add_link(s, &doc, id, &mut sk, kind, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
+    let mut out = link_json(&sk, &l);
+    let wires: Vec<String> = sk.link_wires(&l).iter().filter_map(|w| sk.wires.get(*w).map(|w| w.id.clone())).collect();
+    out["wires"] = json!(wires);
+    *doc.sketch_mut(id)? = sk;
+    *s.doc_mut() = doc;
+    Ok(out)
+}
+
+fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ProjectToSurface";
+    let at = p.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`face` must be a point [x,y,z] on the target face"))?;
+    let body = str_(p, "body").unwrap_or("").to_string();
+    let list = p.get("curves").and_then(Value::as_array).cloned().ok_or_else(|| bad(cmd, "`curves` must list {sketch, curve}"))?;
+    if list.is_empty() || list.len() > 500 {
+        return Err(bad(cmd, "`curves` must list 1…500 curves"));
+    }
+    let mut out = Vec::new();
+    for v in list {
+        let LinkSource::SketchCurve { sketch, curve } = source(s, &v, cmd)? else {
+            return Err(bad(cmd, "each entry must be {sketch, curve}"));
+        };
+        out.push(one_link(s, cmd, LinkKind::Project, LinkSource::OnSurface { sketch, curve, body: body.clone(), at })?);
+    }
+    Ok(json!({"links": out}))
+}
+
+fn intersection_curve(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "IntersectionCurve";
+    let side = |k: &str| -> Result<LinkSource> {
+        let v = p.get(k).ok_or_else(|| bad(cmd, format!("missing `{k}`")))?;
+        match source(s, v, cmd)? {
+            x @ (LinkSource::Body { .. } | LinkSource::Face { .. }) => Ok(x),
+            _ => Err(bad(cmd, format!("`{k}` must be a body or a face"))),
+        }
+    };
+    let (a, b) = (side("a")?, side("b")?);
+    one_link(s, cmd, LinkKind::Include, LinkSource::Intersection { a: Box::new(a), b: Box::new(b) })
+}
+
+fn spun_profile(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "SpunProfileCmd";
+    let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must name a body"))?.to_string();
+    let axis = str_(p, "axis").ok_or_else(|| bad(cmd, "`axis` must be a sketch line or X|Y|Z"))?;
+    let (origin, dir) = match axis.to_ascii_uppercase().as_str() {
+        "X" => (Vec3::ZERO, Vec3::X),
+        "Y" => (Vec3::ZERO, Vec3::Y),
+        "Z" => (Vec3::ZERO, Vec3::Z),
+        _ => {
+            let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+            let st = s.model.state();
+            let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch is not evaluated".into()))?;
+            let ci = ss.sketch.curve_index(axis).ok_or_else(|| bad(cmd, format!("unknown curve `{axis}`")))?;
+            let Some(solvecraft_sketch::Shape::Line { a, b }) = ss.sketch.shape(ci) else { return Err(bad(cmd, "the axis must be a line")) };
+            let (wa, wb) = (ss.plane.to_world(a), ss.plane.to_world(b));
+            (wa, wb - wa)
+        }
+    };
+    one_link(s, cmd, LinkKind::Project, LinkSource::Spun { body, origin, dir })
+}
+
+fn iso_curve(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "SketchIsoparametricCurve";
+    let at = p.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`face` must be a point [x,y,z] on the face"))?;
+    let body = str_(p, "body").unwrap_or("").to_string();
+    let dir = match p.get("direction") {
+        None => "u".to_string(),
+        Some(Value::String(d)) if d.eq_ignore_ascii_case("u") || d.eq_ignore_ascii_case("v") => d.to_ascii_lowercase(),
+        Some(v) => {
+            let d = vec3(v).ok_or_else(|| bad(cmd, "`direction` must be u, v or [x,y,z]"))?;
+            format!("{},{},{}", d.x, d.y, d.z)
+        }
+    };
+    one_link(s, cmd, LinkKind::Include, LinkSource::Iso { body, at, dir })
+}
+
+fn fit_section(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FitCurvesToSectionCommand";
+    let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must name a body"))?.to_string();
+    if s.model.state().body(&body).is_none() {
+        return Err(bad(cmd, format!("no body `{body}`")));
+    }
+    let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    let mut doc = (*s.doc).clone();
+    let mut sk = doc.sketch(id)?.clone();
+    let l = add_link(s, &doc, id, &mut sk, LinkKind::Intersect, LinkSource::Body { body }).map_err(|e| bad(cmd, e.to_string()))?;
+    let curves: Vec<String> = sk.link_curves(&l).iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect();
+    sk.break_link(&l)?;
+    *doc.sketch_mut(id)? = sk;
+    *s.doc_mut() = doc;
+    Ok(json!({"curves": curves}))
 }
 
 fn break_link(s: &mut Session, p: &Value) -> Result<Value> {

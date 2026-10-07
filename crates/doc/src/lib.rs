@@ -11,6 +11,7 @@ mod eval;
 pub mod expr;
 mod params;
 pub mod project;
+mod project3d;
 
 pub use assembly::{IDENTITY, Mat, Occurrence, apply_point, apply_vector, is_identity, mat_inverse, mat_mul, rigid};
 pub use document::*;

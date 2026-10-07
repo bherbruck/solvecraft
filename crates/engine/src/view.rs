@@ -87,6 +87,10 @@ pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool
             out.push((seg.polyline(0.02).iter().map(|p| plane.to_world(*p)).collect(), col, c.construction || c.centerline));
         }
     }
+    // 3D curves are in world coordinates already.
+    for w in &sk.wires {
+        out.push((w.pts.clone(), colors::SKETCH_PROJECTED, false));
+    }
     out
 }
 
