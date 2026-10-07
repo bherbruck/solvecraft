@@ -26,6 +26,9 @@ use p21::{Entity, Exchange, Param};
 const MAX_ASSEMBLY_DEPTH: usize = 32;
 /// Most body instances in one import.
 const MAX_BODIES: usize = 10_000;
+/// Most product occurrences and mapped representations visited (a shared sub-assembly used
+/// twice at every level would otherwise grow exponentially).
+const MAX_VISITS: usize = 100_000;
 
 /// A body read from a STEP file.
 #[derive(Clone, Debug)]
@@ -228,6 +231,8 @@ struct Reader<'a> {
     used_items: HashSet<u64>,
     /// Items already instanced for the product being read.
     node_items: HashSet<u64>,
+    /// Occurrences and mapped representations visited so far.
+    visits: usize,
     bodies: Vec<ImportedBody>,
 }
 
@@ -417,6 +422,11 @@ impl<'a> Reader<'a> {
             self.warn("mapped items nested too deeply");
             return;
         }
+        self.visits += 1;
+        if self.visits > MAX_VISITS {
+            self.warn(format!("more than {MAX_VISITS} component instances: the rest are left out"));
+            return;
+        }
         let u = self.units_of(rep);
         let items = self.reps.get(&rep).map(|r| r.0.clone()).unwrap_or_default();
         for item in items {
@@ -542,6 +552,11 @@ impl<'a> Reader<'a> {
             self.warn("assembly nested too deeply or recursive: some components were left out");
             return node;
         }
+        self.visits += 1;
+        if self.visits > MAX_VISITS {
+            self.warn(format!("more than {MAX_VISITS} component instances: the rest are left out"));
+            return node;
+        }
         stack.push(pd);
         let mut path = path.to_vec();
         path.push(name.clone());
@@ -609,6 +624,7 @@ pub fn step_import(text: &str) -> Result<StepImport> {
         solids: HashMap::new(),
         used_items: HashSet::new(),
         node_items: HashSet::new(),
+        visits: 0,
         bodies: Vec::new(),
     };
     rd.index();
@@ -642,6 +658,7 @@ pub fn step_import(text: &str) -> Result<StepImport> {
     if !loose.is_empty() {
         let mut bodies = Vec::new();
         rd.node_items = rd.used_items.clone();
+        rd.visits = 0;
         for r in loose {
             rd.rep_bodies(r, &identity, &[], "Import", &mut bodies, 0);
         }

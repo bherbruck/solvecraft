@@ -380,6 +380,7 @@ fn timeline_edits_reresolve_references() {
     run(&mut s, "UndoCommand", json!({}));
     run(&mut s, "UndoCommand", json!({}));
     assert!(rel(volume(&mut s), 60.0 * 30.0 * 25.0 - f4 - PI * 9.0 * 25.0) < 1e-3);
+}
 
 /// A 40 × 30 × 20 box exported to a STEP file in a fresh temp directory.
 fn step_box_file(tag: &str) -> std::path::PathBuf {

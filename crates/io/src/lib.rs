@@ -61,8 +61,10 @@ pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "Import".into());
     let generic = |n: &str| n.trim().is_empty() || n.starts_with('(') || n.eq_ignore_ascii_case("import") || n.eq_ignore_ascii_case("unnamed");
-    let name = match imp.tree.as_slice() {
-        [root] if !generic(&root.name) => root.name.clone(),
+    // The root product's name; else the only body's name; else the file name.
+    let name = match (imp.tree.as_slice(), imp.bodies.as_slice()) {
+        ([root], _) if !generic(&root.name) => root.name.clone(),
+        (_, [only]) if !generic(&only.name) => only.name.clone(),
         _ => stem,
     };
     let file_name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());

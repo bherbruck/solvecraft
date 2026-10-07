@@ -283,3 +283,26 @@ fn assembly_cycles_are_bounded() {
     let imp = r.unwrap();
     assert_eq!(imp.bodies.len(), 1);
 }
+
+#[test]
+fn exponential_assemblies_are_bounded() {
+    // P0 uses P1 twice, P1 uses P2 twice, … 30 levels: 2^30 occurrences if followed blindly.
+    let mut t = String::from(HEAD);
+    t += "#8=PRODUCT_DEFINITION_CONTEXT('part definition',#9,'design');\n#9=APPLICATION_CONTEXT('');\n";
+    t += &cube_entities();
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    let levels = 30u64;
+    for l in 0..=levels {
+        t += &product(1000 + l * 10, &format!("P{l}"));
+        if l < levels {
+            for k in 0..2 {
+                t += &format!("#{}=NEXT_ASSEMBLY_USAGE_OCCURRENCE('','','',#{},#{},$);\n", 2000 + l * 10 + k, 1000 + l * 10, 1000 + (l + 1) * 10);
+            }
+        }
+    }
+    t += &format!("#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n#61=SHAPE_DEFINITION_REPRESENTATION(#{},#60);\n", 1000 + levels * 10 + 4);
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert!(!imp.bodies.is_empty() && imp.bodies.len() <= MAX_BODIES);
+    assert!(imp.warnings.iter().any(|w| w.contains("left out")), "{:?}", imp.warnings);
+}
