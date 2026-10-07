@@ -117,7 +117,10 @@ fn rgba(c: Rgb) -> [u8; 4] {
 }
 
 pub fn scene_radius(app: &SolveApp) -> f64 {
-    let b = solvecraft_engine::view::bounds(&app.session);
+    let mut b = solvecraft_engine::view::bounds(&app.session);
+    if !app.preview.bounds.is_empty() {
+        b = b.union(&app.preview.bounds);
+    }
     let r = if b.is_empty() { 50.0 } else { b.diagonal() * 0.5 + b.center().dist(app.cam.target) };
     r.max(app.cam.half_height() * 2.0).max(10.0)
 }
@@ -181,8 +184,8 @@ fn build_scene(app: &SolveApp) -> GpuScene {
             let maj = (t / major).round() * major == t;
             let col = if maj { c4(tk.grid_major) } else { c4(tk.grid) };
             let w = if maj { 1.0 } else { 0.7 };
-            sc.line((c + Vec3::new(t, -ext, 0.0)).to_f32(), (c + Vec3::new(t, ext, 0.0)).to_f32(), col, w, false);
-            sc.line((c + Vec3::new(-ext, t, 0.0)).to_f32(), (c + Vec3::new(ext, t, 0.0)).to_f32(), col, w, false);
+            sc.under_line((c + Vec3::new(t, -ext, 0.0)).to_f32(), (c + Vec3::new(t, ext, 0.0)).to_f32(), col, w);
+            sc.under_line((c + Vec3::new(-ext, t, 0.0)).to_f32(), (c + Vec3::new(ext, t, 0.0)).to_f32(), col, w);
         }
     }
     for b in &st.bodies {

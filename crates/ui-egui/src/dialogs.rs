@@ -19,8 +19,10 @@ use crate::viewport::Hit;
 
 const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
 const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
-const DIRS: [&str; 3] = ["positive", "negative", "symmetric"];
-const DIR_LABELS: [&str; 3] = ["One side", "Flip", "Symmetric"];
+const DIRS: [&str; 4] = ["positive", "negative", "symmetric", "positive"];
+const DIR_LABELS: [&str; 4] = ["One side", "Flip", "Symmetric", "Two sides"];
+/// The "Two sides" direction (a second distance the other way).
+pub const TWO_SIDES: usize = 3;
 const HOLE_TYPES: [&str; 3] = ["simple", "counterbore", "countersink"];
 const HOLE_LABELS: [&str; 3] = ["Simple", "Counterbore", "Countersink"];
 
@@ -35,6 +37,10 @@ pub enum Kind {
         /// The operation follows the geometry (into a body: cut, out of one: join, else new)
         /// until the user picks one.
         auto_op: bool,
+        /// The other side's distance (two sides).
+        distance2: String,
+        /// Taper angle (empty: none).
+        taper: String,
     },
     Revolve {
         angle: String,
@@ -157,7 +163,14 @@ impl Dialog {
         let mut d = match id {
             "SketchCreate" => Dialog::new(Kind::Sketch, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)]),
             "Extrude" => Dialog::new(
-                Kind::Extrude { distance: "10 mm".into(), direction: 0, operation: usize::from(has_bodies), auto_op: true },
+                Kind::Extrude {
+                    distance: "10 mm".into(),
+                    direction: 0,
+                    operation: usize::from(has_bodies),
+                    auto_op: true,
+                    distance2: "10 mm".into(),
+                    taper: String::new(),
+                },
                 vec![SelInput::new("Profiles", PROFILES | PLANAR_FACES, true)],
             ),
             "Revolve" => Dialog::new(
@@ -594,13 +607,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 input_rows(&mut d, ui);
                 match &mut d.kind {
                     Kind::Sketch => {}
-                    Kind::Extrude { distance, direction, operation, auto_op } => {
+                    Kind::Extrude { distance, direction, operation, auto_op, distance2, taper } => {
                         ui.label("Direction");
                         combo(ui, "ex_dir", &DIR_LABELS, direction);
                         ui.end_row();
                         ui.label("Distance");
                         enter |= field(ui, distance);
                         ui.end_row();
+                        if *direction == TWO_SIDES {
+                            ui.label("Distance 2");
+                            enter |= field(ui, distance2);
+                            ui.end_row();
+                        } else if *direction < 2 {
+                            ui.label("Taper angle");
+                            let r = ui.add(egui::TextEdit::singleline(taper).hint_text("0 deg"));
+                            enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            ui.end_row();
+                        }
                         ui.label("Operation");
                         let before = *operation;
                         combo(ui, "ex_op", &OP_LABELS, operation);
@@ -938,9 +961,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         sels(d, i).iter().filter_map(|x| if let Sel::Face { point, .. } = x { Some(pt(*point)) } else { None }).collect()
     };
     let (cmd, params): (&str, Value) = match &d.kind {
-        Kind::Extrude { distance, direction, operation, .. } => {
+        Kind::Extrude { distance, direction, operation, distance2, taper, .. } => {
             need(0, "profiles or a planar face")?;
-            let common = json!({"distance": distance, "direction": DIRS.get(*direction).copied().unwrap_or("positive"), "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            let mut common = json!({"distance": distance, "direction": DIRS.get(*direction).copied().unwrap_or("positive"), "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            if *direction == TWO_SIDES {
+                common["distance2"] = json!(distance2);
+            } else if *direction < 2 && !taper.trim().is_empty() {
+                common["taper"] = json!(taper);
+            }
             let with = |extra: Value| -> Value {
                 let mut p = common.clone();
                 if let (Value::Object(m), Value::Object(e)) = (&mut p, extra) {
@@ -1284,22 +1312,23 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = start("Extrude")?;
             d.kind = Kind::Extrude {
                 distance: extent.distance.clone(),
-                direction: match extent.direction {
-                    Direction::Positive => 0,
-                    Direction::Negative => 1,
-                    Direction::Symmetric => 2,
+                direction: match (extent.direction, &extent.distance2) {
+                    (_, Some(_)) => TWO_SIDES,
+                    (Direction::Positive, None) => 0,
+                    (Direction::Negative, None) => 1,
+                    (Direction::Symmetric, None) => 2,
                 },
                 operation: op_index(operation),
                 auto_op: false,
+                distance2: extent.distance2.clone().unwrap_or_else(|| "10 mm".into()),
+                taper: extent.taper.clone().unwrap_or_default(),
             };
             let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = items.into_iter().map(|index| Sel::Profile { sketch: *sketch, index }).collect();
             }
             for (k, v) in [
-                ("distance2", extent.distance2.as_ref().map(|x| json!(x))),
                 ("start_offset", extent.start_offset.as_ref().map(|x| json!(x))),
-                ("taper", extent.taper.as_ref().map(|x| json!(x))),
                 ("through_all", extent.through_all.then_some(json!(true))),
                 ("targets", (!targets.is_empty()).then(|| json!(targets))),
             ] {

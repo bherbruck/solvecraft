@@ -117,6 +117,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let focus = std::mem::take(&mut d.focus);
     let half_height = app.cam.half_height();
     let axis = revolve_axis(app, d);
+    // Two sides: the second distance gets its own arrow the other way.
+    if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES, distance2, .. }, Some(n)) = (&mut d.kind, dir)
+        && let Some(l2) = app.session.doc.eval(distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
+    {
+        drag_arrow(ui, painter, proj, base, bs, -n, l2, false, egui::Id::new("sc_manipulator2"), half_height, distance2);
+    }
     let Some((label, kind, value)) = d.primary() else { return };
     let len = app.session.doc.eval(value, kind).ok().filter(|v| v.is_finite());
     let mut box_at = bs + vec2(16.0, -30.0);
@@ -127,36 +133,11 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     if let (Some(n), Some(l)) = (dir, len.filter(|_| kind == ValueKind::Length)) {
         let n = n * sign;
-        // A short arrow still shows (and can be grabbed) when the value is near zero.
-        let min = 40.0 * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
-        let shown = if l.abs() < min { min * if l < 0.0 { -1.0 } else { 1.0 } } else { l };
-        let tip = base + n * shown;
-        if let Some(ts) = proj.to_screen(tip) {
-            let handle = egui::Rect::from_center_size(ts, vec2(20.0, 20.0));
-            let r = ui.interact(handle, egui::Id::new("sc_manipulator"), egui::Sense::drag());
-            let hot = r.hovered() || r.dragged();
-            let col = if hot { t.accent } else { t.manipulator };
-            arrow(painter, bs, ts, col);
-            if symmetric && let Some(bt) = proj.to_screen(base - n * shown) {
-                arrow(painter, bs, bt, col);
+        if let Some(ts) = drag_arrow(ui, painter, proj, base, bs, n, l, signed, egui::Id::new("sc_manipulator"), half_height, value) {
+            if symmetric && let Some(bt) = proj.to_screen(base - n * l) {
+                arrow(painter, bs, bt, t.manipulator);
             }
-            painter.circle(bs, 3.5, col, Stroke::new(1.0, Color32::WHITE));
-            if hot {
-                painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-            }
-            if r.dragged()
-                && let Some(p) = r.interact_pointer_pos()
-                && let Some(v) = along(proj, p, base, n)
-            {
-                let free = ui.input(|i| i.modifiers.alt || i.modifiers.ctrl || i.modifiers.command);
-                let step = snap_step(half_height);
-                let mut v = if free { v } else { (v / step).round() * step };
-                if !signed {
-                    v = v.max(if free { 1e-3 } else { step });
-                }
-                *value = format_len(v);
-            }
+            painter.circle(bs, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
             box_at = ts + vec2(14.0, -12.0);
         }
     }
@@ -176,6 +157,49 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             });
         });
     });
+}
+
+/// A draggable arrow from `base` along `n` showing `l` (at least a short stub); dragging writes
+/// the snapped length into `value`. Returns the tip's screen position.
+#[allow(clippy::too_many_arguments)]
+fn drag_arrow(
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    base: Vec3,
+    bs: Pos2,
+    n: Vec3,
+    l: f64,
+    signed: bool,
+    id: egui::Id,
+    half_height: f64,
+    value: &mut String,
+) -> Option<Pos2> {
+    let t = Tokens::get();
+    let min = 40.0 * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
+    let shown = if l.abs() < min { min * if l < 0.0 { -1.0 } else { 1.0 } } else { l };
+    let ts = proj.to_screen(base + n * shown)?;
+    let r = ui.interact(egui::Rect::from_center_size(ts, vec2(20.0, 20.0)), id, egui::Sense::drag());
+    let hot = r.hovered() || r.dragged();
+    let col = if hot { t.accent } else { t.manipulator };
+    arrow(painter, bs, ts, col);
+    if hot {
+        painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    if r.dragged()
+        && let Some(p) = r.interact_pointer_pos()
+        && let Some(v) = along(proj, p, base, n)
+    {
+        let free = ui.input(|i| i.modifiers.alt || i.modifiers.ctrl || i.modifiers.command);
+        let step = snap_step(half_height);
+        let mut v = if free { v } else { (v / step).round() * step };
+        if !signed {
+            v = v.max(if free { 1e-3 } else { step });
+        }
+        *value = format_len(v);
+    }
+    Some(ts)
 }
 
 /// The revolve axis (a point on it and its unit direction).

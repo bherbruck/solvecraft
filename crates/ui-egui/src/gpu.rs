@@ -31,6 +31,9 @@ pub struct GpuScene {
     pub ghost: Vec<u8>,
     /// Translucent triangles drawn through everything (a cut's tool body).
     pub xray: Vec<u8>,
+    /// Lines drawn first, under everything (the ground grid: the model hides it, it never
+    /// hides the model).
+    pub under: Vec<u8>,
 }
 
 impl GpuScene {
@@ -57,6 +60,14 @@ impl GpuScene {
             self.xray.extend_from_slice(&v.to_le_bytes());
         }
         self.xray.extend_from_slice(&c);
+    }
+    /// A line under everything (see [`GpuScene::under`]).
+    pub fn under_line(&mut self, a: [f32; 3], b: [f32; 3], c: [u8; 4], width: f32) {
+        for v in a.iter().chain(&b) {
+            self.under.extend_from_slice(&v.to_le_bytes());
+        }
+        self.under.extend_from_slice(&c);
+        self.under.extend_from_slice(&width.to_le_bytes());
     }
     pub fn line(&mut self, a: [f32; 3], b: [f32; 3], c: [u8; 4], width: f32, on_top: bool) {
         let out = if on_top { &mut self.overlay } else { &mut self.lines };
@@ -102,6 +113,7 @@ struct Batches {
     overlays: Option<Batch>,
     ghost: Option<Batch>,
     xray: Option<Batch>,
+    under: Option<Batch>,
 }
 
 impl Batches {
@@ -116,6 +128,7 @@ impl Batches {
             self.overlays = upload(device, "sc_overlay", &sc.overlay, LINE_SIZE);
             self.ghost = upload(device, "sc_ghost", &sc.ghost, TRI_SIZE);
             self.xray = upload(device, "sc_xray", &sc.xray, TRI_SIZE);
+            self.under = upload(device, "sc_under", &sc.under, LINE_SIZE);
             self.key = Some(key);
         }
     }
@@ -395,6 +408,7 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
             }
         };
         let (m, h, pv) = (&res.model, &res.highlight, &res.preview);
+        lines(pass, &res.overlay, &m.under);
         tris(pass, &res.tri, &m.tris);
         tris(pass, &res.tri, &pv.tris);
         tris(pass, &res.tri_hl, &h.tris);

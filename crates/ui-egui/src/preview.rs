@@ -11,7 +11,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use serde_json::Value;
 use solvecraft_engine::Session;
 use solvecraft_engine::doc::ModelState;
-use solvecraft_engine::geom::{Mesh, Vec3};
+use solvecraft_engine::geom::{Aabb3, Mesh, Vec3};
 
 use crate::SolveApp;
 use crate::gpu::{GpuScene, SceneSlot};
@@ -39,6 +39,8 @@ pub struct Built {
     pub replaced: Vec<String>,
     /// Why the feature failed, when the scene only shows its tool body.
     pub error: Option<String>,
+    /// Extent of what the preview shows (the view's depth range must cover it).
+    pub bounds: Aabb3,
 }
 
 type Job = Result<Built, String>;
@@ -59,6 +61,8 @@ pub struct PreviewState {
     pub error: Option<String>,
     /// A preview is being computed.
     pub busy: bool,
+    /// Extent of the preview scene.
+    pub bounds: Aabb3,
     /// Time the last preview took (ms), for `ui.inspect`.
     pub ms: f64,
     started: f64,
@@ -72,6 +76,7 @@ impl PreviewState {
         self.busy = false;
         if self.active || !self.replaced.is_empty() {
             self.active = false;
+            self.bounds = Aabb3::EMPTY;
             self.replaced.clear();
             self.set_scene(GpuScene::default());
         }
@@ -90,6 +95,7 @@ impl PreviewState {
         match job {
             Ok(b) => {
                 self.replaced = b.replaced;
+                self.bounds = b.bounds;
                 self.active = true;
                 self.error = b.error;
                 self.set_scene(b.scene);
@@ -176,13 +182,20 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             };
             let mut b = guard(&|| build_tool(&tool.before, &tool.after, colors, &op))?;
             b.error = real.err().map(|e| e.to_string());
+            b.bounds = state_bounds(&tool.after);
             Ok(b)
         }
         None => {
             let p = real.map_err(|e| e.to_string())?;
-            guard(&|| build(&p.before, &p.after, colors))
+            let mut b = guard(&|| build(&p.before, &p.after, colors))?;
+            b.bounds = state_bounds(&p.after);
+            Ok(b)
         }
     }
+}
+
+fn state_bounds(st: &ModelState) -> Aabb3 {
+    st.bodies.iter().fold(Aabb3::EMPTY, |b, x| b.union(&x.mesh().bounds()))
 }
 
 /// The tool bodies a join/cut/intersect adds: opaque and tinted for join, see-through for cut
@@ -212,7 +225,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
             }
         }
     }
-    Built { scene: sc, replaced: Vec::new(), error: None }
+    Built { scene: sc, replaced: Vec::new(), error: None, bounds: Aabb3::EMPTY }
 }
 
 /// The same commands making a new body instead of joining, cutting or intersecting, and the
@@ -288,7 +301,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             replaced.push(b.name.clone());
         }
     }
-    Built { scene: sc, replaced, error: None }
+    Built { scene: sc, replaced, error: None, bounds: Aabb3::EMPTY }
 }
 
 /// Is face `f` of `m` new surface, i.e. not on the old mesh? Decided by a vote of points on it
