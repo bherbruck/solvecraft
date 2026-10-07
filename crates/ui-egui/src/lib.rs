@@ -18,6 +18,8 @@ pub mod palette;
 pub mod preview;
 pub mod selection;
 pub mod sketch_dims;
+#[cfg(test)]
+mod sketch_edit_tests;
 pub mod theme;
 pub mod timeline;
 pub mod toolbar;
@@ -85,6 +87,9 @@ pub struct SolveApp {
     pub now: f64,
     /// The view before the current sketch started (Finish Sketch returns to it).
     pub pre_sketch_cam: Option<Camera>,
+    /// The history marker before Edit Sketch rolled the timeline to the sketch; Finish Sketch
+    /// restores it.
+    pub pre_sketch_marker: Option<Option<usize>>,
     pub services: Services,
     pub viewport: viewport::ViewportState,
     pub tool: Option<tools::Tool>,
@@ -112,6 +117,7 @@ impl SolveApp {
             cam_anim: None,
             now: 0.0,
             pre_sketch_cam: None,
+            pre_sketch_marker: None,
             services,
             viewport: viewport::ViewportState::default(),
             tool: None,
@@ -178,12 +184,7 @@ impl SolveApp {
             return;
         }
         if id == "SketchStop" {
-            let r = self.run(id, json!({}));
-            if r.is_ok()
-                && let Some(c) = self.pre_sketch_cam.take()
-            {
-                self.animate_to(c);
-            }
+            self.finish_sketch();
             return;
         }
         // Press Pull: edges get a fillet, faces and profiles an extrude.
@@ -226,8 +227,11 @@ impl SolveApp {
         use solvecraft_engine::doc::FeatureKind;
         let Some(f) = self.session.doc.feature(id) else { return };
         if matches!(f.kind, FeatureKind::Sketch { .. }) {
-            let _ = self.run("SketchActivate", json!({ "sketch": id }));
+            self.edit_sketch(id);
             return;
+        }
+        if self.session.active_sketch.is_some() {
+            self.finish_sketch();
         }
         let Some(idx) = self.session.doc.feature_index(id) else { return };
         let marker = self.session.doc.marker;
@@ -243,6 +247,51 @@ impl SolveApp {
                 self.ui.palette_open = true;
             }
         }
+    }
+
+    /// Edit a sketch the way Fusion does: roll the timeline back to just after it (so later
+    /// features don't hide it), turn the camera to face it, and remember both so Finish Sketch
+    /// puts them back. Editing the sketch that is already open does nothing; editing another one
+    /// finishes the current sketch first, so edit sessions never nest.
+    pub fn edit_sketch(&mut self, id: u64) {
+        if self.session.active_sketch == Some(id) {
+            return;
+        }
+        if self.session.active_sketch.is_some() {
+            self.finish_sketch();
+        }
+        self.tool = None;
+        self.dialog = None;
+        let Some(idx) = self.session.doc.feature_index(id) else { return };
+        let marker = self.session.doc.marker;
+        let rolled = marker.is_none_or(|m| m > idx + 1) && self.run("timeline.rollTo", json!({ "position": idx + 1 })).is_ok();
+        let before = self.cam;
+        if self.run("SketchActivate", json!({ "sketch": id })).is_err() {
+            if rolled {
+                self.restore_marker(marker);
+            }
+            return;
+        }
+        self.pre_sketch_marker = rolled.then_some(marker);
+        self.pre_sketch_cam = Some(before);
+        dialogs::look_at_sketch(self);
+    }
+
+    /// Finish the active sketch: stop editing, restore the history marker Edit Sketch moved and
+    /// return to the view from before the sketch.
+    pub fn finish_sketch(&mut self) {
+        self.tool = None;
+        let _ = self.run("SketchStop", json!({}));
+        if let Some(marker) = self.pre_sketch_marker.take() {
+            self.restore_marker(marker);
+        }
+        if let Some(c) = self.pre_sketch_cam.take() {
+            self.animate_to(c);
+        }
+    }
+
+    fn restore_marker(&mut self, marker: Option<usize>) {
+        let _ = self.run("timeline.rollTo", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
     }
 
     /// Everything shown as selected: the selection plus the open dialog's inputs.

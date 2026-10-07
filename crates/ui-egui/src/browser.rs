@@ -145,7 +145,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 row(ui, "sketch", &name, None, false)
                             };
                             if r.double_clicked() {
-                                let _ = app.run("SketchActivate", json!({"sketch": id}));
+                                app.edit_sketch(id);
                             }
                             r.on_hover_text("Double-click to edit");
                         }

@@ -378,8 +378,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::tools::finish(app);
                 } else if app.dialog.is_some() {
                     crate::dialogs::cancel(app);
-                } else {
+                } else if !app.session.selection.is_empty() || app.session.active_sketch.is_none() {
                     let _ = app.run("select.clear", json!({}));
+                } else {
+                    // Nothing left to cancel: Esc finishes the sketch.
+                    app.finish_sketch();
                 }
             }
             Key::S => app.ui.palette_open = true,

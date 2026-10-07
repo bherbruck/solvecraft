@@ -199,7 +199,7 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if let Some(sk) = sketch_of
                     && ui.button("Edit Profile Sketch").clicked()
                 {
-                    let _ = app.run("SketchActivate", json!({ "sketch": sk }));
+                    app.edit_sketch(sk);
                     ui.close();
                 }
                 if ui.button("Rename").clicked() {

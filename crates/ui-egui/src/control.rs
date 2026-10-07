@@ -150,8 +150,11 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                     _ => egui::PointerButton::Primary,
                 };
                 let modifiers = egui::Modifiers { shift: b("shift"), ctrl: b("ctrl"), command: b("ctrl"), ..Default::default() };
-                app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers });
-                app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers });
+                // `double: true` sends two clicks in one frame, which egui reads as a double-click.
+                for _ in 0..if b("double") { 2 } else { 1 } {
+                    app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers });
+                    app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers });
+                }
             }
             ok(Value::Null)
         }
