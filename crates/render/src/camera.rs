@@ -183,10 +183,11 @@ impl Camera {
         let k = 2.0 * self.half_height() / h.max(1.0);
         self.target = self.target - r * (dx * k) + u * (dy * k);
     }
-    /// Orbit by pixel deltas.
+    /// Orbit by pixel deltas. The model follows the cursor: dragging right turns the side
+    /// facing the viewer to the right.
     pub fn orbit(&mut self, dx: f64, dy: f64) {
         let lim = std::f64::consts::FRAC_PI_2 - 1e-4;
-        self.yaw = (self.yaw - dx * 0.008) % std::f64::consts::TAU;
+        self.yaw = (self.yaw + dx * 0.008) % std::f64::consts::TAU;
         self.pitch = (self.pitch + dy * 0.008).clamp(-lim, lim);
     }
     pub fn set_view(&mut self, v: StandardView) {
@@ -226,6 +227,18 @@ mod tests {
         let (o, d) = c.ray(400.0, 300.0, 800.0, 600.0);
         assert!(d.dist(Vec3::Y) < 1e-9, "{d:?}");
         assert!((o - c.target).cross(d).len() < 1e-6);
+    }
+
+    #[test]
+    fn horizontal_orbit_follows_the_cursor() {
+        let mut c = Camera { distance: 50.0, ..Default::default() };
+        c.set_view(StandardView::Front);
+        // Front view looks along +Y, so -Y is the side facing the viewer.
+        let near = Vec3::new(0.0, -1.0, 0.0);
+        let x0 = c.to_screen(near, 800.0, 600.0, 10.0).unwrap().0;
+        c.orbit(20.0, 0.0);
+        let x1 = c.to_screen(near, 800.0, 600.0, 10.0).unwrap().0;
+        assert!(x1 > x0, "dragging right must move the near side right: {x0} -> {x1}");
     }
 
     #[test]
