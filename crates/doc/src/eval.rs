@@ -963,10 +963,14 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         FeatureKind::Sketch { plane, sketch } => {
             let plane = doc.resolve_plane(vals, plane, 0)?;
             let mut sk = sketch.clone();
+            let mut warns = crate::project::refresh_links(doc, vals, st, &plane, &mut sk);
             doc.apply_dimension_values(vals, &mut sk)?;
             let report = solve(&mut sk);
             if !report.ok() {
-                *warning = Some(format!("the sketch constraints conflict ({})", report.failing.join(", ")));
+                warns.insert(0, format!("the sketch constraints conflict ({})", report.failing.join(", ")));
+            }
+            if !warns.is_empty() {
+                *warning = Some(warns.join("; "));
             }
             let profiles = find_profiles(&sk);
             st.sketches.retain(|s| s.feature != f.id);

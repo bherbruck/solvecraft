@@ -9,10 +9,12 @@
 #![forbid(unsafe_code)]
 
 mod linalg;
+mod link;
 mod model;
 mod profiles;
 mod solver;
 
+pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES};
 pub use model::{Constraint, ConstraintKind, Curve, CurveKind, SPoint, Sketch, SketchError};
 pub use profiles::{Profile, find_profiles, merge_regions};
 pub use solver::{SolveReport, SolveStatus, solve};

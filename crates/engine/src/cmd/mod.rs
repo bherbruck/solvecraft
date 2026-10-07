@@ -8,6 +8,7 @@ mod features;
 mod file;
 mod inspect;
 mod sketch;
+mod sketch_project;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -104,6 +105,7 @@ pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
 pub fn command_specs() -> Vec<&'static CommandSpec> {
     let mut v: Vec<&'static CommandSpec> = Vec::new();
     v.extend(sketch::COMMANDS.iter());
+    v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());

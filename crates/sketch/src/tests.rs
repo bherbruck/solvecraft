@@ -301,3 +301,64 @@ fn merging_adjacent_regions() {
     areas.sort_by(f64::total_cmp);
     assert!((areas[0] - 50.0).abs() < 1e-9 && (areas[1] - 200.0).abs() < 1e-9, "{areas:?}");
 }
+
+#[test]
+fn links_update_in_place_rebuild_and_break() {
+    use crate::{LinkGeom, LinkKind, LinkSource};
+    let mut sk = Sketch::new();
+    let src = LinkSource::Origin;
+    let sq = |s: f64| {
+        vec![
+            LinkGeom::Line(v(0.0, 0.0), v(s, 0.0)),
+            LinkGeom::Line(v(s, 0.0), v(s, s)),
+            LinkGeom::Line(v(s, s), v(0.0, s)),
+            LinkGeom::Line(v(0.0, s), v(0.0, 0.0)),
+        ]
+    };
+    let j = sk.add_link(LinkKind::Project, src, &sq(10.0)).unwrap();
+    assert_eq!(sk.link_curves(&j).len(), 4);
+    // Corners are shared: 4 points, all fixed.
+    let pts = sk.link_points(&j);
+    assert_eq!(pts.len(), 4);
+    assert!(pts.iter().all(|p| sk.points[*p].fixed));
+    // A free line dimensioned to a projected corner keeps its constraint across an update.
+    let l = sk.add_line(v(3.0, 3.0), v(5.0, 7.0), None, None, None).unwrap();
+    let (la, _) = match sk.curves[l].kind {
+        CurveKind::Line { a, b } => (a, b),
+        _ => panic!(),
+    };
+    sk.add_constraint(ConstraintKind::Coincident { p: la, q: pts[2] }, None).unwrap();
+    let ids: Vec<String> = sk.link_curves(&j).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    assert!(!sk.update_link(&j, &sq(20.0)).unwrap(), "same shape updates in place");
+    let ids2: Vec<String> = sk.link_curves(&j).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(ids, ids2);
+    assert!(solve(&mut sk).ok());
+    assert!(sk.points[la].pos.dist(v(20.0, 20.0)) < 1e-9);
+    assert_eq!(find_profiles(&sk).len(), 1);
+    // A different shape rebuilds (the coincidence on the old corner goes).
+    assert!(sk.update_link(&j, &[LinkGeom::Circle(v(1.0, 1.0), 4.0)]).unwrap());
+    assert_eq!(sk.link_curves(&j).len(), 1);
+    assert_eq!(sk.constraints.len(), 0);
+    // Linked circles keep their radius in the solver.
+    let c = sk.link_curves(&j)[0];
+    let rep = solve(&mut sk);
+    assert!(rep.curve_determined[c], "{rep:?}");
+    // Breaking the link frees it.
+    sk.break_link(&j).unwrap();
+    assert!(sk.links.is_empty());
+    assert!(sk.curves[c].link.is_none());
+    let rep = solve(&mut sk);
+    assert!(!rep.curve_determined[c]);
+    // Deleting all of a link's curves removes the link.
+    let j2 = sk.add_link(LinkKind::Project, LinkSource::Origin, &[LinkGeom::Line(v(0.0, 0.0), v(1.0, 0.0))]).unwrap();
+    let cs = sk.link_curves(&j2);
+    sk.remove_curves(&cs);
+    assert!(sk.link(&j2).is_none());
+    // Nothing to project is an error, not an empty link.
+    assert!(sk.add_link(LinkKind::Project, LinkSource::Origin, &[LinkGeom::Line(v(0.0, 0.0), v(0.0, 0.0))]).is_err());
+    // Round trip through JSON.
+    let j3 = sk.add_link(LinkKind::Intersect, LinkSource::Axis { name: "X".into() }, &[LinkGeom::Point(v(2.0, 2.0))]).unwrap();
+    let back: Sketch = serde_json::from_str(&serde_json::to_string(&sk).unwrap()).unwrap();
+    assert_eq!(back, sk);
+    assert_eq!(back.link(&j3).unwrap().kind, LinkKind::Intersect);
+}

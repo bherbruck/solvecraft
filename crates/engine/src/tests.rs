@@ -260,6 +260,9 @@ fn hostile_params_never_panic() {
         "format",
         "ascii",
         "measure",
+        "refs",
+        "link",
+        "project_edges",
     ];
     let mut internal = Vec::new();
     for spec in command_specs() {

@@ -65,18 +65,22 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
         .map(|(i, c)| {
             let det = ss.report.curve_determined.get(i).copied().unwrap_or(false);
             let pid = |k: usize| sk.points.get(k).map(|p| p.id.clone()).unwrap_or_default();
-            match c.kind {
+            let mut v = match c.kind {
                 CurveKind::Line { a, b } => json!({"id": c.id, "type": "line", "start": pid(a), "end": pid(b), "start_at": sk.point(a), "end_at": sk.point(b), "construction": c.construction, "fully_constrained": det}),
                 CurveKind::Circle { c: cc, r } => json!({"id": c.id, "type": "circle", "center": pid(cc), "center_at": sk.point(cc), "radius": r, "construction": c.construction, "fully_constrained": det}),
                 CurveKind::Arc { c: cc, a, b } => json!({"id": c.id, "type": "arc", "center": pid(cc), "start": pid(a), "end": pid(b), "center_at": sk.point(cc), "start_at": sk.point(a), "end_at": sk.point(b), "radius": sk.radius(i), "construction": c.construction, "fully_constrained": det}),
+            };
+            if let (Some(l), Some(o)) = (&c.link, v.as_object_mut()) {
+                o.insert("link".into(), json!(l));
             }
+            v
         })
         .collect();
     let points: Vec<Value> = sk
         .points
         .iter()
         .enumerate()
-        .map(|(i, p)| json!({"id": p.id, "at": p.pos, "world": ss.plane.to_world(p.pos), "fixed": p.fixed, "fully_constrained": ss.report.point_determined.get(i).copied().unwrap_or(false)}))
+        .map(|(i, p)| json!({"id": p.id, "at": p.pos, "world": ss.plane.to_world(p.pos), "fixed": p.fixed, "link": p.link, "fully_constrained": ss.report.point_determined.get(i).copied().unwrap_or(false)}))
         .collect();
     let constraints: Vec<Value> = sk
         .constraints
@@ -112,6 +116,7 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
         "points": points,
         "constraints": constraints,
         "profiles": profiles,
+        "links": sk.links,
     }))
 }
 

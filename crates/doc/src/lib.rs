@@ -8,6 +8,7 @@
 mod document;
 mod eval;
 pub mod expr;
+pub mod project;
 
 pub use document::*;
 pub use eval::{FeatureResult, Model, ModelBody, ModelState, SolvedSketch};

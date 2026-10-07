@@ -20,6 +20,10 @@ pub mod colors {
     pub const SKETCH_DONE: Rgb = Rgb(20, 20, 20);
     pub const SKETCH_CONSTRUCTION: Rgb = Rgb(230, 130, 40);
     pub const SKETCH_FIXED: Rgb = Rgb(20, 20, 20);
+    /// Linked (projected) reference geometry.
+    pub const SKETCH_PROJECTED: Rgb = Rgb(150, 60, 190);
+    /// Linked geometry whose reference was lost.
+    pub const SKETCH_LOST: Rgb = Rgb(200, 60, 90);
     pub const PROFILE: Rgb = Rgb(255, 196, 120);
     pub const GRID: Rgb = Rgb(196, 202, 212);
     pub const GRID_MAJOR: Rgb = Rgb(170, 178, 190);
@@ -65,7 +69,9 @@ pub fn grid_step(half_height: f64) -> (f64, f64) {
 pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool]) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
-        let col = if c.construction {
+        let col = if c.link.is_some() {
+            if sk.is_lost_curve(i) { colors::SKETCH_LOST } else { colors::SKETCH_PROJECTED }
+        } else if c.construction {
             colors::SKETCH_CONSTRUCTION
         } else if !active {
             colors::SKETCH_DONE

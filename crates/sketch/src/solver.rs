@@ -86,7 +86,7 @@ fn layout(sk: &Sketch) -> Layout {
         .curves
         .iter()
         .map(|c| match c.kind {
-            CurveKind::Circle { .. } => {
+            CurveKind::Circle { .. } if c.link.is_none() => {
                 n += 1;
                 Some(n - 1)
             }

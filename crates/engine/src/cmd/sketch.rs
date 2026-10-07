@@ -192,6 +192,7 @@ fn edit<T>(
     let id = target_sketch(s, p, cmd)?;
     let mut doc = (*s.doc).clone();
     let mut sk = doc.sketch(id)?.clone();
+    super::sketch_project::refresh(s, &doc, id, &mut sk);
     let out = f(&mut sk, &mut doc)?;
     let (vals, _) = doc.param_values();
     doc.apply_dimension_values(&vals, &mut sk)?;
@@ -356,7 +357,15 @@ fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let id = s.doc_mut().add_feature(FeatureKind::Sketch { plane, sketch: Sketch::new() }, name)?;
     s.active_sketch = Some(id);
     let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
-    Ok(json!({"sketch": id, "name": name}))
+    // Sketching on a face projects the face's edges (unless turned off).
+    let face = p.get("plane").and_then(|v| v.get("face")).and_then(vec3);
+    let mut link = None;
+    if let Some(at) = face
+        && bool_(p, "project_edges").unwrap_or(s.auto_project)
+    {
+        link = super::sketch_project::auto_project_face(s, id, at)?;
+    }
+    Ok(json!({"sketch": id, "name": name, "projected": link}))
 }
 
 fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
@@ -387,6 +396,7 @@ fn finish_sketch(s: &mut Session, _p: &Value) -> Result<Value> {
 
 fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "DrawPolyline";
+    let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let list = p.get("points").and_then(Value::as_array).cloned().ok_or_else(|| bad(cmd, "`points` must be a list"))?;
     if list.len() < 2 || list.len() > 10_000 {
         return Err(bad(cmd, "a line needs 2 or more points"));
@@ -530,6 +540,7 @@ fn radius_arg(p: &Value, cmd: &str) -> Result<f64> {
 
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "CircleCenterRadius";
+    let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let r = radius_arg(p, cmd)?;
     let id = str_(p, "id").map(str::to_string);
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
@@ -582,6 +593,7 @@ fn circle_three(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "ArcThreePoint";
+    let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let id = str_(p, "id").map(str::to_string);
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let (a, b) = (req_parg(sk, p, "start", cmd)?, req_parg(sk, p, "end", cmd)?);
@@ -603,6 +615,7 @@ fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "ArcCenterTwoPoint";
+    let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let id = str_(p, "id").map(str::to_string);
     let sweep = num(p, "sweep");
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
@@ -1126,6 +1139,9 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 points.push(q);
             } else if sk.constraints.iter().any(|c| &c.id == id) {
                 cons.push(id.clone());
+            } else if sk.link(id).is_some() {
+                curves.extend(sk.link_curves(id));
+                points.extend(sk.link_points(id));
             } else {
                 return Err(bad(cmd, format!("unknown sketch entity `{id}`")));
             }

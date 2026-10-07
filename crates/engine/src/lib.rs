@@ -147,6 +147,8 @@ pub struct Session {
     pub log: Vec<String>,
     /// Increments on every document change (views use it to refresh).
     pub revision: u64,
+    /// Project a face's edges into a sketch created on it (Fusion's default; `sketch.auto_project`).
+    pub auto_project: bool,
 }
 
 const MAX_UNDO: usize = 200;
@@ -174,6 +176,7 @@ impl Session {
             path: None,
             log: Vec::new(),
             revision: 1,
+            auto_project: true,
         }
     }
 
@@ -264,6 +267,7 @@ impl Session {
             saved: self.saved.clone(),
             log: Vec::new(),
             revision: self.revision,
+            auto_project: self.auto_project,
         }
     }
 
