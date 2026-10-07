@@ -147,7 +147,7 @@ pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, 
     if geom.is_empty() {
         return Err(DocError::Invalid(format!("the {} projects to nothing on this sketch plane", src.describe())));
     }
-    Ok(Resolved { geom, source, moved })
+    Ok(Resolved { geom: merge_split_circles(geom), source, moved })
 }
 
 /// Re-resolve every link of a sketch (in place). Returns warnings for lost, moved or rebuilt
@@ -255,6 +255,29 @@ pub(crate) fn nearest_face(m: &Mesh, p: Vec3) -> Option<(u32, Vec3, f64)> {
         }
     }
     best
+}
+
+/// A full circle split by a seam comes out as two arcs between the same two points, but some
+/// meshes give the same half twice. That is a circle too: turn the duplicate into the other half
+/// so re-reading an unchanged face always gives the same two complementary arcs.
+fn merge_split_circles(geom: Vec<LinkGeom>) -> Vec<LinkGeom> {
+    const TOL: f64 = 1e-6;
+    let near = |p: Vec2, q: Vec2| p.dist(q) <= TOL * (1.0 + p.len().max(q.len()));
+    let mut out = geom.clone();
+    for i in 0..geom.len() {
+        let Some(LinkGeom::Arc { c, a, b }) = geom.get(i).copied() else { continue };
+        for j in i + 1..geom.len() {
+            if let Some(LinkGeom::Arc { c: c2, a: a2, b: b2 }) = geom.get(j).copied()
+                && near(c, c2)
+                && near(a, a2)
+                && near(b, b2)
+                && let Some(slot) = out.get_mut(j)
+            {
+                *slot = LinkGeom::Arc { c, a: b, b: a };
+            }
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------------------------

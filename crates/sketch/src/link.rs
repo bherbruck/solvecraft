@@ -215,6 +215,54 @@ fn same_shape(a: &LCurve, b: &LCurve) -> bool {
     )
 }
 
+/// Do two curve sets describe the same geometry, regardless of the order the curves come in or
+/// the direction a loop was walked? Lines match with either end first; circles by centre and
+/// radius; arcs by centre and their (start, end) pair; conics by all their points and rho.
+fn same_geometry(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> bool {
+    const TOL: f64 = 1e-6;
+    let near = |p: Vec2, q: Vec2| p.dist(q) <= TOL * (1.0 + p.len().max(q.len()));
+    let close = |x: f64, y: f64| (x - y).abs() <= TOL * (1.0 + x.abs().max(y.abs()));
+    let matches = |(ca, pa): &(LCurve, Vec<Vec2>), (cb, pb): &(LCurve, Vec<Vec2>)| -> bool {
+        if pa.len() != pb.len() {
+            return false;
+        }
+        let all = || pa.iter().zip(pb).all(|(p, q)| near(*p, *q));
+        match (ca, cb) {
+            (LCurve::Line(..), LCurve::Line(..)) => {
+                all() || matches!((pa.as_slice(), pb.as_slice()), ([a0, a1], [b0, b1]) if near(*a0, *b1) && near(*a1, *b0))
+            }
+            (LCurve::Circle(_, ra), LCurve::Circle(_, rb)) => all() && close(*ra, *rb),
+            (LCurve::Arc(..), LCurve::Arc(..)) => all(),
+            (LCurve::Conic(.., ra), LCurve::Conic(.., rb)) => all() && close(*ra, *rb),
+            _ => false,
+        }
+    };
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut used = vec![false; b.len()];
+    a.iter().all(|x| {
+        let hit = b.iter().enumerate().find(|(j, y)| !used.get(*j).copied().unwrap_or(true) && matches(x, y)).map(|(j, _)| j);
+        match hit.and_then(|j| used.get_mut(j)) {
+            Some(u) => {
+                *u = true;
+                true
+            }
+            None => false,
+        }
+    })
+}
+
+/// The point indices a layout curve uses, in order.
+fn curve_points(c: &LCurve) -> Vec<usize> {
+    match *c {
+        LCurve::Line(a, b) => vec![a, b],
+        LCurve::Circle(c, _) => vec![c],
+        LCurve::Arc(c, a, b) => vec![c, a, b],
+        LCurve::Conic(a, b, x, _) => vec![a, b, x],
+    }
+}
+
 impl Sketch {
     pub fn link(&self, id: &str) -> Option<&Link> {
         self.links.iter().find(|l| l.id == id)
@@ -394,6 +442,29 @@ impl Sketch {
                 }
             }
             return Ok(false);
+        }
+        // The same geometry walked in another order or direction (e.g. a face loop re-read after
+        // a rollback) is not a change: keep the entities, and the constraints on them.
+        if let Some(cur) = &cur {
+            let pos = |pi: usize| self.points.get(pi).map(|p| p.pos);
+            let old: Option<Vec<(LCurve, Vec<Vec2>)>> = cur
+                .iter()
+                .map(|c| curve_points(c).into_iter().map(|li| points.get(li).and_then(|pi| pos(*pi))).collect::<Option<Vec<_>>>().map(|ps| (*c, ps)))
+                .collect();
+            let fresh: Option<Vec<(LCurve, Vec<Vec2>)>> = lay
+                .curves
+                .iter()
+                .map(|c| curve_points(c).into_iter().map(|li| lay.pts.get(li).copied()).collect::<Option<Vec<_>>>().map(|ps| (*c, ps)))
+                .collect();
+            let lone_old: Vec<Vec2> = points.iter().filter_map(|pi| pos(*pi)).collect();
+            if let (Some(old), Some(fresh)) = (old, fresh)
+                && lay.lone.is_empty()
+                && points.len() == lay.pts.len()
+                && lone_old.len() == points.len()
+                && same_geometry(&old, &fresh)
+            {
+                return Ok(false);
+            }
         }
         // Rebuild: drop the old entities (constraints on them go too) and make new ones.
         self.drop_link_entities(id);

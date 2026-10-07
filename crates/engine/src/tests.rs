@@ -841,3 +841,18 @@ fn feature_inputs_are_parameters() {
     let back = solvecraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
     assert_eq!(back.features[0].param_names, s.doc.features[0].param_names);
 }
+
+#[test]
+fn rolling_back_and_forward_leaves_no_projection_warnings() {
+    let mut s = Session::default();
+    s.run_script(&crate::sample::script()).unwrap();
+    let warnings = |s: &Session| -> Vec<String> {
+        s.doc.features.iter().filter_map(|f| s.model.result(f.id).and_then(|r| r.warning.clone()).map(|w| format!("{}: {w}", f.name))).collect()
+    };
+    assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
+    for pos in 0..s.doc.features.len() {
+        run(&mut s, "timeline.rollTo", json!({ "position": pos }));
+        run(&mut s, "timeline.rollTo", json!({}));
+        assert!(warnings(&s).is_empty(), "after rolling to {pos}: {:?}", warnings(&s));
+    }
+}
