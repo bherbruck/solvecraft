@@ -525,3 +525,26 @@ fn preview_of_an_edit() {
     assert!(rel(body_volume(&p.after), 12000.0) < 1e-9);
     assert!(Arc::ptr_eq(&doc, &s.doc));
 }
+
+/// Extruding a planar body face (press-pull style): the face boundary becomes a sketch profile.
+#[test]
+fn extrude_a_body_face() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "Extrude", json!({"face": [20, 15, 20], "distance": 15, "operation": "join"}));
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 35.0) < 1e-6);
+    assert!(s.active_sketch.is_none());
+    // A face with a round hole: the hole stays open (a new body: joins of curved bodies on a
+    // shared face are a kernel gap for now).
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    run(&mut s, "CircleCenterRadius", json!({"center": [20, 15], "radius": 5}));
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Extrude", json!({"distance": 20, "operation": "cut"}));
+    let before = volume(&mut s);
+    run(&mut s, "Extrude", json!({"face": [5, 5, 20], "distance": 10, "operation": "new"}));
+    let v = volume(&mut s);
+    assert!(rel(v - before, (1200.0 - PI * 25.0) * 10.0) < 1e-3, "{v} {before}");
+    assert!(s.execute("Extrude", &json!({"face": [500, 5, 20], "distance": 10})).is_err());
+}

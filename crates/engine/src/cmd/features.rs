@@ -13,7 +13,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("extrude")
         .key("E")
-        .params("distance: expr (or through_all: true); taper?: angle expr; sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [[curve ids]] | [{point:[x,y]}]; direction?: positive|negative|symmetric; distance2?; start_offset?; operation?: new|join|cut|intersect; targets?: [body]; name?; body_name?"),
+        .params("distance: expr (or through_all: true); taper?: angle expr; sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [[curve ids]] | [{point:[x,y]}]; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); direction?: positive|negative|symmetric; distance2?; start_offset?; operation?: new|join|cut|intersect; targets?: [body]; name?; body_name?"),
     CommandSpec::new("Revolve", "Revolve", revolve)
         .at("SOLID", "CREATE")
         .icon("revolve")
@@ -178,7 +178,14 @@ fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
 
 fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "Extrude";
-    let sketch = feature_sketch(s, p, cmd)?;
+    // A planar body face extrudes like a profile: its boundary is copied into a sketch on it.
+    let (sketch, face_profile) = match p.get("face").and_then(vec3) {
+        Some(fp) => {
+            let (id, inside) = super::face::sketch_of_face(s, fp, cmd)?;
+            (id, Some(ProfileSel::Points { points: vec![inside] }))
+        }
+        None => (feature_sketch(s, p, cmd)?, None),
+    };
     let through_all = bool_(p, "through_all").unwrap_or(false) || str_(p, "extent").is_some_and(|e| e.eq_ignore_ascii_case("through_all"));
     let distance = if through_all { expr(p, "distance").unwrap_or_else(|| "0".into()) } else { req_expr(cmd, p, "distance")? };
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
@@ -202,7 +209,10 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let kind = FeatureKind::Extrude {
         sketch,
-        profiles: profiles(p, cmd)?,
+        profiles: match face_profile {
+            Some(f) => f,
+            None => profiles(p, cmd)?,
+        },
         extent: Extent { distance, direction, distance2, start_offset, through_all, taper },
         operation: operation(p, cmd)?,
         targets: string_list(p, "targets"),

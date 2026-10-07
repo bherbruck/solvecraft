@@ -3,6 +3,7 @@
 //! as the parity metric (`cargo xtask parity`).
 
 mod edit;
+mod face;
 mod features;
 mod file;
 mod inspect;

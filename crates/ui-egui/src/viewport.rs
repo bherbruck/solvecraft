@@ -901,6 +901,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(tl) = app.tool.as_ref() {
         crate::tools::preview(app, tl, &painter, &proj);
     }
+    crate::canvas::show(app, ui, &painter, &proj);
     view_cube(app, ui, rect);
     nav_bar(app, ui, rect);
     // Status chip.

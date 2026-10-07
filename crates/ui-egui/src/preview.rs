@@ -161,36 +161,75 @@ fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, V
 }
 
 /// Evaluate the commands on the scratch session and build the preview scene.
-/// When the feature itself fails (a boolean the kernel can't do yet), the tool body alone is
-/// shown with the error, so the shape can still be judged.
+/// Features that add or remove a tool body (extrude, revolve, primitives with join, cut or
+/// intersect) show the tool itself: tinted for join, see-through red for cut. Other features
+/// show their result in place of the bodies they change. When the feature fails (a boolean the
+/// kernel can't do yet), the tool body is still shown, with the error.
 pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
-    let (p, error) = match s.preview(cmds) {
-        Ok(p) => (p, None),
-        Err(e) => match as_new_body(cmds).and_then(|alt| s.preview(&alt).ok()) {
-            Some(p) => (p, Some(e.to_string())),
-            None => return Err(e.to_string()),
-        },
-    };
-    let mut b = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build(&p.before, &p.after, colors)))
-        .map_err(|_| "the preview failed".to_string())?;
-    b.error = error;
-    Ok(b)
+    let real = s.preview(cmds);
+    let guard = |f: &dyn Fn() -> Built| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| "the preview failed".to_string());
+    match as_new_body(cmds) {
+        Some((alt, op)) => {
+            let tool = match s.preview(&alt) {
+                Ok(t) => t,
+                Err(e) => return Err(real.err().map_or_else(|| e.to_string(), |r| r.to_string())),
+            };
+            let mut b = guard(&|| build_tool(&tool.before, &tool.after, colors, &op))?;
+            b.error = real.err().map(|e| e.to_string());
+            Ok(b)
+        }
+        None => {
+            let p = real.map_err(|e| e.to_string())?;
+            guard(&|| build(&p.before, &p.after, colors))
+        }
+    }
 }
 
-/// The same commands making a new body instead of joining, cutting or intersecting.
-fn as_new_body(cmds: &[(String, Value)]) -> Option<Vec<(String, Value)>> {
+/// The tool bodies a join/cut/intersect adds: opaque and tinted for join, see-through for cut
+/// (red) and intersect.
+fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> Built {
+    let mut sc = GpuScene::default();
+    for a in after.bodies.iter().filter(|a| before.body(&a.name).is_none()) {
+        let m = a.mesh();
+        for t in &m.triangles {
+            for k in t {
+                let i = *k as usize;
+                if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
+                    match op {
+                        "cut" => sc.xray_tri(p.to_f32(), n.to_f32(), c.removed),
+                        "intersect" => sc.xray_tri(p.to_f32(), n.to_f32(), [c.added[0], c.added[1], c.added[2], c.removed[3]]),
+                        _ => sc.tri(p.to_f32(), n.to_f32(), c.added),
+                    }
+                }
+            }
+        }
+        let edge = if op == "cut" { [c.removed[0], c.removed[1], c.removed[2], 255] } else { c.edge };
+        for (ei, e) in m.edges.iter().enumerate() {
+            if !m.seams.get(ei).copied().unwrap_or(false) {
+                for w in e.windows(2) {
+                    sc.line(w[0].to_f32(), w[1].to_f32(), edge, 1.3, op != "join");
+                }
+            }
+        }
+    }
+    Built { scene: sc, replaced: Vec::new(), error: None }
+}
+
+/// The same commands making a new body instead of joining, cutting or intersecting, and the
+/// operation they had.
+fn as_new_body(cmds: &[(String, Value)]) -> Option<(Vec<(String, Value)>, String)> {
     let mut out = cmds.to_vec();
-    let mut changed = false;
+    let mut changed: Option<String> = None;
     for (_, p) in &mut out {
         let p = if p.get("command").is_some() { p.get_mut("params")? } else { p };
         if let Some(op) = p.get_mut("operation")
-            && op.as_str().is_some_and(|o| o != "new")
+            && let Some(o) = op.as_str().filter(|o| *o != "new").map(str::to_string)
         {
             *op = Value::from("new");
-            changed = true;
+            changed = Some(o);
         }
     }
-    changed.then_some(out)
+    changed.map(|op| (out, op))
 }
 
 fn same(a: &Mesh, b: &Mesh) -> bool {
@@ -331,6 +370,19 @@ mod tests {
         assert!(!b.scene.ghost.is_empty());
         assert_eq!(s.revision, rev);
         assert_eq!(s.undo.len(), undo);
+    }
+
+    /// A cut shows its tool see-through and replaces nothing.
+    #[test]
+    fn cut_preview_scene() {
+        let mut s = plate();
+        s.execute("SketchCreate", &json!({"plane": "XY"})).unwrap();
+        s.execute("CircleCenterRadius", &json!({"center": [20, 15], "radius": 5})).unwrap();
+        s.execute("SketchStop", &json!({})).unwrap();
+        let b = compute(&s, &[("Extrude".into(), json!({"distance": 20, "operation": "cut"}))], colors()).unwrap();
+        assert!(b.replaced.is_empty());
+        assert!(b.scene.tris.is_empty() && !b.scene.xray.is_empty());
+        assert!(b.error.is_none());
     }
 
     /// A new body is all new surface and replaces nothing; a bad value is an error.

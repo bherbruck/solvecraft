@@ -8,6 +8,7 @@ use egui::{Color32, RichText, vec2};
 use serde_json::{Value, json};
 use solvecraft_engine::Sel;
 use solvecraft_engine::Session;
+use solvecraft_engine::doc::expr::Kind as ValueKind;
 use solvecraft_engine::doc::{AxisRef, Direction, FeatureKind, HoleKind, Operation, PlaneRef, ProfileSel};
 use solvecraft_engine::geom::Vec3;
 
@@ -95,6 +96,8 @@ pub struct Dialog {
     pub error: Option<String>,
     /// Editing an existing feature (its id, and the timeline marker to restore afterwards).
     pub editing: Option<(u64, Option<usize>)>,
+    /// Give the on-canvas value box the keyboard (and select its text) on the next frame.
+    pub focus: bool,
     /// Parameters the dialog doesn't show but the command needs (kept when editing).
     pub extra: serde_json::Map<String, Value>,
 }
@@ -115,7 +118,7 @@ fn fits(a: Accept, s: &Sel) -> bool {
 
 impl Dialog {
     fn new(kind: Kind, inputs: Vec<SelInput>) -> Dialog {
-        Dialog { kind, inputs, active: 0, error: None, editing: None, extra: serde_json::Map::new() }
+        Dialog { kind, inputs, active: 0, error: None, editing: None, focus: true, extra: serde_json::Map::new() }
     }
 
     pub fn for_command(app: &SolveApp, id: &str) -> Option<Dialog> {
@@ -125,7 +128,7 @@ impl Dialog {
             "SketchCreate" => Dialog::new(Kind::Sketch, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)]),
             "Extrude" => Dialog::new(
                 Kind::Extrude { distance: "10 mm".into(), direction: 0, operation: usize::from(has_bodies) },
-                vec![SelInput::new("Profiles", PROFILES, true)],
+                vec![SelInput::new("Profiles", PROFILES | PLANAR_FACES, true)],
             ),
             "Revolve" => Dialog::new(
                 Kind::Revolve { angle: "360 deg".into(), operation: 0 },
@@ -226,6 +229,19 @@ impl Dialog {
         )
     }
 
+    /// The main value (shown on the canvas too): label, kind and the expression.
+    pub fn primary(&mut self) -> Option<(&'static str, ValueKind, &mut String)> {
+        Some(match &mut self.kind {
+            Kind::Extrude { distance, .. } => ("Distance", ValueKind::Length, distance),
+            Kind::Revolve { angle, .. } => ("Angle", ValueKind::Angle, angle),
+            Kind::Fillet { radius, chamfer, .. } => (if *chamfer { "Distance" } else { "Radius" }, ValueKind::Length, radius),
+            Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
+            Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
+            Kind::Hole { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
+            _ => return None,
+        })
+    }
+
     pub fn wants_picks(&self) -> bool {
         !self.inputs.is_empty()
     }
@@ -271,10 +287,11 @@ impl Dialog {
         if let Sel::Profile { sketch, .. } = &sel
             && let Some(inp) = self.inputs.get_mut(self.active)
         {
-            inp.items.retain(|x| matches!(x, Sel::Profile { sketch: s2, .. } if s2 == sketch));
+            inp.items.retain(|x| !matches!(x, Sel::Profile { sketch: s2, .. } if s2 != sketch));
         }
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
         inp.toggle(picked);
+        self.focus = true;
         if !inp.multi && !inp.items.is_empty() && self.active + 1 < self.inputs.len() {
             self.advance();
         }
@@ -343,6 +360,12 @@ fn plane_value(s: &Session, sel: Option<&Sel>) -> Option<Value> {
     }
 }
 
+/// A value field; true when Enter was pressed in it.
+fn field(ui: &mut egui::Ui, s: &mut String) -> bool {
+    let r = ui.text_edit_singleline(s);
+    r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+}
+
 fn combo(ui: &mut egui::Ui, id: &str, labels: &[&str], sel: &mut usize) {
     egui::ComboBox::from_id_salt(id).selected_text(labels.get(*sel).copied().unwrap_or("")).width(FIELD_W).show_ui(ui, |ui| {
         for (i, l) in labels.iter().enumerate() {
@@ -408,7 +431,11 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
             } else {
                 RichText::new(format!("{} selected", inp.items.len())).color(t.text)
             };
-            let b = egui::Button::new(text).fill(if active { t.accent_soft } else { Color32::TRANSPARENT }).min_size(vec2(FIELD_W, 22.0));
+            // Not in the Tab order: Tab moves between values.
+            let b = egui::Button::new(text)
+                .fill(if active { t.accent_soft } else { Color32::TRANSPARENT })
+                .min_size(vec2(FIELD_W, 22.0))
+                .sense(egui::Sense::CLICK);
             if ui.add(b).on_hover_text("Click to make this the input that viewport picks go to").clicked() {
                 activate = Some(i);
             }
@@ -445,6 +472,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut keep = true;
     let mut ok = false;
     let mut cancel = false;
+    let mut enter = false;
     let wide = matches!(d.kind, Kind::Params { .. });
     let heading = if d.editing.is_some() { format!("EDIT {}", title(&d.kind)) } else { title(&d.kind).to_string() };
     let frame = egui::Frame::window(&ctx.global_style()).corner_radius(egui::CornerRadius { nw: 6, sw: 6, ne: 0, se: 0 }).shadow(egui::Shadow {
@@ -478,7 +506,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         combo(ui, "ex_dir", &DIR_LABELS, direction);
                         ui.end_row();
                         ui.label("Distance");
-                        ui.text_edit_singleline(distance);
+                        enter |= field(ui, distance);
                         ui.end_row();
                         ui.label("Operation");
                         combo(ui, "ex_op", &OP_LABELS, operation);
@@ -486,7 +514,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     Kind::Revolve { angle, operation } => {
                         ui.label("Angle");
-                        ui.text_edit_singleline(angle);
+                        enter |= field(ui, angle);
                         ui.end_row();
                         ui.label("Operation");
                         combo(ui, "rv_op", &OP_LABELS, operation);
@@ -494,7 +522,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     Kind::Fillet { radius, chamfer, chain } => {
                         ui.label(if *chamfer { "Distance" } else { "Radius" });
-                        ui.text_edit_singleline(radius);
+                        enter |= field(ui, radius);
                         ui.end_row();
                         ui.label("Tangent chain");
                         ui.checkbox(chain, "");
@@ -502,12 +530,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     Kind::Shell { thickness } => {
                         ui.label("Inside thickness");
-                        ui.text_edit_singleline(thickness);
+                        enter |= field(ui, thickness);
                         ui.end_row();
                     }
                     Kind::Draft { angle } => {
                         ui.label("Angle");
-                        ui.text_edit_singleline(angle);
+                        enter |= field(ui, angle);
                         ui.end_row();
                     }
                     Kind::Mirror => {}
@@ -516,32 +544,33 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         combo(ui, "hole_kind", &HOLE_LABELS, kind);
                         ui.end_row();
                         ui.label("Diameter");
-                        ui.text_edit_singleline(diameter);
+                        enter |= field(ui, diameter);
                         ui.end_row();
                         ui.label("Depth");
-                        ui.add(egui::TextEdit::singleline(depth).hint_text("through all"));
+                        let r = ui.add(egui::TextEdit::singleline(depth).hint_text("through all"));
+                        enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.end_row();
                         if *kind == 1 {
                             ui.label("Counterbore Ø");
-                            ui.text_edit_singleline(cb_diameter);
+                            enter |= field(ui, cb_diameter);
                             ui.end_row();
                             ui.label("Counterbore depth");
-                            ui.text_edit_singleline(cb_depth);
+                            enter |= field(ui, cb_depth);
                             ui.end_row();
                         }
                         if *kind == 2 {
                             ui.label("Countersink Ø");
-                            ui.text_edit_singleline(cs_diameter);
+                            enter |= field(ui, cs_diameter);
                             ui.end_row();
                             ui.label("Countersink angle");
-                            ui.text_edit_singleline(cs_angle);
+                            enter |= field(ui, cs_angle);
                             ui.end_row();
                         }
                     }
                     Kind::Primitive { fields, operation, .. } => {
                         for (k, v) in fields.iter_mut() {
                             ui.label(*k);
-                            ui.text_edit_singleline(v);
+                            enter |= field(ui, v);
                             ui.end_row();
                         }
                         ui.label("Operation");
@@ -617,6 +646,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             });
         });
+    // Keyboard: Enter applies (from a value field, or with nothing focused), Esc cancels.
+    let (enter_free, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+    let nothing_focused = ctx.memory(|m| m.focused().is_none());
+    let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::new("sc_canvas_value")));
+    if d.previews() && (enter || canvas_enter || (enter_free && nothing_focused)) {
+        ok = true;
+    }
+    if esc {
+        cancel = true;
+    }
     // A plane picked for a new sketch starts it right away.
     if matches!(d.kind, Kind::Sketch)
         && let Some(sel) = d.inputs.first().and_then(|i| i.items.first()).cloned()
@@ -768,12 +807,28 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     };
     let (cmd, params): (&str, Value) = match &d.kind {
         Kind::Extrude { distance, direction, operation } => {
-            need(0, "profiles")?;
+            need(0, "profiles or a planar face")?;
+            let common = json!({"distance": distance, "direction": DIRS.get(*direction).copied().unwrap_or("positive"), "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            let with = |extra: Value| -> Value {
+                let mut p = common.clone();
+                if let (Value::Object(m), Value::Object(e)) = (&mut p, extra) {
+                    m.extend(e);
+                    for (k, v) in &d.extra {
+                        m.entry(k.clone()).or_insert_with(|| v.clone());
+                    }
+                }
+                p
+            };
+            let mut out = Vec::new();
             let (sketch, idx) = profiles();
-            (
-                "Extrude",
-                json!({"sketch": sketch, "profiles": idx, "distance": distance, "direction": DIRS.get(*direction).copied().unwrap_or("positive"), "operation": OPS.get(*operation).copied().unwrap_or("new")}),
-            )
+            if !sketch.is_null() {
+                out.push(("Extrude".to_string(), with(json!({"sketch": sketch, "profiles": idx}))));
+            }
+            // Each planar body face extrudes on its own.
+            for p in face_points(0) {
+                out.push(("Extrude".to_string(), with(json!({ "face": p }))));
+            }
+            return Ok(out);
         }
         Kind::Revolve { angle, operation } => {
             need(0, "profiles")?;

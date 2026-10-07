@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod browser;
+pub mod canvas;
 pub mod control;
 pub mod dialogs;
 pub mod gpu;

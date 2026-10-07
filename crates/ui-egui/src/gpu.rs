@@ -29,6 +29,8 @@ pub struct GpuScene {
     /// Translucent triangles pushed slightly back in depth, so they only show where nothing
     /// coincides with them (removed material in a preview).
     pub ghost: Vec<u8>,
+    /// Translucent triangles drawn through everything (a cut's tool body).
+    pub xray: Vec<u8>,
 }
 
 impl GpuScene {
@@ -49,6 +51,12 @@ impl GpuScene {
             self.ghost.extend_from_slice(&v.to_le_bytes());
         }
         self.ghost.extend_from_slice(&c);
+    }
+    pub fn xray_tri(&mut self, p: [f32; 3], n: [f32; 3], c: [u8; 4]) {
+        for v in p.iter().chain(&n) {
+            self.xray.extend_from_slice(&v.to_le_bytes());
+        }
+        self.xray.extend_from_slice(&c);
     }
     pub fn line(&mut self, a: [f32; 3], b: [f32; 3], c: [u8; 4], width: f32, on_top: bool) {
         let out = if on_top { &mut self.overlay } else { &mut self.lines };
@@ -93,6 +101,7 @@ struct Batches {
     lines: Option<Batch>,
     overlays: Option<Batch>,
     ghost: Option<Batch>,
+    xray: Option<Batch>,
 }
 
 impl Batches {
@@ -106,6 +115,7 @@ impl Batches {
             self.lines = upload(device, "sc_lines", &sc.lines, LINE_SIZE);
             self.overlays = upload(device, "sc_overlay", &sc.overlay, LINE_SIZE);
             self.ghost = upload(device, "sc_ghost", &sc.ghost, TRI_SIZE);
+            self.xray = upload(device, "sc_xray", &sc.xray, TRI_SIZE);
             self.key = Some(key);
         }
     }
@@ -117,6 +127,7 @@ struct Resources {
     tri_hl: wgpu::RenderPipeline,
     trans: wgpu::RenderPipeline,
     ghost: wgpu::RenderPipeline,
+    xray: wgpu::RenderPipeline,
     line: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
@@ -309,6 +320,7 @@ impl Resources {
             tri_hl: pipeline("sc_tris_hl", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             trans: pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             ghost: pipeline("sc_ghost", "vs_ghost", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+            xray: pipeline("sc_xray", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             line: pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             overlay: pipeline("sc_overlay", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             uniform,
@@ -392,6 +404,7 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         tris(pass, &res.ghost, &pv.ghost);
         tris(pass, &res.trans, &m.trans);
         tris(pass, &res.trans, &h.trans);
+        tris(pass, &res.xray, &pv.xray);
         lines(pass, &res.overlay, &m.overlays);
         lines(pass, &res.overlay, &h.overlays);
     }

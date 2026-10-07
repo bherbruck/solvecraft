@@ -54,6 +54,8 @@ pub struct Tokens {
     // ---- bodies and live previews ----
     pub body: Color32,
     pub body_edge: Color32,
+    /// Command manipulators (direction arrows, handles).
+    pub manipulator: Color32,
     /// New surface in a feature preview.
     pub preview_add: Color32,
     /// Removed material in a feature preview (translucent).
@@ -104,6 +106,7 @@ impl Tokens {
             construction_plane: Color32::from_rgba_unmultiplied_const(249, 184, 134, 70),
             body: Color32::from_rgb(176, 186, 198),
             body_edge: Color32::from_rgb(40, 44, 52),
+            manipulator: Color32::from_rgb(40, 110, 220),
             preview_add: Color32::from_rgb(112, 160, 226),
             preview_cut: Color32::from_rgba_unmultiplied_const(232, 84, 44, 110),
             box_window: Color32::from_rgb(38, 120, 218),
