@@ -380,7 +380,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(i) = app.docs.closing else { return };
     let name = tabs_info(app).get(i).map(|x| x.0.clone()).unwrap_or_default();
     let mut answer: Option<u8> = None;
-    egui::Window::new("Save changes?")
+    crate::frame::window(ctx, "Save changes?", crate::frame::Width::Normal)
         .id(egui::Id::new("sc_close_prompt"))
         .collapsible(false)
         .resizable(false)

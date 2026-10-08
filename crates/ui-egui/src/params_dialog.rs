@@ -125,10 +125,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let t = Tokens::get();
     let mut open = true;
     let all = rows(app);
-    egui::Window::new(RichText::new("PARAMETERS").strong().size(13.0))
+    crate::frame::window(ctx, RichText::new("PARAMETERS").strong().size(13.0), crate::frame::Width::Wide)
         .id(egui::Id::new("sc_params_dialog"))
         .open(&mut open)
-        .default_width(820.0)
+        .default_width(740.0)
         .default_height(520.0)
         .resizable(true)
         .collapsible(false)

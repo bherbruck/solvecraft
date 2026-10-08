@@ -2,7 +2,7 @@
 //! date, licences, attributions, fonts), the keyboard shortcuts (read only), and Report an Issue,
 //! which copies diagnostic information to the clipboard.
 
-use egui::{RichText, pos2, vec2};
+use egui::{RichText, vec2};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -91,12 +91,10 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let t = Tokens::get();
     let mut open = true;
-    let screen = ctx.content_rect();
-    egui::Window::new("About SolveCraft")
+    crate::frame::window(ctx, "About SolveCraft", crate::frame::Width::Normal)
         .id(egui::Id::new("sc_about"))
         .open(&mut open)
-        .default_pos(pos2(screen.center().x - 260.0, screen.top() + 90.0))
-        .default_size(vec2(540.0, 560.0))
+        .default_size(vec2(440.0, 560.0))
         .show(ctx, |ui| {
             ui.label(RichText::new("SolveCraft").size(22.0).strong());
             ui.label(format!("Version {VERSION} · commit {COMMIT} · built {BUILD_DATE}"));

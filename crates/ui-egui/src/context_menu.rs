@@ -1453,9 +1453,8 @@ fn show_props(app: &mut SolveApp, ctx: &egui::Context) {
     let Some((title, v)) = app.menu.props.clone() else { return };
     let mut open = true;
     let f = |x: &Value, k: &str| x.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
-    egui::Window::new(format!("Properties: {title}"))
+    crate::frame::window(ctx, format!("Properties: {title}"), crate::frame::Width::Normal)
         .id(egui::Id::new("sc_props"))
-        .default_pos(ctx.content_rect().center() - vec2(160.0, 140.0))
         .open(&mut open)
         .resizable(false)
         .collapsible(false)

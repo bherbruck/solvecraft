@@ -25,6 +25,7 @@ pub mod dialogs_sheet;
 pub mod dim_view;
 pub mod documents;
 pub mod drag_snap;
+pub mod frame;
 pub mod gizmo;
 pub mod gpu;
 pub mod help;

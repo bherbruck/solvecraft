@@ -94,7 +94,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let (deleted, fails) = (list("deleted"), list("would_fail"));
     let mut answer: Option<bool> = None;
-    egui::Window::new("Delete")
+    crate::frame::window(ctx, "Delete", crate::frame::Width::Normal)
         .id(egui::Id::new("sc_delete_confirm"))
         .collapsible(false)
         .resizable(false)

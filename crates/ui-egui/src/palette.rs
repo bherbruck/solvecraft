@@ -95,8 +95,9 @@ pub fn popup(app: &mut SolveApp, ctx: &egui::Context) {
     let mut picked: Option<&'static str> = None;
     let t = Tokens::get();
     let center = ctx.content_rect().center();
-    egui::Window::new("Search commands")
+    crate::frame::window(ctx, "Search commands", crate::frame::Width::Normal)
         .id(egui::Id::new("sc_search"))
+        .pivot(egui::Align2::LEFT_TOP)
         .fixed_pos(egui::pos2(center.x - 200.0, 150.0))
         .fixed_size(vec2(400.0, 340.0))
         .collapsible(false)

@@ -205,10 +205,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut open = true;
     let sections = ["General", "Navigation", "Display", "Sketch", "Selection"];
     let before = app.preferences.clone();
-    egui::Window::new("Preferences")
+    crate::frame::window(ctx, "Preferences", crate::frame::Width::Wide)
         .id(egui::Id::new("sc_prefs"))
         .open(&mut open)
-        .default_pos(egui::pos2(300.0, 120.0))
         .default_size([560.0, 360.0])
         .show(ctx, |ui| {
             ui.horizontal_top(|ui| {

@@ -200,71 +200,70 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut look = false;
     let mut finish = false;
     let has_curves = !selected_curves(app).is_empty();
-    egui::Window::new("SKETCH PALETTE")
-        .id(egui::Id::new("sc_sketch_palette"))
-        .title_bar(false)
-        .frame(frame)
-        .pivot(egui::Align2::RIGHT_TOP)
-        .fixed_pos(anchor)
-        .constrain(false)
-        .auto_sized()
-        .collapsible(false)
-        .show(ctx, |ui| {
-            ui.set_width(WIDTH);
-            ui.horizontal(|ui| {
-                let folded = FOLDED.with(Cell::get);
-                if ui.add(egui::Button::new(RichText::new(if folded { "+" } else { "−" }).size(14.0)).frame(false)).clicked() {
-                    FOLDED.with(|f| f.set(!folded));
-                }
-                ui.label(RichText::new("SKETCH PALETTE").strong().size(12.5));
-            });
-            if FOLDED.with(Cell::get) {
-                return;
+    crate::frame::docked(
+        "SKETCH PALETTE",
+        egui::Id::new("sc_sketch_palette"),
+        anchor,
+        ctx.content_rect().bottom() - anchor.y - 8.0,
+        crate::frame::Width::Normal,
+    )
+    .frame(frame)
+    .show(ctx, |ui| {
+        ui.set_width(WIDTH);
+        ui.horizontal(|ui| {
+            let folded = FOLDED.with(Cell::get);
+            if ui.add(egui::Button::new(RichText::new(if folded { "+" } else { "−" }).size(14.0)).frame(false)).clicked() {
+                FOLDED.with(|f| f.set(!folded));
             }
-            let ofold = OPTIONS_FOLDED.with(Cell::get);
-            if ui.add(egui::Button::new(RichText::new(format!("{} Options", if ofold { "+" } else { "−" })).size(12.0)).frame(false)).clicked() {
-                OPTIONS_FOLDED.with(|f| f.set(!ofold));
-            }
-            if !ofold {
-                egui::Grid::new("sc_palette_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
-                    ui.label("Linetype");
-                    ui.horizontal(|ui| {
-                        // With a selection: convert it; without: the mode new curves are drawn in.
-                        let current = mode(app);
-                        for (i, (label, tip)) in [("—", "Normal"), ("- -", "Construction"), ("-·-", "Centerline")].iter().enumerate() {
-                            let on = !has_curves && current == i as u8;
-                            let tip = if has_curves { format!("Make the selection {tip}") } else { format!("Draw {tip} curves") };
-                            if ui.add(egui::Button::new(*label).selected(on).min_size(vec2(30.0, 20.0))).on_hover_text(tip).clicked() {
-                                linetype = Some(i as u8);
-                            }
+            ui.label(RichText::new("SKETCH PALETTE").strong().size(12.5));
+        });
+        if FOLDED.with(Cell::get) {
+            return;
+        }
+        let ofold = OPTIONS_FOLDED.with(Cell::get);
+        if ui.add(egui::Button::new(RichText::new(format!("{} Options", if ofold { "+" } else { "−" })).size(12.0)).frame(false)).clicked() {
+            OPTIONS_FOLDED.with(|f| f.set(!ofold));
+        }
+        if !ofold {
+            egui::Grid::new("sc_palette_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
+                ui.label("Linetype");
+                ui.horizontal(|ui| {
+                    // With a selection: convert it; without: the mode new curves are drawn in.
+                    let current = mode(app);
+                    for (i, (label, tip)) in [("—", "Normal"), ("- -", "Construction"), ("-·-", "Centerline")].iter().enumerate() {
+                        let on = !has_curves && current == i as u8;
+                        let tip = if has_curves { format!("Make the selection {tip}") } else { format!("Draw {tip} curves") };
+                        if ui.add(egui::Button::new(*label).selected(on).min_size(vec2(30.0, 20.0))).on_hover_text(tip).clicked() {
+                            linetype = Some(i as u8);
                         }
-                    });
-                    ui.end_row();
-                    ui.label("Look At");
-                    if ui.button("Look At").clicked() {
-                        look = true;
-                    }
-                    ui.end_row();
-                    for (k, label) in TOGGLES {
-                        // The label is part of the checkbox: clicking it toggles too.
-                        let mut on = shown(k);
-                        if ui.checkbox(&mut on, label).changed() {
-                            set = Some((k.to_string(), on));
-                        }
-                        ui.end_row();
                     }
                 });
-            }
-            ui.add_space(4.0);
-            ui.label(RichText::new(dof_line.as_str()).color(if ok { t.sketch_accent } else { t.text_dim }));
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.add_space(WIDTH - 100.0);
-                if ui.add(egui::Button::new(RichText::new("Finish Sketch").color(Color32::WHITE)).fill(t.accent)).clicked() {
-                    finish = true;
+                ui.end_row();
+                ui.label("Look At");
+                if ui.button("Look At").clicked() {
+                    look = true;
+                }
+                ui.end_row();
+                for (k, label) in TOGGLES {
+                    // The label is part of the checkbox: clicking it toggles too.
+                    let mut on = shown(k);
+                    if ui.checkbox(&mut on, label).changed() {
+                        set = Some((k.to_string(), on));
+                    }
+                    ui.end_row();
                 }
             });
+        }
+        ui.add_space(4.0);
+        ui.label(RichText::new(dof_line.as_str()).color(if ok { t.sketch_accent } else { t.text_dim }));
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add_space(WIDTH - 100.0);
+            if ui.add(egui::Button::new(RichText::new("Finish Sketch").color(Color32::WHITE)).fill(t.accent)).clicked() {
+                finish = true;
+            }
         });
+    });
     if let Some((k, on)) = set {
         let mut p = serde_json::Map::new();
         p.insert(k, Value::Bool(on));

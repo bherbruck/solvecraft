@@ -139,9 +139,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let t = Tokens::get();
     let mut open = true;
     let mut action: Option<(String, &str)> = None;
-    egui::Window::new("Keyboard Shortcuts")
+    crate::frame::window(ctx, "Keyboard Shortcuts", crate::frame::Width::Wide)
         .id(egui::Id::new("sc_keymap"))
-        .default_pos(egui::pos2(270.0, 140.0))
         .open(&mut open)
         .default_size([520.0, 480.0])
         .show(ctx, |ui| {

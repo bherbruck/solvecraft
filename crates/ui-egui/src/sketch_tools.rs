@@ -1022,18 +1022,22 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
 fn text_entry(app: &mut SolveApp, ctx: &egui::Context) {
     let Some((at, mut text)) = TEXT.with(|t| t.borrow_mut().take()) else { return };
     let mut done = None;
-    egui::Window::new("Text").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0)).show(ctx, |ui| {
-        let r = ui.text_edit_singleline(&mut text);
-        r.request_focus();
-        ui.horizontal(|ui| {
-            if ui.button("OK").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                done = Some(true);
-            }
-            if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                done = Some(false);
-            }
+    crate::frame::window(ctx, "Text", crate::frame::Width::Normal)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            let r = ui.text_edit_singleline(&mut text);
+            r.request_focus();
+            ui.horizontal(|ui| {
+                if ui.button("OK").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    done = Some(true);
+                }
+                if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    done = Some(false);
+                }
+            });
         });
-    });
     match done {
         Some(true) => {
             if !text.trim().is_empty() {

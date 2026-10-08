@@ -820,8 +820,9 @@ fn canvas_panel(app: &mut SolveApp, ctx: &egui::Context) {
     let mut edit: Option<Value> = None;
     let mut done = false;
     let title = if m.calibrate { format!("Calibrate: {}", c.name) } else { format!("Edit Canvas: {}", c.name) };
-    egui::Window::new(title)
+    crate::frame::window(ctx, title, crate::frame::Width::Normal)
         .id(egui::Id::new("sc_canvas_panel"))
+        .pivot(egui::Align2::LEFT_TOP)
         .default_pos(panel_pos(app))
         .open(&mut open)
         .resizable(false)
@@ -1318,8 +1319,9 @@ fn occurrence_panel(app: &mut SolveApp, ctx: &egui::Context) {
     let mut open = true;
     let mut action: Option<&str> = None;
     let before = (m.translate, m.angle_deg);
-    egui::Window::new(format!("Move: {name}"))
+    crate::frame::window(ctx, format!("Move: {name}"), crate::frame::Width::Normal)
         .id(egui::Id::new("sc_occ_move"))
+        .pivot(egui::Align2::LEFT_TOP)
         .default_pos(panel_pos(app))
         .open(&mut open)
         .resizable(false)
@@ -1476,7 +1478,7 @@ fn capture_prompt(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let n = app.session.pending_moves.len();
     let mut answer: Option<&str> = None;
-    egui::Window::new("Capture Position")
+    crate::frame::window(ctx, "Capture Position", crate::frame::Width::Normal)
         .id(egui::Id::new("sc_capture_prompt"))
         .collapsible(false)
         .resizable(false)
@@ -1585,8 +1587,9 @@ fn redefine_panel(app: &mut SolveApp, ctx: &egui::Context) {
     let face = app.session.selection.iter().find_map(|s| if let Sel::Face { point, .. } = s { Some(*point) } else { None });
     let mut open = true;
     let mut pick: Option<Value> = None;
-    egui::Window::new(format!("Redefine Sketch Plane: {name}"))
+    crate::frame::window(ctx, format!("Redefine Sketch Plane: {name}"), crate::frame::Width::Normal)
         .id(egui::Id::new("sc_redefine"))
+        .pivot(egui::Align2::LEFT_TOP)
         .default_pos(panel_pos(app))
         .open(&mut open)
         .resizable(false)

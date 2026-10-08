@@ -57,7 +57,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let dir = app.autosave.as_ref().map(|a| a.dir.clone()).or_else(recovery::default_dir);
     let mut act: Option<(Entry, bool)> = None;
     let mut later = false;
-    egui::Window::new(RichText::new("Recover unsaved design?").strong().size(13.0))
+    crate::frame::window(ctx, RichText::new("Recover unsaved design?").strong().size(13.0), crate::frame::Width::Normal)
         .collapsible(false)
         .resizable(false)
         .min_width(420.0)
