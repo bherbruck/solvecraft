@@ -19,6 +19,7 @@ pub mod dialogs_appearance;
 pub mod dialogs_assembly;
 pub mod dialogs_motion;
 pub mod dialogs_move;
+pub mod dialogs_parts;
 pub mod dialogs_plastic;
 pub mod dialogs_sheet;
 pub mod dim_view;

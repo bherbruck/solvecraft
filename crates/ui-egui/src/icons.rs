@@ -856,6 +856,15 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.arc(16.0, 11.5, 4.5, -1.57, 1.57, a);
             pen.line(&[(16.0, 7.0), (8.0, 7.0)], a);
         }
+        // Fastener: a socket head screw seen from the side.
+        "fastener" => {
+            pen.poly(&[(6.0, 3.0), (18.0, 3.0), (18.0, 9.0), (6.0, 9.0)], pen.fill, ink);
+            pen.line(&[(10.0, 3.0), (10.0, 6.0), (14.0, 6.0), (14.0, 3.0)], a);
+            pen.poly(&[(9.0, 9.0), (15.0, 9.0), (15.0, 21.0), (9.0, 21.0)], pen.fill.gamma_multiply(0.85), ink);
+            for y in [12.0, 15.0, 18.0] {
+                pen.line(&[(9.0, y), (15.0, y + 1.5)], ink);
+            }
+        }
         "fold" => {
             pen.line(&[(2.0, 18.0), (12.0, 18.0)], ink);
             pen.line(&[(12.0, 18.0), (19.0, 6.0)], a);

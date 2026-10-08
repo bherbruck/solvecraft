@@ -26,7 +26,16 @@ const TYPE_LABELS: [&str; 7] = ["Rigid", "Revolute", "Slider", "Cylindrical", "P
 /// What a joint origin input accepts (snaps on faces, edges and vertices).
 const SNAPS: u16 = FACES | EDGES | VERTICES;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
-const MOVES: [&str; 6] = ["JointAssembleCmdNew", "JointAsBuiltCmd", "FusionMoveJointsCommand", "joint.edit", "joint.limits", "RigidGroupCmd"];
+const MOVES: [&str; 8] = [
+    "JointAssembleCmdNew",
+    "JointAsBuiltCmd",
+    "FusionMoveJointsCommand",
+    "joint.edit",
+    "joint.limits",
+    "RigidGroupCmd",
+    "parts.insert",
+    "FusionFastenersCommand",
+];
 
 #[derive(Clone, Debug)]
 pub enum Asm {

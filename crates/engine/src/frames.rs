@@ -64,6 +64,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "FusionCurvatureCombAnalysisCommand" | "FusionMinimumRadiusAnalysisCommand" | "FusionIsoCurveAnalysisCommand" => {
             &[("edges", Picks), ("faces", Picks)]
         }
+        "parts.insert" | "FusionFastenersCommand" => &[("at", Pick), ("point", Make), ("direction", Dir)],
         "AppearanceCommand" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
         "FusionMoveCommand" => &[("bodies", Body), ("translate", Dir), ("axis", Dir), ("origin", Make)],
         "FusionCombineCommand" => &[("target", Body), ("tools", Body)],
