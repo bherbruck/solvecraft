@@ -1,7 +1,7 @@
 use solvecraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use super::*;
-use crate::{BoolOp, boolean, box_solid, cylinder, fillet, measure, revolve, sphere, step_export, torus};
+use crate::{BoolOp, boolean, box_solid, cylinder, extrude, fillet, measure, revolve, sphere, step_export, torus};
 
 fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-9)
@@ -501,4 +501,24 @@ fn tee_fillet_exports_byte_identical() {
     for _ in 0..2 {
         assert!(export() == first, "export differs between runs");
     }
+}
+
+/// A plate with a hole glued to its mirror image: the faces split at the mirror plane and the
+/// hole's B-spline halves are written as one plane or one cylinder each, as other systems
+/// count them.
+#[test]
+fn glued_halves_export_as_whole_faces() {
+    let half = Region2 {
+        outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(30.0, 0.0), Vec2::new(30.0, 40.0), Vec2::new(0.0, 40.0)]),
+        holes: vec![Loop2::circle(Vec2::new(15.0, 20.0), 4.0).reversed()],
+    };
+    let right = extrude(&Plane::XY, &[half], 0.0, 10.0).unwrap().pop().unwrap();
+    let left = crate::transform_matrix(&right, [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]).unwrap();
+    let b = boolean(&right, &left, BoolOp::Union).unwrap().unwrap();
+    let text = step_export(&[&b], "t").unwrap();
+    assert!(!text.contains("B_SPLINE_SURFACE"), "{text}");
+    assert_eq!(text.matches("CYLINDRICAL_SURFACE(").count(), 2);
+    let imp = round_trip(&b);
+    // Box sides and caps (6) and two holes.
+    assert_eq!(imp.bodies[0].file_faces, 8);
 }

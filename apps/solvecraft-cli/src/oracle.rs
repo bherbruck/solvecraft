@@ -152,11 +152,11 @@ fn step_export_check(s: &solvecraft_engine::Session, volume: f64) -> (bool, Stri
             let v: f64 = m.iter().map(|x| x.volume).sum();
             let (a, a0): (f64, f64) = (m.iter().map(|x| x.area).sum(), m0.iter().map(|x| x.area).sum());
             let faces: usize = imp.bodies.iter().map(|b| b.file_faces).sum();
-            // Pieces of one analytic surface are written as one face: compare with the merged count.
             let faces0: usize = m0.iter().map(|x| x.merged.faces).sum();
             let close = |x: f64, y: f64| (x - y).abs() <= REL_TOL * y.abs().max(1.0);
             let faces_raw: usize = st.bodies.iter().map(|b| b.body.face_count()).sum();
-            let ok = close(v, volume) && close(a, a0) && faces <= faces_raw && faces >= faces0.min(faces_raw);
+            // (Fewer is fine: pieces of one plane, cylinder, cone, sphere or torus are written as one face.)
+            let ok = close(v, volume) && close(a, a0) && faces <= faces_raw;
             (ok, format!("re-imported volume {v:.3} (was {volume:.3}), area {a:.3} (was {a0:.3}), faces {faces} (was {faces0})"))
         }
         Err(e) => (false, format!("import: {e}")),

@@ -692,7 +692,7 @@ fn revolved_oriented(curve: mt::Curve, o: mt::Point3, axis: mt::Vector3, u: f64,
     revolved(curve, o, -axis)
 }
 
-fn bspline_surface(cx: &Ctx, e: &Entity) -> R<mt::Surface> {
+pub(crate) fn bspline_surface(cx: &Ctx, e: &Entity) -> R<mt::Surface> {
     let (base, knots, kind): (Vec<Param>, Option<[Option<&Param>; 4]>, &str) = if e.is_complex() {
         let b = e.record("B_SPLINE_SURFACE").ok_or("complex surface without B_SPLINE_SURFACE")?;
         let mut base = vec![Param::Str(String::new())];

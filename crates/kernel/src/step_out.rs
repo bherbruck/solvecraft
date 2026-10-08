@@ -149,6 +149,9 @@ struct Out {
     shared: HashMap<String, u64>,
     /// Surfaces written with the opposite normal to the one they replace.
     flipped: std::collections::HashSet<u64>,
+    /// B-spline cylinder sheets of the body being copied under merged faces, with the direction
+    /// of the cylinder's parameter seam.
+    merged: HashMap<u64, V3>,
 }
 
 impl Out {
@@ -263,6 +266,25 @@ impl Out {
                 map.insert(id, new);
                 continue;
             }
+            // Flat B-spline sheets are planes; cylindrical ones become cylinders when their
+            // pieces were merged into one face (a lone piece stays as written).
+            if !done
+                && let Some(a) = planar_bspline(ex, e).map(|kind| Analytic { kind, flip: false }).or_else(|| {
+                    let seam = self.merged.get(&id)?;
+                    let mut a = cylindrical_bspline(ex, e)?;
+                    if let AnalyticKind::Cylinder { x, .. } = &mut a.kind {
+                        *x = *seam;
+                    }
+                    Some(a)
+                })
+            {
+                let new = self.write_analytic(&a);
+                if a.flip {
+                    self.flipped.insert(new);
+                }
+                map.insert(id, new);
+                continue;
+            }
             if !done {
                 stack.push((id, true));
                 let mut refs = Vec::new();
@@ -316,12 +338,14 @@ impl Out {
 }
 
 /// An analytic surface found behind a surface of revolution.
+#[derive(Clone, Copy)]
 struct Analytic {
     kind: AnalyticKind,
     /// The analytic surface's normal is opposite to the revolution's (ISO 10303-42 normals).
     flip: bool,
 }
 
+#[derive(Clone, Copy)]
 enum AnalyticKind {
     Plane {
         o: V3,
@@ -543,6 +567,114 @@ fn face_normal_sign(a: &AnalyticKind, z_written: V3, flip: bool, sense: bool) ->
     base * if flip != sense { 1.0 } else { -1.0 }
 }
 
+/// A B-spline surface that is flat (a sheet swept along a line, as truck makes for extrusions):
+/// the plane with the surface's own normal, so it can be written as a PLANE.
+fn planar_bspline(ex: &p21::Exchange, e: &p21::Entity) -> Option<AnalyticKind> {
+    use truck_modeling::{BoundedSurface, ParametricSurface, ParametricSurface3D};
+    if !(e.has("B_SPLINE_SURFACE") || e.name() == "B_SPLINE_SURFACE_WITH_KNOTS") {
+        return None;
+    }
+    let cx = crate::step_in::Ctx { ex, len: 1.0, ang: 1.0, tol: 1e-6 };
+    let s = crate::step_in::geom::bspline_surface(&cx, e).ok()?;
+    let (ctrl, (u0, u1), (v0, v1)) = match &s {
+        truck_modeling::Surface::BSplineSurface(b) => {
+            (b.control_points().iter().flatten().map(|p| [p.x, p.y, p.z]).collect::<Vec<V3>>(), b.range_tuple().0, b.range_tuple().1)
+        }
+        truck_modeling::Surface::NurbsSurface(n) => {
+            let pts = n.non_rationalized().control_points().iter().flatten().map(|p| [p.x / p.w, p.y / p.w, p.z / p.w]).collect::<Vec<V3>>();
+            let (ru, rv) = n.range_tuple();
+            (pts, ru, rv)
+        }
+        _ => return None,
+    };
+    let (um, vm) = ((u0 + u1) / 2.0, (v0 + v1) / 2.0);
+    let n = s.normal(um, vm);
+    let z = unit([n.x, n.y, n.z])?;
+    let o = s.subs(um, vm);
+    let o = [o.x, o.y, o.z];
+    let du = s.uder(um, vm);
+    let x = unit(sub([du.x, du.y, du.z], mul(z, dot([du.x, du.y, du.z], z))))?;
+    let size = ctrl.iter().map(|p| norm(sub(*p, o))).fold(0.0, f64::max);
+    // Every control point on the plane (a flat net gives a flat surface, rational or not).
+    if ctrl.iter().any(|p| dot(sub(*p, o), z).abs() > 1e-9 * (1.0 + size)) {
+        return None;
+    }
+    Some(AnalyticKind::Plane { o, z, x })
+}
+
+/// A B-spline surface that is a circular cylinder (a circle or arc swept along a line, as truck
+/// makes for extruded round profiles), with its normal direction relative to the cylinder's
+/// outward normal.
+fn cylindrical_bspline(ex: &p21::Exchange, e: &p21::Entity) -> Option<Analytic> {
+    use truck_modeling::{ParametricSurface, ParametricSurface3D};
+    if !(e.has("B_SPLINE_SURFACE") || e.name() == "B_SPLINE_SURFACE_WITH_KNOTS") {
+        return None;
+    }
+    let cx = crate::step_in::Ctx { ex, len: 1.0, ang: 1.0, tol: 1e-6 };
+    let s = crate::step_in::geom::bspline_surface(&cx, e).ok()?;
+    let (Some((u0, u1)), Some((v0, v1))) = s.try_range_tuple() else { return None };
+    let at = |u: f64, v: f64| {
+        let p = s.subs(u, v);
+        [p.x, p.y, p.z]
+    };
+    // Which parameter sweeps along a line: the same translation from one end to the other at
+    // every point of the profile.
+    for along_v in [true, false] {
+        let point = |t: f64, w: f64| if along_v { at(u0 + (u1 - u0) * t, v0 + (v1 - v0) * w) } else { at(u0 + (u1 - u0) * w, v0 + (v1 - v0) * t) };
+        let prof: Vec<V3> = (0..=8).map(|k| point(k as f64 / 8.0, 0.0)).collect();
+        let d = sub(point(0.0, 1.0), point(0.0, 0.0));
+        let len = norm(d);
+        let scale = prof.iter().map(|p| norm(sub(*p, prof[0]))).fold(len, f64::max);
+        let tol = 1e-7 * (1.0 + scale);
+        if len < tol
+            || (0..=8).any(|k| {
+                let t = k as f64 / 8.0;
+                (0..=4).any(|m| norm(sub(sub(point(t, m as f64 / 4.0), point(t, 0.0)), mul(d, m as f64 / 4.0))) > tol)
+            })
+        {
+            continue;
+        }
+        let (Some(&a), Some(&b), Some(&c)) = (prof.first(), prof.get(4), prof.get(8)) else { continue };
+        let (centre, r, n) = circle3(a, b, c).or_else(|| circle3(a, prof[2], b))?;
+        let z = unit(d)?;
+        if norm(cross(n, z)) > 1e-7 || prof.iter().any(|p| (norm(sub(*p, centre)) - r).abs() > tol) {
+            return None;
+        }
+        // The surface's own normal against the outward one, mid-face.
+        let (um, vm) = ((u0 + u1) / 2.0, (v0 + v1) / 2.0);
+        let nn = s.normal(um, vm);
+        let q = at(um, vm);
+        let radial = sub(sub(q, centre), mul(z, dot(sub(q, centre), z)));
+        let flip = dot([nn.x, nn.y, nn.z], radial) < 0.0;
+        // The parameter seam opposite the middle of the sheet, away from its edges.
+        let x = unit(mul(radial, -1.0)).or_else(|| unit(sub(a, centre)))?;
+        return Some(Analytic { kind: AnalyticKind::Cylinder { o: centre, z, x, r }, flip });
+    }
+    None
+}
+
+/// A B-spline surface that is really a plane or a cylinder.
+fn analytic_bspline(ex: &p21::Exchange, e: &p21::Entity) -> Option<Analytic> {
+    planar_bspline(ex, e).map(|kind| Analytic { kind, flip: false }).or_else(|| cylindrical_bspline(ex, e))
+}
+
+/// Points along an edge's curve (its ends for a line, None for a conic it cannot sample).
+fn edge_samples(ex: &p21::Exchange, edge: u64) -> Option<Vec<V3>> {
+    use truck_modeling::{BoundedCurve, ParametricCurve};
+    let p = ex.get(edge)?.params();
+    let ends = [vertex_point(ex, p.get(1)?.as_ref_id()?)?, vertex_point(ex, p.get(2)?.as_ref_id()?)?];
+    let cx = crate::step_in::Ctx { ex, len: 1.0, ang: 1.0, tol: 1e-6 };
+    let sample = |f: &dyn Fn(f64) -> truck_modeling::Point3, (t0, t1): (f64, f64)| {
+        (0..=4).map(|k| f(t0 + (t1 - t0) * k as f64 / 4.0)).map(|q| [q.x, q.y, q.z]).collect::<Vec<V3>>()
+    };
+    match crate::step_in::geom::curve(&cx, p.get(3)?.as_ref_id()?, 0).ok()? {
+        crate::step_in::geom::CurveGeo::Line { .. } => Some(ends.to_vec()),
+        crate::step_in::geom::CurveGeo::BSpline(c) => Some(sample(&|t| c.subs(t), c.range_tuple())),
+        crate::step_in::geom::CurveGeo::Nurbs(c) => Some(sample(&|t| c.subs(t), c.range_tuple())),
+        crate::step_in::geom::CurveGeo::Conic { .. } => None,
+    }
+}
+
 fn vertex_point(ex: &p21::Exchange, v: u64) -> Option<V3> {
     let p = ex.get(ex.get(v)?.params().get(1)?.as_ref_id()?)?;
     let c = p.params().get(1)?.as_list()?;
@@ -695,9 +827,12 @@ fn face_edges(ex: &p21::Exchange, face: &p21::Entity) -> Option<Vec<Vec<(u64, bo
 /// Faces that truck splits (a revolution in two or three turns) joined back into one face per
 /// analytic surface, by dropping the edges between them. Faces whose union would lose all its
 /// edges, or whose leftover edges do not close into loops, stay apart.
-fn merge_split_faces(ex: &mut p21::Exchange) {
+fn merge_split_faces(ex: &mut p21::Exchange) -> HashMap<u64, V3> {
+    let mut merged_surfaces = std::collections::HashSet::new();
     let mut next = ex.entities.keys().max().copied().unwrap_or(0) + 1;
     let shells: Vec<u64> = ex.entities.iter().filter(|(_, e)| matches!(e.name(), "CLOSED_SHELL" | "OPEN_SHELL")).map(|(i, _)| *i).collect();
+    // Each surface's analytic form, worked out once (merged faces keep a piece's surface).
+    let mut cache: HashMap<u64, Option<Analytic>> = HashMap::new();
     for sh in shells {
         for _round in 0..64 {
             let Some(faces) = ex
@@ -716,11 +851,37 @@ fn merge_split_faces(ex: &mut p21::Exchange) {
                     if !matches!(fe.name(), "FACE_SURFACE" | "ADVANCED_FACE") {
                         return None;
                     }
-                    let se = ex.get(fe.params().get(2)?.as_ref_id()?)?;
-                    if se.name() != "SURFACE_OF_REVOLUTION" {
-                        return None;
-                    }
-                    let an = analytic_revolution(ex, se)?;
+                    let sid = fe.params().get(2)?.as_ref_id()?;
+                    let an = (*cache.entry(sid).or_insert_with(|| {
+                        let se = ex.get(sid)?;
+                        match se.name() {
+                            "SURFACE_OF_REVOLUTION" => analytic_revolution(ex, se),
+                            // Coplanar pieces (a face split where a mirrored half was glued on).
+                            "PLANE" => {
+                                let cx = crate::step_in::Ctx { ex, len: 1.0, ang: 1.0, tol: 1e-6 };
+                                let f = crate::step_in::geom::frame(&cx, se.params().get(1)?.as_ref_id()?).ok()?;
+                                let v = |a: truck_modeling::Vector3| [a.x, a.y, a.z];
+                                Some(Analytic { kind: AnalyticKind::Plane { o: [f.o.x, f.o.y, f.o.z], z: v(f.z), x: v(f.x) }, flip: false })
+                            }
+                            _ => analytic_bspline(ex, se).filter(|a| match a.kind {
+                                // Pieces of a B-spline cylinder merge only when their curved edges
+                                // are circles square to the axis (an extruded hole): crossing
+                                // curves (a hole through a tube wall) read far more slowly on a
+                                // cylinder than on the sheet they came with.
+                                AnalyticKind::Cylinder { z, .. } => face_edges(ex, fe).is_some_and(|ls| {
+                                    ls.iter().flatten().all(|(x, _)| {
+                                        edge_samples(ex, *x).is_some_and(|pts| {
+                                            let Some(&q0) = pts.first() else { return false };
+                                            let tol = 1e-7 * (1.0 + norm(q0));
+                                            pts.iter().all(|q| dot(sub(*q, q0), z).abs() <= tol)
+                                                || pts.iter().all(|q| norm(cross(sub(*q, q0), z)) <= tol)
+                                        })
+                                    })
+                                }),
+                                _ => true,
+                            }),
+                        }
+                    }))?;
                     let sense = fe.params().get(3)?.as_bool()?;
                     let z = match an.kind {
                         AnalyticKind::Plane { z, .. } => z,
@@ -784,48 +945,70 @@ fn merge_split_faces(ex: &mut p21::Exchange) {
                     // systems write cylinders and cone tips); otherwise the shared edges go.
                     // (A horn torus band needs no seam: its rings meet at the pole.)
                     let mut loops = None;
-                    if shared.len() >= 2 && !matches!(ka, AnalyticKind::HornTorus { .. }) {
-                        let mut cands: Vec<u64> = shared.iter().copied().collect();
-                        cands.sort();
-                        for keep in cands {
-                            let pool: Vec<(u64, bool)> = all.iter().copied().filter(|(e, _)| *e == keep || !shared.contains(e)).collect();
-                            let Some(mut l) = chain(pool) else { continue };
-                            // The seam may come out as its own back-and-forth loop: splice it into
-                            // the loop that passes its start vertex.
-                            if l.len() == 2
-                                && let Some(si) = l.iter().position(|x| x.len() == 2 && x.iter().all(|(e, _)| *e == keep))
-                            {
-                                let mut seam_loop = l.remove(si);
-                                // Start the seam pair at the vertex it shares with the main loop.
-                                for _ in 0..2 {
-                                    let on_main = seam_loop
-                                        .first()
-                                        .and_then(|f| ends(*f))
-                                        .is_some_and(|(v, _)| l.first().is_some_and(|m| m.iter().any(|x| ends(*x).is_some_and(|(_, e)| e == v))));
-                                    if on_main {
-                                        break;
+                    if shared.len() >= 2 && !matches!(ka, AnalyticKind::HornTorus { .. } | AnalyticKind::Plane { .. }) {
+                        // Without the shared edges: one ring (a cone tip) or two (a band). The seam
+                        // runs from a vertex on the first ring to the second ring (or the apex) and
+                        // back: ring A, seam, ring B, seam reversed.
+                        let rest: Vec<(u64, bool)> = all.iter().copied().filter(|(e, _)| !shared.contains(e)).collect();
+                        if let Some(rings) = chain(rest).filter(|r| matches!(r.len(), 1 | 2)) {
+                            let starts_at = |ring: &Vec<(u64, bool)>, v: u64| ring.iter().position(|x| ends(*x).is_some_and(|(a, _)| a == v));
+                            let on_axis = |v: u64| {
+                                let (o, z) = match ka {
+                                    AnalyticKind::Cone { o, z, .. } | AnalyticKind::Sphere { o, z, .. } => (*o, *z),
+                                    _ => return false,
+                                };
+                                vertex_point(ex, v).is_some_and(|q| norm(cross(sub(q, o), z)) <= 1e-6 * (1.0 + norm(q)))
+                            };
+                            let rotated =
+                                |ring: &Vec<(u64, bool)>, k: usize| ring.iter().skip(k).chain(ring.iter().take(k)).copied().collect::<Vec<_>>();
+                            let mut cands: Vec<u64> = shared.iter().copied().collect();
+                            cands.sort();
+                            'seam: for keep in cands {
+                                for &(e, d) in all.iter().filter(|(e, _)| *e == keep) {
+                                    let Some((a, b)) = ends((e, d)) else { continue };
+                                    let (Some(ra), Some(ka0)) = (rings.first(), rings.first().and_then(|r| starts_at(r, a))) else { continue };
+                                    let mut lp = rotated(ra, ka0);
+                                    lp.push((e, d));
+                                    match rings.get(1) {
+                                        Some(rb) => {
+                                            let Some(kb) = starts_at(rb, b) else { continue };
+                                            lp.extend(rotated(rb, kb));
+                                        }
+                                        // A cone tip (or a sphere's pole cap): the seam's far end is
+                                        // the apex on the axis, off the ring.
+                                        None if starts_at(ra, b).is_none() && on_axis(b) => {}
+                                        None => continue,
                                     }
-                                    seam_loop.rotate_left(1);
+                                    lp.push((e, !d));
+                                    loops = Some(vec![lp]);
+                                    break 'seam;
                                 }
-                                let Some(&first) = seam_loop.first() else { continue };
-                                let Some((v, _)) = ends(first) else { continue };
-                                if let Some(main) = l.first_mut()
-                                    && let Some(pos) = main.iter().position(|x| ends(*x).is_some_and(|(_, e)| e == v))
-                                {
-                                    for (k, x) in seam_loop.into_iter().enumerate() {
-                                        main.insert(pos + 1 + k, x);
-                                    }
-                                    let merged_loop = std::mem::take(main);
-                                    l = vec![merged_loop];
-                                }
-                            }
-                            if l.len() == 1 {
-                                loops = Some(l);
-                                break;
                             }
                         }
                     }
-                    if loops.is_none() {
+                    let planar = matches!(ka, AnalyticKind::Plane { .. });
+                    if loops.is_none() && planar {
+                        // A plane needs no seam: an annulus keeps its two rings, a face with a hole
+                        // its hole. The largest loop goes first (the outer bound).
+                        let rest: Vec<(u64, bool)> = all.iter().copied().filter(|(e, _)| !shared.contains(e)).collect();
+                        loops = chain(rest).map(|mut l| {
+                            let size = |lp: &Vec<(u64, bool)>| {
+                                let pts: Vec<V3> = lp.iter().filter_map(|x| ends(*x).and_then(|(a, _)| vertex_point(ex, a))).collect();
+                                let mut lo = [f64::INFINITY; 3];
+                                let mut hi = [f64::NEG_INFINITY; 3];
+                                for p in &pts {
+                                    for k in 0..3 {
+                                        lo[k] = lo[k].min(p[k]);
+                                        hi[k] = hi[k].max(p[k]);
+                                    }
+                                }
+                                norm(sub(hi, lo))
+                            };
+                            l.sort_by(|a, b| size(b).total_cmp(&size(a)));
+                            l
+                        });
+                    }
+                    if loops.is_none() && !planar {
                         let rest: Vec<(u64, bool)> = all.iter().copied().filter(|(e, _)| !shared.contains(e)).collect();
                         loops = chain(rest)
                             .map(|mut l| {
@@ -913,6 +1096,9 @@ fn merge_split_faces(ex: &mut p21::Exchange) {
                     }
                     let nid = next;
                     next += 1;
+                    if let Some(sid) = params.get(2).and_then(Param::as_ref_id) {
+                        merged_surfaces.insert(sid);
+                    }
                     ex.entities.insert(nid, p21::Entity { records: vec![p21::Record { name: old.name().to_string(), params }] });
                     let new_list: Vec<Param> = faces.iter().filter(|f| **f != fb).map(|f| Param::Ref(if *f == fa { nid } else { *f })).collect();
                     if let Some(she) = ex.entities.get_mut(&sh)
@@ -930,56 +1116,64 @@ fn merge_split_faces(ex: &mut p21::Exchange) {
             }
         }
     }
+    // B-spline cylinder sheets under merged faces are written as cylinders (the sheet covers only
+    // its own piece), with the parameter seam on the face's seam edge for a full turn, else
+    // opposite the face's middle. (Faces replaced by merges stay in the exchange unreferenced:
+    // only the shells' faces count.)
+    let live: Vec<u64> = ex
+        .entities
+        .values()
+        .filter_map(|e| if matches!(e.name(), "CLOSED_SHELL" | "OPEN_SHELL") { e.params().get(1).and_then(Param::as_list) } else { None })
+        .flatten()
+        .filter_map(Param::as_ref_id)
+        .collect();
+    let mut out = HashMap::new();
+    for e in live.iter().filter_map(|f| ex.get(*f)) {
+        let Some(sid) = e.params().get(2).and_then(Param::as_ref_id) else { continue };
+        if !merged_surfaces.contains(&sid) || out.contains_key(&sid) {
+            continue;
+        }
+        let Some(Analytic { kind: AnalyticKind::Cylinder { o, z, .. }, .. }) = ex.get(sid).and_then(|se| cylindrical_bspline(ex, se)) else {
+            continue;
+        };
+        let Some(loops) = face_edges(ex, e) else { continue };
+        let radial = |q: V3| {
+            let v = sub(q, o);
+            sub(v, mul(z, dot(v, z)))
+        };
+        let seam = loops
+            .iter()
+            .flat_map(|l| l.iter().map(move |(x, _)| (l, *x)))
+            .find(|(l, x)| l.iter().filter(|(y, _)| y == x).count() > 1)
+            .map(|(_, x)| x);
+        let x = match seam.and_then(|edge| ex.get(edge)?.params().get(1)?.as_ref_id()).and_then(|v| vertex_point(ex, v)) {
+            Some(q) => unit(radial(q)),
+            None => {
+                let mean = loops
+                    .iter()
+                    .flatten()
+                    .filter_map(|(edge, _)| ex.get(*edge)?.params().get(1)?.as_ref_id())
+                    .filter_map(|v| vertex_point(ex, v))
+                    .filter_map(|q| unit(radial(q)))
+                    .fold([0.0; 3], add);
+                unit(mul(mean, -1.0))
+            }
+        };
+        if let Some(x) = x {
+            out.insert(sid, x);
+        }
+    }
+    out
 }
 
-/// The B-rep entities of one body as truck writes them, parsed.
-fn brep_exchange(b: &Body) -> Result<p21::Exchange> {
+/// The B-rep entities of one body as truck writes them, parsed, and the surfaces of faces
+/// merged from pieces.
+fn brep_exchange(b: &Body, merge: bool) -> Result<(p21::Exchange, HashMap<u64, V3>)> {
     let text = crate::step::truck_step(&[b], "SolveCraft")?;
     let mut ex = p21::parse(&text).map_err(|e| KernelError::Failed(format!("STEP export: {e}")))?;
     collapse_short_edges(&mut ex);
-    let plain = ex.clone();
-    merge_split_faces(&mut ex);
-    // Keep the merged faces only when they read back as cleanly as the pieces (a merge that
-    // leaves a face the reader cannot lay out, such as a band round a closed surface whose
-    // loop crosses itself, is undone).
-    let clean = |ex: &p21::Exchange| {
-        let header = text.split("DATA;").next().unwrap_or_default();
-        exchange_text(header, ex).and_then(|t| crate::step_in::step_import(&t).ok()).is_some_and(|imp| imp.warnings.is_empty())
-    };
-    if ex.entities.len() != plain.entities.len() && !clean(&ex) && clean(&plain) {
-        return Ok(plain);
-    }
-    Ok(ex)
-}
-
-/// A parsed exchange written back as STEP text (with the given header).
-fn exchange_text(header: &str, ex: &p21::Exchange) -> Option<String> {
-    let map: HashMap<u64, u64> = ex.entities.keys().map(|k| (*k, *k)).collect();
-    let mut ids: Vec<u64> = ex.entities.keys().copied().collect();
-    ids.sort();
-    let mut o = format!("{header}DATA;\n");
-    for id in ids {
-        let e = ex.get(id)?;
-        let _ = write!(o, "#{id}=");
-        if e.is_complex() {
-            o.push('(');
-            for r in &e.records {
-                o.push_str(&r.name);
-                o.push('(');
-                params(&r.params, &map, &mut o).ok()?;
-                o.push(')');
-            }
-            o.push(')');
-        } else {
-            o.push_str(e.name());
-            o.push('(');
-            params(e.params(), &map, &mut o).ok()?;
-            o.push(')');
-        }
-        o.push_str(";\n");
-    }
-    o.push_str("ENDSEC;\nEND-ISO-10303-21;\n");
-    Some(o)
+    let merged = if merge { merge_split_faces(&mut ex) } else { Default::default() };
+    Ok((ex, merged))
 }
 
 fn rigid_frame(m: &[[f64; 4]; 4]) -> Result<([f64; 3], [f64; 3], [f64; 3])> {
@@ -997,6 +1191,20 @@ fn rigid_frame(m: &[[f64; 4]; 4]) -> Result<([f64; 3], [f64; 3], [f64; 3])> {
 
 /// STEP text (AP242) for products with bodies and assembly placements; `root` is the top product.
 pub fn step_export_products(products: &[ExportProduct], root: usize, header: &StepHeader) -> Result<String> {
+    let text = products_text(products, root, header, true)?;
+    // Faces merged per surface must read back as cleanly as the pieces they came from (a merge
+    // can leave a loop the reader cannot lay out); otherwise the pieces are written.
+    let clean = |t: &str| crate::step_in::step_import(t).is_ok_and(|i| i.warnings.is_empty());
+    if !clean(&text) {
+        let plain = products_text(products, root, header, false)?;
+        if clean(&plain) {
+            return Ok(plain);
+        }
+    }
+    Ok(text)
+}
+
+fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, merge: bool) -> Result<String> {
     if products.is_empty() || root >= products.len() {
         return Err(KernelError::Invalid("nothing to export".into()));
     }
@@ -1100,7 +1308,8 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
         if !p.bodies.is_empty() {
             let mut solids = Vec::new();
             for b in &p.bodies {
-                let ex = brep_exchange(b.body)?;
+                let (ex, merged) = brep_exchange(b.body, merge)?;
+                o.merged = merged;
                 let mut roots: Vec<u64> =
                     ex.entities.iter().filter(|(_, e)| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS")).map(|(i, _)| *i).collect();
                 roots.sort();
