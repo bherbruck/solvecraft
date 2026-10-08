@@ -3,7 +3,7 @@
 //! leaves the old file or the new one, never a torn mix. The previous version can be kept as
 //! `<file>.bak` (itself written the same way).
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -30,7 +30,7 @@ fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 fn sync_dir(path: &Path) {
     #[cfg(unix)]
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty())
-        && let Ok(d) = File::open(dir)
+        && let Ok(d) = fs::File::open(dir)
     {
         let _ = d.sync_all();
     }
