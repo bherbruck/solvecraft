@@ -15,6 +15,8 @@ pub use dxf::{read_dxf, write_dxf};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
 pub use svg::read_svg;
+mod obj;
+pub use obj::read_obj;
 pub use threemf::{MAX_3MF_BYTES, MeshObject, model_xml, read_3mf, weld, write_3mf};
 
 use solvecraft_doc::{Document, ModelState};
@@ -44,9 +46,18 @@ pub type Result<T> = std::result::Result<T, IoError>;
 /// Largest STEP file we read.
 pub const MAX_STEP_BYTES: usize = 512 << 20;
 
-/// Is this a STEP file name (`.step` / `.stp`, any case)?
+/// Is this a CAD exchange file read as an Import base feature: STEP (`.step` / `.stp`) or IGES
+/// (`.igs` / `.iges`), any case?
 pub fn is_step_path(path: &str) -> bool {
-    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"))
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| ["step", "stp", "igs", "iges"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+}
+
+/// Is this an IGES file name (`.igs` / `.iges`, any case)?
+pub fn is_iges_path(path: &str) -> bool {
+    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("igs") || e.eq_ignore_ascii_case("iges"))
 }
 
 /// A STEP file read as an import feature.
@@ -65,8 +76,11 @@ pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
     if bytes.len() > MAX_STEP_BYTES {
         return Err(IoError::Invalid(format!("STEP file too large ({} MB, limit {} MB)", bytes.len() >> 20, MAX_STEP_BYTES >> 20)));
     }
-    // STEP is 7-bit text with escapes; tolerate stray 8-bit bytes.
+    // STEP is 7-bit text with escapes; tolerate stray 8-bit bytes. IGES is restated as STEP
+    // (the feature keeps that STEP text).
     let text = String::from_utf8_lossy(bytes).into_owned();
+    let (text, iges_warnings) =
+        if is_iges_path(file) { solvecraft_kernel::iges_to_step(&text).map_err(IoError::Invalid)? } else { (text, Vec::new()) };
     let imp = solvecraft_kernel::step_import_shared(&text)?;
     let stem = std::path::Path::new(file)
         .file_stem()
@@ -85,16 +99,16 @@ pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
         name,
         body_names: imp.bodies.iter().map(|b| b.name.clone()).collect(),
         kind: solvecraft_doc::FeatureKind::Import { file: file_name, step: text, components: imp.tree.clone() },
-        warnings: imp.warnings.clone(),
+        warnings: iges_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
     })
 }
 
-/// Is this a mesh file we import (`.3mf`, `.stl`, any case)?
+/// Is this a mesh file we import (`.3mf`, `.stl`, `.obj`, any case)?
 pub fn is_mesh_path(path: &str) -> bool {
-    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("3mf") || e.eq_ignore_ascii_case("stl"))
+    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| ["3mf", "stl", "obj"].iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
-/// A 3MF or STL file read as a mesh import feature.
+/// A 3MF, STL or OBJ file read as a mesh import feature.
 pub struct MeshFeature {
     /// Timeline name: the only mesh's name, else the file name.
     pub name: String,
@@ -103,15 +117,17 @@ pub struct MeshFeature {
     pub warnings: Vec<String>,
 }
 
-/// Read 3MF or STL bytes (the format from `file`'s extension) into a MeshImport feature.
+/// Read 3MF, STL or OBJ bytes (the format from `file`'s extension) into a MeshImport feature.
 pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
     if bytes.len() > MAX_3MF_BYTES {
         return Err(IoError::Invalid(format!("mesh file too large ({} MB)", bytes.len() >> 20)));
     }
     let path = std::path::Path::new(file);
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Mesh".into());
-    let is_stl = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("stl"));
-    let (objects, warnings) = if is_stl {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let (objects, warnings) = if ext == "obj" {
+        obj::read_obj(bytes, &stem)?
+    } else if ext == "stl" {
         let tris = read_stl(bytes)?;
         if tris.is_empty() {
             return Err(IoError::Invalid("STL has no triangles".into()));
@@ -154,6 +170,7 @@ pub enum Format {
     StlAscii,
     Obj,
     Step,
+    Iges,
     ThreeMf,
     Design,
 }
@@ -167,6 +184,7 @@ impl Format {
             "stla" | "stl-ascii" => Format::StlAscii,
             "obj" => Format::Obj,
             "step" | "stp" => Format::Step,
+            "igs" | "iges" => Format::Iges,
             "3mf" => Format::ThreeMf,
             "solvecraft" | "json" => Format::Design,
             _ => return Err(IoError::Format(ext)),
@@ -263,6 +281,12 @@ pub fn export(state: &ModelState, bodies: &[String], format: Format, name: &str)
             let header = solvecraft_kernel::StepHeader { file_name: format!("{name}.step"), ..Default::default() };
             solvecraft_kernel::step_export_bodies(&bs, &header)?.into_bytes()
         }
+        Format::Iges => {
+            let bs: Vec<solvecraft_kernel::ExportBody> =
+                sel.iter().map(|b| solvecraft_kernel::ExportBody { name: b.name.clone(), body: &b.body, color: b.body.color() }).collect();
+            let header = solvecraft_kernel::StepHeader { file_name: format!("{name}.igs"), ..Default::default() };
+            solvecraft_kernel::iges_export_bodies(&bs, &header)?.into_bytes()
+        }
         Format::ThreeMf => {
             let objs: Vec<MeshObject> = sel
                 .iter()
@@ -333,38 +357,69 @@ pub fn write_design(doc: &Document) -> Vec<u8> {
 
 /// Parse a binary or ASCII STL (used by tests and round-trip checks): triangles.
 pub fn read_stl(bytes: &[u8]) -> Result<Vec<[[f32; 3]; 3]>> {
-    let ascii = bytes.starts_with(b"solid") && std::str::from_utf8(bytes).is_ok_and(|s| s.contains("facet"));
+    // Binary when the size matches the triangle count in the header (some binary files start
+    // with "solid" too); ASCII when the text has facets.
+    let count = bytes.get(80..84).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
+    let binary_size = count.is_some_and(|n| bytes.len() == 84 + n.saturating_mul(50));
+    let head = String::from_utf8_lossy(bytes.get(..bytes.len().min(512)).unwrap_or_default()).to_string();
+    let ascii = !binary_size && head.trim_start().starts_with("solid") && String::from_utf8_lossy(bytes).contains("facet");
     let mut tris = Vec::new();
+    let ok = |v: &[f32; 3]| v.iter().all(|x| x.is_finite() && x.abs() < 1e9);
     if ascii {
-        let s = std::str::from_utf8(bytes).map_err(|_| IoError::Invalid("bad STL".into()))?;
+        let s = String::from_utf8_lossy(bytes);
         let mut cur: Vec<[f32; 3]> = Vec::new();
         for l in s.lines() {
             let mut it = l.split_whitespace();
-            if it.next() == Some("vertex") {
-                let v: Vec<f32> = it.filter_map(|x| x.parse().ok()).collect();
-                if let [x, y, z] = v[..] {
-                    cur.push([x, y, z]);
+            match it.next() {
+                Some("vertex") => {
+                    let v: Vec<f32> = it.filter_map(|x| x.parse().ok()).collect();
+                    if let [x, y, z] = v[..] {
+                        cur.push([x, y, z]);
+                    }
                 }
-                if let [a, b, c] = cur[..] {
-                    tris.push([a, b, c]);
+                // Each facet takes exactly its three vertices (a bad vertex drops the facet).
+                Some("endfacet") => {
+                    if let [a, b, c] = cur[..]
+                        && [a, b, c].iter().all(ok)
+                    {
+                        tris.push([a, b, c]);
+                    }
                     cur.clear();
                 }
+                _ => {}
+            }
+            if tris.len() > MAX_STL_TRIANGLES {
+                return Err(IoError::Invalid(format!("STL with more than {MAX_STL_TRIANGLES} triangles")));
             }
         }
         return Ok(tris);
     }
-    let n = bytes.get(80..84).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize).ok_or_else(|| IoError::Invalid("short STL".into()))?;
-    if bytes.len() < 84 + n.saturating_mul(50) {
-        return Err(IoError::Invalid("truncated STL".into()));
+    let n = count.ok_or_else(|| IoError::Invalid("short STL".into()))?;
+    // A wrong count in the header (some writers leave 0): use the triangles that are there.
+    let room = bytes.len().saturating_sub(84) / 50;
+    let n = if n == 0 || n > room { room } else { n };
+    if n == 0 {
+        return Err(IoError::Invalid("STL has no triangles".into()));
     }
-    let f = |o: usize| bytes.get(o..o + 4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).unwrap_or(0.0);
+    if n > MAX_STL_TRIANGLES {
+        return Err(IoError::Invalid(format!("STL with {n} triangles (limit {MAX_STL_TRIANGLES})")));
+    }
+    let f = |o: usize| bytes.get(o..o + 4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).unwrap_or(f32::NAN);
+    tris.reserve(n);
     for i in 0..n {
+        // The facet normal (first 12 bytes) is ignored: winding gives the orientation.
         let o = 84 + i * 50 + 12;
         let v = |k: usize| [f(o + k * 12), f(o + k * 12 + 4), f(o + k * 12 + 8)];
-        tris.push([v(0), v(1), v(2)]);
+        let t = [v(0), v(1), v(2)];
+        if t.iter().all(ok) {
+            tris.push(t);
+        }
     }
     Ok(tris)
 }
+
+/// Most triangles we read from one STL file.
+pub const MAX_STL_TRIANGLES: usize = 20_000_000;
 
 #[cfg(test)]
 mod tests {
@@ -382,6 +437,63 @@ mod tests {
         let mut m = Model::new();
         m.evaluate(&doc);
         (doc, m)
+    }
+
+    /// A binary STL of a cube's triangles.
+    fn cube_stl(flip: &[usize], header: &[u8], count: Option<u32>, normals: [f32; 3]) -> Vec<u8> {
+        let c = |i: usize| [(i & 1) as f32 * 10.0, ((i >> 1) & 1) as f32 * 10.0, ((i >> 2) & 1) as f32 * 10.0];
+        let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+        let mut tris = Vec::new();
+        for q in quads {
+            tris.push([c(q[0]), c(q[1]), c(q[2])]);
+            tris.push([c(q[0]), c(q[2]), c(q[3])]);
+        }
+        for &k in flip {
+            tris[k].swap(1, 2);
+        }
+        let mut b = header.to_vec();
+        b.resize(80, b' ');
+        b.extend(count.unwrap_or(tris.len() as u32).to_le_bytes());
+        for t in &tris {
+            for x in normals.iter().chain(t.iter().flatten()) {
+                b.extend(x.to_le_bytes());
+            }
+            b.extend([0, 0]);
+        }
+        b
+    }
+
+    fn mesh_volume(bytes: &[u8]) -> f64 {
+        let f = mesh_import_feature(bytes, "x.stl").unwrap();
+        let solvecraft_doc::FeatureKind::MeshImport { meshes, .. } = f.kind else { panic!() };
+        let m = &meshes[0];
+        let pos: Vec<Vec3> = m.positions.chunks(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect();
+        let tris: Vec<[u32; 3]> = m.triangles.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
+        solvecraft_kernel::measure(&solvecraft_kernel::mesh_body(&pos, &tris).unwrap()).unwrap().volume
+    }
+
+    /// STL quirks: a binary header starting with "solid", a zero triangle count, garbage
+    /// normals, stray inverted facets and non-finite vertices.
+    #[test]
+    fn stl_quirks_read_cleanly() {
+        let v = mesh_volume(&cube_stl(&[], b"solid exported by something", None, [0.0; 3]));
+        assert!((v - 1000.0).abs() < 1e-6, "{v}");
+        let v = mesh_volume(&cube_stl(&[], b"x", Some(0), [f32::NAN, 9.0, -7.0]));
+        assert!((v - 1000.0).abs() < 1e-6, "{v}");
+        let v = mesh_volume(&cube_stl(&[1, 4, 7], b"x", None, [1.0, 0.0, 0.0]));
+        assert!((v - 1000.0).abs() < 1e-6, "flipped facets: {v}");
+        let mut bad = cube_stl(&[], b"x", None, [0.0; 3]);
+        bad[84 + 12..84 + 16].copy_from_slice(&f32::INFINITY.to_le_bytes());
+        assert_eq!(read_stl(&bad).unwrap().len(), 11);
+        // ASCII with a non-UTF-8 name and a facet with a bad vertex.
+        let mut ascii = b"solid caf\xe9\n".to_vec();
+        ascii.extend(b"facet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\n");
+        ascii.extend(b"facet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex nan 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid\n");
+        assert_eq!(read_stl(&ascii).unwrap().len(), 1);
+        for b in [&b""[..], b"solid", &[0u8; 83], &[0xff; 200], &cube_stl(&[], b"x", Some(u32::MAX), [0.0; 3])[..]] {
+            let r = std::panic::catch_unwind(|| read_stl(b).map(|t| t.len()));
+            assert!(r.is_ok());
+        }
     }
 
     #[test]

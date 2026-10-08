@@ -30,12 +30,14 @@ storytold "craft" family.
   deleted.
 - **Parameters** with unit-aware expressions (`2 * width + 5 mm`, `angle / 2`).
 - **Files**: designs as JSON (`.solvecraft`), export to STEP (AP242 with body names, colours and
-  components as assemblies; revolved faces as native planes, cylinders, cones, spheres and tori), 3MF, STL (binary/ASCII) and OBJ;
-  3MF and STL import as mesh bodies (they render, measure, move and export; solid features need
-  B-rep bodies);
-  STEP import (AP203/AP214/AP242 solids, assemblies, units, names, colours) as a base feature
-  that later features build on — open a `.step`/`.stp` file, insert one into a design, or drop it
-  on the window ([docs/step-import.md](docs/step-import.md)).
+  components as assemblies; revolved faces as native planes, cylinders, cones, spheres and tori),
+  IGES 5.3 (manifold solid B-reps with names and colours), 3MF, STL (binary/ASCII) and OBJ;
+  3MF, STL and OBJ import as mesh bodies (they render, measure, move and export; solid features
+  need B-rep bodies);
+  STEP import (AP203/AP214/AP242 solids, assemblies, units, names, colours) and IGES import
+  (manifold solid B-reps, or trimmed and bounded surfaces sewn into solids) as a base feature
+  that later features build on — open a `.step`/`.stp`/`.igs`/`.iges` file, insert one into a
+  design, or drop it on the window ([docs/step-import.md](docs/step-import.md)).
 - **Desktop app** (egui + wgpu): toolbar with workspace tabs, browser, timeline, 3D viewport with
   view cube and navigation bar, sketch tools, feature dialogs, command palette, and a JSON-lines
   control channel so agents and tests can drive it.

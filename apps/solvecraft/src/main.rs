@@ -47,9 +47,13 @@ fn services() -> Services {
     Services {
         pick_open: Some(Box::new(|| {
             rfd::FileDialog::new()
-                .add_filter("Designs, STEP and meshes", &["solvecraft", "step", "stp", "STEP", "STP", "3mf", "3MF", "stl", "STL"])
+                .add_filter(
+                    "Designs, STEP, IGES and meshes",
+                    &["solvecraft", "step", "stp", "STEP", "STP", "igs", "iges", "IGS", "IGES", "3mf", "3MF", "stl", "STL"],
+                )
                 .add_filter("SolveCraft design", &["solvecraft"])
                 .add_filter("STEP", &["step", "stp", "STEP", "STP"])
+                .add_filter("IGES", &["igs", "iges", "IGS", "IGES"])
                 .add_filter("Mesh (3MF, STL)", &["3mf", "3MF", "stl", "STL"])
                 .add_filter("All files", &["*"])
                 .pick_file()

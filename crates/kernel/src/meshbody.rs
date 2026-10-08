@@ -95,12 +95,55 @@ pub fn mesh_body(positions: &[Vec3], triangles: &[[u32; 3]]) -> Result<Body> {
     if out.triangles.is_empty() {
         return Err(KernelError::Invalid("mesh has no triangles".into()));
     }
+    unify_winding(&mut out);
     if out.volume6() < 0.0 && is_closed(&out) {
         for t in &mut out.triangles {
             t.swap(1, 2);
         }
     }
     Ok(Body { solid: Arc::new(crate::body::Solid::new_unchecked(Vec::new())), mesh: Some(Arc::new(out)), color: None, paint: None })
+}
+
+/// Wind every connected piece one way: a triangle that runs a side in the same direction as
+/// its neighbour is turned over (files with stray inverted facets). Sides shared by more than
+/// two triangles are left alone.
+fn unify_winding(m: &mut TriMesh) {
+    let mut sides: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+    for (i, t) in m.triangles.iter().enumerate() {
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            sides.entry((a.min(b), a.max(b))).or_default().push(i);
+        }
+    }
+    let runs = |t: &[u32; 3], a: u32, b: u32| [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])].contains(&(a, b));
+    let mut done = vec![false; m.triangles.len()];
+    for start in 0..m.triangles.len() {
+        if done[start] {
+            continue;
+        }
+        done[start] = true;
+        let mut stack = vec![start];
+        while let Some(i) = stack.pop() {
+            let Some(t) = m.triangles.get(i).copied() else { continue };
+            for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                let Some(list) = sides.get(&(a.min(b), a.max(b))) else { continue };
+                if list.len() != 2 {
+                    continue;
+                }
+                for &j in list {
+                    if j == i || done[j] {
+                        continue;
+                    }
+                    done[j] = true;
+                    if let Some(u) = m.triangles.get_mut(j)
+                        && runs(u, a, b)
+                    {
+                        u.swap(1, 2);
+                    }
+                    stack.push(j);
+                }
+            }
+        }
+    }
 }
 
 /// Every triangle side is shared by exactly two triangles in opposite directions.

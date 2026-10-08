@@ -1016,6 +1016,29 @@ fn face_colours_and_opacity_export() {
     assert_eq!(looks[0].1.color, [255, 0, 0]);
 }
 
+/// IGES: a design exports as IGES and the file opens again as an Import feature with the same
+/// bodies, names and colours.
+#[test]
+fn iges_export_and_open() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "PrimitiveCylinder", json!({"radius": 4, "height": 20, "base": [10, 10, 5], "body_name": "Pin"}));
+    run(&mut s, "AppearanceCommand", json!({"bodies": ["Pin"], "color": "#ff0000"}));
+    let want: Vec<f64> = s.world_state().bodies.iter().map(|b| solvecraft_kernel::measure(&b.body).unwrap().volume).collect();
+    let p = std::env::temp_dir().join(format!("solvecraft-iges-{}.igs", std::process::id()));
+    run(&mut s, "ExportCommand", json!({"path": p.to_string_lossy()}));
+    let mut s2 = Session::default();
+    run(&mut s2, "doc.open", json!({"path": p.to_string_lossy()}));
+    let _ = std::fs::remove_file(&p);
+    let st = s2.world_state();
+    let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, ["Plate", "Pin"]);
+    for (b, v) in st.bodies.iter().zip(&want) {
+        assert!(rel(solvecraft_kernel::measure(&b.body).unwrap().volume, *v) < 1e-4);
+    }
+    assert_eq!(st.bodies[1].body.color(), Some([1.0, 0.0, 0.0]));
+}
+
 /// Components export as a STEP assembly: products, occurrences, placements.
 #[test]
 fn components_export_as_step_assembly() {

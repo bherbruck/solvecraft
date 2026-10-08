@@ -706,7 +706,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         },
         "ui.export" => {
             let name = bodies.first().cloned().unwrap_or_else(|| app.session.doc.name.clone());
-            if let Some(path) = app.services.pick_save.as_ref().and_then(|f| f(&format!("{name}.step"), &["step", "stp", "stl", "3mf", "obj"])) {
+            if let Some(path) = app.services.pick_save.as_ref().and_then(|f| f(&format!("{name}.step"), &["step", "stp", "igs", "stl", "3mf", "obj"]))
+            {
                 let _ = app.run("ExportCommand", json!({ "path": path, "bodies": bodies }));
             }
         }
