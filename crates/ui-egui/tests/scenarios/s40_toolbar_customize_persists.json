@@ -1,8 +1,5 @@
 [
  {
-  "pending": "toolbar Pin/Remove/reorder (toolbar:<id> handles, ui.menu toolbar_command) and a full-height workspace switcher (solvecraft-shell)"
- },
- {
   "note": "Toolbar customizing like Fusion survives a restart: Pin to Toolbar, Remove from Toolbar, drag to reorder. Toolbar buttons publish handles `toolbar:<command id>`. The workspace switcher spans the toolbar's height."
  },
  {
