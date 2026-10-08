@@ -658,7 +658,11 @@ fn loop_split(cur: &Body, pts: &[Vec3]) -> Result<Option<(Vec<Vec<Vec3>>, Vec<Ve
 /// Constant-radius fillet of the edges nearest to the given points.
 pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     body.require_brep("fillet")?;
-    blend(body, edges, radius, Shape::Round, "fillet")
+    // Corners the local blends refuse (an earlier round at an edge's end): radius per edge.
+    blend(body, edges, radius, Shape::Round, "fillet").or_else(|e| {
+        let sel: Vec<(Vec3, f64)> = edges.iter().map(|p| (*p, radius)).collect();
+        crate::blend_corner::fillet_radii(body, &sel).map_err(|_| e)
+    })
 }
 
 /// Equal-distance chamfer of the edges nearest to the given points. Each edge is cut with a

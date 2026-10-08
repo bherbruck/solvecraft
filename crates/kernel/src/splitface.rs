@@ -325,7 +325,7 @@ fn boundary_hits(face: &mt::Face, g: &Field) -> Vec<Hit> {
 
 /// A curve through points: a line when they are collinear, else a cubic through every point
 /// (Catmull-Rom tangents; `closed` when the last point repeats the first).
-fn fit(pts: &[mt::Point3], scale: f64) -> Result<mt::Curve> {
+pub(crate) fn fit(pts: &[mt::Point3], scale: f64) -> Result<mt::Curve> {
     let (Some(a), Some(b)) = (pts.first(), pts.last()) else { return Err(KernelError::Failed("empty split line".into())) };
     let d = b - a;
     let len = d.magnitude();

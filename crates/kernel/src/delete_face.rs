@@ -219,18 +219,37 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 let m = edges.len();
                 let start = (0..m).find(|i| edges.get((i + m - 1) % m).is_some_and(gap) && edges.get(*i).is_some_and(|e| !gap(e))).unwrap_or(0);
                 let mut new_edges: Vec<mt::Edge> = Vec::new();
-                let mut pending: Option<Vec3> = None;
+                // The moved corners along a gap stretch (two rounds meeting in a mitre leave
+                // the sharp corner between them).
+                let mut pending: Option<Vec<Vec3>> = None;
+                let close = |pts: Vec<Vec3>, a: Vec3| -> Vec<(Vec3, Vec3)> {
+                    let mut c: Vec<Vec3> = Vec::new();
+                    for p in pts.into_iter().chain(std::iter::once(a)) {
+                        if c.last().is_some_and(|l| l.dist(p) <= q * 10.0) {
+                            continue;
+                        }
+                        // Drop a corner in line with its neighbours.
+                        if let [.., x, y] = c[..]
+                            && (y - x).cross(p - y).len() <= q * 10.0 * (p - x).len()
+                            && (y - x).dot(p - y) > 0.0
+                        {
+                            c.pop();
+                        }
+                        c.push(p);
+                    }
+                    c.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).collect()
+                };
                 for k in 0..m {
                     let Some(e) = edges.get((start + k) % m) else { continue };
                     if gap(e) {
-                        pending.get_or_insert(pos(e.front()));
+                        pending.get_or_insert_with(Vec::new).extend([pos(e.front()), pos(e.back())]);
                         continue;
                     }
                     let (a, b) = (pos(e.front()), pos(e.back()));
-                    if let Some(p) = pending.take()
-                        && p.dist(a) > q * 10.0
-                    {
-                        new_edges.push(line(p, a, &mut verts));
+                    if let Some(p) = pending.take() {
+                        for (x, y) in close(p, a) {
+                            new_edges.push(line(x, y, &mut verts));
+                        }
                     }
                     let moves = moved.contains_key(&e.front().id()) || moved.contains_key(&e.back().id());
                     if !moves {
@@ -246,8 +265,8 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 // A gap stretch at the end closes back to the first edge.
                 if let (Some(p), Some(first)) = (pending, new_edges.first()) {
                     let a = from_p3(first.front().point());
-                    if p.dist(a) > q * 10.0 {
-                        new_edges.push(line(p, a, &mut verts));
+                    for (x, y) in close(p, a) {
+                        new_edges.push(line(x, y, &mut verts));
                     }
                 }
                 if new_edges.is_empty() {
