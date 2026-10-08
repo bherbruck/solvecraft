@@ -42,7 +42,7 @@ impl Surf {
     }
     fn same(&self, o: &Surf, tol: f64) -> bool {
         match (*self, *o) {
-            (Surf::Plane { n, d }, Surf::Plane { n: n2, d: d2 }) => n.dot(n2) > 1.0 - 1e-6 && (d - d2).abs() < tol,
+            (Surf::Plane { n, d }, Surf::Plane { n: n2, d: d2 }) => n.dot(n2) > 1.0 - 1e-9 && (d - d2).abs() < tol,
             (Surf::Cylinder { axis, p, r }, Surf::Cylinder { axis: a2, p: p2, r: r2 }) => {
                 let off = p2 - p;
                 axis.dot(a2).abs() > 1.0 - 1e-6 && (r - r2).abs() < tol && (off - axis * off.dot(axis)).len() < tol
@@ -382,13 +382,14 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
             *a += (q - p).cross(r - p).len() * 0.5;
         }
     }
-    let degenerate: Vec<bool> = area.iter().map(|a| *a < (b.size() * 1e-6).powi(2)).collect();
+    let tiny = (b.size() * 1e-6).powi(2);
+    let degenerate: Vec<bool> = area.iter().map(|a| *a < tiny).collect();
     let is_deg = |f: usize| degenerate.get(f).copied().unwrap_or(false);
 
     // Edge → faces, edge → vertices. Vertices and edges lying on each other count once (two
     // tangent holes touch along a line that both bodies' pieces carry): welded by position,
     // edges by their ends and the point halfway along them.
-    let q = tol * 10.0;
+    let q = (b.size() * 1e-6).max(1e-9);
     let cell = |p: Vec3| ((p.x / q).round() as i64, (p.y / q).round() as i64, (p.z / q).round() as i64);
     let mut edge_faces: HashMap<usize, Vec<usize>> = HashMap::new();
     let mut edge_verts: HashMap<usize, (usize, usize)> = HashMap::new();
@@ -528,7 +529,7 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
         }
     }
     let mut ep: Vec<usize> = (0..remaining.len()).collect();
-    let mut merge_vertex: Vec<usize> = Vec::new();
+    let mut merge_vertex: std::collections::HashSet<usize> = std::collections::HashSet::new();
     for (v, es) in &deg {
         if let [i, j] = es[..]
             && let (Some(a), Some(b)) = (remaining.get(i), remaining.get(j))
@@ -538,7 +539,7 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
             if let Some(s) = ep.get_mut(ri) {
                 *s = rj;
             }
-            merge_vertex.push(*v);
+            merge_vertex.insert(*v);
         }
     }
     let mut edge_groups: BTreeMap<usize, bool> = BTreeMap::new(); // root → has a real end vertex

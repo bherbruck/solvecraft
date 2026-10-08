@@ -1360,3 +1360,22 @@ fn boolean_of_a_body_in_pieces() {
     let v = measure(&cut).unwrap().volume;
     assert!((v - (2000.0 - 2.0 * PI * 4.0 * 10.0)).abs() < 1.0, "{v}");
 }
+
+/// Measuring a body of 5000 faces (a modelled thread is like that) stays fast and counts
+/// right: 0.8 s here, it took 13 s (a per-face recomputation of the body's size).
+#[test]
+fn measure_of_a_body_with_many_faces() {
+    let n = 5000;
+    let pts: Vec<Vec2> = (0..n)
+        .map(|i| {
+            let a = std::f64::consts::TAU * i as f64 / n as f64;
+            Vec2::new(20.0 * a.cos(), 20.0 * a.sin())
+        })
+        .collect();
+    let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&pts), holes: vec![] }], 0.0, 10.0).unwrap().pop().unwrap();
+    let t = std::time::Instant::now();
+    let m = measure(&b).unwrap();
+    // (A loaded build machine runs slower; the bound is loose.)
+    assert!(t.elapsed().as_secs_f64() < 5.0, "{:?}", t.elapsed());
+    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (n + 2, 3 * n, 2 * n), "{:?}", m.merged);
+}
