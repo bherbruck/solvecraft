@@ -1489,7 +1489,6 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::AnglePlane { angle } => {
             need(0, "a plane")?;
-            need(1, "an axis")?;
             let base = match sels(d, 0).first() {
                 Some(Sel::Plane { name }) => name.clone(),
                 _ => return Err("pick an origin or construction plane".into()),
@@ -1500,7 +1499,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     let (o, dir) = axis_of(app, x).ok_or("the axis must be an origin axis or a sketch line")?;
                     json!({"origin": pt(o), "dir": pt(dir)})
                 }
-                None => return Err("pick an axis".into()),
+                None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
             };
             ("ConstructionPlaneAtAngleCommand", json!({"base": base, "axis": axis, "angle": angle}))
         }
@@ -2088,6 +2087,133 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
+            }
+            d
+        }
+        FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base, distance } } => {
+            let mut d = start("ConstructionPlaneOffsetFromPlaneCommand")?;
+            d.kind = Kind::OffsetPlane { offset: distance.clone() };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = plane_sel(s, base).into_iter().collect();
+            }
+            d
+        }
+        FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, axis_origin, axis_dir, angle } } => {
+            let mut d = start("ConstructionPlaneAtAngleCommand")?;
+            d.kind = Kind::AnglePlane { angle: angle.clone() };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = plane_sel(s, base).into_iter().collect();
+            }
+            match world_axis(*axis_dir).filter(|_| axis_origin.len() < 1e-9) {
+                Some(name) => {
+                    if let Some(inp) = d.inputs.get_mut(1) {
+                        inp.items = vec![Sel::Axis { name }];
+                    }
+                }
+                None => {
+                    d.extra.insert("axis".into(), json!({"origin": pt3(*axis_origin), "dir": pt3(*axis_dir)}));
+                }
+            }
+            d
+        }
+        FeatureKind::Split { body, plane } => {
+            let mut d = start("FusionSplitBodyCommand")?;
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = vec![Sel::Body { name: body.clone() }];
+            }
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = plane_sel(s, plane).into_iter().collect();
+            }
+            d
+        }
+        FeatureKind::Scale { bodies, origin, factor, factors } => {
+            let mut d = start("ModifyScale")?;
+            d.kind = Kind::Scale { factor: factor.clone() };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect();
+            }
+            d.extra.insert("origin".into(), pt3(*origin));
+            if let Some(f) = factors {
+                d.extra.insert("factors".into(), json!(f));
+            }
+            d
+        }
+        FeatureKind::OffsetFace { faces, distance, body } => {
+            let mut d = start("FusionOffsetFacesCommand")?;
+            d.kind = Kind::OffsetFaces { distance: distance.clone() };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = faces.iter().filter_map(|p| face_sel(s, *p)).collect();
+            }
+            if let Some(b) = body {
+                d.extra.insert("body".into(), json!(b));
+            }
+            d
+        }
+        FeatureKind::Thread { face, designation, length } => {
+            let mut d = start("FusionThreadCommand")?;
+            d.kind = Kind::Thread { designation: designation.clone().unwrap_or_default(), length: length.clone().unwrap_or_default() };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = face_sel(s, *face).into_iter().collect();
+            }
+            d
+        }
+        FeatureKind::BoundingSolid { bodies, margin } => {
+            let mut d = start("StockModelCommand")?;
+            d.kind = Kind::Stock { margin: margin.clone() };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect();
+            }
+            d
+        }
+        FeatureKind::Pipe { path, diameter, wall, operation, targets, .. } => {
+            let mut d = start("PrimitivePipe")?;
+            d.kind = Kind::Pipe { diameter: diameter.clone(), wall: wall.clone().unwrap_or_default() };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = path.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+            }
+            d.extra.insert("operation".into(), json!(OPS.get(op_index(operation)).copied().unwrap_or("new")));
+            if !targets.is_empty() {
+                d.extra.insert("targets".into(), json!(targets));
+            }
+            d
+        }
+        FeatureKind::Emboss { sketch, profiles, depth, deboss, targets } => {
+            let mut d = start("EmbossCmd")?;
+            d.kind = Kind::Emboss { depth: depth.clone(), deboss: *deboss };
+            let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = items.into_iter().map(|index| Sel::Profile { sketch: *sketch, index }).collect();
+            }
+            if !targets.is_empty() {
+                d.extra.insert("targets".into(), json!(targets));
+            }
+            d
+        }
+        FeatureKind::Rib { curves, thickness, depth, flip, web, .. } => {
+            let mut d = start(if *web { "FusionWebCommand" } else { "FusionRibCommand" })?;
+            d.kind = Kind::Rib { web: *web, thickness: thickness.clone(), depth: depth.clone().unwrap_or_default(), flip: *flip };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = curves.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+            }
+            d
+        }
+        FeatureKind::ReplaceFace { faces, target, body } => {
+            let mut d = start("FusionReplaceFaceCommand")?;
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = faces.iter().filter_map(|p| face_sel(s, *p)).collect();
+            }
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = plane_sel(s, target).into_iter().collect();
+            }
+            if let Some(b) = body {
+                d.extra.insert("body".into(), json!(b));
+            }
+            d
+        }
+        FeatureKind::Remove { bodies } => {
+            let mut d = start("SoftDeleteCommand")?;
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect();
             }
             d
         }
