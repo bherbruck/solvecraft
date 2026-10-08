@@ -110,9 +110,7 @@ pub fn group_items(app: &SolveApp, id: u64) -> Vec<Item> {
         let bodies = group_bodies(app, id);
         let hidden = !bodies.is_empty() && bodies.iter().all(|b| app.ui.hidden_bodies.contains(b));
         v.push(Item::sep());
-        v.push(
-            Item::action(if hidden { "ui.show" } else { "ui.hide" }, if hidden { "Show" } else { "Hide" }, "eye").with(json!({ "bodies": bodies })),
-        );
+        v.push(Item::action(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": bodies })));
         v.push(Item::action("ui.isolate", "Isolate", "").with(json!({ "bodies": bodies })));
     }
     v
@@ -137,7 +135,7 @@ pub fn folder_items(app: &SolveApp, component: u64, folder: &str) -> Vec<Item> {
         v.push(Item::action("ui.groupSelected", "Group Selected", "folder").with(json!({ "component": component, "folder": folder, "items": sel })));
     }
     v.push(Item::sep());
-    v.push(Item::action("ui.folderVisible", "Show/Hide", "eye").with(json!({ "component": component, "folder": folder })));
+    v.push(Item::action("ui.folderVisible", "Show/Hide", "eye").key("V").with(json!({ "component": component, "folder": folder })));
     v.push(Item::action("ui.showAll", "Show All", "eye"));
     v
 }
@@ -147,7 +145,7 @@ pub fn origin_items(app: &SolveApp) -> Vec<Item> {
     let planes = ["XY", "XZ", "YZ"].iter().all(|p| !app.ui.hidden_origin.iter().any(|h| h == p));
     let axes = ["X", "Y", "Z"].iter().all(|p| !app.ui.hidden_origin.iter().any(|h| h == p));
     vec![
-        Item::action("ui.origin", "Show/Hide", "eye"),
+        Item::action("ui.origin", "Show/Hide", "eye").key("V"),
         Item::action("ui.originAll", "Show All", "eye"),
         Item::action("ui.originPart", if planes { "Hide Planes" } else { "Show Planes" }, "plane")
             .with(json!({ "keys": ["XY", "XZ", "YZ"], "show": !planes })),
@@ -252,6 +250,12 @@ struct RowResp {
 
 fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let t = Tokens::get();
+    // Rows scrolled out of view only take their space: no widgets, no painting.
+    let r = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), ROW_H));
+    if !ui.is_rect_visible(r) {
+        ui.allocate_space(r.size());
+        return RowResp { rect: Some(r), ..Default::default() };
+    }
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click_and_drag());
     let mut out = RowResp { rect: Some(r), hovered: resp.hovered(), ..Default::default() };
     if row.selected {
@@ -678,7 +682,7 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })),
         Item::action("ui.rename", "Rename", "").with(json!({ "canvas": id })),
         Item::sep(),
-        Item::action("ui.canvasVisible", if visible { "Hide" } else { "Show" }, "eye").with(json!({ "canvas": id, "visible": !visible })),
+        Item::action("ui.canvasVisible", "Show/Hide", "eye").key("V").with(json!({ "canvas": id, "visible": !visible })),
     ]
 }
 

@@ -23,3 +23,18 @@ What changed:
 With 49 bodies the frame was already 2.8 ms (hover) before these changes. The remaining frame
 time with the Browser shown is mostly the Browser listing every body row. GPU ID-buffer picking
 was not needed at this size.
+
+## Browser
+
+Same model and method (400 bodies, Bodies folder open, 60 hover moves over the viewport):
+
+| | median | p90 |
+|---|---|---|
+| Browser shown, before | 1.95 ms | 2.71 ms |
+| Browser shown, after | 0.72 ms | 1.19 ms |
+| Browser hidden | 0.30 ms | 0.72 ms |
+
+What changed: rows scrolled out of view only reserve their height. They register no widgets
+and paint nothing (no text layout, icons or eye/fold buttons), so the cost follows the rows on
+screen rather than the rows in the tree. Scrolling, Find in Browser and drag and drop still see
+every row's place.

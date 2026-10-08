@@ -89,7 +89,7 @@ impl Item {
         self.enabled &= enabled;
         self
     }
-    fn key(mut self, k: &str) -> Item {
+    pub fn key(mut self, k: &str) -> Item {
         self.shortcut = k.into();
         self
     }
@@ -319,7 +319,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.properties", "Properties", "measure").with(json!({ "bodies": [face] })));
         v.push(Item::sep());
         v.push(act("ui.delete", "Delete", "delete").key("Del"));
-        v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").with(json!({ "bodies": [face] })));
+        v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [face] })));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "").with(json!({ "body": face })));
         v.push(act("ui.findTimeline", "Find in Timeline", "").with(json!({ "body": face })));
@@ -333,7 +333,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "FusionChamferCommand", "Chamfer"));
         v.push(Item::sep());
         v.push(act("ui.delete", "Delete", "delete").key("Del"));
-        v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").with(json!({ "bodies": [body] })));
+        v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [body] })));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "").with(json!({ "body": body })));
         v.push(Item::sep());
@@ -396,7 +396,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         cmd(app, "SoftDeleteCommand", "Remove").with(json!({ "bodies": names })).on(!locked),
         act("ui.rename", "Rename", "").with(json!({ "body": bodies.first() })).on(one),
         Item::sep(),
-        act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").with(json!({ "bodies": names })),
+        act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "").with(json!({ "bodies": names })),
         act("ui.isolate", "Isolate", "").with(json!({ "bodies": names })),
     ];
@@ -430,7 +430,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.lookAt", "Look At", "").with(json!({ "sketch": id })),
         act("ui.sketchProfile", if profiles { "Hide Profile" } else { "Show Profile" }, "").with(json!({ "sketch": id })),
         act("ui.sketchDims", if dims { "Hide Dimension" } else { "Show Dimension" }, "dimension").with(json!({ "sketch": id })),
-        act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").with(json!({ "sketch": id })),
+        act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").key("V").with(json!({ "sketch": id })),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "").with(json!({ "feature": id })),
     ]
@@ -479,7 +479,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     v.push(act("ui.rename", "Rename", "").with(json!({ "component": id })));
     v.push(Item::sep());
-    v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     v.push(act("ui.showAll", "Show All Bodies", "eye"));
     v.push(act("ui.isolate", "Isolate", "").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
     v.push(act("ui.newGroup", "New Group", "folder").with(json!({ "component": id })));
@@ -805,6 +805,51 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
 /// Delete what is selected: sketch entities, features, and bodies (a Remove feature).
 pub fn delete(app: &mut SolveApp) {
     crate::delete::delete_selection(app);
+}
+
+/// Show/Hide (the V key): what is selected in the viewport or picked in the browser flips its
+/// visibility (bodies, faces' and edges' bodies, sketches, construction and origin planes and
+/// axes, components' bodies, canvases). When some are shown and some hidden, all are hidden.
+pub fn toggle_visibility(app: &mut SolveApp) {
+    use solvecraft_engine::doc::FeatureKind;
+    let mut bodies: Vec<String> = touched_bodies(app);
+    for c in app.tree.picked_components.clone() {
+        bodies.extend(component_bodies(app, c));
+    }
+    let sketches: Vec<u64> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|s| if let Sel::Feature { id } = s { Some(*id) } else { None })
+        .filter(|id| app.session.doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })))
+        .collect();
+    let origin: Vec<String> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|s| match s {
+            Sel::Plane { name } | Sel::Axis { name } => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    let canvases = app.tree.picked_canvases.clone();
+    let any_visible = bodies.iter().any(|b| !app.ui.hidden_bodies.contains(b))
+        || sketches.iter().any(|s| crate::browser::sketch_visible(app, *s))
+        || origin.iter().any(|o| !app.ui.hidden_origin.contains(o))
+        || app.session.doc.canvases.iter().any(|c| canvases.contains(&c.id) && c.visible);
+    let hide = any_visible;
+    app.ui.hidden_bodies.retain(|b| !bodies.contains(b));
+    app.ui.hidden_origin.retain(|o| !origin.contains(o));
+    if hide {
+        app.ui.hidden_bodies.extend(bodies);
+        app.ui.hidden_origin.extend(origin);
+    }
+    for s in sketches {
+        crate::browser::set_sketch_visible(app, s, !hide);
+    }
+    for c in canvases {
+        let _ = app.run("canvas.edit", json!({ "canvas": c, "visible": !hide }));
+    }
 }
 
 /// Add the edges that continue the selected edges smoothly to the selection.

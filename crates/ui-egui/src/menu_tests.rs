@@ -183,7 +183,7 @@ fn folder_and_group_menus_make_rename_and_drop_groups() {
     act(&mut app, &t, "Rename");
     assert!(context_menu::finish_rename(&mut app, Some("Parts"), true));
     assert_eq!(app.session.doc.browser_groups[0].name, "Parts");
-    act(&mut app, &t, "Hide");
+    act(&mut app, &t, "Show/Hide");
     assert_eq!(app.ui.hidden_bodies.len(), 2);
     act(&mut app, &t, "Ungroup");
     assert!(app.session.doc.browser_groups.is_empty());
@@ -263,7 +263,7 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     let data = solvecraft_engine::doc::canvas::base64_encode(&png);
     let id = app.run("FusionAddCanvasCommand", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
     let t = Target::Canvas { id };
-    act(&mut app, &t, "Hide");
+    act(&mut app, &t, "Show/Hide");
     assert!(!app.session.doc.canvases[0].visible);
     act(&mut app, &t, "Rename");
     assert!(context_menu::finish_rename(&mut app, Some("Photo"), true));
@@ -357,4 +357,26 @@ fn menus_follow_fusion_order() {
     order(&empty, &["Pan", "Zoom", "Orbit", "Show All", "Unisolate", "Extrude", "Fillet"]);
     context_menu::run_item(&mut app, &find(&empty, "Pan"), pos2(0.0, 0.0));
     assert!(matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan)));
+}
+
+#[test]
+fn v_toggles_what_is_selected() {
+    let mut app = sample_app();
+    let b = body(&app);
+    let sk = app.session.doc.features.iter().find(|f| f.name == "Base").unwrap().id;
+    app.run("select.set", json!({"items": [{"type": "body", "name": b}, {"type": "plane", "name": "XY"}, {"type": "feature", "id": sk}]})).unwrap();
+    crate::browser::set_sketch_visible(&mut app, sk, true);
+    context_menu::toggle_visibility(&mut app);
+    assert!(app.ui.hidden_bodies.contains(&b) && app.ui.hidden_origin.iter().any(|h| h == "XY"));
+    assert!(!crate::browser::sketch_visible(&app, sk));
+    context_menu::toggle_visibility(&mut app);
+    assert!(app.ui.hidden_bodies.is_empty() && app.ui.hidden_origin.is_empty());
+    assert!(crate::browser::sketch_visible(&app, sk));
+    // Components picked in the browser hide their bodies.
+    app.run("FusionCreateComponentsFromBodiesCommand", json!({"bodies": [b.clone()]})).unwrap();
+    app.run("select.clear", json!({})).unwrap();
+    app.tree.picked_components = vec![app.session.doc.components[0].id];
+    context_menu::toggle_visibility(&mut app);
+    assert_eq!(app.ui.hidden_bodies, vec![b]);
+    assert_eq!(find(&context_menu::items(&app, &Target::Body { name: body(&app) }), "Show/Hide").shortcut, "V");
 }
