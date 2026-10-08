@@ -23,6 +23,7 @@ mod sketch_constraints;
 mod sketch_create;
 mod sketch_freeform;
 mod sketch_import;
+mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
 
@@ -124,6 +125,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_create::COMMANDS.iter());
     v.extend(sketch_constraints::COMMANDS.iter());
     v.extend(sketch_import::COMMANDS.iter());
+    v.extend(sketch_inspect::COMMANDS.iter());
     v.extend(sketch_modify::COMMANDS.iter());
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());

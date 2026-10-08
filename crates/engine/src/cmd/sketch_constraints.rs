@@ -528,3 +528,7 @@ mod tests;
 #[cfg(test)]
 #[path = "sketch_fuzz_tests.rs"]
 mod fuzz;
+
+#[cfg(test)]
+#[path = "sketch_perf_tests.rs"]
+mod perf;

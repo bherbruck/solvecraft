@@ -7,7 +7,7 @@ use std::cell::{Cell, RefCell};
 
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
-use solvecraft_engine::geom::Vec2;
+use solvecraft_engine::geom::{Vec2, Vec3};
 
 use crate::SolveApp;
 use crate::tools::{Kind, Tool};
@@ -24,6 +24,32 @@ thread_local! {
     /// The inference the cursor snapped to last (label, sketch point), for the hint.
     static SNAP: RefCell<Option<(&'static str, Vec2)>> = const { RefCell::new(None) };
     static PREV: Cell<Option<Vec2>> = const { Cell::new(None) };
+    /// Curvature comb teeth (foot, tip) shown while the comb tool is active.
+    static COMBS: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn v3(v: &Value) -> Option<Vec3> {
+    Some(Vec3::new(v.get(0)?.as_f64()?, v.get(1)?.as_f64()?, v.get(2)?.as_f64()?))
+}
+
+/// Curvature combs: teeth and the envelope through their tips.
+fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    if app.tool.as_ref().map(|t| t.cmd) != Some("FusionCurvatureCombAnalysisCommand") {
+        COMBS.with(|c| c.borrow_mut().clear());
+        return;
+    }
+    let tk = crate::theme::Tokens::get();
+    COMBS.with(|c| {
+        for comb in c.borrow().iter() {
+            let mut tips: Vec<Pos2> = Vec::new();
+            for [a, b] in comb {
+                let (Some(p), Some(q)) = (proj.to_screen(*a), proj.to_screen(*b)) else { continue };
+                painter.line_segment([p, q], Stroke::new(1.0, tk.warning.gamma_multiply(0.8)));
+                tips.push(q);
+            }
+            painter.add(egui::Shape::line(tips, Stroke::new(1.4, tk.warning)));
+        }
+    });
 }
 
 /// Snap a cursor point on the sketch plane to what Fusion infers while drawing: a line's
@@ -149,6 +175,7 @@ enum Mode {
 fn mode(id: &str) -> Option<Mode> {
     Some(match id {
         "ProjectNewCmd" | "IntersectCmd" | "Include3DGeometry" | "FitCurvesToSectionCommand" | "SketchIsoparametricCurve" => Mode::ModelRef,
+        "FusionCurvatureCombAnalysisCommand" => Mode::ModelRef,
         "TrimSketchCmd" | "ExtendSketchCmd" | "BreakSketchCmd" => Mode::CurveAt,
         "SketchMidpointLine" => Mode::Points(2),
         "ArcTangent" => Mode::Points(2),
@@ -193,6 +220,7 @@ pub fn hint(id: &str) -> Option<String> {
             "Include3DGeometry" => "Include 3D Geometry: click edges or vertices",
             "FitCurvesToSectionCommand" => "Fit Curves to Mesh Section: click a body",
             "SketchIsoparametricCurve" => "Isoparametric Curve: click a point on a face (Shift: along)",
+            "FusionCurvatureCombAnalysisCommand" => "Curvature comb: click sketch curves or model edges",
             "TrimSketchCmd" => "Trim: click the piece of a curve to remove",
             "ExtendSketchCmd" => "Extend: click a curve near the end to extend",
             "BreakSketchCmd" => "Break: click a curve where it should split",
@@ -315,6 +343,22 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
     let at = sketch_point_at(app, proj, pos);
     let cmd = tool.cmd;
     match m {
+        Mode::ModelRef if cmd == "FusionCurvatureCombAnalysisCommand" => {
+            let params = hits.iter().find_map(|h| match h {
+                Hit::SketchCurve { sketch, id, .. } => Some(json!({"sketch": sketch, "curves": [id]})),
+                Hit::Edge { mid, .. } => Some(json!({"edges": [[mid.x, mid.y, mid.z]]})),
+                _ => None,
+            });
+            if let Some(p) = params
+                && let Ok(v) = app.run(cmd, p)
+            {
+                for comb in v["combs"].as_array().into_iter().flatten() {
+                    let teeth: Vec<[Vec3; 2]> =
+                        comb["teeth"].as_array().into_iter().flatten().filter_map(|t| Some([v3(t.get(0)?)?, v3(t.get(1)?)?])).collect();
+                    COMBS.with(|c| c.borrow_mut().push(teeth));
+                }
+            }
+        }
         Mode::ModelRef => {
             let r = hits.iter().find_map(|h| model_ref(app, h));
             let Some(r) = r else { return };
@@ -724,6 +768,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     SHIFT.with(|c| c.set(ui.input(|i| i.modifiers.shift)));
     glyphs(app, painter, proj);
     snap_hint(app, painter, proj);
+    combs(app, painter, proj);
     text_entry(app, ui.ctx());
 }
 
