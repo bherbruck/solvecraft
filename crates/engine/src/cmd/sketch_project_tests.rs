@@ -298,3 +298,55 @@ fn isoparametric_curves_of_a_cylinder() {
     assert!(zs.iter().cloned().fold(f64::MIN, f64::max) > 19.9 && zs.iter().cloned().fold(f64::MAX, f64::min) < 0.1, "{zs:?}");
     assert!(w.pts.iter().all(|p| (p.x - 6.0).abs() < 1e-3 && p.y.abs() < 1e-3));
 }
+
+#[test]
+fn tilted_circles_project_to_exact_ellipses_and_splines_stay_splines() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveCylinder", json!({"base": [0, 0, 0], "axis": [1, 0, 1], "radius": 5, "height": 20}));
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "offset": -10}));
+    // The base circle (centred at the origin) seen from above.
+    let r = run(&mut s, "ProjectNewCmd", json!({"refs": [{"edge": [0, 5, 0]}]}));
+    // One seam half: exact conics (rational quadratic arcs).
+    let si = inspect(&mut s);
+    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == r["links"][0]["curves"][0]).unwrap().clone();
+    assert_eq!(c["type"], "conic", "{c}");
+    let st = s.model.state();
+    let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
+    for ci in sk.link_curves(r["links"][0]["link"].as_str().unwrap()) {
+        for q in sk.polyline(ci) {
+            // On the ellipse x²/(5/√2)² + y²/5² = 1.
+            let e = (q.x / (5.0 * std::f64::consts::FRAC_1_SQRT_2)).powi(2) + (q.y / 5.0).powi(2);
+            assert!((e - 1.0).abs() < 1e-9, "{q:?}");
+        }
+    }
+    // The whole face (both halves of its rim, plus its seam) gives the full ellipse.
+    let r = run(&mut s, "ProjectNewCmd", json!({"refs": [{"face": [0, 0, 0]}]}));
+    let si = inspect(&mut s);
+    let types: Vec<String> = r["links"][0]["curves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|id| si["curves"].as_array().unwrap().iter().find(|c| c["id"] == *id).unwrap()["type"].as_str().unwrap().to_string())
+        .collect();
+    assert!(types.iter().all(|t| t == "conic" || t == "ellipse"), "{types:?}");
+    let r = run(&mut s, "ProjectNewCmd", json!({"refs": [{"edge": [0, -5, 0]}]}));
+    let si = inspect(&mut s);
+    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == r["links"][0]["curves"][0]).unwrap().clone();
+    if c["type"] == "ellipse" {
+        assert!((c["minor_radius"].as_f64().unwrap() - 5.0 * std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-6, "{c}");
+        let major = &c["major_at"];
+        assert!(((major[0].as_f64().unwrap().powi(2) + major[1].as_f64().unwrap().powi(2)).sqrt() - 5.0).abs() < 1e-6, "{c}");
+    }
+    run(&mut s, "SketchStop", json!({}));
+    // A spline of a parallel sketch projects as the same spline.
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "offset": 30}));
+    let sp = run(&mut s, "DrawSpline", json!({"points": [[0, 0], [10, 5], [20, 0]]}))["curves"][0].clone();
+    run(&mut s, "SketchStop", json!({}));
+    let sk1 = s.doc.features.last().unwrap().id;
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    let r = run(&mut s, "ProjectNewCmd", json!({"refs": [{"sketch": sk1, "curve": sp}]}));
+    let si = inspect(&mut s);
+    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == r["links"][0]["curves"][0]).unwrap().clone();
+    assert_eq!(c["type"], "spline", "{c}");
+    assert_eq!(c["points"].as_array().unwrap().len(), 3);
+}

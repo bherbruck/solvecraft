@@ -327,9 +327,9 @@ fn merge_split_circles(geom: Vec<LinkGeom>) -> Vec<LinkGeom> {
     let near = |p: Vec2, q: Vec2| p.dist(q) <= TOL * (1.0 + p.len().max(q.len()));
     let mut out = geom.clone();
     for i in 0..geom.len() {
-        let Some(LinkGeom::Arc { c, a, b }) = geom.get(i).copied() else { continue };
+        let Some(LinkGeom::Arc { c, a, b }) = geom.get(i).cloned() else { continue };
         for j in i + 1..geom.len() {
-            if let Some(LinkGeom::Arc { c: c2, a: a2, b: b2 }) = geom.get(j).copied()
+            if let Some(LinkGeom::Arc { c: c2, a: a2, b: b2 }) = geom.get(j).cloned()
                 && near(c, c2)
                 && near(a, a2)
                 && near(b, b2)
@@ -365,12 +365,134 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Vec
             }
             _ => Vec::new(),
         },
+        // Free-form curves in a parallel plane map exactly through their defining points.
+        Some(CurveKind::Ellipse { c, m, r }) if parallel => match (sk.point(*c), sk.point(*m)) {
+            (Some(c), Some(m)) => vec![LinkGeom::Ellipse { c: map(c), major: map(m), minor: *r }],
+            _ => Vec::new(),
+        },
+        Some(CurveKind::Spline { pts, control, degree }) if parallel => {
+            let p: Option<Vec<Vec2>> = pts.iter().map(|q| sk.point(*q).map(map)).collect();
+            p.map(|pts| vec![LinkGeom::Spline { pts, control: *control, degree: *degree }]).unwrap_or_default()
+        }
+        Some(CurveKind::Conic { a, b, apex, rho }) if parallel => match (sk.point(*a), sk.point(*apex), sk.point(*b)) {
+            (Some(a), Some(x), Some(b)) => vec![LinkGeom::Conic { a: map(a), apex: map(x), b: map(b), rho: *rho }],
+            _ => Vec::new(),
+        },
         Some(_) => {
-            let pts: Vec<Vec3> = sk.segs(ci).iter().flat_map(|s| s.polyline(1e-3)).map(|p| from.to_world(p)).collect();
+            let pts: Vec<Vec3> = sk.polyline(ci).iter().map(|p| from.to_world(*p)).collect();
             fit_world(to, &pts)
         }
         None => Vec::new(),
     }
+}
+
+/// A circle in space (centre, unit normal, radius) through the polyline's points, and whether
+/// the polyline closes.
+fn circle3(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64, bool)> {
+    let n = pts.len();
+    if n < 4 {
+        return None;
+    }
+    let closed = pts.first()?.dist(*pts.last()?) <= 1e-9 * pts.first()?.len().max(1.0);
+    let (a, b, c) = if closed { (*pts.first()?, *pts.get(n / 3)?, *pts.get(2 * n / 3)?) } else { (*pts.first()?, *pts.get(n / 2)?, *pts.last()?) };
+    let (ab, ac) = (b - a, c - a);
+    let nrm = ab.cross(ac);
+    let l2 = nrm.len2();
+    if l2 < 1e-24 {
+        return None;
+    }
+    // Circumcentre of the triangle a, b, c.
+    let centre = a + (nrm.cross(ab) * ac.len2() + ac.cross(nrm) * ab.len2()) / (2.0 * l2);
+    let r = centre.dist(a);
+    let un = nrm.normalized()?;
+    let tol = 1e-7 * r.max(1.0);
+    pts.iter().all(|p| (p.dist(centre) - r).abs() < tol && (*p - centre).dot(un).abs() < tol).then_some((centre, un, r, closed))
+}
+
+/// A circle seen at a slant is an ellipse, exactly: a full circle becomes an ellipse; an arc
+/// becomes conics (rational quadratic Béziers of at most 90 degrees each — parallel projection
+/// keeps their weights).
+fn tilted_circle(plane: &Plane, pts: &[Vec3]) -> Option<Vec<LinkGeom>> {
+    let (c, n, r, closed) = circle3(pts)?;
+    let sn = plane.normal();
+    let cosang = n.dot(sn).abs();
+    if cosang > 1.0 - 1e-12 || cosang < 1e-9 {
+        return None;
+    }
+    if closed {
+        let u = n.cross(sn).normalized()?;
+        return Some(vec![LinkGeom::Ellipse { c: plane.to_local(c), major: plane.to_local(c + u * r), minor: r * cosang }]);
+    }
+    // Sweep from the first point along the polyline's direction.
+    let (p0, p1) = (*pts.first()?, *pts.last()?);
+    let e1 = (p0 - c).normalized()?;
+    let e2 = n.cross(e1);
+    let ang = |p: Vec3| (p - c).dot(e2).atan2((p - c).dot(e1));
+    let mut sweep = 0.0;
+    for w in pts.windows(2) {
+        let mut d = ang(w[1]) - ang(w[0]);
+        while d > std::f64::consts::PI {
+            d -= std::f64::consts::TAU;
+        }
+        while d < -std::f64::consts::PI {
+            d += std::f64::consts::TAU;
+        }
+        sweep += d;
+    }
+    let _ = p1;
+    let k = ((sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize).clamp(1, 8);
+    let h = sweep / k as f64;
+    let at = |t: f64| c + (e1 * t.cos() + e2 * t.sin()) * r;
+    let w = (h.abs() / 2.0).cos();
+    let rho = w / (1.0 + w);
+    let mut out = Vec::new();
+    for i in 0..k {
+        let (t0, t1) = (h * i as f64, h * (i + 1) as f64);
+        let apex = c + (e1 * ((t0 + t1) / 2.0).cos() + e2 * ((t0 + t1) / 2.0).sin()) * (r / w);
+        out.push(LinkGeom::Conic { a: plane.to_local(at(t0)), apex: plane.to_local(apex), b: plane.to_local(at(t1)), rho });
+    }
+    Some(out)
+}
+
+/// A smooth chain that fitting broke into many short lines is better as one fit spline (a
+/// projected spline edge or elliptical arc): when a spline through a few of its points stays
+/// within `tol` of all of them.
+fn as_spline(pts: &[Vec2], tol: f64) -> Option<LinkGeom> {
+    let n = pts.len();
+    if n < 4 {
+        return None;
+    }
+    // No sharp corners.
+    for w in pts.windows(3) {
+        let (Some(u), Some(v)) = ((w[1] - w[0]).normalized(), (w[2] - w[1]).normalized()) else { continue };
+        if u.dot(v) < 30f64.to_radians().cos() {
+            return None;
+        }
+    }
+    for k in [8usize, 16, 32, 64] {
+        let step = (n - 1) as f64 / k as f64;
+        let mut fit: Vec<Vec2> = (0..=k).map(|i| pts[((i as f64 * step).round() as usize).min(n - 1)]).collect();
+        fit.dedup_by(|a, b| a.dist(*b) < 1e-12);
+        if fit.len() < 2 {
+            return None;
+        }
+        let poly = solvecraft_sketch::spline_polyline(&fit, false, 3);
+        let ok = pts.iter().all(|q| {
+            poly.windows(2)
+                .map(|w| {
+                    let (a, b) = (w[0], w[1]);
+                    let d = b - a;
+                    let t = if d.len2() > 0.0 { ((*q - a).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+                    q.dist(a + d * t)
+                })
+                .fold(f64::INFINITY, f64::min)
+                <= tol
+        });
+        if ok {
+            return Some(LinkGeom::Spline { pts: fit, control: false, degree: 3 });
+        }
+    }
+    None
 }
 
 /// The line where another plane crosses the sketch plane (None when parallel).
@@ -389,9 +511,19 @@ fn plane_trace(sk: &Plane, other: &Plane) -> Option<LinkGeom> {
 
 /// Project a world polyline and fit lines and arcs to it.
 fn fit_world(plane: &Plane, pts: &[Vec3]) -> Vec<LinkGeom> {
+    if let Some(e) = tilted_circle(plane, pts) {
+        return e;
+    }
     let p2: Vec<Vec2> = pts.iter().map(|p| plane.to_local(*p)).collect();
     let mut out = Vec::new();
     fit_chain(&p2, None, &mut out);
+    // Many little lines from one smooth edge: a spline instead.
+    if out.len() > 4 && out.iter().all(|g| matches!(g, LinkGeom::Line(..))) {
+        let ext = p2.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p.x).min(p.y), hi.max(p.x).max(p.y)));
+        if let Some(sp) = as_spline(&p2, (ext.1 - ext.0).abs().max(1e-9) * 1e-4) {
+            return vec![sp];
+        }
+    }
     out
 }
 

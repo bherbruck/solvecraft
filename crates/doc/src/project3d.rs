@@ -404,6 +404,10 @@ fn link_polyline(g: &solvecraft_sketch::LinkGeom) -> Vec<Vec2> {
             (0..=48).map(|i| c + Vec2::from_angle(s0 + sw * i as f64 / 48.0) * r).collect()
         }
         LinkGeom::Conic { a, apex, b, rho } => (0..=32).map(|i| solvecraft_sketch::conic_point(a, apex, b, rho, i as f64 / 32.0)).collect(),
+        LinkGeom::Ellipse { c, major, minor } => {
+            (0..=96).map(|i| solvecraft_sketch::ellipse_point(c, major, minor, i as f64 / 96.0 * std::f64::consts::TAU)).collect()
+        }
+        LinkGeom::Spline { ref pts, control, degree } => solvecraft_sketch::spline_polyline(pts, control, degree),
         LinkGeom::Point(_) => Vec::new(),
     }
 }

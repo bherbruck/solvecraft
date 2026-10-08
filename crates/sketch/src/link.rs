@@ -110,7 +110,7 @@ pub struct Link {
 }
 
 /// Geometry a link produces, in sketch coordinates.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LinkGeom {
     Point(Vec2),
     Line(Vec2, Vec2),
@@ -128,6 +128,18 @@ pub enum LinkGeom {
         b: Vec2,
         rho: f64,
     },
+    /// Full ellipse: centre, end of the major axis, minor radius.
+    Ellipse {
+        c: Vec2,
+        major: Vec2,
+        minor: f64,
+    },
+    /// Spline through (`control == false`) or over (`control`) the points.
+    Spline {
+        pts: Vec<Vec2>,
+        control: bool,
+        degree: u8,
+    },
 }
 
 impl LinkGeom {
@@ -139,6 +151,12 @@ impl LinkGeom {
             LinkGeom::Circle(c, r) => ok(c) && r.is_finite() && *r > 1e-9 && *r < 1e9,
             LinkGeom::Arc { c, a, b } => ok(c) && ok(a) && ok(b) && c.dist(*a) > 1e-9 && a.dist(*b) > MERGE_TOL,
             LinkGeom::Conic { a, apex, b, rho } => ok(a) && ok(apex) && ok(b) && a.dist(*b) > MERGE_TOL && *rho > 1e-6 && *rho < 1.0 - 1e-6,
+            LinkGeom::Ellipse { c, major, minor } => {
+                ok(c) && ok(major) && c.dist(*major) > 1e-9 && minor.is_finite() && *minor > 1e-9 && *minor < 1e9
+            }
+            LinkGeom::Spline { pts, degree, .. } => {
+                (2..=crate::curves::MAX_SPLINE_POINTS).contains(&pts.len()) && pts.iter().all(ok) && (1..=7).contains(degree)
+            }
         }
     }
 }
@@ -157,6 +175,10 @@ enum LCurve {
     Circle(usize, f64),
     Arc(usize, usize, usize),
     Conic(usize, usize, usize, f64),
+    Ellipse(usize, usize, f64),
+    /// Start, end, first interior point and interior count (interior points are consecutive
+    /// and never shared), control flag, degree.
+    Spline(usize, usize, usize, usize, bool, u8),
 }
 
 fn layout(geom: &[LinkGeom]) -> Result<Layout> {
@@ -172,7 +194,7 @@ fn layout(geom: &[LinkGeom]) -> Result<Layout> {
         pts.len() - 1
     }
     for g in geom.iter().filter(|g| g.finite()) {
-        match *g {
+        match g.clone() {
             LinkGeom::Point(p) => {
                 let i = pt(&mut l.pts, p);
                 if !l.lone.contains(&i) {
@@ -203,6 +225,21 @@ fn layout(geom: &[LinkGeom]) -> Result<Layout> {
                     l.curves.push(LCurve::Conic(a, b, x, rho));
                 }
             }
+            LinkGeom::Ellipse { c, major, minor } => {
+                let (c, m) = (pt(&mut l.pts, c), pt(&mut l.pts, major));
+                if c != m {
+                    l.curves.push(LCurve::Ellipse(c, m, minor));
+                }
+            }
+            LinkGeom::Spline { pts, control, degree } => {
+                let (Some(first), Some(last)) = (pts.first(), pts.last()) else { continue };
+                let s0 = pt(&mut l.pts, *first);
+                let first_in = l.pts.len();
+                let inner = pts.get(1..pts.len() - 1).unwrap_or_default();
+                l.pts.extend(inner.iter().copied());
+                let s1 = pt(&mut l.pts, *last);
+                l.curves.push(LCurve::Spline(s0, s1, first_in, inner.len(), control, degree));
+            }
         }
     }
     // Lone points that a curve also uses are not lone.
@@ -212,6 +249,8 @@ fn layout(geom: &[LinkGeom]) -> Result<Layout> {
             LCurve::Circle(c, _) => c == i,
             LCurve::Arc(c, a, b) => c == i || a == i || b == i,
             LCurve::Conic(a, b, x, _) => a == i || b == i || x == i,
+            LCurve::Ellipse(c, m, _) => c == i || m == i,
+            LCurve::Spline(a, b, f, n, ..) => a == i || b == i || (i >= f && i < f + n),
         })
     };
     let curves = l.curves.clone();
@@ -226,6 +265,8 @@ fn same_shape(a: &LCurve, b: &LCurve) -> bool {
             | (LCurve::Circle(..), LCurve::Circle(..))
             | (LCurve::Arc(..), LCurve::Arc(..))
             | (LCurve::Conic(..), LCurve::Conic(..))
+            | (LCurve::Ellipse(..), LCurve::Ellipse(..))
+            | (LCurve::Spline(..), LCurve::Spline(..))
     )
 }
 
@@ -248,6 +289,8 @@ fn same_geometry(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> bool {
             (LCurve::Circle(_, ra), LCurve::Circle(_, rb)) => all() && close(*ra, *rb),
             (LCurve::Arc(..), LCurve::Arc(..)) => all(),
             (LCurve::Conic(.., ra), LCurve::Conic(.., rb)) => all() && close(*ra, *rb),
+            (LCurve::Ellipse(.., ra), LCurve::Ellipse(.., rb)) => all() && close(*ra, *rb),
+            (LCurve::Spline(.., ca, da), LCurve::Spline(.., cb, db)) => ca == cb && da == db && all(),
             _ => false,
         }
     };
@@ -274,6 +317,13 @@ fn curve_points(c: &LCurve) -> Vec<usize> {
         LCurve::Circle(c, _) => vec![c],
         LCurve::Arc(c, a, b) => vec![c, a, b],
         LCurve::Conic(a, b, x, _) => vec![a, b, x],
+        LCurve::Ellipse(c, m, _) => vec![c, m],
+        LCurve::Spline(a, b, f, n, ..) => {
+            let mut v = vec![a];
+            v.extend(f..f + n);
+            v.push(b);
+            v
+        }
     }
 }
 
@@ -346,6 +396,15 @@ impl Sketch {
                 LCurve::Circle(c, r) => (CurveKind::Circle { c: point(self, c)?, r }, "c"),
                 LCurve::Arc(c, a, b) => (CurveKind::Arc { c: point(self, c)?, a: point(self, a)?, b: point(self, b)? }, "a"),
                 LCurve::Conic(a, b, x, rho) => (CurveKind::Conic { a: point(self, a)?, b: point(self, b)?, apex: point(self, x)?, rho }, "k"),
+                LCurve::Ellipse(c, m, r) => (CurveKind::Ellipse { c: point(self, c)?, m: point(self, m)?, r }, "e"),
+                LCurve::Spline(a, b, f, n, control, degree) => {
+                    let mut pts = vec![point(self, a)?];
+                    for i in f..f + n {
+                        pts.push(point(self, i)?);
+                    }
+                    pts.push(point(self, b)?);
+                    (CurveKind::Spline { pts, control, degree }, "s")
+                }
             };
             let cid = self.fresh(prefix);
             self.curves.push(Curve { id: cid, kind, construction: false, reversed: false, link: Some(id.to_string()), centerline: false });
@@ -376,6 +435,18 @@ impl Sketch {
                 Some(CurveKind::Circle { c, r }) => Some(LCurve::Circle(local(*c)?, *r)),
                 Some(CurveKind::Arc { c, a, b }) => Some(LCurve::Arc(local(*c)?, local(*a)?, local(*b)?)),
                 Some(CurveKind::Conic { a, b, apex, rho }) => Some(LCurve::Conic(local(*a)?, local(*b)?, local(*apex)?, *rho)),
+                Some(CurveKind::Ellipse { c, m, r }) => Some(LCurve::Ellipse(local(*c)?, local(*m)?, *r)),
+                Some(CurveKind::Spline { pts, control, degree }) => {
+                    let (a, b) = (local(*pts.first()?)?, local(*pts.last()?)?);
+                    let inner: Vec<usize> =
+                        pts.get(1..pts.len().saturating_sub(1)).unwrap_or_default().iter().map(|q| local(*q)).collect::<Option<_>>()?;
+                    let f = inner.first().copied().unwrap_or(0);
+                    // Interior points were made one after another.
+                    if inner.iter().enumerate().any(|(k, x)| *x != f + k) {
+                        return None;
+                    }
+                    Some(LCurve::Spline(a, b, f, inner.len(), *control, *degree))
+                }
                 _ => None,
             })
             .collect();
@@ -404,6 +475,17 @@ impl Sketch {
                     visit(b);
                     visit(x);
                 }
+                LCurve::Ellipse(c, m, _) => {
+                    visit(c);
+                    visit(m);
+                }
+                LCurve::Spline(a, b, f, n, ..) => {
+                    visit(a);
+                    for i in f..f + n {
+                        visit(i);
+                    }
+                    visit(b);
+                }
             }
         }
         for i in &lay.lone {
@@ -418,6 +500,8 @@ impl Sketch {
                 LCurve::Circle(c, r) => LCurve::Circle(renum(c), r),
                 LCurve::Arc(c, a, b) => LCurve::Arc(renum(c), renum(a), renum(b)),
                 LCurve::Conic(a, b, x, r) => LCurve::Conic(renum(a), renum(b), renum(x), r),
+                LCurve::Ellipse(c, m, r) => LCurve::Ellipse(renum(c), renum(m), r),
+                LCurve::Spline(a, b, f, n, ct, d) => LCurve::Spline(renum(a), renum(b), renum(f), n, ct, d),
             })
             .collect();
         let same = match &cur {
@@ -431,6 +515,10 @@ impl Sketch {
                                 (LCurve::Circle(a0, _), LCurve::Circle(b0, _)) => a0 == b0,
                                 (LCurve::Arc(a0, a1, a2), LCurve::Arc(b0, b1, b2)) => a0 == b0 && a1 == b1 && a2 == b2,
                                 (LCurve::Conic(a0, a1, a2, _), LCurve::Conic(b0, b1, b2, _)) => a0 == b0 && a1 == b1 && a2 == b2,
+                                (LCurve::Ellipse(a0, a1, _), LCurve::Ellipse(b0, b1, _)) => a0 == b0 && a1 == b1,
+                                (LCurve::Spline(a0, a1, a2, a3, a4, a5), LCurve::Spline(b0, b1, b2, b3, b4, b5)) => {
+                                    a0 == b0 && a1 == b1 && (a2 == b2 || *a3 == 0) && a3 == b3 && a4 == b4 && a5 == b5
+                                }
                                 _ => false,
                             }
                     })
@@ -453,6 +541,9 @@ impl Sketch {
                 }
                 if let (LCurve::Conic(.., r), Some(Curve { kind: CurveKind::Conic { rho, .. }, .. })) = (c, self.curves.get_mut(*ci)) {
                     *rho = *r;
+                }
+                if let (LCurve::Ellipse(.., r), Some(Curve { kind: CurveKind::Ellipse { r: slot, .. }, .. })) = (c, self.curves.get_mut(*ci)) {
+                    *slot = *r;
                 }
             }
             return Ok(false);
