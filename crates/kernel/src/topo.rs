@@ -397,11 +397,37 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
             edge_verts.insert(ei, (a, bb));
         }
     }
-    // Merge faces.
+    // Merge faces. Free-form faces meeting along an edge: smooth by their exact normals.
+    let flist: Vec<&truck_modeling::Face> = solid.face_iter().collect();
+    let exact_smooth = |a: usize, b: usize, edge: Option<&Vec<Vec3>>| -> bool {
+        use truck_modeling::{ParametricSurface3D, SearchNearestParameter};
+        let (Some(fa), Some(fb), Some(e)) = (flist.get(a), flist.get(b), edge) else { return false };
+        let (sa, sb) = (fa.oriented_surface(), fb.oriented_surface());
+        let step = (e.len() / 8).max(1);
+        e.iter().step_by(step).all(|p| {
+            let q = crate::body::p3(*p);
+            match (sa.search_nearest_parameter(q, None, 50), sb.search_nearest_parameter(q, None, 50)) {
+                (Some((u, v)), Some((s, t))) => {
+                    let (x, y) = (sa.normal(u, v), sb.normal(s, t));
+                    x.x * y.x + x.y * y.y + x.z * y.z > 1.0 - 1e-4
+                }
+                _ => false,
+            }
+        })
+    };
     let mut fp: Vec<usize> = (0..nf).collect();
     for (ei, faces) in &edge_faces {
+        let other = |f: usize| matches!(surfs.get(f), Some(Surf::Other(_)));
         if let [a, b] = faces[..]
-            && same_surface(&surfs, &verts, mesh.edges.get(*ei), a, b, tol * 10.0)
+            && (same_surface(&surfs, &verts, mesh.edges.get(*ei), a, b, tol * 10.0)
+                || (other(a) && other(b) && exact_smooth(a, b, mesh.edges.get(*ei)) && {
+                    let (Some(va), Some(vb)) = (verts.get(a), verts.get(b)) else { return Ok(TopoCounts::default()) };
+                    match (cone_signature(va), cone_signature(vb)) {
+                        (Some((xa, ca)), Some((xb, cb))) => xa.dot(xb) > 1.0 - 1e-4 && (ca - cb).abs() < 1e-3,
+                        (None, None) => true,
+                        _ => false,
+                    }
+                }))
         {
             let (ra, rb) = (find(&mut fp, a), find(&mut fp, b));
             if let Some(s) = fp.get_mut(ra) {

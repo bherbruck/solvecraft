@@ -16,6 +16,7 @@ mod blend;
 mod body;
 mod build;
 mod coplanar;
+mod curveblend;
 mod freeform;
 mod heal;
 mod helix;

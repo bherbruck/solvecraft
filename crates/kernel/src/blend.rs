@@ -339,10 +339,53 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
         }
         let solid = cur.deep_copy();
         let edge = Body::unique_edges(&solid).into_iter().nth(idx).ok_or_else(|| KernelError::Invalid("edge index".into()))?;
-        let out = guard(what, || blend_one(&solid, &edge, size, r, shape))?;
+        let out = match guard(what, || blend_one(&solid, &edge, size, r, shape)) {
+            Ok(o) => o,
+            // A curved edge: roll a ball along its smooth closed chain.
+            Err(e) => match smooth_chain(&solid, &edge) {
+                Some(ids) => guard(what, || crate::curveblend::curve_blend(&solid, &ids, size, r, shape == Shape::Round))
+                    .map_err(|e2| KernelError::Failed(format!("{e2} ({e})")))?,
+                None => return Err(e),
+            },
+        };
         cur = Body::new(out)?;
     }
     Ok(cur)
+}
+
+/// The closed chain of edges continuing `edge` smoothly at both ends (its ids), if any.
+fn smooth_chain(solid: &Solid, edge: &mt::Edge) -> Option<Vec<mt::EdgeID>> {
+    use mt::{BoundedCurve, ParametricCurve};
+    let all = Body::unique_edges(solid);
+    let dir = |e: &mt::Edge, at_end: bool| -> Option<Vec3> {
+        let c = e.curve();
+        let (t0, t1) = c.range_tuple();
+        let d = c.der(if at_end { t1 } else { t0 });
+        Vec3::new(d.x, d.y, d.z).normalized()
+    };
+    let mut ids = vec![edge.id()];
+    let start = edge.front().clone();
+    let (mut v, mut d) = (edge.back().clone(), dir(edge, true)?);
+    for _ in 0..200 {
+        if v == start {
+            return Some(ids);
+        }
+        let next = all.iter().filter(|e| !ids.contains(&e.id()) && (*e.front() == v || *e.back() == v)).find_map(|e| {
+            let fwd = *e.front() == v;
+            let t = if fwd { dir(e, false)? } else { -dir(e, true)? };
+            (t.dot(d) > 1.0 - 1e-4).then(|| (e.clone(), fwd))
+        });
+        let (e, fwd) = next?;
+        ids.push(e.id());
+        if fwd {
+            v = e.back().clone();
+            d = dir(&e, true)?;
+        } else {
+            v = e.front().clone();
+            d = -dir(&e, false)?;
+        }
+    }
+    None
 }
 
 fn edge_mid(e: &mt::Edge) -> Option<Vec3> {

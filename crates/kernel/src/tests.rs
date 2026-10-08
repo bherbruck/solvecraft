@@ -1060,3 +1060,22 @@ fn torus_cut_through_its_middle_plane() {
     let v = measure(&i).unwrap().volume;
     assert!(rel(v, PI * 75.0 * 10.0) < 1e-4, "{v}");
 }
+
+#[test]
+fn fillet_where_a_branch_pipe_meets_a_main_pipe() {
+    // A branch (radius 10) on a main pipe (radius 15): the saddle curve between the two
+    // cylinders, blended by rolling a ball of radius 3 along it.
+    let main = cylinder(Vec3::new(-40.0, 0.0, 0.0), Vec3::X, 15.0, 80.0).unwrap();
+    let branch = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 35.0).unwrap();
+    let tee = boolean(&main, &branch, BoolOp::Union).unwrap().unwrap();
+    let v0 = measure(&tee).unwrap().volume;
+    let f = fillet(&tee, &[Vec3::new(0.0, 10.0, 125f64.sqrt())], 3.0).unwrap();
+    let m = measure(&f).unwrap();
+    // The added material: less than r²(1 − π/4) (a right-angled corner's) swept round the
+    // ≈ 65 mm saddle, as the pipes meet at obtuse angles, but well over a third of it.
+    let bare = 9.0 * (1.0 - PI / 4.0) * 65.0;
+    let added = m.volume - v0;
+    assert!(added > 0.35 * bare && added < bare, "added {added} (bare {bare})");
+    // Main cylinder, branch cylinder, the blend, the branch's top and the main's two ends.
+    assert_eq!(m.merged.faces, 6, "{:?}", m.merged);
+}
