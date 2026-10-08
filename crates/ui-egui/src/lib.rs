@@ -599,7 +599,11 @@ impl SolveApp {
     pub fn animate_view(&mut self, v: &str) {
         let mut to = self.cam;
         match v {
-            "fit" => to = self.fitted(to),
+            // With something selected, Fit frames the selection.
+            "fit" => match viewport::selection_bounds(self) {
+                Some(b) => to.fit(&b),
+                None => to = self.fitted(to),
+            },
             "home" => {
                 to.set_view(StandardView::Iso);
                 to = self.fitted(to);

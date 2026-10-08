@@ -664,6 +664,58 @@ pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
     app.session.section
 }
 
+/// The box around what is selected (bodies, faces, edges, vertices, sketch curves and the
+/// bodies of selected features), where it is shown.
+pub fn selection_bounds(app: &SolveApp) -> Option<solvecraft_engine::geom::Aabb3> {
+    let st = app.session.world_state();
+    let mut b = solvecraft_engine::geom::Aabb3::EMPTY;
+    for s in &app.session.selection {
+        match s {
+            Sel::Body { name } => {
+                if let Some(x) = st.body(name) {
+                    b = b.union(&x.mesh().bounds());
+                }
+            }
+            Sel::Face { body, index, .. } => {
+                if let Some(x) = st.body(body) {
+                    let m = x.mesh();
+                    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+                        if *f as usize == *index {
+                            for p in m.tri(t).into_iter().flatten() {
+                                b.add(p);
+                            }
+                        }
+                    }
+                }
+            }
+            Sel::Edge { body, index, .. } => {
+                if let Some(e) = st.body(body).and_then(|x| x.mesh().edges.get(*index).cloned()) {
+                    for p in e {
+                        b.add(p);
+                    }
+                }
+            }
+            Sel::Vertex { point, .. } => b.add(*point),
+            Sel::Feature { id } => {
+                for x in st.bodies.iter().filter(|x| x.feature == *id) {
+                    b = b.union(&x.mesh().bounds());
+                }
+            }
+            Sel::SketchCurve { id } => {
+                for ss in &st.sketches {
+                    if let Some(i) = ss.sketch.curve_index(id) {
+                        for q in ss.sketch.polyline(i) {
+                            b.add(ss.plane.to_world(q));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    (!b.is_empty()).then_some(b)
+}
+
 /// The section as the shader's clip plane (normal, d), zero when there is none.
 /// The surface analysis for the shader (see `gpu::ViewportCallback::analysis`).
 fn analysis_uniform(app: &SolveApp) -> [f32; 8] {
@@ -1079,6 +1131,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let f = (-scroll as f64 * 0.0015 * crate::prefs::zoom_sign(app)).exp();
         let anchor = hover.map(|p| {
             let proj = projection(app, rect);
+            // Toward the model's surface under the cursor, else the target's depth.
+            if let Some(q) = pick_cached(app, &proj, p).iter().find_map(|h| if let Hit::Face { point, .. } = h { Some(*point) } else { None }) {
+                return q;
+            }
             let (o, d) = proj.ray(p);
             let n = app.cam.back();
             let den = d.dot(n);
