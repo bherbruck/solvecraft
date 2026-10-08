@@ -78,6 +78,29 @@ pub enum Kind {
     Sweep {
         operation: usize,
     },
+    /// A construction plane offset from a plane.
+    OffsetPlane {
+        offset: String,
+    },
+    /// A construction plane through an axis at an angle to a plane.
+    AnglePlane {
+        angle: String,
+    },
+    /// Split a body by a plane.
+    Split,
+    /// Scale bodies uniformly.
+    Scale {
+        factor: String,
+    },
+    /// Move planar faces along their normals.
+    OffsetFaces {
+        distance: String,
+    },
+    /// A cosmetic thread on a cylindrical face.
+    Thread {
+        designation: String,
+        length: String,
+    },
     /// Application preferences (applied as they change; kept between runs).
     Preferences,
     /// Physical material (and with it the appearance) of bodies.
@@ -208,6 +231,25 @@ impl Dialog {
             "MirrorCommand" => {
                 Dialog::new(Kind::Mirror, vec![SelInput::new("Bodies", BODIES, true), SelInput::new("Mirror plane", PLANES | PLANAR_FACES, false)])
             }
+            "ConstructionPlaneOffsetFromPlaneCommand" => {
+                Dialog::new(Kind::OffsetPlane { offset: "10 mm".into() }, vec![SelInput::new("Plane", PLANES, false)])
+            }
+            "ConstructionPlaneAtAngleCommand" => Dialog::new(
+                Kind::AnglePlane { angle: "45 deg".into() },
+                vec![SelInput::new("Plane", PLANES, false), SelInput::new("Axis", AXES, false)],
+            ),
+            "FusionSplitBodyCommand" => Dialog::new(
+                Kind::Split,
+                vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting plane", PLANES | PLANAR_FACES, false)],
+            ),
+            "ModifyScale" => Dialog::new(Kind::Scale { factor: "2".into() }, vec![SelInput::new("Bodies", BODIES, true)]),
+            "FusionOffsetFacesCommand" => {
+                Dialog::new(Kind::OffsetFaces { distance: "2 mm".into() }, vec![SelInput::new("Faces", PLANAR_FACES, true)])
+            }
+            "FusionThreadCommand" => Dialog::new(
+                Kind::Thread { designation: String::new(), length: String::new() },
+                vec![SelInput::new("Cylindrical face", FACES, false)],
+            ),
             "PhysicalMaterialCommand" => Dialog::new(Kind::Material { index: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
             "FusionHalfSectionViewCommand" => {
                 Dialog::new(Kind::Section { offset: "0 mm".into(), flip: false }, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)])
@@ -323,6 +365,9 @@ impl Dialog {
                 | Kind::Shell { .. }
                 | Kind::Draft { .. }
                 | Kind::Mirror
+                | Kind::Split
+                | Kind::Scale { .. }
+                | Kind::OffsetFaces { .. }
                 | Kind::PatternRect { .. }
                 | Kind::PatternCirc { .. }
                 | Kind::Loft { .. }
@@ -347,6 +392,10 @@ impl Dialog {
             Kind::PatternRect { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
             Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Section { offset, .. } => ("Distance", ValueKind::Length, offset),
+            Kind::OffsetPlane { offset } => ("Distance", ValueKind::Length, offset),
+            Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
+            Kind::Scale { factor } => ("Scale", ValueKind::Unitless, factor),
+            Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
             _ => return None,
         })
     }
@@ -502,6 +551,12 @@ fn title(k: &Kind) -> &'static str {
         Kind::Measure { .. } => "MEASURE",
         Kind::Material { .. } => "PHYSICAL MATERIAL",
         Kind::Preferences => "PREFERENCES",
+        Kind::OffsetPlane { .. } => "OFFSET PLANE",
+        Kind::AnglePlane { .. } => "PLANE AT ANGLE",
+        Kind::Split => "SPLIT BODY",
+        Kind::Scale { .. } => "SCALE",
+        Kind::OffsetFaces { .. } => "OFFSET FACE",
+        Kind::Thread { .. } => "THREAD",
         Kind::Section { .. } => "SECTION ANALYSIS",
         Kind::PatternRect { .. } => "RECTANGULAR PATTERN",
         Kind::PatternCirc { .. } => "CIRCULAR PATTERN",
@@ -787,6 +842,37 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     Kind::Mirror => {}
                     Kind::Measure { result, .. } => measure_rows(ui, result.as_ref()),
                     Kind::Preferences => preferences_rows(app, ui),
+                    Kind::OffsetPlane { offset } => {
+                        ui.label("Distance");
+                        enter |= field(ui, offset);
+                        ui.end_row();
+                    }
+                    Kind::AnglePlane { angle } => {
+                        ui.label("Angle");
+                        enter |= field(ui, angle);
+                        ui.end_row();
+                    }
+                    Kind::Split => {}
+                    Kind::Scale { factor } => {
+                        ui.label("Scale factor");
+                        enter |= field(ui, factor);
+                        ui.end_row();
+                    }
+                    Kind::OffsetFaces { distance } => {
+                        ui.label("Distance");
+                        enter |= field(ui, distance);
+                        ui.end_row();
+                    }
+                    Kind::Thread { designation, length } => {
+                        ui.label("Size");
+                        let r = ui.add(egui::TextEdit::singleline(designation).hint_text("fits the face, e.g. M8"));
+                        enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        ui.end_row();
+                        ui.label("Length");
+                        let r = ui.add(egui::TextEdit::singleline(length).hint_text("whole face"));
+                        enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        ui.end_row();
+                    }
                     Kind::Material { index } => {
                         let names: Vec<&str> = solvecraft_engine::doc::MATERIALS.iter().map(|(n, _)| *n).collect();
                         ui.label("Material");
@@ -1256,6 +1342,64 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 "Sweep",
                 json!({"sketch": sketch, "profiles": idx, "path_sketch": path_sketch, "path": path, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
+        }
+        Kind::OffsetPlane { offset } => {
+            need(0, "a plane")?;
+            let base = match sels(d, 0).first() {
+                Some(Sel::Plane { name }) => name.clone(),
+                _ => return Err("pick an origin or construction plane".into()),
+            };
+            ("ConstructionPlaneOffsetFromPlaneCommand", json!({"base": base, "offset": offset}))
+        }
+        Kind::AnglePlane { angle } => {
+            need(0, "a plane")?;
+            need(1, "an axis")?;
+            let base = match sels(d, 0).first() {
+                Some(Sel::Plane { name }) => name.clone(),
+                _ => return Err("pick an origin or construction plane".into()),
+            };
+            let axis = match sels(d, 1).first() {
+                Some(Sel::Axis { name }) => json!(name),
+                Some(x) => {
+                    let (o, dir) = axis_of(app, x).ok_or("the axis must be an origin axis or a sketch line")?;
+                    json!({"origin": pt(o), "dir": pt(dir)})
+                }
+                None => return Err("pick an axis".into()),
+            };
+            ("ConstructionPlaneAtAngleCommand", json!({"base": base, "axis": axis, "angle": angle}))
+        }
+        Kind::Split => {
+            need(0, "the body to split")?;
+            need(1, "the splitting plane")?;
+            let body = body_names(0).into_iter().next().unwrap_or_default();
+            let plane = match sels(d, 1).first() {
+                Some(Sel::Plane { name }) => json!(name),
+                Some(Sel::Face { body, index, point }) => {
+                    let (_, n) = planar_face(s, body, *index).ok_or("the face must be planar")?;
+                    json!({"origin": pt(*point), "normal": pt(n)})
+                }
+                _ => return Err("pick a plane or a planar face".into()),
+            };
+            ("FusionSplitBodyCommand", json!({"body": body, "plane": plane}))
+        }
+        Kind::Scale { factor } => {
+            need(0, "bodies")?;
+            ("ModifyScale", json!({"bodies": body_names(0), "factor": factor}))
+        }
+        Kind::OffsetFaces { distance } => {
+            need(0, "planar faces")?;
+            ("FusionOffsetFacesCommand", json!({"faces": face_points(0), "distance": distance}))
+        }
+        Kind::Thread { designation, length } => {
+            need(0, "a cylindrical face")?;
+            let mut p = json!({"face": face_points(0).into_iter().next().unwrap_or(Value::Null)});
+            if !designation.trim().is_empty() {
+                p["designation"] = json!(designation.trim());
+            }
+            if !length.trim().is_empty() {
+                p["length"] = json!(length);
+            }
+            ("FusionThreadCommand", p)
         }
         Kind::Material { index } => {
             need(0, "bodies")?;

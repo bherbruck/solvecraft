@@ -31,13 +31,17 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         Sel::Vertex { point, .. } => (*point, None),
         Sel::Body { name } => (st.body(name)?.mesh().bounds().center(), None),
         Sel::Plane { name } => {
-            let pl = solvecraft_engine::geom::Plane::named(name)?;
+            let pl = solvecraft_engine::geom::Plane::named(name).or_else(|| {
+                solvecraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl)
+            })?;
             (pl.origin, Some(pl.normal()))
         }
         _ => return None,
     };
     Some(match d.kind {
-        Kind::Extrude { .. } | Kind::Fillet { .. } | Kind::Section { .. } | Kind::Hole { .. } => (at, normal),
+        Kind::Extrude { .. } | Kind::Fillet { .. } | Kind::Section { .. } | Kind::Hole { .. } | Kind::OffsetPlane { .. } | Kind::OffsetFaces { .. } => {
+            (at, normal)
+        }
         // Shell thickness grows into the body.
         Kind::Shell { .. } => (at, normal.map(|n| -n)),
         Kind::Move { .. } => (at, Some(Vec3::Z)),
@@ -122,7 +126,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     };
     let symmetric = matches!(d.kind, Kind::Extrude { direction: 2, .. });
     // Extrudes and moves go either way; radii and thicknesses stay positive.
-    let signed = matches!(d.kind, Kind::Extrude { .. } | Kind::Move { .. } | Kind::Section { .. });
+    let signed = matches!(d.kind, Kind::Extrude { .. } | Kind::Move { .. } | Kind::Section { .. } | Kind::OffsetPlane { .. } | Kind::OffsetFaces { .. });
     let focus = std::mem::take(&mut d.focus);
     let half_height = app.cam.half_height();
     let axis = revolve_axis(app, d);
@@ -131,6 +135,19 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         && let Some(l2) = app.session.doc.eval(distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
         drag_arrow(ui, painter, proj, base, bs, -n, l2, false, egui::Id::new("sc_manipulator2"), half_height, distance2);
+    }
+    // An offset plane shows where it will be.
+    if let (Kind::OffsetPlane { offset }, Some(n)) = (&d.kind, dir)
+        && let Ok(off) = app.session.doc.eval(offset, ValueKind::Length)
+        && let Some(u) = n.cross(if n.z.abs() < 0.9 { Vec3::Z } else { Vec3::X }).normalized()
+    {
+        let v = n.cross(u);
+        let h = half_height * 0.25;
+        let c = base + n * off;
+        let q: Vec<Pos2> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().filter_map(|(a, b)| proj.to_screen(c + u * (a * h) + v * (b * h))).collect();
+        if q.len() == 4 {
+            painter.add(egui::Shape::convex_polygon(q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
+        }
     }
     // Holes: the depth arrow points into the material (empty depth: through all); the
     // diameter is typed in the box.
