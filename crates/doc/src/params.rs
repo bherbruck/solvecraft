@@ -138,6 +138,20 @@ impl FeatureKind {
                 }
             }
             FeatureKind::Emboss { depth, .. } => v.push(("Depth", depth, L)),
+            FeatureKind::SheetContour { distance, .. } => v.push(("Distance", distance, L)),
+            FeatureKind::SheetFlange { height, angle, radius, .. } => {
+                v.push(("Height", height, L));
+                v.push(("Angle", angle, A));
+                if let Some(r) = radius {
+                    v.push(("Bend radius", r, L));
+                }
+            }
+            FeatureKind::SheetHem { length, gap, .. } => {
+                v.push(("Length", length, L));
+                if let Some(g) = gap {
+                    v.push(("Gap", g, L));
+                }
+            }
             FeatureKind::Coil { diameter, pitch, turns, section_size, start_angle, .. } => {
                 v.push(("Diameter", diameter, L));
                 v.push(("Pitch", pitch, L));
@@ -155,6 +169,9 @@ impl FeatureKind {
             }
             FeatureKind::ReplaceFace { target, .. } => plane_inputs_mut(target, &mut v),
             FeatureKind::Combine { .. }
+            | FeatureKind::SheetBase { .. }
+            | FeatureKind::SheetUnfold { .. }
+            | FeatureKind::SheetConvert { .. }
             | FeatureKind::Align { .. }
             | FeatureKind::Remove { .. }
             | FeatureKind::Loft { .. }

@@ -1,0 +1,333 @@
+//! Sheet metal: rules, Flange (base, edge, contour), Hem, Unfold/Refold, Convert to Sheet Metal,
+//! the flat pattern (outline, bend lines, bend table) and its DXF export.
+
+use serde_json::{Value, json};
+use solvecraft_doc::FeatureKind;
+use solvecraft_doc::expr::Kind;
+use solvecraft_doc::sheet::{SheetBody, SheetRule};
+use solvecraft_geom::{Vec2, Vec3};
+
+use super::CommandSpec;
+use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_id};
+use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
+use crate::{EngineError, Result, Session};
+
+pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("FusionSheetMetalFlangeCommand", "Flange", flange).at("SHEET METAL", "CREATE").icon("flange").params(
+        "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines) + distance (rule?, flip?, reverse?) | \
+         edge: edges: [[x,y,z] on top/bottom edges] + height (to the outer face), angle? (default 90 deg), radius? (default: rule), \
+         position?: inside|outside|middle, flip?, body?; type?: base|edge|contour (default from the inputs)",
+    ),
+    CommandSpec::new("FusionSheetMetalHemFlangeCommand", "Hem", hem)
+        .at("SHEET METAL", "CREATE")
+        .icon("flange")
+        .params("edges: [[x,y,z] on sheet edges]; length (to the outer face); gap? (inner radius, default: rule); flip?; body?"),
+    CommandSpec::new("FusionSheetmetalUnfoldCommand", "Unfold", unfold).at("SHEET METAL", "MODIFY").icon("flat").params("body? (default: the last sheet body) — all bends"),
+    CommandSpec::new("sheet.refold", "Refold", refold).at("SHEET METAL", "MODIFY").icon("flat").params("body? (default: the last unfolded sheet)"),
+    CommandSpec::new("ConvertToSheetMetalCmd", "Convert to Sheet Metal", convert)
+        .at("SHEET METAL", "CREATE")
+        .icon("flat")
+        .params("body; face: [x,y,z] on its large flat face (a plate of even thickness); rule?"),
+    CommandSpec::new("FusionSheetMetalRulesCommand", "Sheet Metal Rules", rules).at("SHEET METAL", "MODIFY").icon("params").params(
+        "name (new or existing); thickness?, k_factor?, bend_radius?, relief_width?, relief_depth?, corner_relief?, hem_gap?, gap? (expressions; `Thickness` is the rule's); active?: bool; delete?: bool",
+    ),
+    CommandSpec::new("sheet.rules", "List Sheet Metal Rules", list_rules).noundo().params("→ rules with their expressions and values, and the active one"),
+    CommandSpec::new("FusionSheetMetalFlatPatternCmd", "Create Flat Pattern", flat_pattern)
+        .at("SHEET METAL", "CREATE")
+        .icon("flat")
+        .noundo()
+        .params("body? → flat size, outline loops and cut-outs (flat coordinates), bend lines and the bend table"),
+    CommandSpec::new("sheet.export_dxf", "Export Flat Pattern as DXF", export_dxf)
+        .noundo()
+        .params("body?, path? → DXF (mm): OUTLINE, BEND_UP and BEND_DOWN (centre lines) layers"),
+];
+
+fn points(p: &Value, k: &str, cmd: &str) -> Result<Vec<Vec3>> {
+    let a = p.get(k).and_then(Value::as_array).ok_or_else(|| bad(cmd, format!("`{k}` must list points [x, y, z] on sheet edges")))?;
+    if a.is_empty() || a.len() > 1000 {
+        return Err(bad(cmd, format!("`{k}` must list 1…1000 points")));
+    }
+    a.iter()
+        .map(|v| vec3(v).or_else(|| v.get("point").and_then(vec3)).ok_or_else(|| bad(cmd, format!("`{k}` must contain [x, y, z] points"))))
+        .collect()
+}
+
+fn rule_param(s: &Session, p: &Value, cmd: &str) -> Result<Option<String>> {
+    match str_(p, "rule") {
+        Some(r) if s.doc.sheet.rules.iter().any(|x| x.name == r) || r == SheetRule::steel().name => Ok(Some(r.to_string())),
+        Some(r) => Err(bad(cmd, format!("no sheet metal rule `{r}` (FusionSheetMetalRulesCommand makes one)"))),
+        None => Ok(None),
+    }
+}
+
+fn flange(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionSheetMetalFlangeCommand";
+    let ty = match str_(p, "type") {
+        Some(t) => t.to_ascii_lowercase(),
+        None if p.get("edges").is_some() => "edge".into(),
+        None if p.get("curves").is_some() => "contour".into(),
+        None => "base".into(),
+    };
+    match ty.as_str() {
+        "base" => {
+            let sketch = feature_sketch(s, p, cmd)?;
+            let rule = rule_param(s, p, cmd)?;
+            add_feature(s, p, FeatureKind::SheetBase { sketch, profiles: profiles(p, cmd)?, rule, flip: bool_(p, "flip").unwrap_or(false) })
+        }
+        "contour" => {
+            let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
+            let curves = string_list(p, "curves");
+            if curves.is_empty() || curves.len() > 1000 {
+                return Err(bad(cmd, "`curves` must list the open chain's lines"));
+            }
+            let distance = req_expr(cmd, p, "distance")?;
+            check_expr(s, &distance, Kind::Length, cmd, "distance")?;
+            let rule = rule_param(s, p, cmd)?;
+            add_feature(
+                s,
+                p,
+                FeatureKind::SheetContour {
+                    sketch,
+                    curves,
+                    distance,
+                    rule,
+                    flip: bool_(p, "flip").unwrap_or(false),
+                    reverse: bool_(p, "reverse").unwrap_or(false),
+                },
+            )
+        }
+        "edge" => {
+            let edges = points(p, "edges", cmd)?;
+            let height = req_expr(cmd, p, "height")?;
+            check_expr(s, &height, Kind::Length, cmd, "height")?;
+            let angle = expr(p, "angle").unwrap_or_else(|| "90 deg".into());
+            check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
+            let radius = expr(p, "radius");
+            if let Some(r) = &radius {
+                check_expr(s, r, Kind::Length, cmd, "radius")?;
+            }
+            let position = str_(p, "position").unwrap_or("inside").to_ascii_lowercase();
+            if !matches!(position.as_str(), "inside" | "outside" | "middle") {
+                return Err(bad(cmd, "`position` must be inside, outside or middle"));
+            }
+            let body = str_(p, "body").map(str::to_string);
+            add_feature(s, p, FeatureKind::SheetFlange { edges, height, angle, radius, position, flip: bool_(p, "flip").unwrap_or(false), body })
+        }
+        other => Err(bad(cmd, format!("unknown flange type `{other}` (base, edge or contour)"))),
+    }
+}
+
+fn hem(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionSheetMetalHemFlangeCommand";
+    let edges = points(p, "edges", cmd)?;
+    let length = req_expr(cmd, p, "length")?;
+    check_expr(s, &length, Kind::Length, cmd, "length")?;
+    let gap = expr(p, "gap");
+    if let Some(g) = &gap {
+        check_expr(s, g, Kind::Length, cmd, "gap")?;
+    }
+    add_feature(
+        s,
+        p,
+        FeatureKind::SheetHem { edges, length, gap, flip: bool_(p, "flip").unwrap_or(false), body: str_(p, "body").map(str::to_string) },
+    )
+}
+
+fn unfold(s: &mut Session, p: &Value) -> Result<Value> {
+    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(str::to_string), refold: false })
+}
+
+fn refold(s: &mut Session, p: &Value) -> Result<Value> {
+    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(str::to_string), refold: true })
+}
+
+fn convert(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ConvertToSheetMetalCmd";
+    let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
+    if s.model.state().body(&body).is_none() {
+        return Err(bad(cmd, format!("no body `{body}`")));
+    }
+    let face = p.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on the plate's face"))?;
+    let rule = rule_param(s, p, cmd)?;
+    add_feature(s, p, FeatureKind::SheetConvert { body, face, rule })
+}
+
+fn rules(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionSheetMetalRulesCommand";
+    let name = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` is required"))?.to_string();
+    if bool_(p, "delete").unwrap_or(false) {
+        let doc = s.doc_mut();
+        let before = doc.sheet.rules.len();
+        doc.sheet.rules.retain(|r| r.name != name);
+        if doc.sheet.rules.len() == before {
+            return Err(bad(cmd, format!("no rule `{name}`")));
+        }
+        if doc.sheet.active.as_deref() == Some(name.as_str()) {
+            doc.sheet.active = None;
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let mut rule =
+        s.doc.sheet.rules.iter().find(|r| r.name == name).cloned().unwrap_or_else(|| SheetRule { name: name.clone(), ..s.doc.sheet_rule(None) });
+    for (k, slot) in [
+        ("thickness", &mut rule.thickness),
+        ("k_factor", &mut rule.k_factor),
+        ("bend_radius", &mut rule.bend_radius),
+        ("relief_width", &mut rule.relief_width),
+        ("relief_depth", &mut rule.relief_depth),
+        ("corner_relief", &mut rule.corner_relief),
+        ("hem_gap", &mut rule.hem_gap),
+        ("gap", &mut rule.gap),
+    ] {
+        if let Some(e) = expr(p, k) {
+            *slot = e;
+        }
+    }
+    let (vals, _) = s.doc.param_values();
+    let values = s.doc.rule_values(&vals, &rule).map_err(|e| bad(cmd, e.to_string()))?;
+    let doc = s.doc_mut();
+    match doc.sheet.rules.iter_mut().find(|r| r.name == name) {
+        Some(r) => *r = rule.clone(),
+        None => {
+            if doc.sheet.rules.len() >= 1000 {
+                return Err(EngineError::Other("too many rules".into()));
+            }
+            doc.sheet.rules.push(rule.clone());
+        }
+    }
+    if bool_(p, "active").unwrap_or(doc.sheet.active.is_none()) {
+        doc.sheet.active = Some(name.clone());
+    }
+    s.refresh();
+    let errors: Vec<Value> = s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| json!({"feature": r.name, "error": e}))).collect();
+    Ok(json!({"rule": rule, "values": values, "errors": errors}))
+}
+
+fn list_rules(s: &mut Session, _p: &Value) -> Result<Value> {
+    let (vals, _) = s.doc.param_values();
+    let mut all = s.doc.sheet.rules.clone();
+    if all.is_empty() {
+        all.push(SheetRule::steel());
+    }
+    let rules: Vec<Value> = all.iter().map(|r| json!({"rule": r, "values": s.doc.rule_values(&vals, r).ok()})).collect();
+    let active = s.doc.sheet_rule(None).name;
+    Ok(json!({"rules": rules, "active": active}))
+}
+
+fn sheet_of(s: &Session, p: &Value, cmd: &str) -> Result<SheetBody> {
+    let st = s.model.state();
+    match str_(p, "body") {
+        Some(b) => st.sheets.iter().find(|x| x.body == b).cloned().ok_or_else(|| bad(cmd, format!("`{b}` is not a sheet metal body"))),
+        None => st.sheets.last().cloned().ok_or_else(|| bad(cmd, "there is no sheet metal body")),
+    }
+}
+
+fn flat_json(sh: &SheetBody) -> Result<Value> {
+    let (w, h) = sh.flat_size()?;
+    let loops = sh.outline()?;
+    let pt = |v: &Vec2| json!([v.x, v.y]);
+    let outline: Vec<Value> = loops.iter().map(|l| Value::Array(l.iter().map(pt).collect())).collect();
+    let holes: Vec<Value> = sh.holes.iter().map(|h| Value::Array(h.outer.polyline(1e-3).iter().map(pt).collect())).collect();
+    let bends: Vec<Value> = sh
+        .bends()
+        .iter()
+        .map(|b| {
+            json!({"bend": b.index, "angle_deg": b.angle_deg, "radius": b.radius, "direction": if b.up { "up" } else { "down" },
+                "allowance": b.allowance, "length": b.length, "start": pt(&b.start), "end": pt(&b.end)})
+        })
+        .collect();
+    Ok(
+        json!({"body": sh.body, "rule": sh.rule, "thickness": sh.t, "k_factor": sh.k, "flat_size_mm": [w, h, sh.t], "outline": outline, "cutouts": holes, "bends": bends, "unfolded": sh.flat}),
+    )
+}
+
+fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
+    let sh = sheet_of(s, p, "FusionSheetMetalFlatPatternCmd")?;
+    flat_json(&sh)
+}
+
+/// A DXF (R12 entities, mm) of the flat pattern on named layers.
+pub fn flat_dxf(sh: &SheetBody) -> Result<String> {
+    let mut out = String::new();
+    let mut w = |c: i32, v: &str| out.push_str(&format!("{c}\n{v}\n"));
+    w(0, "SECTION");
+    w(2, "HEADER");
+    w(9, "$INSUNITS");
+    w(70, "4");
+    w(0, "ENDSEC");
+    w(0, "SECTION");
+    w(2, "TABLES");
+    w(0, "TABLE");
+    w(2, "LAYER");
+    for (name, colour) in [("OUTLINE", "7"), ("BEND_UP", "1"), ("BEND_DOWN", "5")] {
+        w(0, "LAYER");
+        w(2, name);
+        w(70, "0");
+        w(62, colour);
+        w(6, "CONTINUOUS");
+    }
+    w(0, "ENDTAB");
+    w(0, "ENDSEC");
+    w(0, "SECTION");
+    w(2, "ENTITIES");
+    let f = |x: f64| format!("{x:.6}");
+    let line = |w: &mut dyn FnMut(i32, &str), layer: &str, a: Vec2, b: Vec2| {
+        w(0, "LINE");
+        w(8, layer);
+        w(10, &f(a.x));
+        w(20, &f(a.y));
+        w(11, &f(b.x));
+        w(21, &f(b.y));
+    };
+    for l in sh.outline()? {
+        let m = l.len();
+        for i in 0..m {
+            if let (Some(a), Some(b)) = (l.get(i), l.get((i + 1) % m)) {
+                line(&mut w, "OUTLINE", *a, *b);
+            }
+        }
+    }
+    for h in &sh.holes {
+        for seg in &h.outer.segs {
+            match *seg {
+                solvecraft_geom::Seg2::Arc { center, radius, start, sweep } => {
+                    let (a0, a1) = if sweep >= 0.0 { (start, start + sweep) } else { (start + sweep, start) };
+                    w(0, "ARC");
+                    w(8, "OUTLINE");
+                    w(10, &f(center.x));
+                    w(20, &f(center.y));
+                    w(40, &f(radius));
+                    w(50, &f(a0.to_degrees()));
+                    w(51, &f(a1.to_degrees()));
+                }
+                other => {
+                    let pts: Vec<Vec2> = (0..=8).map(|k| other.point_at(k as f64 / 8.0)).collect();
+                    for p in pts.windows(2) {
+                        line(&mut w, "OUTLINE", p[0], p[1]);
+                    }
+                }
+            }
+        }
+    }
+    for b in sh.bends() {
+        line(&mut w, if b.up { "BEND_UP" } else { "BEND_DOWN" }, b.start, b.end);
+    }
+    w(0, "ENDSEC");
+    w(0, "EOF");
+    Ok(out)
+}
+
+fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.export_dxf";
+    let sh = sheet_of(s, p, cmd)?;
+    let text = flat_dxf(&sh)?;
+    if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
+        std::fs::write(path, &text).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        return Ok(json!({"path": path, "bends": sh.bends().len()}));
+    }
+    Ok(json!({"dxf": text, "bends": sh.bends().len()}))
+}
+
+#[cfg(test)]
+#[path = "sheet_tests.rs"]
+mod tests;

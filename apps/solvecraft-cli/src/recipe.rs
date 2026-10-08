@@ -335,6 +335,51 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
                 let axis = f.get("axis").map(|a| json!({"origin": a.get("origin").cloned().unwrap_or(json!([0, 0, 0])), "dir": a.get("dir")})).unwrap_or(Value::Null);
                 out.push(json!({"command": "PatternCircular", "params": {"features": feature_refs(f.get("features")), "axis": axis, "count": f.get("count"), "angle": f.get("total_angle").cloned().unwrap_or(json!(360)), "name": name}}));
             }
+            Some("sm_flange") => match f.get("type").and_then(Value::as_str) {
+                Some("edge") => {
+                    let mut p = json!({"type": "edge", "edges": edge_points(f), "height": f.get("height"), "name": name});
+                    if let Some(a) = f.get("angle") {
+                        p["angle"] = a.clone();
+                    }
+                    if f.get("flip").and_then(Value::as_bool) == Some(true) {
+                        p["flip"] = json!(true);
+                    }
+                    out.push(json!({"command": "FusionSheetMetalFlangeCommand", "params": p}));
+                }
+                Some("contour") => out.push(json!({"command": "FusionSheetMetalFlangeCommand", "params": {
+                    "type": "contour", "sketch": f.get("profile_sketch"), "curves": f.get("profile_curves"), "distance": f.get("distance"), "name": name}})),
+                _ => out.push(json!({"command": "FusionSheetMetalFlangeCommand", "params": {
+                    "type": "base", "sketch": profile_sketch(f), "profiles": profiles_of(f), "name": name, "body_names": bodies}})),
+            },
+            Some("sheet_metal_rule_edit") => {
+                let rule = f.get("rule").cloned().unwrap_or(json!("Steel (mm)"));
+                let mut p = json!({"name": rule});
+                if let Some(set) = f.get("set") {
+                    for (from, to) in [("thickness", "thickness"), ("kFactor", "k_factor"), ("bendRadius", "bend_radius")] {
+                        if let Some(v) = set.get(from) {
+                            p[to] = v.clone();
+                        }
+                    }
+                }
+                // "thickness 3 mm (final state…)": the last step of a sequence.
+                if let Some(last) = f.get("sequence").and_then(Value::as_array).and_then(|a| a.last()).and_then(Value::as_str) {
+                    let w: Vec<&str> = last.split_whitespace().collect();
+                    if let (Some(&"thickness"), Some(v), Some(u)) = (w.first(), w.get(1), w.get(2)) {
+                        p["thickness"] = json!(format!("{v} {u}"));
+                    }
+                }
+                out.push(json!({"command": "FusionSheetMetalRulesCommand", "params": p}));
+            }
+            Some("sm_hem") => {
+                let e = f.get("edge").and_then(|e| e.get("point")).cloned().unwrap_or(Value::Null);
+                let mut p = json!({"edges": [e], "length": f.get("length"), "name": name});
+                if f.get("flipped").and_then(Value::as_bool) == Some(true) {
+                    p["flip"] = json!(true);
+                }
+                out.push(json!({"command": "FusionSheetMetalHemFlangeCommand", "params": p}));
+            }
+            Some("sm_unfold") => out.push(json!({"command": "FusionSheetmetalUnfoldCommand", "params": {"name": name}})),
+            Some("sm_refold") => out.push(json!({"command": "sheet.refold", "params": {"name": name}})),
             Some("path_pattern") => {
                 let path = f.get("path").cloned().unwrap_or(Value::Null);
                 let mut p = json!({"path_sketch": path.get("sketch"), "path": path.get("curves"), "count": f.get("count"), "name": name});

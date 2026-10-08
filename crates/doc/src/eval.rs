@@ -185,6 +185,8 @@ pub struct ModelState {
     pub bodies: Vec<ModelBody>,
     pub sketches: Vec<SolvedSketch>,
     pub body_counter: usize,
+    /// Sheet metal bodies (by body name) and their flat patterns.
+    pub sheets: Vec<crate::sheet::SheetBody>,
 }
 
 impl ModelState {
@@ -287,7 +289,21 @@ impl Model {
         let marker = doc.marker.unwrap_or(usize::MAX);
         for (i, f) in doc.features.iter().enumerate() {
             let rolled_back = i >= marker;
-            let fp = fingerprint(prev_fp, f, &vals, rolled_back);
+            let mut fp = fingerprint(prev_fp, f, &vals, rolled_back);
+            // Sheet metal features also depend on the rules (and the parameters they use).
+            if f.kind.is_sheet() {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                fp.hash(&mut h);
+                serde_json::to_string(&doc.sheet).unwrap_or_default().hash(&mut h);
+                for r in &doc.sheet.rules {
+                    for e in [&r.thickness, &r.k_factor, &r.bend_radius, &r.relief_width, &r.relief_depth, &r.corner_relief, &r.hem_gap, &r.gap] {
+                        for n in expr::references(e) {
+                            vals.get(&n).map(|v| v.v.to_bits()).hash(&mut h);
+                        }
+                    }
+                }
+                fp = h.finish();
+            }
             prev_fp = fp;
             if reuse
                 && let Some(old) = self.results.get(i)
@@ -1371,6 +1387,12 @@ mod more;
 
 fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
+        FeatureKind::SheetBase { .. }
+        | FeatureKind::SheetContour { .. }
+        | FeatureKind::SheetFlange { .. }
+        | FeatureKind::SheetHem { .. }
+        | FeatureKind::SheetUnfold { .. }
+        | FeatureKind::SheetConvert { .. } => more::sheet_eval(doc, vals, f, st),
         FeatureKind::Emboss { .. }
         | FeatureKind::Rib { .. }
         | FeatureKind::ReplaceFace { .. }
@@ -1400,6 +1422,22 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::Coil { operation, targets, .. }
         | FeatureKind::Sweep { operation, targets, .. } => {
             let tools = feature_tools(vals, f, st)?;
+            // Cuts through sheet metal become cut-outs of its flat pattern.
+            if *operation == Operation::Cut && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() {
+                let handled = more::sheet_cut(f, st, &tools, targets)?;
+                if !handled.is_empty() {
+                    let rest: Vec<String> = st
+                        .bodies
+                        .iter()
+                        .map(|b| b.name.clone())
+                        .filter(|n| !handled.contains(n) && (targets.is_empty() || targets.contains(n)))
+                        .collect();
+                    if rest.is_empty() {
+                        return Ok(());
+                    }
+                    return apply_op(st, f, tools, *operation, &rest);
+                }
+            }
             apply_op(st, f, tools, *operation, targets)
         }
         FeatureKind::Hole { thread, diameter, .. } => {

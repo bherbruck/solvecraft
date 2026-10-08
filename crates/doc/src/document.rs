@@ -406,6 +406,70 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<String>,
     },
+    /// Sheet metal base flange: a sheet from a closed profile (thickness from the rule).
+    SheetBase {
+        sketch: u64,
+        profiles: ProfileSel,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<String>,
+        /// Thickness grows against the sketch normal.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+    },
+    /// Sheet metal contour flange: a sheet bent along an open chain of sketch lines.
+    SheetContour {
+        sketch: u64,
+        curves: Vec<String>,
+        distance: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<String>,
+        /// Material on the other side of the chain.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// Width the other way along the sketch normal.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+    },
+    /// Edge flanges on sheet edges (points on the top or bottom edges).
+    SheetFlange {
+        edges: Vec<Vec3>,
+        height: String,
+        angle: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radius: Option<String>,
+        /// inside | outside | middle.
+        #[serde(default = "inside_str")]
+        position: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
+    /// Flat hems on sheet edges.
+    SheetHem {
+        edges: Vec<Vec3>,
+        length: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gap: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
+    /// Unfold a sheet body flat (all bends), or refold it.
+    SheetUnfold {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        refold: bool,
+    },
+    /// Convert a plate body (constant thickness from the face at `face`) to sheet metal.
+    SheetConvert {
+        body: String,
+        face: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<String>,
+    },
     /// Remove bodies from the model (from here on in the timeline).
     Remove {
         bodies: Vec<String>,
@@ -575,6 +639,19 @@ fn z_axis() -> Vec3 {
 }
 
 impl FeatureKind {
+    /// A sheet metal feature (its result depends on the sheet metal rules).
+    pub fn is_sheet(&self) -> bool {
+        matches!(
+            self,
+            FeatureKind::SheetBase { .. }
+                | FeatureKind::SheetContour { .. }
+                | FeatureKind::SheetFlange { .. }
+                | FeatureKind::SheetHem { .. }
+                | FeatureKind::SheetUnfold { .. }
+                | FeatureKind::SheetConvert { .. }
+        )
+    }
+
     /// Fusion-like type name (timeline tooltip, `inspect`).
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -606,6 +683,13 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
+            FeatureKind::SheetBase { .. } => "BaseFlangeFeature",
+            FeatureKind::SheetContour { .. } => "ContourFlangeFeature",
+            FeatureKind::SheetFlange { .. } => "EdgeFlangeFeature",
+            FeatureKind::SheetHem { .. } => "HemFeature",
+            FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
+            FeatureKind::SheetUnfold { .. } => "RefoldFeature",
+            FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
             FeatureKind::Rib { .. } => "WebFeature",
@@ -647,6 +731,13 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::Emboss { .. } => "Emboss",
+            FeatureKind::SheetBase { .. } => "BaseFlange",
+            FeatureKind::SheetContour { .. } => "ContourFlange",
+            FeatureKind::SheetFlange { .. } => "EdgeFlange",
+            FeatureKind::SheetHem { .. } => "Hem",
+            FeatureKind::SheetUnfold { refold: false, .. } => "Unfold",
+            FeatureKind::SheetUnfold { .. } => "Refold",
+            FeatureKind::SheetConvert { .. } => "ConvertToSheetMetal",
             FeatureKind::Coil { .. } => "Coil",
             FeatureKind::Rib { web: false, .. } => "Rib",
             FeatureKind::Rib { .. } => "Web",
@@ -728,6 +819,16 @@ impl FeatureKind {
                 }
             }
             FeatureKind::Emboss { depth, .. } => v.push(depth),
+            FeatureKind::SheetContour { distance, .. } => v.push(distance),
+            FeatureKind::SheetFlange { height, angle, radius, .. } => {
+                v.extend([height.as_str(), angle]);
+                v.extend(radius.iter().map(String::as_str));
+            }
+            FeatureKind::SheetHem { length, gap, .. } => {
+                v.push(length);
+                v.extend(gap.iter().map(String::as_str));
+            }
+            FeatureKind::SheetBase { .. } | FeatureKind::SheetUnfold { .. } | FeatureKind::SheetConvert { .. } => {}
             FeatureKind::Coil { diameter, pitch, turns, section_size, start_angle, .. } => {
                 v.extend([diameter.as_str(), pitch, turns, section_size]);
                 v.extend(start_angle.iter().map(String::as_str));
@@ -763,6 +864,10 @@ pub struct Feature {
     pub kind: FeatureKind,
 }
 
+fn inside_str() -> String {
+    "inside".into()
+}
+
 fn zero_expr() -> String {
     "0".into()
 }
@@ -795,6 +900,9 @@ pub struct Document {
     /// Joints between occurrences, joint origins and motion links.
     #[serde(default, skip_serializing_if = "crate::joints::Assembly::is_empty")]
     pub assembly: crate::joints::Assembly,
+    /// Sheet metal rules.
+    #[serde(default, skip_serializing_if = "crate::sheet::SheetSettings::is_empty")]
+    pub sheet: crate::sheet::SheetSettings,
     /// Favourite parameters (by name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub favorites: std::collections::BTreeSet<String>,
@@ -854,6 +962,7 @@ impl Document {
             components: Vec::new(),
             occurrences: Vec::new(),
             assembly: Default::default(),
+            sheet: Default::default(),
             body_components: Default::default(),
             materials: Default::default(),
             favorites: Default::default(),
@@ -995,6 +1104,7 @@ impl Document {
                 FeatureKind::Loft { sections, .. } if sections.iter().any(|s| s.sketch == id) => gone.push(f.id),
                 FeatureKind::Pattern { pattern: PatternKind::Path { path_sketch, .. }, .. } if *path_sketch == id => gone.push(f.id),
                 FeatureKind::Emboss { sketch, .. } | FeatureKind::Rib { sketch, .. } if *sketch == id => gone.push(f.id),
+                FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } if *sketch == id => gone.push(f.id),
                 _ => {}
             }
         }

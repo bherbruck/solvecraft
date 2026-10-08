@@ -14,6 +14,7 @@ pub mod joints;
 mod params;
 pub mod project;
 mod project3d;
+pub mod sheet;
 
 pub use assembly::{IDENTITY, Mat, Occurrence, apply_point, apply_vector, is_identity, mat_inverse, mat_mul, rigid};
 pub use document::*;

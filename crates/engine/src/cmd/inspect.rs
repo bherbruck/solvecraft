@@ -65,6 +65,18 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     if !want.is_empty() && bodies.len() != want.len() {
         return Err(bad("MeasureCommand", "unknown body name"));
     }
+    // Sheet metal keeps the edges where bends meet flat faces (as Fusion does): count its
+    // B-rep faces as they are, without merging coplanar neighbours.
+    let sheets = s.model.state().sheets.clone();
+    for b in &mut bodies {
+        if let Some(sh) = sheets.iter().find(|x| b["name"].as_str() == Some(x.body.as_str())) {
+            let (df, de, dv) = sh.round_hole_correction();
+            for (k, d) in [("faces", df), ("edges", de), ("vertices", dv)] {
+                b[k] = json!(b["kernel"][k].as_i64().unwrap_or(0) + d);
+            }
+            b["sheet_metal"] = json!(true);
+        }
+    }
     let tv: f64 = bodies.iter().filter_map(|b| b["volume_mm3"].as_f64()).sum();
     let ta: f64 = bodies.iter().filter_map(|b| b["area_mm2"].as_f64()).sum();
     let tf: u64 = bodies.iter().filter_map(|b| b["faces"].as_u64()).sum();

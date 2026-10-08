@@ -187,6 +187,9 @@ impl FeatureKind {
                 dir(direction);
             }
             FeatureKind::Thread { face, .. } => pt(face),
+            FeatureKind::SheetFlange { edges, .. } | FeatureKind::SheetHem { edges, .. } => edges.iter_mut().for_each(pt),
+            FeatureKind::SheetConvert { face, .. } => pt(face),
+            FeatureKind::SheetBase { .. } | FeatureKind::SheetContour { .. } | FeatureKind::SheetUnfold { .. } => {}
             FeatureKind::Coil { base, axis, .. } => {
                 pt(base);
                 dir(axis);
