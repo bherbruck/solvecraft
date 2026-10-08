@@ -74,6 +74,8 @@ pub struct UiState {
     pub shown_sketches: Vec<u64>,
     /// Sketches whose closed profiles are not shaded.
     pub hidden_profiles: Vec<u64>,
+    /// Finished sketches whose dimensions are shown.
+    pub shown_dims: Vec<u64>,
     /// Bodies locked in the browser (no move or delete).
     pub locked_bodies: Vec<String>,
 }
@@ -98,6 +100,7 @@ impl Default for UiState {
             hidden_sketches: Vec::new(),
             shown_sketches: Vec::new(),
             hidden_profiles: Vec::new(),
+            shown_dims: Vec::new(),
             locked_bodies: Vec::new(),
         }
     }

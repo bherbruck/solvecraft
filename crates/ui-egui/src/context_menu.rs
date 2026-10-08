@@ -359,11 +359,13 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
 fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let visible = crate::browser::sketch_visible(app, id);
     let profiles = !app.ui.hidden_profiles.contains(&id);
+    let dims = app.ui.shown_dims.contains(&id);
     let editing = app.session.active_sketch == Some(id);
     vec![
         act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
         act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id })),
         act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, if visible { "Hide" } else { "Show" }, "eye").with(json!({ "sketch": id })),
+        act("ui.sketchDims", if dims { "Hide Dimensions" } else { "Show Dimensions" }, "dimension").with(json!({ "sketch": id })),
         act("ui.sketchProfile", if profiles { "Hide Profile" } else { "Show Profile" }, "").with(json!({ "sketch": id })),
         act("ui.rename", "Rename", "").with(json!({ "feature": id })),
         cmd(app, "FusionDeleteCommand", "Delete").key("Del").with(json!({ "features": [id.to_string()] })),
@@ -601,6 +603,15 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.hideSketch" | "ui.showSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
                 crate::browser::set_sketch_visible(app, id, item.id == "ui.showSketch");
+            }
+        }
+        "ui.sketchDims" => {
+            if let Some(id) = id_of(&p, "sketch") {
+                if app.ui.shown_dims.contains(&id) {
+                    app.ui.shown_dims.retain(|x| *x != id);
+                } else {
+                    app.ui.shown_dims.push(id);
+                }
             }
         }
         "ui.sketchProfile" => {
@@ -895,6 +906,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.menu.pending = None;
         if target == Target::Viewport { open(app, at) } else { open_for(app, at, target) }
     }
+    crate::browser::dims_overlay(app, ctx);
     track_hold(app, ctx);
     show_rename(app, ctx);
     show_props(app, ctx);

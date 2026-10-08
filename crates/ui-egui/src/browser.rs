@@ -1047,6 +1047,63 @@ fn occurrence_panel(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// Dimensions of finished sketches whose dimensions are shown (Show Dimensions), drawn over the
+/// viewport like the sketch being edited draws its own (`crate::dim_view`), but not editable.
+pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
+    use solvecraft_engine::geom::Vec2;
+    use solvecraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_frame, dim_layout};
+    let Some(rect) = app.viewport.rect else { return };
+    if app.ui.shown_dims.is_empty() {
+        return;
+    }
+    let tk = Tokens::get();
+    let proj = crate::viewport::projection(app, rect);
+    let painter = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(rect);
+    let st = app.session.world_state();
+    for id in app.ui.shown_dims.iter().filter(|id| app.session.active_sketch != Some(**id) && sketch_visible(app, **id)) {
+        let Some(ss) = st.sketch(*id) else { continue };
+        let sk = &ss.sketch;
+        let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
+        // Unplaced dimensions sit away from the middle of the sketch.
+        let centres = chain_centres(sk);
+        let n = centres.len().max(1) as f64;
+        let middle = centres.iter().fold(Vec2::ZERO, |a, p| a + *p) * (1.0 / n);
+        for c in &sk.constraints {
+            let Some(frame) = dim_frame(sk, &c.kind) else { continue };
+            let anchor = match frame {
+                DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,
+                DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } => center,
+                DimFrame::Angular { vertex, .. } => vertex,
+            };
+            let (Some(a), Some(b)) = (to(anchor), to(anchor + Vec2::X)) else { continue };
+            let px = 1.0 / f64::from(a.distance(b)).max(1e-9);
+            if !px.is_finite() {
+                continue;
+            }
+            let expr = c.param.as_ref().and_then(|p| app.session.doc.param(p)).map(|p| p.expr.as_str());
+            let col = if c.driven { tk.dimension_driven } else { tk.dimension };
+            let galley = painter.layout_no_wrap(crate::dim_view::label(&c.kind, expr, c.driven), FontId::proportional(11.5), col);
+            let size = galley.size() + vec2(6.0, 2.0);
+            let half = Vec2::new(f64::from(size.x) * 0.5 * px, f64::from(size.y) * 0.5 * px);
+            let lay = dim_layout(&frame, c.text.or_else(|| default_text(&frame, middle, px)), px, half);
+            for line in &lay.lines {
+                painter.add(egui::Shape::line(line.iter().filter_map(|q| to(*q)).collect(), Stroke::new(1.0, col)));
+            }
+            for (tip, dir) in &lay.arrows {
+                if let (Some(t), Some(back)) = (to(*tip), to(*tip - *dir * px)) {
+                    let d = (t - back).normalized();
+                    let n = vec2(-d.y, d.x);
+                    painter.add(egui::Shape::convex_polygon(vec![t, t - d * 9.0 + n * 3.0, t - d * 9.0 - n * 3.0], col, Stroke::NONE));
+                }
+            }
+            let Some(tc) = to(lay.text) else { continue };
+            let r = Rect::from_center_size(tc, size);
+            painter.rect_filled(r, 2.0, tk.viewport_top.gamma_multiply(0.85));
+            painter.galley(r.min + vec2(3.0, 1.0), galley, col);
+        }
+    }
+}
+
 /// Where the browser's panels open: the viewport's top left corner.
 fn panel_pos(app: &SolveApp) -> Pos2 {
     app.viewport.rect.map(|r| r.left_top() + vec2(16.0, 16.0)).unwrap_or(pos2(270.0, 140.0))

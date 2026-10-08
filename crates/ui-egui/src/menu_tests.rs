@@ -106,6 +106,9 @@ fn sketch_menu_hides_and_moves_to_another_plane() {
     let vis = crate::browser::sketch_visible(&app, id);
     context_menu::run_item(&mut app, &find(&items, if vis { "Hide" } else { "Show" }), pos2(0.0, 0.0));
     assert_eq!(crate::browser::sketch_visible(&app, id), !vis);
+    context_menu::run_item(&mut app, &find(&items, "Show Dimensions"), pos2(0.0, 0.0));
+    assert_eq!(app.ui.shown_dims, vec![id]);
+    assert!(find(&context_menu::items(&app, &t), "Hide Dimensions").enabled);
     context_menu::run_item(&mut app, &find(&items, "Edit Sketch"), pos2(0.0, 0.0));
     assert_eq!(app.session.active_sketch, Some(id));
     app.finish_sketch();
