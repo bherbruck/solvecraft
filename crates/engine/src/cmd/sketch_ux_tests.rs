@@ -613,9 +613,11 @@ fn pipe_and_sweep_follow_3d_sketch_curves() {
     let p = run(&mut s, "PrimitivePipe", json!({"path_sketch": "Path", "path": path, "diameter": 4}));
     let si = run(&mut s, "document.inspect", json!({"measure": true}));
     let body = si["bodies"].as_array().and_then(|b| b.first()).cloned().unwrap_or_default();
-    // The tube runs from the first line's start to the spline's end (radius 2 around them).
+    // The tube runs from the first line's start to the spline's end (radius 2 around them; the
+    // end cap is square to the spline, so it reaches up to 2 past the end point).
     let (lo, hi) = (&body["bbox"]["min"], &body["bbox"]["max"]);
     let near = |v: &Value, x: f64| (v.as_f64().unwrap_or(f64::NAN) - x).abs() < 0.5;
-    assert!(near(&lo[0], -2.0) && near(&lo[2], 0.0) && near(&hi[0], 52.0) && near(&hi[2], 50.0), "{p} {body}");
+    let within = |v: &Value, a: f64, b: f64| v.as_f64().is_some_and(|x| x > a - 0.1 && x < b + 0.1);
+    assert!(near(&lo[0], -2.0) && near(&lo[2], 0.0) && within(&hi[0], 50.0, 52.0) && within(&hi[2], 50.0, 52.0), "{p} {body}");
     assert!(body["volume_mm3"].as_f64().unwrap_or(0.0) > 4.0 * std::f64::consts::PI * 50.0 * 0.95, "{p} {body}");
 }
