@@ -73,3 +73,44 @@ fn patterns_of_bodies() {
     assert!(rel(volume(&mut s), 6000.0) < 1e-4);
     assert!(s.execute("PatternRectangular", &json!({"bodies": ["Nope"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 5})).is_err());
 }
+
+#[test]
+fn patterns_of_components_place_occurrences() {
+    let mut s = Session::default();
+    run(&mut s, "FusionCreateNewComponentCommand", json!({"name": "Peg"}));
+    run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = run(&mut s, "PatternRectangular", json!({"components": ["Peg"], "dir1": [0, 0, 1], "count1": 3, "spacing1": 20}));
+    assert_eq!(r["occurrences"].as_array().map(Vec::len), Some(2), "{r}");
+    let m = run(&mut s, "MeasureCommand", json!({}));
+    assert_eq!(m["body_count"], 3, "{m}");
+    let zs: Vec<f64> = m["bodies"].as_array().unwrap().iter().filter_map(|b| b["bbox"]["min"][2].as_f64()).collect();
+    for z in [0.0, 20.0, 40.0] {
+        assert!(zs.iter().any(|x| (x - z).abs() < 1e-6), "{zs:?}");
+    }
+    assert!(s.execute("PatternCircular", &json!({"components": ["Nope"], "axis": "Z", "count": 2})).is_err());
+}
+
+#[test]
+fn path_pattern_orientation_follows_the_path() {
+    let width_of_copy = |orient: &str| {
+        let mut s = Session::default();
+        run(&mut s, "PrimitiveBox", json!({"length": 2, "width": 4, "height": 2, "corner": [19, -2, 0], "body_name": "Tab"}));
+        run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "Arc"}));
+        run(&mut s, "ArcCenterTwoPoint", json!({"center": [0, 0], "start": [20, 0], "sweep": 90, "id": "a1"}));
+        run(&mut s, "SketchStop", json!({}));
+        run(
+            &mut s,
+            "PatternOnPath",
+            json!({"bodies": ["Tab"], "path_sketch": "Arc", "path": ["a1"], "count": 2, "distance": "pi * 10", "orientation": orient}),
+        );
+        let m = run(&mut s, "MeasureCommand", json!({}));
+        let b = m["bodies"].as_array().unwrap().iter().find(|b| b["name"] != "Tab").unwrap().clone();
+        let (lo, hi) = (b["bbox"]["min"].clone(), b["bbox"]["max"].clone());
+        // The copy sits at the arc's end (0, 20).
+        assert!(((lo[1].as_f64().unwrap() + hi[1].as_f64().unwrap()) / 2.0 - 20.0).abs() < 1e-6, "{b}");
+        hi[0].as_f64().unwrap() - lo[0].as_f64().unwrap()
+    };
+    assert!((width_of_copy("identical") - 2.0).abs() < 1e-6);
+    assert!((width_of_copy("path") - 4.0).abs() < 1e-6);
+}

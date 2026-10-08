@@ -37,11 +37,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("PatternRectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
-        .params("features: [names] | bodies: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?"),
+        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?"),
     CommandSpec::new("PatternCircular", "Circular Pattern", pattern_circ)
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
-        .params("features: [names] | bodies: [names]; axis: X|Y|Z | {origin, dir}; count; angle? (default 360 deg)"),
+        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | {origin, dir}; count; angle? (default 360 deg)"),
     CommandSpec::new("PatternOnPath", "Pattern on Path", pattern_path)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
@@ -522,8 +522,31 @@ fn axis_line(p: &Value, cmd: &str) -> Result<(Vec3, Vec3)> {
     }
 }
 
-/// What a pattern copies: features (replayed), or bodies (`bodies: [names]`).
+/// A pattern feature, or for `components`, new occurrences of them at each placement.
+fn finish_pattern(s: &mut Session, p: &Value, features: Vec<String>, pattern: solvecraft_doc::PatternKind, bodies: Vec<String>) -> Result<Value> {
+    let comps = string_list(p, "components");
+    if comps.is_empty() {
+        return add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies });
+    }
+    let cmd = "pattern (components)";
+    let mats = solvecraft_doc::pattern_matrices(&s.doc, &s.model.state(), &pattern)?;
+    let mut made = Vec::new();
+    for c in &comps {
+        let id = s.doc.find_component(c).filter(|id| *id != 0).ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
+        let src = s.doc.occurrence_of(id).cloned().ok_or_else(|| bad(cmd, format!("component `{c}` has no occurrence")))?;
+        for m in &mats {
+            made.push(s.doc_mut().add_occurrence(id, src.parent, solvecraft_doc::mat_mul(m, &src.transform))?);
+        }
+    }
+    Ok(json!({"occurrences": made}))
+}
+
+/// What a pattern copies: features (replayed), bodies (`bodies: [names]`), or components
+/// (`components: [names]`, placed again as occurrences).
 fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<String>, Vec<String>)> {
+    if !string_list(p, "components").is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
     let bodies = string_list(p, "bodies");
     if bodies.is_empty() {
         return Ok((source_features(s, p, cmd)?, Vec::new()));
@@ -552,7 +575,7 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, c, Kind::Length, cmd, "spacing2")?;
     }
     let pattern = solvecraft_doc::PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2 };
-    add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies })
+    finish_pattern(s, p, features, pattern, bodies)
 }
 
 fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
@@ -564,7 +587,7 @@ fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let pattern = solvecraft_doc::PatternKind::Circular { origin, axis, count, angle };
-    add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies })
+    finish_pattern(s, p, features, pattern, bodies)
 }
 
 fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
@@ -590,7 +613,7 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let flip = bool_(p, "flip").unwrap_or(false);
     let pattern = solvecraft_doc::PatternKind::Path { path_sketch, path, count, spacing, extent, flip, orient };
-    add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies })
+    finish_pattern(s, p, features, pattern, bodies)
 }
 
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {

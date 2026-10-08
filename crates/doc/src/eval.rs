@@ -1125,6 +1125,12 @@ fn mirror_matrix(pl: &Plane) -> Mat {
 
 const MAX_INSTANCES: usize = 1000;
 
+/// The placements (column-major matrices) of a pattern's copies, the original excluded.
+pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind) -> Result<Vec<[[f64; 4]; 4]>> {
+    let (vals, _) = doc.param_values();
+    pattern_transforms(&vals, st, p)
+}
+
 fn pattern_transforms(vals: &BTreeMap<String, Value>, st: &ModelState, p: &crate::PatternKind) -> Result<Vec<Mat>> {
     let count = |e: &str| -> Result<usize> {
         let n = val(vals, e, Kind::Unitless)?.round();
