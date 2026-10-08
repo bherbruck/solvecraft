@@ -652,6 +652,15 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
                 pen.line(&[(3.0 + 12.0 * t, 17.0 + 2.0 * t), (9.0 + 12.0 * t, 5.0 + 2.0 * t)], a);
             }
         }
+        "environment_map" => {
+            let pts: Vec<Pos2> =
+                (0..32).map(|i| i as f32 / 32.0 * std::f32::consts::TAU).map(|t| pen.at(12.0 + 9.0 * t.cos(), 12.0 + 9.0 * t.sin())).collect();
+            p.add(Shape::convex_polygon(pts, Color32::from_rgb(190, 205, 230), Stroke::new(pen.w, ink)));
+            pen.poly(&[(3.6, 13.0), (20.4, 13.0), (18.5, 17.5), (5.5, 17.5)], Color32::from_rgb(60, 62, 70), Color32::TRANSPARENT);
+            pen.line(&[(3.2, 12.6), (20.8, 12.6)], Color32::WHITE);
+            p.circle_filled(pen.at(9.0, 8.0), 2.2 * pen.s(), Color32::WHITE);
+            pen.circle(12.0, 12.0, 9.0, Color32::TRANSPARENT, ink);
+        }
         "zebra" | "draft_analysis" | "curvature_map" => {
             let pts: Vec<Pos2> =
                 (0..32).map(|i| i as f32 / 32.0 * std::f32::consts::TAU).map(|t| pen.at(12.0 + 9.0 * t.cos(), 12.0 + 9.0 * t.sin())).collect();

@@ -176,6 +176,8 @@ pub enum SurfaceAnalysis {
     Draft { pull: Vec3, angle: f64 },
     /// Colour by curvature: blue flat, through green, to red at 1 / `radius`.
     Curvature { radius: f64 },
+    /// Mirror finish reflecting a studio (sky, horizon, floor, light panels).
+    Environment,
 }
 
 const MAX_UNDO: usize = 200;

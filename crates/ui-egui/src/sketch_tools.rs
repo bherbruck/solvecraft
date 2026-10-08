@@ -101,7 +101,11 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         ("FusionZebraAnalysisCommand", Some(A::Zebra { .. })) => Some(true),
         ("FusionDraftAnalysisCommand", Some(A::Draft { .. })) => Some(true),
         ("FusionCurvatureMapAnalysisCommand", Some(A::Curvature { .. })) => Some(true),
-        ("FusionZebraAnalysisCommand" | "FusionDraftAnalysisCommand" | "FusionCurvatureMapAnalysisCommand", _) => Some(false),
+        ("FusionEnvironmentMapAnalysisCommand", Some(A::Environment)) => Some(true),
+        (
+            "FusionZebraAnalysisCommand" | "FusionDraftAnalysisCommand" | "FusionCurvatureMapAnalysisCommand" | "FusionEnvironmentMapAnalysisCommand",
+            _,
+        ) => Some(false),
         _ => None,
     };
     if let Some(on) = same {

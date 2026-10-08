@@ -19,6 +19,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("draft_analysis")
         .noundo()
         .params("pull?: [x,y,z] direction (default Z); angle?: degrees (default 1); clear?: true turns the analysis off"),
+    CommandSpec::new("FusionEnvironmentMapAnalysisCommand", "Environment Map Analysis", |s, p| set(s, p, SurfaceAnalysis::Environment))
+        .at("SKETCH", "INSPECT")
+        .icon("environment_map")
+        .noundo()
+        .params("clear?: true turns the analysis off"),
     CommandSpec::new("FusionCurvatureMapAnalysisCommand", "Curvature Map Analysis", curvature_map)
         .at("SKETCH", "INSPECT")
         .icon("curvature_map")
@@ -88,6 +93,8 @@ mod tests {
         assert!(matches!(s.analysis, Some(SurfaceAnalysis::Draft { angle, .. }) if angle == 3.0));
         s.execute("FusionCurvatureMapAnalysisCommand", &json!({})).unwrap();
         assert!(matches!(s.analysis, Some(SurfaceAnalysis::Curvature { radius }) if (radius - 300f64.sqrt() / 10.0).abs() < 1e-6));
+        s.execute("FusionEnvironmentMapAnalysisCommand", &json!({})).unwrap();
+        assert_eq!(s.analysis, Some(SurfaceAnalysis::Environment));
         s.execute("FusionCurvatureMapAnalysisCommand", &json!({"clear": true})).unwrap();
         assert_eq!(s.analysis, None);
         assert_eq!(s.undo.len(), undo, "no undo steps");

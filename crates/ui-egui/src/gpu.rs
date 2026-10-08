@@ -257,6 +257,21 @@ fn analysis(i: TOut) -> vec4<f32> {
         let c = select(0.08, 0.95, s > 0.0);
         return out_color(vec4<f32>(vec3<f32>(c), 1.0));
     }
+    if (u.ana.x > 3.5) {
+        // A studio around the model: sky above, a dark floor below, a bright horizon band and
+        // two soft light panels, seen in a mirror.
+        let r = reflect(-v, n);
+        var c = mix(vec3<f32>(0.32, 0.34, 0.38), vec3<f32>(0.80, 0.86, 0.95), smoothstep(-0.05, 0.6, r.z));
+        c = c + vec3<f32>(0.6) * exp(-abs(r.z) * 40.0);
+        let side = atan2(r.y, r.x);
+        c = c + vec3<f32>(0.9) * smoothstep(0.92, 0.98, cos(side * 2.0)) * smoothstep(0.1, 0.3, r.z) * smoothstep(0.8, 0.6, r.z);
+        if (r.z < -0.02) {
+            // The floor: lighter toward the horizon, with light-panel streaks along it.
+            c = mix(vec3<f32>(0.55, 0.56, 0.60), vec3<f32>(0.20, 0.20, 0.22), clamp(-r.z * 1.6, 0.0, 1.0));
+            c = c + vec3<f32>(0.35) * smoothstep(0.95, 0.99, cos(side * 3.0));
+        }
+        return out_color(vec4<f32>(min(c, vec3<f32>(1.0)), 1.0));
+    }
     if (u.ana.x < 2.5) {
         let a = degrees(asin(clamp(dot(normalize(i.n), normalize(u.pull.xyz)), -1.0, 1.0)));
         var c = vec3<f32>(0.95, 0.80, 0.15);

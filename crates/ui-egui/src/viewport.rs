@@ -653,6 +653,7 @@ fn analysis_uniform(app: &SolveApp) -> [f32; 8] {
         Some(A::Zebra { stripes }) => [1.0, stripes as f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         Some(A::Draft { pull, angle }) => [2.0, angle as f32, 0.0, 0.0, pull.x as f32, pull.y as f32, pull.z as f32, 0.0],
         Some(A::Curvature { radius }) => [3.0, radius as f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+        Some(A::Environment) => [4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         None => [0.0; 8],
     }
 }
