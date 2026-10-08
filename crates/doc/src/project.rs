@@ -31,8 +31,64 @@ pub struct Resolved {
     pub moved: bool,
 }
 
+/// Resolutions of body-based references, keyed by the reference, the sketch plane and the
+/// identity of every body's display mesh: re-resolving an unchanged model (every sketch edit
+/// does) is free.
+static CACHE: std::sync::Mutex<Vec<(String, Resolved)>> = std::sync::Mutex::new(Vec::new());
+const CACHE_SIZE: usize = 64;
+
+fn cache_key(st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -> Option<String> {
+    let body_based = matches!(
+        src,
+        LinkSource::Edge { .. }
+            | LinkSource::Face { .. }
+            | LinkSource::Body { .. }
+            | LinkSource::Vertex { .. }
+            | LinkSource::Intersection { .. }
+            | LinkSource::Iso { .. }
+            | LinkSource::Spun { .. }
+    );
+    if !body_based {
+        return None;
+    }
+    let bodies: Vec<String> = st
+        .bodies
+        .iter()
+        .map(|b| {
+            let m = b.mesh();
+            format!("{}@{:p}/{}/{:?}", b.name, std::sync::Arc::as_ptr(&m), m.triangles.len(), m.bounds())
+        })
+        .collect();
+    Some(format!("{kind:?}|{src:?}|{plane:?}|{}", bodies.join(";")))
+}
+
 /// Resolve a link source against the model state before the sketch.
 pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -> Result<Resolved> {
+    let key = cache_key(st, plane, kind, src);
+    if let Some(k) = &key
+        && let Ok(c) = CACHE.lock()
+        && let Some((_, r)) = c.iter().find(|(x, _)| x == k)
+    {
+        return Ok(r.clone());
+    }
+    let r = resolve_uncached(doc, vals, st, plane, kind, src)?;
+    if let Some(k) = key
+        && let Ok(mut c) = CACHE.lock()
+    {
+        c.insert(0, (k, r.clone()));
+        c.truncate(CACHE_SIZE);
+    }
+    Ok(r)
+}
+
+fn resolve_uncached(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    plane: &Plane,
+    kind: LinkKind,
+    src: &LinkSource,
+) -> Result<Resolved> {
     let lost = |what: &str| DocError::Invalid(format!("{what} no longer exists"));
     let mut moved = false;
     let mut source = src.clone();
