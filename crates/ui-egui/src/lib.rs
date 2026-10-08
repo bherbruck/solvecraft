@@ -37,6 +37,23 @@ pub mod inference;
 pub mod keymap;
 #[cfg(test)]
 mod menu_tests;
+#[cfg(test)]
+mod status_tests {
+    #[test]
+    fn the_status_bar_names_commands_by_label() {
+        assert_eq!(super::command_label("solid.fillet"), "Fillet");
+        assert_eq!(
+            super::friendly_error("solid.shell", "invalid parameters for `solid.shell`: offset: must be positive"),
+            "Shell: offset: must be positive"
+        );
+        assert_eq!(super::friendly_error("edit.undo", "nothing to undo"), "Undo: nothing to undo");
+        let mut app = super::SolveApp::new(solvecraft_engine::Session::default(), Default::default());
+        app.run("solid.box", serde_json::json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        assert_eq!(app.session.log.last().map(String::as_str), Some("Box done"));
+        let _ = app.run("edit.redo", serde_json::json!({}));
+        assert!(app.session.log.last().is_some_and(|l| l.starts_with("Redo: ") && !l.contains("edit.redo")), "{:?}", app.session.log.last());
+    }
+}
 pub mod palette;
 pub mod params_dialog;
 pub mod prefs;
@@ -387,7 +404,7 @@ impl SolveApp {
         }
         match &r {
             Ok(_) => {
-                self.session.echo(format!("{id}: done"));
+                self.session.echo(format!("{} done", command_label(id)));
                 if matches!(id, "file.new" | "doc.open") {
                     self.cam = Camera::default();
                     self.fit_view();
@@ -399,8 +416,9 @@ impl SolveApp {
                 }
             }
             Err(e) => {
-                self.session.echo(format!("{id}: {e}"));
-                self.set_status(e.clone(), true);
+                let msg = friendly_error(id, e);
+                self.session.echo(msg.clone());
+                self.set_status(msg, true);
             }
         }
         if self.session.active_sketch.is_some() && self.ui.tab != "SKETCH" {
@@ -878,6 +896,18 @@ impl SolveApp {
             false
         });
     }
+}
+
+/// A command's name as people see it (its label), for the status bar.
+pub fn command_label(id: &str) -> &str {
+    solvecraft_engine::find_command(id).map_or(id, |c| c.label)
+}
+
+/// An engine error with the command's label instead of its id: "Shell: offset must be …".
+pub fn friendly_error(id: &str, e: &str) -> String {
+    let label = command_label(id);
+    let msg = e.replace(&format!("invalid parameters for `{id}`: "), "").replace(&format!("{id}: "), "").replace(&format!("`{id}`"), label);
+    if msg.starts_with(label) { msg } else { format!("{label}: {msg}") }
 }
 
 pub fn now_ms() -> f64 {
