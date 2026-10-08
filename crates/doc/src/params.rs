@@ -650,6 +650,17 @@ impl Document {
         if self.favorites.remove(old) {
             self.favorites.insert(new.to_string());
         }
+        for c in &mut self.configs.columns {
+            if *c == crate::config::Column::Param(old.to_string()) {
+                *c = crate::config::Column::Param(new.to_string());
+            }
+        }
+        // Configuration cells refer to parameters too.
+        for r in &mut self.configs.rows {
+            for cell in &mut r.cells {
+                *cell = expr::rename_reference(cell, old, new);
+            }
+        }
         if let Some(c) = self.param_comments.remove(old) {
             self.param_comments.insert(new.to_string(), c);
         }

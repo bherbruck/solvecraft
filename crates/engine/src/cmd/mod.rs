@@ -11,6 +11,7 @@ mod face;
 mod features;
 mod features_more;
 pub use features::auto_operation;
+mod config;
 mod file;
 mod inspect;
 pub(crate) mod joints;
@@ -144,6 +145,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(component::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
+    v.extend(config::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());

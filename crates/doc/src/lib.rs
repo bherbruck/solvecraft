@@ -9,6 +9,7 @@ pub mod appearance;
 mod assembly;
 pub mod canvas;
 mod clipboard;
+pub mod config;
 mod document;
 mod eval;
 pub mod expr;

@@ -1057,6 +1057,9 @@ pub struct Document {
     /// Plastic rules.
     #[serde(default, skip_serializing_if = "crate::plastic::PlasticSettings::is_empty")]
     pub plastic: crate::plastic::PlasticSettings,
+    /// Configurations (rows of parameter values and suppressions).
+    #[serde(default, skip_serializing_if = "crate::config::ConfigTable::is_empty")]
+    pub configs: crate::config::ConfigTable,
     /// Favourite parameters (by name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub favorites: std::collections::BTreeSet<String>,
@@ -1140,6 +1143,7 @@ impl Document {
             assembly: Default::default(),
             sheet: Default::default(),
             plastic: Default::default(),
+            configs: Default::default(),
             body_components: Default::default(),
             materials: Default::default(),
             appearances: Default::default(),
@@ -1296,6 +1300,16 @@ impl Document {
             }
         }
         self.features.retain(|f| !gone.contains(&f.id));
+        // Configuration columns of deleted features go with them.
+        let keep: Vec<bool> = self.configs.columns.iter().map(|c| !matches!(c, crate::config::Column::Suppress(id) if gone.contains(id))).collect();
+        if keep.contains(&false) {
+            let mut k = keep.iter();
+            self.configs.columns.retain(|_| k.next().copied().unwrap_or(true));
+            for r in &mut self.configs.rows {
+                let mut k = keep.iter();
+                r.cells.retain(|_| k.next().copied().unwrap_or(true));
+            }
+        }
         if let Some(m) = self.marker
             && m > idx
         {
