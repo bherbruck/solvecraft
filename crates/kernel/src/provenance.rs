@@ -368,6 +368,66 @@ pub fn offset_origins(result: &Body, input: &Body, thickness: f64, prov: &mut Pr
     Ok(())
 }
 
+/// Origins of any swept tool's faces (sweep, loft, pipe; extrude and revolve too) from where
+/// they start: the face lying in the profile's plane is the start cap, a face with an edge in
+/// that plane sweeps the profile segment under the edge, and the rest are end caps.
+pub fn swept_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Result<Vec<FaceOrigin>> {
+    let size = tool.size().max(1e-9);
+    let m = tool.tessellate(size * 2e-4)?;
+    let faces = face_tris(&m);
+    let segs = segments(regions);
+    let flat = |p: Vec3| plane.height(p).abs() <= size * 1e-6;
+    let mut out = Vec::with_capacity(faces.len());
+    for (fi, f) in faces.iter().enumerate() {
+        if f.tris.iter().all(|(t, _)| t.iter().all(|p| flat(*p))) {
+            out.push(FaceOrigin::Cap { end: false });
+            continue;
+        }
+        // Its edges in the profile's plane, as 2D points.
+        let pts: Vec<Vec2> = m
+            .edges
+            .iter()
+            .zip(&m.edge_faces)
+            .filter(|(_, fs)| fs.contains(&(fi as u32)))
+            .filter(|(e, _)| e.len() >= 2 && e.iter().all(|p| flat(*p)))
+            .flat_map(|(e, _)| e.windows(2).map(|w| plane.to_local((w[0] + w[1]) * 0.5)).collect::<Vec<_>>())
+            .collect();
+        match (pts.is_empty(), nearest_segment(&segs, &pts)) {
+            (false, Some(k)) => out.push(FaceOrigin::Profile { segment: k }),
+            _ => out.push(FaceOrigin::Cap { end: true }),
+        }
+    }
+    Ok(out)
+}
+
+/// Origins of a [`crate::sweep_path`] tool's faces. Its walls come in profile order (once for
+/// smooth walls, once per station for ruled ones) followed by the start and end caps; checked
+/// against the start cap lying in the profile's plane, else found as [`swept_origins`] does.
+pub fn sweep_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Result<Vec<FaceOrigin>> {
+    let n = tool.face_count();
+    let k = segments(regions).len();
+    let size = tool.size().max(1e-9);
+    if k > 0 && n >= 2 && (n - 2).is_multiple_of(k) {
+        let m = tool.tessellate(size * 2e-4)?;
+        let faces = face_tris(&m);
+        let start_flat = faces.get(n - 2).is_some_and(|f| f.tris.iter().all(|(t, _)| t.iter().all(|p| plane.height(*p).abs() <= size * 1e-6)));
+        if start_flat {
+            return Ok((0..n)
+                .map(|i| {
+                    if i + 2 == n {
+                        FaceOrigin::Cap { end: false }
+                    } else if i + 1 == n {
+                        FaceOrigin::Cap { end: true }
+                    } else {
+                        FaceOrigin::Profile { segment: i % k }
+                    }
+                })
+                .collect());
+        }
+    }
+    swept_origins(tool, plane, regions)
+}
+
 /// Replace origins on operand `operand` (a tool made by the operation) with that tool's own
 /// origins (`tool[k]` for its face k): a result face from the tool's side face k comes from the
 /// profile segment that swept it.
@@ -488,6 +548,24 @@ mod tests {
         let blend = face_at(&f, Vec3::new(20.0, 25.0 + 5.0 * std::f64::consts::FRAC_1_SQRT_2, 15.0 + 5.0 * std::f64::consts::FRAC_1_SQRT_2));
         assert_eq!(p.faces[blend].origins, vec![FaceOrigin::Edge { operand: 0, edge: e }]);
         assert_eq!(p.faces[blend].change, Change::Generated);
+        // A sweep along a 3D path: each wall from the segment it starts on.
+        let path: Vec<Vec3> = (0..=20).map(|i| Vec3::new(0.0, 0.0, i as f64) + Vec3::new((i as f64 * 0.2).sin() * 10.0, 0.0, 0.0)).collect();
+        let sq = Loop2::polygon(&[Vec2::new(-2.0, -2.0), Vec2::new(2.0, -2.0), Vec2::new(2.0, 2.0), Vec2::new(-2.0, 2.0)]);
+        let sr = Region2 { outer: sq, holes: vec![] };
+        let sw = crate::sweep_path(&plane, &sr, &path).unwrap();
+        let so = super::sweep_origins(&sw, &plane, std::slice::from_ref(&sr)).unwrap();
+        let walls: std::collections::BTreeSet<_> =
+            so.iter().filter_map(|o| if let FaceOrigin::Profile { segment } = o { Some(*segment) } else { None }).collect();
+        assert_eq!(walls.len(), 4, "{so:?}");
+        // The first ring of walls agrees with what their start edges say.
+        let geo = super::swept_origins(&sw, &plane, std::slice::from_ref(&sr)).unwrap();
+        for i in 0..4 {
+            assert_eq!(so[i], geo[i], "wall {i}");
+        }
+        assert_eq!(so.iter().filter(|o| **o == FaceOrigin::Cap { end: false }).count(), 1);
+        assert_eq!(so.iter().filter(|o| **o == FaceOrigin::Cap { end: true }).count(), 1);
+        // The same for an extrusion.
+        assert_eq!(super::swept_origins(&tool, &plane, std::slice::from_ref(&region)).unwrap(), o);
         // A shell: the inner walls are offsets of the outer ones.
         let sh = crate::shell(&b, &[Vec3::new(20.0, 15.0, 20.0)], 2.0).unwrap();
         let mut p = trace(&sh, &[&b]).unwrap();
