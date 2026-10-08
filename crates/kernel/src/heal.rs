@@ -308,6 +308,74 @@ fn exact_edges(shell: &mt::Shell, tol: f64) -> Option<mt::Shell> {
     Some(faces.into())
 }
 
+/// Faces whose surface is flat but not a plane (a revolved line square to the axis, a swept
+/// line) get a real plane, so they merge with their coplanar neighbours and blend like planes.
+fn planar_surfaces(shell: &mt::Shell, tol: f64) -> Option<mt::Shell> {
+    use mt::{BoundedCurve, ParametricCurve, ParametricSurface, ParametricSurface3D, SearchNearestParameter};
+    let mut changed = false;
+    let mut faces = Vec::new();
+    for f in shell.face_iter() {
+        let surf = f.surface();
+        if matches!(surf, mt::Surface::Plane(_)) {
+            faces.push(f.clone());
+            continue;
+        }
+        // Parameter box of the boundary, then a grid of surface points in it.
+        let mut uv: Vec<(f64, f64)> = Vec::new();
+        let mut pts: Vec<Vec3> = Vec::new();
+        for w in f.absolute_boundaries() {
+            for e in w.edge_iter() {
+                let c = e.oriented_curve();
+                let (t0, t1) = c.range_tuple();
+                for k in 0..6 {
+                    let p = c.subs(t0 + (t1 - t0) * k as f64 / 6.0);
+                    pts.push(from_p3(p));
+                    if let Some(x) = surf.search_nearest_parameter(p, uv.last().copied(), 50) {
+                        uv.push(x);
+                    }
+                }
+            }
+        }
+        if uv.len() < 3 || pts.len() < 3 {
+            faces.push(f.clone());
+            continue;
+        }
+        let (u0, u1) = uv.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, x| (a.0.min(x.0), a.1.max(x.0)));
+        let (v0, v1) = uv.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, x| (a.0.min(x.1), a.1.max(x.1)));
+        for i in 0..=4 {
+            for j in 0..=4 {
+                pts.push(from_p3(surf.subs(u0 + (u1 - u0) * i as f64 / 4.0, v0 + (v1 - v0) * j as f64 / 4.0)));
+            }
+        }
+        // The plane through the points (normal from the surface).
+        let (um, vm) = ((u0 + u1) / 2.0, (v0 + v1) / 2.0);
+        let nn = surf.normal(um, vm);
+        let Some(n) = Vec3::new(nn.x, nn.y, nn.z).normalized() else {
+            faces.push(f.clone());
+            continue;
+        };
+        let o = from_p3(surf.subs(um, vm));
+        if pts.iter().any(|p| (*p - o).dot(n).abs() > tol) {
+            faces.push(f.clone());
+            continue;
+        }
+        let u = n.any_perp();
+        let w = n.cross(u);
+        let plane = mt::Plane::new(crate::body::p3(o), crate::body::p3(o + u), crate::body::p3(o + w));
+        match mt::Face::try_new(f.absolute_boundaries().clone(), mt::Surface::Plane(plane)) {
+            Ok(mut nf) => {
+                if !f.orientation() {
+                    nf.invert();
+                }
+                faces.push(nf);
+                changed = true;
+            }
+            Err(_) => faces.push(f.clone()),
+        }
+    }
+    changed.then(|| faces.into())
+}
+
 /// Heal a solid; returns the input unchanged when nothing applies or healing fails.
 pub fn heal(solid: Solid, size: f64) -> Solid {
     let tol = (size * 1e-7).max(1e-9);
@@ -315,6 +383,10 @@ pub fn heal(solid: Solid, size: f64) -> Solid {
     let mut changed = false;
     for sh in solid.boundaries() {
         let mut cur = sh.clone();
+        if let Some(m) = planar_surfaces(&cur, (size * 1e-7).max(1e-9)) {
+            cur = m;
+            changed = true;
+        }
         if let Some(m) = exact_edges(&cur, (size * 1e-5).max(1e-7)) {
             cur = m;
             changed = true;

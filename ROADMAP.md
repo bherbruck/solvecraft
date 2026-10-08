@@ -9,7 +9,7 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 |---|---|
 | Where are we? | **M0 done; M1/M2 in progress.** Sketch with solver, extrude (taper, two-sided, through all), revolve, fillet/chamfer, holes, patterns, mirror, shell, draft, loft, sweep, split, construction planes, parameters that rebuild the timeline, STEP/STL export, desktop and browser (wasm) app with Fusion-style selection (hover/selected highlights, origin planes, click-to-pick sketch planes, multi-select, window/crossing box selection, animated view cube), CLI, MCP server, oracle harness. |
 | Command parity (in scope) | **139 / 541 (26%)** in-scope commands; SOLID + SKETCH **102 / 291 (35%)** — [docs/parity.md](docs/parity.md) |
-| Fusion oracle | **38 / 66 parts match** (batch 1: 29/29; batch 2 in progress) — [docs/oracle.md](docs/oracle.md) |
+| Fusion oracle | **49 / 66 parts match** (batch 1: 29/29; batch 2 in progress) — [docs/oracle.md](docs/oracle.md) |
 | Tests | 85 (solver, profiles, kernel booleans/blends/measures, expressions, timeline, file formats, camera, engine end-to-end, hostile-input fuzz over every command) |
 | Gates | `cargo xtask ci`: fmt, clippy -D warnings, tests, asset attribution, layering, wasm32 build — green |
 | Weighted parity estimate | **≈ 5%** of Fusion's Design workspace by importance (sketch + basic solids are the core, but surfaces, assemblies, sheet metal, CAM, drawings are untouched) |
@@ -54,8 +54,10 @@ headline counts in-scope tabs only and lists the deferred ones separately.
 ## Known limitations
 
 - Fillets and chamfers: straight edges (convex or concave) between planar faces with perpendicular
-  planar end faces; whole smooth loops of a planar face (pocket floors, plate outlines); every edge
-  of a convex planar body (sphere corners). Other corner configurations are not supported yet.
+  planar end faces; whole smooth loops of a planar face, picked whole or by one edge (tangent
+  chain), including circles and walls at any angle (boss bases and tops, bores, pocket floors,
+  plate outlines); every edge of a convex planar body (sphere corners); fillets inside patterns.
+  Edges between two curved faces and mixed corners are not supported yet.
 - Coincident planar faces are pushed apart exactly when their neighbours stand perpendicular
   (extruded and box-like parts); other coincident configurations can still fail. Fully internal
   voids are not supported. Spheres are built from six pole-free patches so they

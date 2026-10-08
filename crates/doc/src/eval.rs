@@ -1188,6 +1188,24 @@ fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut 
             .find(|x| &x.name == name && !matches!(x.kind, FeatureKind::Sketch { .. } | FeatureKind::ConstructionPlane { .. }))
             .or_else(|| doc.find_feature(name))
             .ok_or_else(|| DocError::Unknown(format!("feature `{name}`")))?;
+        // A fillet or chamfer repeats at the copied edges.
+        if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
+            let r = val(vals, radius, Kind::Length)?;
+            for m in mats {
+                let moved: Vec<Vec3> = edges.iter().map(|p| crate::apply_point(m, *p)).collect();
+                let ti = blend_target(st, &None, &moved)?;
+                let Some(mb) = st.bodies.get(ti).cloned() else { continue };
+                let nb = if matches!(src.kind, FeatureKind::Fillet { .. }) {
+                    kernel::fillet(&mb.body, &moved, r)?
+                } else {
+                    kernel::chamfer(&mb.body, &moved, r)?
+                };
+                if let Some(slot) = st.bodies.get_mut(ti) {
+                    *slot = ModelBody::new(mb.name, nb, mb.feature);
+                }
+            }
+            continue;
+        }
         let tools = feature_tools(vals, src, st)?;
         let (op, targets) = feature_op(src);
         let mut copies = Vec::new();

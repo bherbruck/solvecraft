@@ -856,3 +856,22 @@ fn debug_revolved_tube_cut() {
         println!("{name}: faces {} cut {r:?}", tool.face_count());
     }
 }
+
+#[test]
+fn circle_loop_fillets_and_chamfers() {
+    // A boss on a plate: concave fillet where it meets the plate, convex at its top.
+    let plate = box_solid(Vec3::new(-30.0, -30.0, 0.0), Vec3::new(30.0, 30.0, 8.0)).unwrap();
+    let boss = cylinder(Vec3::new(0.0, 0.0, 8.0), Vec3::Z, 10.0, 15.0).unwrap();
+    let b = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+    let v0 = measure(&b).unwrap().volume;
+    let f = fillet(&b, &[Vec3::new(-10.0, 0.0, 8.0)], 3.0).unwrap();
+    let v1 = measure(&f).unwrap().volume;
+    // Concave: the profile area r²(1 − π/4) swept round a circle of radius ≈ 10 + r/3.
+    let added = 9.0 * (1.0 - PI / 4.0) * 2.0 * PI * (10.0 + 3.0 * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI));
+    assert!((v1 - v0 - added).abs() < 0.02 * added, "{} {}", v1 - v0, added);
+    let c = chamfer(&f, &[Vec3::new(-10.0, 0.0, 23.0)], 1.0).unwrap();
+    let v2 = measure(&c).unwrap().volume;
+    // Convex chamfer: a 1×1 triangle round a circle of radius ≈ 10 − 1/3.
+    let removed = 0.5 * 2.0 * PI * (10.0 - 1.0 / 3.0);
+    assert!((v1 - v2 - removed).abs() < 0.02 * removed, "{} {}", v1 - v2, removed);
+}

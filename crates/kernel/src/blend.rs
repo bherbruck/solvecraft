@@ -306,25 +306,18 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
             }
         }
     }
-    // A whole smooth loop of a planar face is blended in one go.
-    if edges.len() >= 2 {
-        let size = cur.size();
-        let tol = (size * 2e-3).max(1e-3);
-        let solid = cur.deep_copy();
-        let all = Body::unique_edges(&solid);
-        let mut ids = Vec::new();
-        for p in edges {
-            if let Some((idx, dist)) = cur.nearest_edge(*p, tol)?
-                && dist <= size * 0.05 + 1e-3
-                && let Some(e) = all.get(idx)
-                && !ids.contains(&e.id())
-            {
-                ids.push(e.id());
+    // Whole smooth loops of planar faces are blended in one go, loop by loop.
+    if let Some(groups) = loop_groups(&cur, edges)? {
+        for g in groups {
+            let size = cur.size();
+            let solid = cur.deep_copy();
+            let ids = edge_ids(&cur, &solid, &g)?;
+            match crate::loopblend::loop_blend(&solid, &ids, size, r, shape == Shape::Round) {
+                Some(res) => cur = Body::new(guard(what, || res)?)?,
+                None => return Err(unsupported("the edges are not a whole loop of a planar face")),
             }
         }
-        if let Some(r2) = crate::loopblend::loop_blend(&solid, &ids, size, r, shape == Shape::Round) {
-            return Body::new(guard(what, || r2)?);
-        }
+        return Ok(cur);
     }
     for p in edges {
         let size = cur.size();
@@ -339,6 +332,106 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
         cur = Body::new(out)?;
     }
     Ok(cur)
+}
+
+fn edge_mid(e: &mt::Edge) -> Option<Vec3> {
+    use mt::{BoundedCurve, ParametricCurve};
+    let c = e.curve();
+    let (t0, t1) = c.range_tuple();
+    Some(from_p3(c.subs((t0 + t1) * 0.5)))
+}
+
+/// Do the loop's edges meet tangentially everywhere?
+fn smooth_loop(w: &mt::Wire) -> bool {
+    use mt::{BoundedCurve, ParametricCurve};
+    let es: Vec<mt::Edge> = w.edge_iter().cloned().collect();
+    let n = es.len();
+    let dir = |e: &mt::Edge, at_end: bool| -> Option<Vec3> {
+        let c = e.oriented_curve();
+        let (t0, t1) = c.range_tuple();
+        let t = if at_end { t1 } else { t0 };
+        let d = c.der(t);
+        Vec3::new(d.x, d.y, d.z).normalized()
+    };
+    (0..n).all(|i| match (es.get(i), es.get((i + 1) % n)) {
+        (Some(a), Some(b)) => match (dir(a, true), dir(b, false)) {
+            (Some(x), Some(y)) => x.dot(y) > 1.0 - 1e-6,
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
+/// The B-rep edges nearest the points (each once).
+fn edge_ids(cur: &Body, solid: &Solid, pts: &[Vec3]) -> Result<Vec<mt::EdgeID>> {
+    let size = cur.size();
+    let tol = (size * 2e-3).max(1e-3);
+    let all = Body::unique_edges(solid);
+    let mut ids = Vec::new();
+    for p in pts {
+        if let Some((idx, dist)) = cur.nearest_edge(*p, tol)?
+            && dist <= size * 0.05 + 1e-3
+            && let Some(e) = all.get(idx)
+            && !ids.contains(&e.id())
+        {
+            ids.push(e.id());
+        }
+    }
+    Ok(ids)
+}
+
+/// When the edges make up whole boundary loops of planar faces: the edge points per loop.
+fn loop_groups(cur: &Body, pts: &[Vec3]) -> Result<Option<Vec<Vec<Vec3>>>> {
+    let solid = cur.deep_copy();
+    let size = cur.size();
+    let tol = (size * 2e-3).max(1e-3);
+    let all = Body::unique_edges(&solid);
+    // Each point's edge. A point on a vertex is as near to the edges meeting there (a circle
+    // and a cylinder's seam line): prefer one on a planar face's boundary.
+    let polys = cur.edges(tol)?;
+    let planar_edge: std::collections::HashSet<mt::EdgeID> = solid
+        .face_iter()
+        .filter(|f| matches!(f.oriented_surface(), mt::Surface::Plane(_)))
+        .flat_map(|f| f.edge_iter().map(|e| e.id()).collect::<Vec<_>>())
+        .collect();
+    let mut per: Vec<(Vec3, mt::EdgeID)> = Vec::new();
+    for p in pts {
+        let dists: Vec<(usize, f64)> =
+            polys.iter().map(|e| (e.index, e.points.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min))).collect();
+        let best = dists.iter().map(|x| x.1).fold(f64::INFINITY, f64::min);
+        if best > size * 0.05 + 1e-3 {
+            return Ok(None);
+        }
+        let near: Vec<&mt::Edge> = dists.iter().filter(|x| x.1 <= best + tol).filter_map(|x| all.get(x.0)).collect();
+        let Some(e) = near.iter().find(|e| planar_edge.contains(&e.id())).or(near.first()) else { return Ok(None) };
+        per.push((*p, e.id()));
+    }
+    let ids: Vec<mt::EdgeID> = per.iter().map(|x| x.1).collect();
+    let mut covered: Vec<mt::EdgeID> = Vec::new();
+    let mut groups = Vec::new();
+    for f in solid.face_iter() {
+        if !matches!(f.oriented_surface(), mt::Surface::Plane(_)) {
+            continue;
+        }
+        for w in f.boundaries() {
+            let wids: Vec<mt::EdgeID> = w.edge_iter().map(|e| e.id()).collect();
+            if wids.iter().any(|x| covered.contains(x)) {
+                continue;
+            }
+            // The whole loop is selected, or one of its edges and the loop is smooth (tangent
+            // chain, which also covers a circle that a boolean left in pieces).
+            let all_sel = wids.iter().all(|x| ids.contains(x));
+            let some_sel = wids.iter().any(|x| ids.contains(x));
+            if all_sel || (some_sel && smooth_loop(&w)) {
+                covered.extend(wids.iter().copied());
+                // One point per loop edge, on it.
+                let pts: Vec<Vec3> = w.edge_iter().filter_map(|e| edge_mid(&e)).collect();
+                groups.push(pts);
+            }
+        }
+    }
+    let all_in = ids.iter().all(|x| covered.contains(x));
+    Ok((all_in && !groups.is_empty()).then_some(groups))
 }
 
 /// Constant-radius fillet of the edges nearest to the given points.
@@ -383,25 +476,17 @@ pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
     }
     // Coplanar neighbours as one face (as after a join), so corners look as they should.
     let mut cur = Body::new(crate::heal::heal(body.deep_copy(), body.size()))?;
-    // A whole smooth loop of a planar face is blended in one go.
-    if edges.len() >= 2 {
-        let size = cur.size();
-        let tol = (size * 2e-3).max(1e-3);
-        let solid = cur.deep_copy();
-        let all = Body::unique_edges(&solid);
-        let mut ids = Vec::new();
-        for p in edges {
-            if let Some((idx, dist)) = cur.nearest_edge(*p, tol)?
-                && dist <= size * 0.05 + 1e-3
-                && let Some(e) = all.get(idx)
-                && !ids.contains(&e.id())
-            {
-                ids.push(e.id());
+    if let Some(groups) = loop_groups(&cur, edges)? {
+        for g in groups {
+            let size = cur.size();
+            let solid = cur.deep_copy();
+            let ids = edge_ids(&cur, &solid, &g)?;
+            match crate::loopblend::loop_blend(&solid, &ids, size, distance, false) {
+                Some(res) => cur = Body::new(guard("chamfer", || res)?)?,
+                None => return Err(unsupported("the edges are not a whole loop of a planar face")),
             }
         }
-        if let Some(r2) = crate::loopblend::loop_blend(&solid, &ids, size, distance, false) {
-            return Body::new(guard("chamfer", || r2)?);
-        }
+        return Ok(cur);
     }
     for p in edges {
         cur = match chamfer_tool(&cur, *p, distance, 0).and_then(|t| crate::ops::boolean(&cur, &t, crate::BoolOp::Cut)) {

@@ -55,11 +55,14 @@ fn seg_of(e: &mt::Edge, tol: f64) -> Option<Seg> {
     let c = e.oriented_curve();
     let (t0, t1) = c.range_tuple();
     let pts: Vec<Vec3> = (0..=16).map(|k| from_p3(c.subs(t0 + (t1 - t0) * k as f64 / 16.0))).collect();
-    if pts.iter().all(|p| p.dist_to_segment(a, b) < tol) {
+    let closed = a.dist(b) < tol;
+    if !closed && pts.iter().all(|p| p.dist_to_segment(a, b) < tol) {
         return Some(Seg::Line { a, b });
     }
     let m = *pts.get(8)?;
-    let (u, v) = (b - a, m - a);
+    // A closed edge (a full circle): fit through points a third of the way round.
+    let (b_fit, m_fit) = if closed { (*pts.get(5)?, *pts.get(11)?) } else { (b, m) };
+    let (u, v) = (b_fit - a, m_fit - a);
     let w = u.cross(v);
     let d = 2.0 * w.len2();
     if d < 1e-300 {
@@ -81,7 +84,35 @@ fn seg_of(e: &mt::Edge, tol: f64) -> Option<Seg> {
     if ra.cross(rb).dot(axis) < 0.0 {
         angle = std::f64::consts::TAU - angle;
     }
+    if closed {
+        angle = std::f64::consts::TAU;
+    }
     Some(Seg::Arc { a, c: centre, axis, angle, mid: m })
+}
+
+/// `p` turned about the line (c, axis) by `ang`.
+fn turn(p: Vec3, c: Vec3, axis: Vec3, ang: f64) -> Vec3 {
+    let k = axis.normalized().unwrap_or(Vec3::Z);
+    let v = p - c;
+    let (s, co) = ang.sin_cos();
+    c + v * co + k.cross(v) * s + k * (k.dot(v) * (1.0 - co))
+}
+
+/// Split full circles in two halves (an edge needs two ends).
+fn pieces(segs: &[Seg]) -> Vec<(usize, Seg)> {
+    let mut out = Vec::new();
+    for (i, s) in segs.iter().enumerate() {
+        match *s {
+            Seg::Arc { a, c, axis, angle, .. } if angle > std::f64::consts::TAU - 1e-9 => {
+                let h = std::f64::consts::PI;
+                let a2 = turn(a, c, axis, h);
+                out.push((i, Seg::Arc { a, c, axis, angle: h, mid: turn(a, c, axis, h / 2.0) }));
+                out.push((i, Seg::Arc { a: a2, c, axis, angle: h, mid: turn(a, c, axis, 1.5 * h) }));
+            }
+            _ => out.push((i, *s)),
+        }
+    }
+    out
 }
 
 fn plane_normal(f: &mt::Face) -> Option<Vec3> {
@@ -128,12 +159,16 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
     let f = faces.get(fi).ok_or_else(|| KernelError::Failed("face".into()))?;
     let wire = f.boundaries().get(wi).cloned().ok_or_else(|| KernelError::Failed("loop".into()))?;
     let edges: Vec<mt::Edge> = wire.edge_iter().cloned().collect();
-    let k = edges.len();
-    let segs: Vec<Seg> = edges
+    let edge_segs: Vec<Seg> = edges
         .iter()
         .map(|e| seg_of(e, (size * 1e-5).max(1e-6)))
         .collect::<Option<_>>()
         .ok_or_else(|| unsupported("loop edges must be lines or arcs"))?;
+    // Pieces: the loop's edges, full circles in halves; each knows its edge.
+    let split = pieces(&edge_segs);
+    let owner: Vec<usize> = split.iter().map(|x| x.0).collect();
+    let segs: Vec<Seg> = split.iter().map(|x| x.1).collect();
+    let k = segs.len();
     // Smooth joints.
     for i in 0..k {
         let (Some(prev), Some(cur)) = (segs.get((i + k - 1) % k), segs.get(i)) else { continue };
@@ -146,7 +181,8 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
     // Walls: the other face of each edge, perpendicular to the face; all on one side.
     let mut walls: Vec<usize> = Vec::with_capacity(k);
     let mut side = 0.0;
-    for (e, s) in edges.iter().zip(&segs) {
+    for (oi, s) in owner.iter().zip(&segs) {
+        let e = edges.get(*oi).ok_or_else(|| KernelError::Failed("edge".into()))?;
         let wf = faces
             .iter()
             .position(|g| !std::ptr::eq(*g, *f) && g.edge_iter().any(|x| x.id() == e.id()))
@@ -157,8 +193,8 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
         };
         let g = faces.get(wf).ok_or_else(|| KernelError::Failed("wall".into()))?;
         let gn = face_normal(g, mid).ok_or_else(|| unsupported("wall normal"))?;
-        if gn.dot(n).abs() > 1e-6 {
-            return Err(unsupported("the walls must stand perpendicular to the face"));
+        if gn.dot(n).abs() > 1.0 - 1e-6 {
+            return Err(unsupported("a wall tangent to the face"));
         }
         // Into the face from the loop: left of travel.
         let m = n.cross(s.tangent(mid).ok_or_else(|| unsupported("tangent"))?);
@@ -169,11 +205,37 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
         side = sd;
         walls.push(wf);
     }
-    // Offsets: into the face by r; along the wall by r (up a concave wall, down a convex one).
+    // Cross-section at a loop point: into the face (m) and up the wall (t, away from the edge,
+    // up a concave wall and down a convex one). The ball of radius r touches both at the
+    // setback s = r / tan(φ/2), φ the angle between m and t; its centre is on the bisector.
     let into = |s: &Seg, p: Vec3| -> Vec3 { s.tangent(p).map(|t| n.cross(t)).unwrap_or(Vec3::ZERO) };
-    let lift = n * (r * side);
-    let pa: Vec<Vec3> = (0..k).map(|i| segs.get(i).map(|s| s.start() + into(s, s.start()) * r).unwrap_or_default()).collect();
-    let pb: Vec<Vec3> = (0..k).map(|i| segs.get(i).map(|s| s.start() + lift).unwrap_or_default()).collect();
+    let up = |i: usize, p: Vec3| -> Option<Vec3> {
+        let s = segs.get(i)?;
+        let g = faces.get(*walls.get(i)?)?;
+        let gn = face_normal(g, p)?;
+        let t = s.tangent(p)?.cross(gn).normalized()?;
+        Some(if t.dot(n * side) < 0.0 { -t } else { t })
+    };
+    let frame = |i: usize, p: Vec3| -> Option<(Vec3, Vec3, f64, f64)> {
+        let s = segs.get(i)?;
+        let (m, t) = (into(s, p), up(i, p)?);
+        let phi = m.dot(t).clamp(-1.0, 1.0).acos();
+        if !(phi > 1e-3 && phi < std::f64::consts::PI - 1e-3) {
+            return None;
+        }
+        let sb = r / (phi / 2.0).tan();
+        Some((m, t, sb, r / (phi / 2.0).sin()))
+    };
+    let mut pa = Vec::with_capacity(k);
+    let mut pb = Vec::with_capacity(k);
+    let mut centres = Vec::with_capacity(k);
+    for i in 0..k {
+        let p = segs.get(i).map(|s| s.start()).unwrap_or_default();
+        let (m, t, sb, dc) = frame(i, p).ok_or_else(|| unsupported("the face and wall meet at an angle the blend can't take"))?;
+        pa.push(p + m * sb);
+        pb.push(p + t * sb);
+        centres.push(p + (m + t).normalized().unwrap_or(m) * dc);
+    }
     // The offset arcs must not collapse.
     for s in &segs {
         if let Seg::Arc { a, c, .. } = *s {
@@ -185,7 +247,7 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
     }
     let va: Vec<mt::Vertex> = pa.iter().map(|p| builder::vertex(p3(*p))).collect();
     let vb: Vec<mt::Vertex> = pb.iter().map(|p| builder::vertex(p3(*p))).collect();
-    let centre = |i: usize| pa.get(i).copied().unwrap_or_default() + lift;
+    let centre = |i: usize| centres.get(i).copied().unwrap_or_default();
     let profile_mid = |i: usize| {
         let (Some(s), c) = (segs.get(i), centre(i)) else { return Vec3::ZERO };
         c + (s.start() - c).normalized().unwrap_or(n) * r
@@ -207,17 +269,28 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
             Seg::Arc { mid, .. } => builder::circle_arc(a, b, p3(offset(mid, s))),
         })
     };
-    let face_off = |p: Vec3, s: &Seg| p + into(s, p) * r;
-    let wall_off = |p: Vec3, _: &Seg| p + lift;
+    let piece_of = |s: &Seg| segs.iter().position(|x| std::ptr::eq(x, s)).unwrap_or(0);
+    let face_off = |p: Vec3, s: &Seg| {
+        let i = piece_of(s);
+        frame(i, p).map(|(m, _, sb, _)| p + m * sb).unwrap_or(p)
+    };
+    let wall_off = |p: Vec3, s: &Seg| {
+        let i = piece_of(s);
+        frame(i, p).map(|(_, t, sb, _)| p + t * sb).unwrap_or(p)
+    };
     let face_rails: Vec<mt::Edge> =
         (0..k).map(|i| rail(&va, i, &face_off)).collect::<Option<_>>().ok_or_else(|| KernelError::Failed("rail".into()))?;
     let wall_rails: Vec<mt::Edge> =
         (0..k).map(|i| rail(&vb, i, &wall_off)).collect::<Option<_>>().ok_or_else(|| KernelError::Failed("rail".into()))?;
     // Seams between neighbouring walls at the joints get shorter.
-    let loop_vertex: Vec<mt::Vertex> = edges.iter().map(|e| e.front().clone()).collect();
+    // Model vertices at the joints (the second half of a circle starts at none).
+    let joint_vertex: Vec<Option<mt::Vertex>> = (0..k)
+        .map(|i| if i == 0 || owner.get(i) != owner.get(i - 1) { owner.get(i).and_then(|o| edges.get(*o)).map(|e| e.front().clone()) } else { None })
+        .collect();
     let mut seam_subst: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
     let loop_ids: Vec<mt::EdgeID> = edges.iter().map(|e| e.id()).collect();
-    for (i, v) in loop_vertex.iter().enumerate() {
+    for (i, v) in joint_vertex.iter().enumerate() {
+        let Some(v) = v else { continue };
         for g in faces {
             for e in g.edge_iter() {
                 if loop_ids.contains(&e.id()) || seam_subst.contains_key(&e.id()) || !(e.front() == v || e.back() == v) {
@@ -228,8 +301,9 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
                 if !matches!(e.curve(), mt::Curve::Line(_)) {
                     return Err(unsupported("the wall seams must be straight"));
                 }
-                let along = (from_p3(other.point()) - from_p3(v.point())).dot(n) * side;
-                if along <= r + tol {
+                let along = (from_p3(other.point()) - from_p3(v.point())).dot(pb.get(i).copied().unwrap_or_default() - from_p3(v.point()));
+                let reach = (pb.get(i).copied().unwrap_or_default() - from_p3(v.point())).len2();
+                if along <= reach + tol {
                     return Err(unsupported("the blend is taller than the walls"));
                 }
                 let nb = vb.get(i).ok_or_else(|| KernelError::Failed("joint".into()))?;
@@ -245,11 +319,18 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
         for w in g.absolute_boundaries() {
             let mut es = Vec::new();
             for e in w.edge_iter() {
-                let ne = if let Some(i) = idx_of(e.id()) {
-                    let rl = rails.get(i).ok_or_else(|| KernelError::Failed("rail".into()))?;
-                    // Rails run in loop order (joint i → i+1).
-                    if e.front() == loop_vertex.get(i).ok_or_else(|| KernelError::Failed("joint".into()))? { rl.clone() } else { rl.inverse() }
-                } else if let Some(s) = seam_subst.get(&e.id()) {
+                if let Some(i) = idx_of(e.id()) {
+                    // Rails run in loop order; an edge used the other way takes them reversed.
+                    let mine: Vec<&mt::Edge> = owner.iter().zip(rails).filter(|(o, _)| **o == i).map(|(_, r)| r).collect();
+                    let same = edges.get(i).is_some_and(|le| le.orientation() == e.orientation());
+                    if same {
+                        es.extend(mine.into_iter().cloned());
+                    } else {
+                        es.extend(mine.into_iter().rev().map(|r| r.inverse()));
+                    }
+                    continue;
+                }
+                let ne = if let Some(s) = seam_subst.get(&e.id()) {
                     if e.front() == e.absolute_front() { s.clone() } else { s.inverse() }
                 } else {
                     e.clone()
