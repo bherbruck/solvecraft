@@ -226,6 +226,9 @@ fn build_scene(app: &SolveApp) -> GpuScene {
             _ => (true, true),
         };
         let edge_col = if shaded { c4(tk.body_edge) } else { c4(tk.text) };
+        // Shaded with hidden edges: edges behind the model show faintly.
+        let hidden_edges = app.ui.visual_style == 3;
+        let hidden_col = c4(tk.text.gamma_multiply(0.35));
         // Appearances: the body's opacity, and faces with looks of their own.
         let opacity = s.doc.body_look(&b.name, b.feature).map_or(1.0, |l| l.opacity);
         let face_looks: std::collections::HashMap<usize, solvecraft_engine::doc::appearance::Look> =
@@ -261,6 +264,9 @@ fn build_scene(app: &SolveApp) -> GpuScene {
             }
             for w in e.windows(2) {
                 sc.line(w[0].to_f32(), w[1].to_f32(), edge_col, 1.3, false);
+                if hidden_edges {
+                    sc.hidden_line(w[0].to_f32(), w[1].to_f32(), hidden_col, 1.0);
+                }
             }
         }
     }
@@ -1223,6 +1229,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             images: crate::ref_images::gpu_images(app),
             analysis: analysis_uniform(app),
             access: crate::access::map(app),
+            outline: matches!(app.ui.visual_style, 0 | 3),
         };
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
     } else {
@@ -1852,7 +1859,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         ("lookat", "Look At the selected face or plane (or the active sketch)"),
         ("home", "Home view"),
         ("perspective", "Perspective / orthographic"),
-        ("style", "Visual style: shaded with edges, shaded, wireframe"),
+        ("style", "Visual style: shaded with edges, shaded, wireframe, shaded with hidden edges"),
         ("settings", "Grid on/off"),
     ];
     let w = items.len() as f32 * 30.0 + 10.0;
@@ -1883,7 +1890,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 "fit" => app.animate_view("fit"),
                 "home" => app.animate_view("home"),
                 "lookat" => look_at_selection(app),
-                "style" => app.ui.visual_style = (app.ui.visual_style + 1) % 3,
+                "style" => app.ui.visual_style = (app.ui.visual_style + 1) % 4,
                 "perspective" => app.ui.perspective = !app.ui.perspective,
                 _ => app.ui.show_grid = !app.ui.show_grid,
             }

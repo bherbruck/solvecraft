@@ -284,8 +284,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             ui.checkbox(&mut app.ui.perspective, "");
                             ui.end_row();
                             ui.label("Visual style");
-                            let styles = ["Shaded with edges", "Shaded", "Wireframe"];
-                            egui::ComboBox::from_id_salt("pref_style").selected_text(styles[usize::from(app.ui.visual_style.min(2))]).show_ui(
+                            let styles = ["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges"];
+                            egui::ComboBox::from_id_salt("pref_style").selected_text(styles[usize::from(app.ui.visual_style.min(3))]).show_ui(
                                 ui,
                                 |ui| {
                                     for (i, s) in styles.iter().enumerate() {

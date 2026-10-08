@@ -27,6 +27,8 @@ pub struct GpuScene {
     pub glass: Vec<u8>,
     /// Depth-tested lines.
     pub lines: Vec<u8>,
+    /// Lines drawn only where the model hides them (hidden edges).
+    pub hidden: Vec<u8>,
     /// Lines drawn over everything (active sketch, highlights).
     pub overlay: Vec<u8>,
     /// Translucent triangles pushed slightly back in depth, so they only show where nothing
@@ -51,6 +53,14 @@ impl GpuScene {
             self.trans.extend_from_slice(&v.to_le_bytes());
         }
         self.trans.extend_from_slice(&c);
+    }
+    /// A line shown only where the model hides it.
+    pub fn hidden_line(&mut self, a: [f32; 3], b: [f32; 3], c: [u8; 4], width: f32) {
+        for v in a.iter().chain(&b) {
+            self.hidden.extend_from_slice(&v.to_le_bytes());
+        }
+        self.hidden.extend_from_slice(&c);
+        self.hidden.extend_from_slice(&width.to_le_bytes());
     }
     pub fn glass_tri(&mut self, p: [f32; 3], n: [f32; 3], c: [u8; 4]) {
         for v in p.iter().chain(&n) {
@@ -134,6 +144,8 @@ pub struct ViewportCallback {
     pub analysis: [f32; 8],
     /// Accessibility: the depth map seen from the access direction.
     pub access: Option<AccessMap>,
+    /// Draw silhouette outlines around the model (visual styles with edges).
+    pub outline: bool,
 }
 
 /// Heights of the model seen from a direction (an orthographic depth map): a point is reachable
@@ -162,6 +174,7 @@ struct Batches {
     trans: Option<Batch>,
     glass: Option<Batch>,
     lines: Option<Batch>,
+    hidden: Option<Batch>,
     overlays: Option<Batch>,
     ghost: Option<Batch>,
     xray: Option<Batch>,
@@ -178,6 +191,7 @@ impl Batches {
             self.trans = upload(device, "sc_trans", &sc.trans, TRI_SIZE);
             self.glass = upload(device, "sc_glass", &sc.glass, TRI_SIZE);
             self.lines = upload(device, "sc_lines", &sc.lines, LINE_SIZE);
+            self.hidden = upload(device, "sc_hidden", &sc.hidden, LINE_SIZE);
             self.overlays = upload(device, "sc_overlay", &sc.overlay, LINE_SIZE);
             self.ghost = upload(device, "sc_ghost", &sc.ghost, TRI_SIZE);
             self.xray = upload(device, "sc_xray", &sc.xray, TRI_SIZE);
@@ -198,6 +212,10 @@ struct Resources {
     ghost: wgpu::RenderPipeline,
     xray: wgpu::RenderPipeline,
     line: wgpu::RenderPipeline,
+    /// Lines behind the model (depth test >).
+    line_hidden: wgpu::RenderPipeline,
+    /// Silhouettes: back faces pushed out a little on screen, drawn dark behind the model.
+    outline: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     bind: wgpu::BindGroup,
@@ -445,6 +463,28 @@ fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(
 fn fs_line(i: LOut) -> @location(0) vec4<f32> {
     if (clipped(i.wp)) { discard; }
     return out_color(i.c);
+}
+
+/// Silhouettes: back faces pushed out along their screen-space normal by about 1.5 px.
+@vertex
+fn vs_outline(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: vec4<f32>) -> TOut {
+    var o: TOut;
+    o.pos = u.vp * vec4<f32>(p, 1.0);
+    let nc = (u.vp * vec4<f32>(n, 0.0)).xy * u.screen.xy;
+    if (length(nc) > 1e-6) {
+        let d = normalize(nc) * 1.5 * 2.0 / u.screen.xy;
+        o.pos = vec4<f32>(o.pos.xy + d * o.pos.w, o.pos.zw);
+    }
+    o.n = vec3<f32>(0.0);
+    o.c = c;
+    o.wp = p;
+    return o;
+}
+
+@fragment
+fn fs_outline(i: TOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return out_color(vec4<f32>(0.07, 0.08, 0.10, 1.0));
 }
 
 struct IOut {
@@ -701,6 +741,32 @@ impl Resources {
             ghost: pipeline("sc_ghost", "vs_ghost", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             xray: pipeline("sc_xray", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             line: pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+            line_hidden: pipeline("sc_lines_hidden", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
+            outline: device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("sc_outline"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_outline"),
+                    buffers: &[Some(tri_layout())],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: Some(wgpu::Face::Front),
+                    ..Default::default()
+                },
+                depth_stencil: depth(wgpu::CompareFunction::Less, false),
+                multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_outline"),
+                    targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            }),
             overlay: pipeline("sc_overlay", "vs_line", "fs_line_all", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             uniform,
             bind,
@@ -834,7 +900,11 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         tris(pass, &res.tri, &m.tris);
         tris(pass, &res.tri, &pv.tris);
         tris(pass, &res.tri_hl, &h.tris);
+        if self.outline {
+            tris(pass, &res.outline, &m.tris);
+        }
         lines(pass, &res.line, &m.lines);
+        lines(pass, &res.line_hidden, &m.hidden);
         lines(pass, &res.line, &pv.lines);
         lines(pass, &res.line, &h.lines);
         for (id, q) in &res.quads {

@@ -300,7 +300,7 @@ impl SolveApp {
             self.autosave_minutes = m.clamp(0.0, 600.0);
         }
         if let Some(s) = v.get("visual_style").and_then(Value::as_u64) {
-            self.ui.visual_style = u8::try_from(s.min(2)).unwrap_or(0);
+            self.ui.visual_style = u8::try_from(s.min(3)).unwrap_or(0);
         }
         // Browser folders the user opened or closed.
         let keys = |k: &str| -> std::collections::BTreeSet<String> {
