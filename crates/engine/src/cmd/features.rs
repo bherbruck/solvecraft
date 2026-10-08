@@ -17,7 +17,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("Revolve", "Revolve", revolve)
         .at("SOLID", "CREATE")
         .icon("revolve")
-        .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world); angle?: expr (default 360 deg); sketch?, profiles?, operation?, targets?, name?, body_name?"),
+        .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world); angle?: expr (default 360 deg); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile), operation?, targets?, name?, body_name?"),
     CommandSpec::new("Sweep", "Sweep", sweep)
         .at("SOLID", "CREATE")
         .icon("sweep")
@@ -321,7 +321,15 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "Revolve";
-    let sketch = feature_sketch(s, p, cmd)?;
+    // A planar body face revolves like a profile (its edges projected into a sketch on it).
+    let (sketch, face_profile) = match p.get("face").and_then(vec3) {
+        Some(fp) => {
+            let (id, inside) = super::face::sketch_of_face(s, fp, cmd)?;
+            s.active_sketch = None;
+            (id, Some(ProfileSel::Points { points: vec![inside] }))
+        }
+        None => (feature_sketch(s, p, cmd)?, None),
+    };
     let axis = if let Some(o) = p.get("axis").filter(|v| v.is_object()) {
         let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
         let dir = o.get("dir").and_then(vec3).ok_or_else(|| bad(cmd, "axis needs `dir`"))?;
@@ -336,8 +344,11 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
-    let kind =
-        FeatureKind::Revolve { sketch, profiles: profiles(p, cmd)?, axis, angle, operation: operation(p, cmd)?, targets: string_list(p, "targets") };
+    let profiles = match face_profile {
+        Some(f) => f,
+        None => profiles(p, cmd)?,
+    };
+    let kind = FeatureKind::Revolve { sketch, profiles, axis, angle, operation: operation(p, cmd)?, targets: string_list(p, "targets") };
     add_feature(s, p, kind)
 }
 

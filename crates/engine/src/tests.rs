@@ -987,4 +987,12 @@ fn face_extrude_follows_edits() {
     assert!(rel(volume(&mut s), 40.0 * 30.0 * 30.0) < 1e-6);
     run(&mut s, "timeline.edit", json!({"feature": "Base", "set": {"height": "25", "length": "50"}}));
     assert!(rel(volume(&mut s), 50.0 * 30.0 * 35.0) < 1e-6, "{}", volume(&mut s));
+    // A face revolved about a line: Pappus (area × centroid path).
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    let before = volume(&mut s);
+    run(&mut s, "Revolve", json!({"face": [40, 15, 10], "axis": {"origin": [40, 0, 30], "dir": [0, 1, 0]}, "angle": "90 deg", "operation": "new"}));
+    let added = volume(&mut s) - before;
+    let want = 30.0 * 20.0 * 20.0 * PI / 2.0;
+    assert!(rel(added, want) < 1e-4, "{added} vs {want}");
 }
