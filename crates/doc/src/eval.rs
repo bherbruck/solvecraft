@@ -304,6 +304,20 @@ impl Model {
                 }
                 fp = h.finish();
             }
+            // Plastic features take defaults from the plastic rules.
+            if f.kind.is_plastic() && !doc.plastic.is_empty() {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                fp.hash(&mut h);
+                serde_json::to_string(&doc.plastic).unwrap_or_default().hash(&mut h);
+                for r in &doc.plastic.rules {
+                    for (_, e, _) in r.fields() {
+                        for n in expr::references(e) {
+                            vals.get(&n).map(|v| v.v.to_bits()).hash(&mut h);
+                        }
+                    }
+                }
+                fp = h.finish();
+            }
             prev_fp = fp;
             if reuse
                 && let Some(old) = self.results.get(i)
@@ -1393,7 +1407,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::SheetHem { .. }
         | FeatureKind::SheetUnfold { .. }
         | FeatureKind::SheetConvert { .. } => more::sheet_eval(doc, vals, f, st),
-        FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } => more::plastic_eval(vals, f, st),
+        FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => {
+            more::plastic_eval(doc, vals, f, st)
+        }
         FeatureKind::Emboss { .. }
         | FeatureKind::Rib { .. }
         | FeatureKind::ReplaceFace { .. }

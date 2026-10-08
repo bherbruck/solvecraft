@@ -533,6 +533,30 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<String>,
     },
+    /// Plastic rest: a raised pad on a face (round, or a rectangle), solid or a hollow wall,
+    /// with draft.
+    Rest {
+        position: Vec3,
+        /// Out of the face (the pad grows along it).
+        #[serde(default = "z_axis")]
+        direction: Vec3,
+        /// The rectangle's length runs along this (default: any direction in the face).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        along: Option<Vec3>,
+        /// Diameter of a round rest, or the rectangle's width.
+        width: String,
+        /// The rectangle's length (none: round).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        length: Option<String>,
+        height: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        draft: Option<String>,
+        /// Wall thickness of a hollow rest (none: solid).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thickness: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
     /// Remove bodies from the model (from here on in the timeline).
     Remove {
         bodies: Vec<String>,
@@ -703,6 +727,10 @@ fn z_axis() -> Vec3 {
 
 impl FeatureKind {
     /// A sheet metal feature (its result depends on the sheet metal rules).
+    pub fn is_plastic(&self) -> bool {
+        matches!(self, FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. })
+    }
+
     pub fn is_sheet(&self) -> bool {
         matches!(
             self,
@@ -750,6 +778,7 @@ impl FeatureKind {
             FeatureKind::Lip { groove: false, .. } => "LipFeature",
             FeatureKind::Lip { .. } => "GrooveFeature",
             FeatureKind::SnapFit { .. } => "SnapFitFeature",
+            FeatureKind::Rest { .. } => "RestFeature",
             FeatureKind::SheetBase { .. } => "BaseFlangeFeature",
             FeatureKind::SheetContour { .. } => "ContourFlangeFeature",
             FeatureKind::SheetFlange { .. } => "EdgeFlangeFeature",
@@ -802,6 +831,7 @@ impl FeatureKind {
             FeatureKind::Lip { groove: false, .. } => "Lip",
             FeatureKind::Lip { .. } => "Groove",
             FeatureKind::SnapFit { .. } => "SnapFit",
+            FeatureKind::Rest { .. } => "Rest",
             FeatureKind::SheetBase { .. } => "BaseFlange",
             FeatureKind::SheetContour { .. } => "ContourFlange",
             FeatureKind::SheetFlange { .. } => "EdgeFlange",
@@ -903,6 +933,10 @@ impl FeatureKind {
             FeatureKind::SnapFit { length, thickness, width, catch_depth, catch_length, .. } => {
                 v.extend([length.as_str(), thickness, width, catch_depth, catch_length]);
             }
+            FeatureKind::Rest { width, length, height, draft, thickness, .. } => {
+                v.extend([width.as_str(), height]);
+                v.extend([length, draft, thickness].into_iter().flatten().map(String::as_str));
+            }
             FeatureKind::SheetContour { distance, .. } => v.push(distance),
             FeatureKind::SheetFlange { height, angle, radius, .. } => {
                 v.extend([height.as_str(), angle]);
@@ -987,6 +1021,9 @@ pub struct Document {
     /// Sheet metal rules.
     #[serde(default, skip_serializing_if = "crate::sheet::SheetSettings::is_empty")]
     pub sheet: crate::sheet::SheetSettings,
+    /// Plastic rules.
+    #[serde(default, skip_serializing_if = "crate::plastic::PlasticSettings::is_empty")]
+    pub plastic: crate::plastic::PlasticSettings,
     /// Favourite parameters (by name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub favorites: std::collections::BTreeSet<String>,
@@ -1050,6 +1087,7 @@ impl Document {
             occurrences: Vec::new(),
             assembly: Default::default(),
             sheet: Default::default(),
+            plastic: Default::default(),
             body_components: Default::default(),
             materials: Default::default(),
             favorites: Default::default(),

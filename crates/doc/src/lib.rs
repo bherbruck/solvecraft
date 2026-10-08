@@ -13,6 +13,7 @@ mod eval;
 pub mod expr;
 pub mod joints;
 mod params;
+pub mod plastic;
 pub mod project;
 mod project3d;
 pub mod sheet;

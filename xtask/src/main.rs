@@ -114,6 +114,18 @@ fn cmd_layers() -> Result<(), String> {
     }
 }
 
+/// Features with no Fusion part to compare with, and the tests that check them analytically.
+const NO_ORACLE: [(&str, &str); 5] = [
+    ("Boss (draft, root fillet, hole, ribs)", "post, hole and rib volumes (`boss_with_hole_fillet_and_ribs`)"),
+    ("Lip / Groove", "band offsets and groove clearance on a shelled box (`lip_and_groove_on_a_shelled_box`, `groove_takes_the_rule_clearance`)"),
+    ("Snap Fit", "arm and catch volume, hook direction (`snap_fit_arm_and_catch`)"),
+    ("Rest", "rectangle, round, hollow and drafted pads (`rest_pads`)"),
+    (
+        "Plastic Rules (manage, assign)",
+        "library values, Thickness-based values, rule draft as the boss default (`plastic_rules_library_edit_and_assign`)",
+    ),
+];
+
 /// Run the CLI's oracle replay over every case directory and write docs/oracle.md.
 fn cmd_oracle() -> Result<(), String> {
     let dir = root().join("plan/fusion/oracle");
@@ -165,6 +177,11 @@ fn cmd_oracle() -> Result<(), String> {
         }
         md += &format!("| {} | {status} | {} |\n", r["case"].as_str().unwrap_or(""), notes.join("; "));
     }
+    md += "\n## No oracle\n\n| Feature | Status | Tested by |\n|---|---|---|\n";
+    for (feature, test) in NO_ORACLE {
+        md += &format!("| {feature} | no oracle (licence) | {test} |\n");
+    }
+    md += "\nFusion builds these only with its Design Extension, which the oracle account lacks, so there is no Fusion part to compare with. They follow Autodesk's public descriptions of the features and are checked against hand-computed geometry; the plastic rule library values were read from Fusion's API.\n";
     std::fs::write(root().join("docs/oracle.md"), md).map_err(|e| format!("docs/oracle.md: {e}"))?;
     println!("oracle: {pass}/{} cases pass ({skipped} not yet supported) → docs/oracle.md", list.len());
     Ok(())

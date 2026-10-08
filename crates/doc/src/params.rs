@@ -163,6 +163,15 @@ impl FeatureKind {
                     v.push(("Gap", g, L));
                 }
             }
+            FeatureKind::Rest { width, length, height, draft, thickness, .. } => {
+                v.push(("Width", width, L));
+                v.push(("Height", height, L));
+                for (l, o, k) in [("Length", length, L), ("Draft angle", draft, A), ("Wall thickness", thickness, L)] {
+                    if let Some(e) = o {
+                        v.push((l, e, k));
+                    }
+                }
+            }
             FeatureKind::SnapFit { length, thickness, width, catch_depth, catch_length, .. } => {
                 v.push(("Length", length, L));
                 v.push(("Thickness", thickness, L));

@@ -587,8 +587,12 @@ fn offset_left(p: &[Vec2], d: f64) -> Vec<Vec2> {
         .collect()
 }
 
-pub(super) fn plastic_eval(vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
     let len = |e: &str| val(vals, e, Kind::Length);
+    // The plastic rule of the body a feature goes on gives its defaults (draft, clearance).
+    let rule = |target: &str| -> Result<Option<crate::plastic::PlasticValues>> {
+        doc.plastic_rule_for(target).map(|r| doc.plastic_values(vals, &r)).transpose()
+    };
     // Tools start a little inside the material so they overlap it instead of touching a face.
     match &f.kind {
         FeatureKind::Boss {
@@ -613,7 +617,7 @@ pub(super) fn plastic_eval(vals: &BTreeMap<String, Value>, f: &Feature, st: &mut
             }
             let dr = match draft {
                 Some(e) => val(vals, e, Kind::Angle)?,
-                None => 0.0,
+                None => rule(&target)?.map_or(0.0, |r| r.draft),
             };
             let rf = match fillet {
                 Some(e) => len(e)?.max(0.0),
@@ -705,6 +709,7 @@ pub(super) fn plastic_eval(vals: &BTreeMap<String, Value>, f: &Feature, st: &mut
             let (w, h) = (len(width)?, len(height)?);
             let g = match gap {
                 Some(e) => len(e)?,
+                None if *groove => rule(&target)?.map_or(0.0, |r| r.clearance),
                 None => 0.0,
             };
             if !(w > 0.0 && h > 0.0 && g >= 0.0) {
@@ -755,6 +760,55 @@ pub(super) fn plastic_eval(vals: &BTreeMap<String, Value>, f: &Feature, st: &mut
             let sgn = if pl.normal().dot(y) >= 0.0 { 1.0 } else { -1.0 };
             let (lo, hi) = if sgn > 0.0 { (0.0, w) } else { (-w, 0.0) };
             let tool = kernel::extrude(&pl, &[Region2 { outer: lp, holes: Vec::new() }], lo, hi)?;
+            apply_op(st, f, tool, Operation::Join, std::slice::from_ref(&target))
+        }
+        FeatureKind::Rest { position, direction, along, width, length, height, draft, thickness, body } => {
+            let target = body_under(st, body, *position)?;
+            let (w, h) = (len(width)?, len(height)?);
+            let l = length.as_deref().map(len).transpose()?;
+            let dr = match draft {
+                Some(e) => val(vals, e, Kind::Angle)?,
+                None => rule(&target)?.map_or(0.0, |r| r.draft),
+            };
+            let t = thickness.as_deref().map(len).transpose()?;
+            if !(w > 0.0 && h > 0.0 && l.is_none_or(|l| l > 0.0) && t.is_none_or(|t| t > 0.0 && 2.0 * t < w.min(l.unwrap_or(w)))) {
+                return Err(DocError::Invalid("the rest's sizes must be positive and its wall thinner than half its width".into()));
+            }
+            if !(dr.abs() < 1.0) {
+                return Err(DocError::Invalid("the rest's draft must be under 57°".into()));
+            }
+            let shrink = h * dr.tan();
+            let closes = match t {
+                Some(t) => 2.0 * shrink >= t,
+                None => 2.0 * shrink >= w.min(l.unwrap_or(w)),
+            };
+            if closes {
+                return Err(DocError::Invalid("the draft closes the rest before its top".into()));
+            }
+            let delta = (h * 0.05).clamp(1e-3, 0.5);
+            let (x, y, z) = local_frame(*direction, *along)?;
+            // Sized at the face: the tool starts a little inside, grown by the draft over that.
+            let e = delta * dr.tan();
+            let shape = |grow: f64| match l {
+                Some(l) => Loop2::polygon(&[
+                    Vec2::new(-l / 2.0 - grow, -w / 2.0 - grow),
+                    Vec2::new(l / 2.0 + grow, -w / 2.0 - grow),
+                    Vec2::new(l / 2.0 + grow, w / 2.0 + grow),
+                    Vec2::new(-l / 2.0 - grow, w / 2.0 + grow),
+                ]),
+                None => Loop2::circle(Vec2::ZERO, w / 2.0 + grow),
+            };
+            let holes = match t {
+                Some(t) => vec![shape(-t - e).reversed()],
+                None => Vec::new(),
+            };
+            let region = Region2 { outer: shape(e), holes };
+            let base = Plane::new(*position - z * delta, x, y).ok_or_else(|| DocError::Invalid("rest frame".into()))?;
+            let tool = if dr.abs() > 1e-12 {
+                vec![kernel::extrude_tapered(&base, &region, h + delta, 1.0, -dr)?]
+            } else {
+                kernel::extrude(&base, &[region], 0.0, h + delta)?
+            };
             apply_op(st, f, tool, Operation::Join, std::slice::from_ref(&target))
         }
         _ => Err(DocError::Invalid(format!("{} is not a plastic feature", f.name))),

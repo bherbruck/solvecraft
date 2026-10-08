@@ -194,6 +194,13 @@ impl FeatureKind {
                 dir(direction);
             }
             FeatureKind::Lip { face, .. } => pt(face),
+            FeatureKind::Rest { position, direction, along, .. } => {
+                pt(position);
+                dir(direction);
+                if let Some(a) = along {
+                    dir(a);
+                }
+            }
             FeatureKind::SnapFit { position, direction, hook, .. } => {
                 pt(position);
                 dir(direction);
