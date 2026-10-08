@@ -421,6 +421,14 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.arrow((17.0, 17.5), (19.6, 14.5), a);
             pen.dot(12.0, 12.0, ink);
         }
+        "spin" => {
+            // A turntable: an ellipse with an arrow running round it, a post in the middle.
+            let pts: Vec<Pos2> = (0..=28).map(|i| 0.2 + i as f32 / 28.0 * 5.6).map(|t| pen.at(12.0 + 9.0 * t.cos(), 16.0 + 3.5 * t.sin())).collect();
+            p.add(Shape::line(pts, Stroke::new(pen.w, ink)));
+            pen.arrow((17.0, 19.0), (20.5, 17.0), a);
+            pen.line(&[(12.0, 15.5), (12.0, 4.0)], ink);
+            pen.poly(&[(9.0, 9.0), (15.0, 9.0), (15.0, 4.0), (9.0, 4.0)], Color32::TRANSPARENT, ink);
+        }
         "pan" => {
             for (dx, dy) in [(0.0, -1.0), (0.0, 1.0), (-1.0, 0.0), (1.0, 0.0)] {
                 pen.arrow((12.0 + 3.0 * dx, 12.0 + 3.0 * dy), (12.0 + 9.0 * dx, 12.0 + 9.0 * dy), ink);

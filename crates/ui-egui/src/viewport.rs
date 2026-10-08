@@ -47,6 +47,8 @@ pub struct ViewportState {
     pub hover_bodies: Vec<String>,
     /// The model point an orbit turns around (Preferences: orbit around the cursor).
     pub orbit_pivot: Option<Vec3>,
+    /// Continuous orbit: the view turns about the vertical until the next click or key.
+    pub spin: bool,
     pub build_ms: f64,
     /// The right-click menu, open at this screen position.
     pub context_menu: Option<Pos2>,
@@ -1221,6 +1223,23 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !dragging {
         app.viewport.orbit_pivot = None;
     }
+    if app.viewport.spin {
+        // A click on the navigation bar (its own button) is not a stop.
+        let bar = Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 22.0), vec2(320.0, 30.0));
+        let (pressed, key, dt) = ui.input(|i| {
+            (
+                i.pointer.any_pressed() && inside && !i.pointer.press_origin().is_some_and(|p| bar.contains(p)),
+                i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })),
+                i.stable_dt,
+            )
+        });
+        if pressed || key || dragging {
+            app.viewport.spin = false;
+        } else {
+            app.cam.orbit(f64::from(dt.min(0.1)) * 30.0, 0.0);
+            ui.ctx().request_repaint();
+        }
+    }
     if !app.cam.is_valid() {
         app.cam = Camera::default();
         app.fit_view();
@@ -1897,8 +1916,9 @@ pub fn look_at_selection(app: &mut SolveApp) {
 
 fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let t = Tokens::get();
-    let items: [(&str, &str); 9] = [
+    let items: [(&str, &str); 10] = [
         ("orbit", "Orbit (drag; or Shift+middle / right drag)"),
+        ("spin", "Continuous orbit (stops at the next click or key)"),
         ("pan", "Pan (drag; or middle drag)"),
         ("zoom", "Zoom (drag; or wheel)"),
         ("fit", "Fit (F6)"),
@@ -1921,6 +1941,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             "zoom" => app.viewport.nav == Some(NavMode::Zoom),
             "perspective" => app.ui.perspective,
             "settings" => app.ui.show_grid,
+            "spin" => app.viewport.spin,
             _ => false,
         };
         if active || resp.hovered() {
@@ -1934,6 +1955,10 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 "pan" => app.viewport.nav = toggle(NavMode::Pan, app.viewport.nav),
                 "zoom" => app.viewport.nav = toggle(NavMode::Zoom, app.viewport.nav),
                 "fit" => app.animate_view("fit"),
+                "spin" => {
+                    app.cancel_view_animation();
+                    app.viewport.spin = !app.viewport.spin;
+                }
                 "home" => app.animate_view("home"),
                 "lookat" => look_at_selection(app),
                 "style" => app.ui.visual_style = (app.ui.visual_style + 1) % 4,
