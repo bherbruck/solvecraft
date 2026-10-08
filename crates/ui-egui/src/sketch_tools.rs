@@ -28,15 +28,59 @@ thread_local! {
     static COMBS: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
     /// The image file a Canvas or Decal tool places.
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Analysis markers shown while an analysis tool is active: (where, label).
+    static MARKS: RefCell<Vec<(Vec3, String)>> = const { RefCell::new(Vec::new()) };
+    /// Center of Mass has just started: measure everything on the next frame.
+    static DEFERRED: Cell<bool> = const { Cell::new(false) };
     /// The canvas whose panel is open.
     static CANVAS_PANEL: Cell<Option<u64>> = const { Cell::new(None) };
     /// The opacity slider while it is dragged: (canvas, value).
     static OPACITY: Cell<Option<(u64, f64)>> = const { Cell::new(None) };
 }
 
+/// Run an analysis and keep its result as a marker.
+fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
+    let Ok(v) = app.run(cmd, p) else { return };
+    let mark = match cmd {
+        "FusionCenterOfMassCommand" => v3(&v["center"]).map(|c| (c, "Center of mass".to_string())),
+        _ => v3(&v["at"]).zip(v["min_radius"].as_f64()).map(|(c, r)| (c, format!("R min {r:.3} mm"))),
+    };
+    if let Some(m) = mark {
+        MARKS.with(|k| k.borrow_mut().push(m));
+    } else if cmd == "FusionMinimumRadiusAnalysisCommand" {
+        app.set_status("Minimum radius: it is straight (no curvature)", false);
+    }
+}
+
+/// Analysis markers: a target with its label.
+fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    if !app.tool.as_ref().is_some_and(|t| matches!(t.cmd, "FusionMinimumRadiusAnalysisCommand" | "FusionCenterOfMassCommand")) {
+        MARKS.with(|m| m.borrow_mut().clear());
+        return;
+    }
+    let tk = crate::theme::Tokens::get();
+    MARKS.with(|m| {
+        for (at, label) in m.borrow().iter() {
+            let Some(q) = proj.to_screen(*at) else { continue };
+            painter.circle(q, 6.0, tk.panel.gamma_multiply(0.8), Stroke::new(1.6, tk.accent));
+            painter.line_segment([q - egui::vec2(10.0, 0.0), q + egui::vec2(10.0, 0.0)], Stroke::new(1.2, tk.accent));
+            painter.line_segment([q - egui::vec2(0.0, 10.0), q + egui::vec2(0.0, 10.0)], Stroke::new(1.2, tk.accent));
+            let r = painter.text(q + egui::vec2(12.0, -12.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(12.0), tk.text);
+            painter.rect_filled(r.expand(3.0), 3.0, tk.panel.gamma_multiply(0.85));
+            painter.text(q + egui::vec2(12.0, -12.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(12.0), tk.text);
+        }
+    });
+}
+
 /// Commands that start with a step of their own: Canvas and Decal ask for the image first,
 /// Edit Canvas opens the canvas panel. False when the command should not go on.
 pub fn start_hook(app: &SolveApp, id: &str) -> bool {
+    if id == "FusionCenterOfMassCommand" {
+        // The whole model at once; the tool stays for picking single bodies.
+        MARKS.with(|m| m.borrow_mut().clear());
+        DEFERRED.with(|d| d.set(true));
+        return true;
+    }
     if id == "canvas.edit" {
         let first = app.session.doc.canvases.first().map(|c| c.id);
         CANVAS_PANEL.with(|c| c.set(first));
@@ -294,6 +338,7 @@ fn mode(id: &str) -> Option<Mode> {
     Some(match id {
         "ProjectNewCmd" | "IntersectCmd" | "Include3DGeometry" | "FitCurvesToSectionCommand" | "SketchIsoparametricCurve" => Mode::ModelRef,
         "FusionCurvatureCombAnalysisCommand" | "FusionAddCanvasCommand" | "FusionAddEditDecalCommand" => Mode::ModelRef,
+        "FusionMinimumRadiusAnalysisCommand" | "FusionCenterOfMassCommand" => Mode::ModelRef,
         "TrimSketchCmd" | "ExtendSketchCmd" | "BreakSketchCmd" => Mode::CurveAt,
         "SketchMidpointLine" => Mode::Points(2),
         "ArcTangent" => Mode::Points(2),
@@ -339,6 +384,8 @@ pub fn hint(id: &str) -> Option<String> {
             "FitCurvesToSectionCommand" => "Fit Curves to Mesh Section: click a body",
             "SketchIsoparametricCurve" => "Isoparametric Curve: click a point on a face (Shift: along)",
             "FusionCurvatureCombAnalysisCommand" => "Curvature comb: click sketch curves or model edges",
+            "FusionMinimumRadiusAnalysisCommand" => "Minimum radius: click sketch curves, edges or faces",
+            "FusionCenterOfMassCommand" => "Center of mass of all bodies; click a body for its own",
             "FusionAddCanvasCommand" => "Canvas: click a plane or a planar face where the image's centre goes",
             "FusionAddEditDecalCommand" => "Decal: click a planar face where the image's centre goes",
             "TrimSketchCmd" => "Trim: click the piece of a curve to remove",
@@ -477,6 +524,18 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                         comb["teeth"].as_array().into_iter().flatten().filter_map(|t| Some([v3(t.get(0)?)?, v3(t.get(1)?)?])).collect();
                     COMBS.with(|c| c.borrow_mut().push(teeth));
                 }
+            }
+        }
+        Mode::ModelRef if matches!(cmd, "FusionMinimumRadiusAnalysisCommand" | "FusionCenterOfMassCommand") => {
+            let params = hits.iter().find_map(|h| match (cmd, h) {
+                ("FusionMinimumRadiusAnalysisCommand", Hit::SketchCurve { sketch, id, .. }) => Some(json!({"sketch": sketch, "curves": [id]})),
+                ("FusionMinimumRadiusAnalysisCommand", Hit::Edge { mid, .. }) => Some(json!({"edges": [[mid.x, mid.y, mid.z]]})),
+                ("FusionMinimumRadiusAnalysisCommand", Hit::Face { point, .. }) => Some(json!({"faces": [[point.x, point.y, point.z]]})),
+                ("FusionCenterOfMassCommand", Hit::Face { body, .. }) => Some(json!({"bodies": [body]})),
+                _ => None,
+            });
+            if let Some(p) = params {
+                analysis(app, cmd, p);
             }
         }
         Mode::ModelRef if matches!(cmd, "FusionAddCanvasCommand" | "FusionAddEditDecalCommand") => {
@@ -926,6 +985,10 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     glyphs(app, painter, proj);
     snap_hint(app, painter, proj);
     combs(app, painter, proj);
+    if DEFERRED.with(|d| d.replace(false)) {
+        analysis(app, "FusionCenterOfMassCommand", json!({}));
+    }
+    marks(app, painter, proj);
     text_entry(app, ui.ctx());
     canvas_panel(app, ui.ctx());
 }

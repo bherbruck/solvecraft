@@ -638,6 +638,28 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             let pts: Vec<(f32, f32)> = (0..=24).map(|i| 3.0 + 18.0 * i as f32 / 24.0).map(|x| (x, f(x))).collect();
             pen.line(&pts, ink);
         }
+        "min_radius" => {
+            pen.line(&[(3.0, 20.0), (7.0, 9.0), (12.0, 5.5), (17.0, 9.0), (21.0, 20.0)], ink);
+            pen.circle(12.0, 10.5, 5.0, Color32::TRANSPARENT, a);
+            pen.arrow((12.0, 10.5), (15.5, 7.0), a);
+            pen.dot(12.0, 10.5, ink);
+        }
+        "center_of_mass" => {
+            pen.circle(12.0, 12.0, 8.0, Color32::TRANSPARENT, ink);
+            let q = |a0: f32| {
+                let pts: Vec<Pos2> = std::iter::once(pen.at(12.0, 12.0))
+                    .chain(
+                        (0..=8)
+                            .map(|i| a0 + i as f32 / 8.0 * std::f32::consts::FRAC_PI_2)
+                            .map(|t| pen.at(12.0 + 8.0 * t.cos(), 12.0 - 8.0 * t.sin())),
+                    )
+                    .collect();
+                p.add(Shape::convex_polygon(pts, a, Stroke::NONE));
+            };
+            q(0.0);
+            q(std::f32::consts::PI);
+            pen.circle(12.0, 12.0, 8.0, Color32::TRANSPARENT, ink);
+        }
         "sketch_fillet" => {
             pen.line(&[(4.0, 21.0), (4.0, 12.0)], ink);
             pen.line(&[(12.0, 4.0), (21.0, 4.0)], ink);
