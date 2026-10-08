@@ -38,6 +38,52 @@ pub enum Seg2 {
         b: Vec2,
         w: f64,
     },
+    /// Bézier of degree `n` (4…7) over `p[0..=n]` (the rest unused): pieces of higher-degree
+    /// splines.
+    Bezier {
+        n: u8,
+        p: [Vec2; 8],
+    },
+}
+
+/// Highest degree of [`Seg2::Bezier`].
+pub const MAX_BEZIER_DEGREE: usize = 7;
+
+/// A Bézier segment over `pts` (2…8 points): a line, a cubic or a higher-degree piece. A
+/// quadratic becomes a conic of weight 1.
+pub fn bezier(pts: &[Vec2]) -> Option<Seg2> {
+    Some(match *pts {
+        [a, b] => Seg2::Line { a, b },
+        [a, apex, b] => Seg2::Conic { a, apex, b, w: 1.0 },
+        [p0, p1, p2, p3] => Seg2::Cubic { p0, p1, p2, p3 },
+        _ if pts.len() <= MAX_BEZIER_DEGREE + 1 => {
+            let mut p = [Vec2::ZERO; 8];
+            for (d, s) in p.iter_mut().zip(pts) {
+                *d = *s;
+            }
+            Seg2::Bezier { n: (pts.len() - 1) as u8, p }
+        }
+        _ => return None,
+    })
+}
+
+/// de Casteljau: the point at `t` and the two halves' control points.
+fn casteljau(c: &[Vec2], t: f64) -> (Vec2, Vec<Vec2>, Vec<Vec2>) {
+    let mut w = c.to_vec();
+    let mut left = Vec::with_capacity(c.len());
+    let mut right = Vec::with_capacity(c.len());
+    while let Some(first) = w.first().copied() {
+        left.push(first);
+        if let Some(last) = w.last().copied() {
+            right.push(last);
+        }
+        if w.len() == 1 {
+            break;
+        }
+        w = w.windows(2).map(|x| x[0].lerp(x[1], t)).collect();
+    }
+    right.reverse();
+    (left.last().copied().unwrap_or(Vec2::ZERO), left, right)
 }
 
 /// Gauss–Legendre nodes and weights on [0, 1] (5 points).
@@ -50,6 +96,9 @@ const GL5: [(f64, f64); 5] = [
 ];
 
 impl Seg2 {
+    fn bez(n: u8, p: &[Vec2; 8]) -> &[Vec2] {
+        &p[..(n as usize).clamp(1, MAX_BEZIER_DEGREE) + 1]
+    }
     /// Derivative with respect to the parameter at `t` (Béziers and conics; lines and arcs too).
     pub fn derivative(&self, t: f64) -> Vec2 {
         match *self {
@@ -65,12 +114,18 @@ impl Seg2 {
                 let (dn, dd) = (a * (-2.0 * u) + apex * (2.0 * w * (1.0 - 2.0 * t)) + b * (2.0 * t), -2.0 * u + 2.0 * w * (1.0 - 2.0 * t) + 2.0 * t);
                 (dn * d - n * dd) / (d * d).max(1e-300)
             }
+            Seg2::Bezier { n, ref p } => {
+                let c = Self::bez(n, p);
+                let diffs: Vec<Vec2> = c.windows(2).map(|w| (w[1] - w[0]) * (c.len() - 1) as f64).collect();
+                casteljau(&diffs, t).0
+            }
         }
     }
     pub fn start(&self) -> Vec2 {
         match *self {
             Seg2::Line { a, .. } | Seg2::Conic { a, .. } => a,
             Seg2::Cubic { p0, .. } => p0,
+            Seg2::Bezier { p, .. } => p[0],
             Seg2::Arc { center, radius, start, .. } => center + Vec2::from_angle(start) * radius,
         }
     }
@@ -78,6 +133,7 @@ impl Seg2 {
         match *self {
             Seg2::Line { b, .. } | Seg2::Conic { b, .. } => b,
             Seg2::Cubic { p3, .. } => p3,
+            Seg2::Bezier { n, ref p } => Self::bez(n, p).last().copied().unwrap_or(p[0]),
             Seg2::Arc { center, radius, start, sweep } => center + Vec2::from_angle(start + sweep) * radius,
         }
     }
@@ -94,6 +150,7 @@ impl Seg2 {
                 let d = u * u + 2.0 * w * u * t + t * t;
                 (a * (u * u) + apex * (2.0 * w * u * t) + b * (t * t)) / d.max(1e-300)
             }
+            Seg2::Bezier { n, ref p } => casteljau(Self::bez(n, p), t).0,
         }
     }
     pub fn mid(&self) -> Vec2 {
@@ -106,6 +163,10 @@ impl Seg2 {
             Seg2::Arc { start, sweep, .. } => Vec2::from_angle(start).perp() * sweep.signum(),
             Seg2::Cubic { p0, p1, p2, .. } => (p1 - p0).normalized().or_else(|| (p2 - p0).normalized()).unwrap_or(Vec2::X),
             Seg2::Conic { a, apex, b, .. } => (apex - a).normalized().or_else(|| (b - a).normalized()).unwrap_or(Vec2::X),
+            Seg2::Bezier { n, ref p } => {
+                let c = Self::bez(n, p);
+                c.iter().skip(1).find_map(|q| (*q - c[0]).normalized()).unwrap_or(Vec2::X)
+            }
         }
     }
     /// Unit tangent at the end (direction of travel).
@@ -115,6 +176,11 @@ impl Seg2 {
             Seg2::Arc { start, sweep, .. } => Vec2::from_angle(start + sweep).perp() * sweep.signum(),
             Seg2::Cubic { p1, p2, p3, .. } => (p3 - p2).normalized().or_else(|| (p3 - p1).normalized()).unwrap_or(Vec2::X),
             Seg2::Conic { a, apex, b, .. } => (b - apex).normalized().or_else(|| (b - a).normalized()).unwrap_or(Vec2::X),
+            Seg2::Bezier { n, ref p } => {
+                let c = Self::bez(n, p);
+                let last = c.last().copied().unwrap_or(p[0]);
+                c.iter().rev().skip(1).find_map(|q| (last - *q).normalized()).unwrap_or(Vec2::X)
+            }
         }
     }
     pub fn reversed(&self) -> Seg2 {
@@ -123,13 +189,19 @@ impl Seg2 {
             Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center, radius, start: start + sweep, sweep: -sweep },
             Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: p3, p1: p2, p2: p1, p3: p0 },
             Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: b, apex, b: a, w },
+            Seg2::Bezier { n, ref p } => {
+                let mut q = *p;
+                let k = (n as usize).clamp(1, MAX_BEZIER_DEGREE);
+                q[..=k].reverse();
+                Seg2::Bezier { n, p: q }
+            }
         }
     }
     pub fn length(&self) -> f64 {
         match *self {
             Seg2::Line { a, b } => a.dist(b),
             Seg2::Arc { radius, sweep, .. } => (radius * sweep).abs(),
-            Seg2::Cubic { .. } | Seg2::Conic { .. } => self.integrate(|s, t| s.derivative(t).len()),
+            Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => self.integrate(|s, t| s.derivative(t).len()),
         }
     }
     /// The segment split at parameter `t` in (0, 1) (same kind, exact; conic halves are
@@ -164,6 +236,11 @@ impl Seg2 {
                     Seg2::Conic { a, apex: pt(q0), b: m, w: q0.1 / r.1.max(1e-300).sqrt() },
                     Seg2::Conic { a: m, apex: pt(q1), b, w: q1.1 / r.1.max(1e-300).sqrt() },
                 )
+            }
+            Seg2::Bezier { n, ref p } => {
+                let (_, l, r) = casteljau(Self::bez(n, p), t);
+                let mk = |c: &[Vec2]| bezier(c).unwrap_or(*self);
+                (mk(&l), mk(&r))
             }
         }
     }
@@ -213,6 +290,7 @@ impl Seg2 {
                 let (l, r) = ((a + apex * w) / (1.0 + w), (apex * w + b) / (1.0 + w));
                 (Seg2::Conic { a, apex: l, b: m, w: w2 }, Seg2::Conic { a: m, apex: r, b, w: w2 })
             }
+            Seg2::Bezier { .. } => self.split_at(0.5),
         }
     }
     /// ∫₀¹ f(t) dt by composite Gauss–Legendre (16 pieces of 5 points).
@@ -236,7 +314,7 @@ impl Seg2 {
                 // Chord term plus the circular segment between chord and arc.
                 0.5 * a.cross(b) + 0.5 * radius * radius * (sweep - sweep.sin())
             }
-            Seg2::Cubic { .. } | Seg2::Conic { .. } => self.integrate(|s, t| 0.5 * s.point_at(t).cross(s.derivative(t))),
+            Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => self.integrate(|s, t| 0.5 * s.point_at(t).cross(s.derivative(t))),
         }
     }
     /// Polyline approximation (including both end points) with at most `tol` chord error.
@@ -259,6 +337,13 @@ impl Seg2 {
                 let bow = (a - apex * 2.0 + b).len() * 2.0 * w.max(1.0);
                 let n = ((bow / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
                 (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
+            }
+            Seg2::Bezier { n, ref p } => {
+                // Second derivative ≤ n(n−1) × the largest second difference of the controls.
+                let c = Self::bez(n, p);
+                let d2 = c.windows(3).map(|w| (w[0] - w[1] * 2.0 + w[2]).len()).fold(0.0, f64::max) * (n as f64) * (n as f64 - 1.0);
+                let k = ((d2 / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
+                (0..=k).map(|i| self.point_at(i as f64 / k as f64)).collect()
             }
         }
     }

@@ -153,6 +153,15 @@ fn add_pieces(sk: &mut Sketch, segs: &[Seg2], start: Option<usize>, end: Option<
                 let x = sk.add_point(apex, None)?;
                 CurveKind::Conic { a: prev, b: to, apex: x, rho: w / (1.0 + w) }
             }
+            Seg2::Bezier { n, p } => {
+                let k = (n as usize).clamp(1, solvecraft_geom::MAX_BEZIER_DEGREE);
+                let mut pts = vec![prev];
+                for q in p.iter().take(k).skip(1) {
+                    pts.push(sk.add_point(*q, None)?);
+                }
+                pts.push(to);
+                CurveKind::Spline { pts, control: true, degree: n }
+            }
             Seg2::Arc { .. } => return Err(bad("trim", "unexpected arc piece")),
         };
         let c = sk.add_curve(kind, None)?;

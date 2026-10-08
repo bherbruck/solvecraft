@@ -72,7 +72,10 @@ fn end_param(sh: &Shape, p: Vec2, tol: f64) -> Option<f64> {
     }
 }
 
-/// Put exact free-form segments back where a loop runs over all the pieces of one, in order.
+/// Put exact free-form segments back. A loop that runs over all the pieces of one, in order,
+/// gets the whole segment; one that runs over part of it (cut by a crossing) gets the exact
+/// sub-segment, its ends moved to the true crossing with the neighbouring segment. Where that
+/// crossing cannot be found the loop keeps the polyline pieces.
 fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::collections::HashMap<usize, Vec<Seg2>>) -> Vec<Seg2> {
     let n = segs.len();
     if n == 0 || tags.len() != n || tags.iter().all(Option::is_none) {
@@ -81,7 +84,7 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
     let key = |i: usize| tags.get(i % n).copied().flatten().map(|((ci, k, _, _), fwd)| (ci, k, fwd));
     // Start where a run begins so no run wraps around.
     let r = (0..n).find(|i| key(*i) != key(*i + n - 1)).unwrap_or(0);
-    let mut out = Vec::with_capacity(n);
+    let mut runs: Vec<Run> = Vec::new();
     let mut i = 0;
     while i < n {
         let k0 = key(r + i);
@@ -90,21 +93,205 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
             j += 1;
         }
         let run: Vec<usize> = (i..j).map(|x| (r + x) % n).collect();
-        let whole = match (k0, tags.get(run[0]).copied().flatten()) {
-            (Some((ci, k, fwd)), Some(((_, _, _, cnt), _))) if run.len() == cnt => {
+        let plain: Vec<Seg2> = run.iter().filter_map(|x| segs.get(*x).copied()).collect();
+        let full = k0.and_then(|(ci, k, fwd)| exact.get(&ci).and_then(|e| e.get(k)).map(|s| if fwd { *s } else { s.reversed() }));
+        let whole = match (full, tags.get(run[0]).copied().flatten()) {
+            (Some(_), Some(((_, _, _, cnt), fwd))) if run.len() == cnt => {
                 let order: Vec<usize> = run.iter().filter_map(|x| tags.get(*x).copied().flatten().map(|((_, _, p, _), _)| p)).collect();
                 let want: Vec<usize> = if fwd { (0..cnt).collect() } else { (0..cnt).rev().collect() };
-                if order == want { exact.get(&ci).and_then(|e| e.get(k)).map(|s| if fwd { *s } else { s.reversed() }) } else { None }
+                order == want
             }
-            _ => None,
+            _ => false,
         };
-        match whole {
-            Some(s) => out.push(s),
-            None => out.extend(run.iter().filter_map(|x| segs.get(*x).copied())),
-        }
+        runs.push(match full {
+            Some(seg) if whole => Run::Exact { seg, t0: 0.0, t1: 1.0, fixed: (true, true), plain },
+            Some(seg) => {
+                let (a, b) = (plain.first().map(Seg2::start).unwrap_or_default(), plain.last().map(Seg2::end).unwrap_or_default());
+                let (t0, t1) = (seg.closest_param(a), seg.closest_param(b));
+                // Ends that are the segment's own ends need no search.
+                let snap = |t: f64, p: Vec2, at: f64| (t - at).abs() < 1e-6 && seg.point_at(at).dist(p) < 1e-6;
+                let fixed = (snap(t0, a, 0.0), snap(t1, b, 1.0));
+                let (t0, t1) = (if fixed.0 { 0.0 } else { t0 }, if fixed.1 { 1.0 } else { t1 });
+                if t1 - t0 > 1e-9 { Run::Exact { seg, t0, t1, fixed, plain } } else { Run::Plain(plain) }
+            }
+            None => Run::Plain(plain),
+        });
         i = j;
     }
-    out
+    // Junctions next to a cut exact run: find the true crossing.
+    let m = runs.len();
+    for a in 0..m {
+        let b = (a + 1) % m;
+        let need = match (runs.get(a), runs.get(b)) {
+            (Some(Run::Exact { fixed, .. }), _) if !fixed.1 => true,
+            (_, Some(Run::Exact { fixed, .. })) if !fixed.0 => true,
+            _ => false,
+        };
+        if !need {
+            continue;
+        }
+        let (Some(ra), Some(rb)) = (runs.get(a), runs.get(b)) else { continue };
+        let p0 = ra.end();
+        let crossing = refine_crossing(ra, rb, p0);
+        match crossing {
+            Some((p, ta, tb)) if p.dist(p0) < 1e-2 => {
+                if let Some(x) = runs.get_mut(a) {
+                    x.set_end(p, ta);
+                }
+                if let Some(x) = runs.get_mut(b) {
+                    x.set_start(p, tb);
+                }
+            }
+            _ => {
+                for k in [a, b] {
+                    if let Some(x) = runs.get_mut(k) {
+                        x.give_up();
+                    }
+                }
+            }
+        }
+    }
+    runs.into_iter().flat_map(Run::into_segs).collect()
+}
+
+/// A stretch of a profile loop: plain segments, or (part of) an exact free-form segment.
+enum Run {
+    Plain(Vec<Seg2>),
+    /// `seg` (in loop direction) between parameters `t0` and `t1`; `fixed` ends are exact;
+    /// `plain` is the polyline fallback.
+    Exact {
+        seg: Seg2,
+        t0: f64,
+        t1: f64,
+        fixed: (bool, bool),
+        plain: Vec<Seg2>,
+    },
+}
+
+impl Run {
+    fn end(&self) -> Vec2 {
+        match self {
+            Run::Plain(v) => v.last().map(Seg2::end).unwrap_or_default(),
+            Run::Exact { seg, t1, .. } => seg.point_at(*t1),
+        }
+    }
+    /// The segment at the run's end and the parameter of the end on it.
+    fn end_geom(&self) -> Option<(Seg2, f64)> {
+        match self {
+            Run::Plain(v) => v.last().map(|s| (*s, 1.0)),
+            Run::Exact { seg, t1, .. } => Some((*seg, *t1)),
+        }
+    }
+    /// The segment at the run's start and the parameter of the start on it.
+    fn start_geom(&self) -> Option<(Seg2, f64)> {
+        match self {
+            Run::Plain(v) => v.first().map(|s| (*s, 0.0)),
+            Run::Exact { seg, t0, .. } => Some((*seg, *t0)),
+        }
+    }
+    fn set_end(&mut self, p: Vec2, t: f64) {
+        match self {
+            Run::Plain(v) => {
+                if let Some(s) = v.last_mut() {
+                    *s = with_end(*s, p);
+                }
+            }
+            Run::Exact { t1, .. } => *t1 = t,
+        }
+    }
+    fn set_start(&mut self, p: Vec2, t: f64) {
+        match self {
+            Run::Plain(v) => {
+                if let Some(s) = v.first_mut() {
+                    *s = with_end(s.reversed(), p).reversed();
+                }
+            }
+            Run::Exact { t0, .. } => *t0 = t,
+        }
+    }
+    fn give_up(&mut self) {
+        if let Run::Exact { fixed: (false, _) | (_, false), plain, .. } = self {
+            *self = Run::Plain(std::mem::take(plain));
+        }
+    }
+    fn into_segs(self) -> Vec<Seg2> {
+        match self {
+            Run::Plain(v) => v,
+            Run::Exact { seg, t0, t1, .. } => {
+                if t0 <= 1e-12 && t1 >= 1.0 - 1e-12 {
+                    return vec![seg];
+                }
+                let s = if t1 < 1.0 - 1e-12 { seg.split_at(t1).0 } else { seg };
+                if t0 <= 1e-12 {
+                    return vec![s];
+                }
+                // Conic halves are reparametrised: find t0's point again on the left part.
+                let u = local_param(&s, seg.point_at(t0), if t1 > 1e-12 { t0 / t1 } else { 0.0 });
+                vec![s.split_at(u.clamp(1e-9, 1.0 - 1e-9)).1]
+            }
+        }
+    }
+}
+
+/// The segment with its end moved to `p` (lines; arcs keep their circle).
+fn with_end(s: Seg2, p: Vec2) -> Seg2 {
+    match s {
+        Seg2::Line { a, .. } => Seg2::Line { a, b: p },
+        Seg2::Arc { center, radius, start, sweep } => {
+            let target = (p - center).angle();
+            let end = start + sweep;
+            // The same end angle, wound the same way.
+            let delta = (target - end + std::f64::consts::PI).rem_euclid(TAU) - std::f64::consts::PI;
+            Seg2::Arc { center, radius, start, sweep: sweep + delta }
+        }
+        other => other,
+    }
+}
+
+/// Where the end of run `a` meets the start of run `b`, near `p`: the point and the parameters
+/// on the two runs' segments (Newton on A(ta) = B(tb); lines and arcs extend past their ends).
+fn refine_crossing(a: &Run, b: &Run, p: Vec2) -> Option<(Vec2, f64, f64)> {
+    let (sa, mut ta) = a.end_geom()?;
+    let (sb, mut tb) = b.start_geom()?;
+    // Start from the parameters nearest the polyline crossing.
+    ta = local_param(&sa, p, ta);
+    tb = local_param(&sb, p, tb);
+    for _ in 0..50 {
+        let f = sa.point_at(ta) - sb.point_at(tb);
+        if f.len() < 1e-11 {
+            let pt = match (a, b) {
+                (Run::Exact { .. }, _) | (Run::Plain(_), Run::Plain(_)) => sa.point_at(ta),
+                (_, Run::Exact { .. }) => sb.point_at(tb),
+            };
+            return (ta.is_finite() && tb.is_finite()).then_some((pt, ta, tb));
+        }
+        let (da, db) = (sa.derivative(ta), -sb.derivative(tb));
+        let det = da.cross(db);
+        if det.abs() < 1e-14 * da.len().max(1e-300) * db.len().max(1e-300) {
+            return None;
+        }
+        // Solve [da db] (dta, dtb)ᵀ = −f.
+        ta -= f.cross(db) / det;
+        tb -= da.cross(f) / det;
+    }
+    None
+}
+
+/// Parameter of the point of `s` nearest `p`, by Newton from `t`.
+fn local_param(s: &Seg2, p: Vec2, mut t: f64) -> f64 {
+    for _ in 0..30 {
+        let (q, d) = (s.point_at(t), s.derivative(t));
+        let dd = d.dot(d);
+        if dd < 1e-300 {
+            break;
+        }
+        let step = (p - q).dot(d) / dd;
+        t += step;
+        if step.abs() < 1e-15 {
+            break;
+        }
+    }
+    t
 }
 
 /// A uniform grid over a set of boxes (about one box per cell), for neighbour queries.
@@ -161,7 +348,7 @@ fn curvature(s: &Seg2) -> f64 {
     match *s {
         Seg2::Line { .. } => 0.0,
         Seg2::Arc { radius, sweep, .. } => sweep.signum() / radius.max(1e-12),
-        Seg2::Cubic { .. } | Seg2::Conic { .. } => {
+        Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => {
             let (d1, h) = (s.derivative(0.0), 1e-5);
             let d2 = (s.derivative(h) - d1) / h;
             d1.cross(d2) / d1.len().powi(3).max(1e-300)

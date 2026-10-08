@@ -407,3 +407,53 @@ fn long_connected_chain_solves() {
     assert_eq!(rep.dof, 0);
     assert!(ms < 10_000, "{ms} ms");
 }
+
+/// Free-form curves stay exact in profiles: a degree-5 spline closed by a line, and a fit spline
+/// cut in two by a line through it (each side gets an exact sub-curve ending on the line).
+#[test]
+fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
+    use solvecraft_geom::Seg2;
+    let exact_loop = |p: &Profile| p.region.outer.segs.iter().all(|s| !matches!(s, Seg2::Line { .. }) || s.length() > 1.0);
+    let closed = |p: &Profile| {
+        let s = &p.region.outer.segs;
+        s.iter().zip(s.iter().cycle().skip(1)).all(|(a, b)| a.end().dist(b.start()) < 1e-9)
+    };
+    // Degree 5 over six points, closed by a line.
+    let mut sk = Sketch::default();
+    let ids: Vec<usize> = [v(0.0, 0.0), v(4.0, 10.0), v(10.0, 12.0), v(16.0, 12.0), v(22.0, 10.0), v(26.0, 0.0)]
+        .iter()
+        .map(|p| sk.add_point(*p, None).unwrap())
+        .collect();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 5 }, None).unwrap();
+    sk.add_line_pts(ids[5], ids[0], None).unwrap();
+    let pr = find_profiles(&sk);
+    assert_eq!(pr.len(), 1);
+    assert!(pr[0].region.outer.segs.iter().any(|s| matches!(s, Seg2::Bezier { n: 5, .. })), "{:?}", pr[0].region.outer.segs);
+    assert!(closed(&pr[0]));
+    // A fit spline arch over a base line, cut by a vertical line at x = 10.
+    let mut sk = Sketch::default();
+    let ids: Vec<usize> = [v(0.0, 0.0), v(6.0, 9.0), v(14.0, 9.0), v(20.0, 0.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: false, degree: 3 }, None).unwrap();
+    sk.add_line_pts(ids[3], ids[0], None).unwrap();
+    let (a, b) = (sk.add_point(v(10.0, -5.0), None).unwrap(), sk.add_point(v(10.0, 20.0), None).unwrap());
+    sk.add_line_pts(a, b, None).unwrap();
+    let pr = find_profiles(&sk);
+    assert_eq!(pr.len(), 2, "{pr:?}");
+    let whole: f64 = pr.iter().map(|p| p.area).sum();
+    for p in &pr {
+        assert!(closed(p), "{:?}", p.region.outer.segs);
+        assert!(exact_loop(p), "polyline pieces left: {:?}", p.region.outer.segs);
+        // The crossing lies on the line x = 10.
+        assert!(
+            p.region
+                .outer
+                .segs
+                .iter()
+                .any(|s| matches!(s, Seg2::Cubic { .. }) && ((s.start().x - 10.0).abs() < 1e-9 || (s.end().x - 10.0).abs() < 1e-9))
+        );
+    }
+    // Same total area as the uncut arch.
+    sk.curves.pop();
+    let uncut: f64 = find_profiles(&sk).iter().map(|p| p.area).sum();
+    assert!((whole - uncut).abs() < 1e-6 * uncut, "{whole} vs {uncut}");
+}

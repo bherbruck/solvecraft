@@ -13,7 +13,7 @@ mod vec;
 
 pub use mesh::{Aabb3, Mesh, MeshMeasure};
 pub use plane::Plane;
-pub use profile::{Loop2, Region2, Seg2};
+pub use profile::{Loop2, MAX_BEZIER_DEGREE, Region2, Seg2, bezier};
 pub use vec::{Vec2, Vec3};
 
 /// Geometric tolerance for coincidence tests (mm).

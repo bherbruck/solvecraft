@@ -1223,7 +1223,7 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
                 vec![kernel::PathSeg::Arc { a: w(s.start()), center: w(center), axis: n * sweep.signum(), angle: sweep.abs() }]
             }
             // Free-form path curves are followed as polylines.
-            solvecraft_geom::Seg2::Cubic { .. } | solvecraft_geom::Seg2::Conic { .. } => {
+            solvecraft_geom::Seg2::Cubic { .. } | solvecraft_geom::Seg2::Conic { .. } | solvecraft_geom::Seg2::Bezier { .. } => {
                 s.polyline(1e-2).windows(2).map(|q| kernel::PathSeg::Line { a: w(q[0]), b: w(q[1]) }).collect()
             }
         })

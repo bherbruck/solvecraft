@@ -344,6 +344,35 @@ fn free_form_profiles_extrude_exactly() {
 }
 
 #[test]
+fn degree_five_and_cut_free_form_profiles_extrude_exactly() {
+    let vol = |s: &mut Session| run(s, "MeasureCommand", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    // A degree-5 control spline closed by a line: one B-spline side face.
+    let mut s = new_sketch();
+    let sp = ids(&run(&mut s, "DrawCVMSpline5D", json!({"points": [[0, 0], [4, 10], [10, 12], [16, 12], [22, 10], [26, 0]]}))["curves"])[0].clone();
+    run(&mut s, "DrawPolyline", json!({"points": [format!("{sp}.end"), format!("{sp}.start")]}));
+    let a = profiles(&s)[0];
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Extrude", json!({"distance": 3}));
+    let v = vol(&mut s);
+    assert!((v - a * 3.0).abs() / (a * 3.0) < 2e-4, "{v} vs {}", a * 3.0);
+    let m = run(&mut s, "MeasureCommand", json!({}));
+    assert_eq!(m["bodies"][0]["faces"], 4, "{m}");
+    // A fit spline arch cut by a line: both sides extrude with exact curved faces.
+    let mut s = new_sketch();
+    let sp = ids(&run(&mut s, "DrawSpline", json!({"points": [[0, 0], [6, 9], [14, 9], [20, 0]]}))["curves"])[0].clone();
+    run(&mut s, "DrawPolyline", json!({"points": [format!("{sp}.end"), format!("{sp}.start")]}));
+    run(&mut s, "DrawPolyline", json!({"points": [[10, -5], [10, 20]]}));
+    let areas = profiles(&s);
+    assert_eq!(areas.len(), 2, "{areas:?}");
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Extrude", json!({"distance": 2, "profiles": [0]}));
+    let v = vol(&mut s);
+    assert!((v - areas[0] * 2.0).abs() / (areas[0] * 2.0) < 2e-4, "{v} vs {}", areas[0] * 2.0);
+    let m = run(&mut s, "MeasureCommand", json!({}));
+    assert!(m["bodies"][0]["faces"].as_u64().unwrap() <= 7, "no polyline facets: {m}");
+}
+
+#[test]
 fn trim_and_break_free_form_curves_exactly() {
     let pi = std::f64::consts::PI;
     let mut s = new_sketch();

@@ -40,7 +40,7 @@ headline counts in-scope tabs only and lists the deferred ones separately.
 | # | Milestone | Status | Hours left |
 |---|---|---|---|
 | M0 | Vertical slice | done | — |
-| M1 | Sketch depth: done — projection/intersect/include as linked geometry (auto-project on faces, lost-reference warnings, break link), full SKETCH create/modify set (slots, polygons, tangent arcs/circles, ellipse, fit/control splines, conic, text, trim/extend/break, fillet/chamfer, offset, mirror, patterns, move/scale, blend curve, centerline), constraints incl. curvature and polygon with over-constraint refusal, driven/arc-length/linear-diameter dimensions, AutoConstrain, DXF/SVG insert, 3D sketch curves (Project To Surface, Intersection Curve, Isoparametric Curve, Spun Profile), exact free-form profiles (B-spline/NURBS edges). Left: sweeps along 3D sketch curves, degree 4+ splines as exact profiles | in progress | 4 |
+| M1 | Sketch depth: done — projection/intersect/include as linked geometry (auto-project on faces, lost-reference warnings, break link), full SKETCH create/modify set (slots, polygons, tangent arcs/circles, ellipse, fit/control splines, conic, text, trim/extend/break, fillet/chamfer, offset, mirror, patterns, move/scale, blend curve, centerline), constraints incl. curvature and polygon with over-constraint refusal, driven/arc-length/linear-diameter dimensions, AutoConstrain, DXF/SVG insert, 3D sketch curves (Project To Surface, Intersection Curve, Isoparametric Curve, Spun Profile), exact free-form profiles (B-spline/NURBS edges, any spline degree, curves cut by crossings), sweeps and pipes along 3D sketch curves, canvases and decals, curvature combs | done | 4 |
 | M2 | Robust modelling: coplanar booleans in the kernel, holes (placed on faces and on sketch points), threads (cosmetic, then modelled), patterns, mirror, shell, draft, split, construction geometry | in progress | 16 |
 | M3 | General fillets and chamfers (curved edges, chains, vertex blends) | planned | 30 |
 | M4 | Files: STEP import (done: all 29 Fusion STEP files — [docs/step-import.md](docs/step-import.md)), 3MF export and 3MF/STL import as mesh bodies (done), DXF sketches, OBJ import | in progress | 6 |
@@ -77,8 +77,8 @@ headline counts in-scope tabs only and lists the deferred ones separately.
   and assembly components are flattened into bodies. Closed periodic faces (torus, B-spline
   bands) are split in two for meshing; measure() uses a finer tolerance for small radii.
 - No persistent naming (fillet edges are re-found by position; projected sketch geometry too).
-- Control-point splines of degree 4 and up, and free-form curves split by crossings, enter
-  profiles as polylines; 3D sketch curves are reference geometry (not sweep paths yet).
+- Free-form curves cut at a tangent touch (no clean crossing) enter that profile as polylines.
+  Sweeps along 3D sketch curves follow their polyline (smooth walls when the path is smooth).
 - Shell and offset faces work on bodies of planes and cylinders (convex or not: filleted boxes,
   bosses); draft on convex planar bodies and on walls (planes, cylinders → cones) between caps; loft is ruled.
 

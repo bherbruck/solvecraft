@@ -41,7 +41,7 @@ pub(crate) fn wire(plane: &Plane, lp: &Loop2) -> Result<mt::Wire> {
                     builder::circle_arc(a, b, p3(plane.to_world(s.mid())))
                 }
             }
-            Seg2::Cubic { .. } | Seg2::Conic { .. } => {
+            Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => {
                 crate::freeform::edge(plane, s, a, b).ok_or_else(|| KernelError::Invalid("profile curve".into()))?
             }
         };
@@ -71,6 +71,7 @@ fn region_ok(r: &Region2) -> Result<()> {
             }
             Seg2::Cubic { p0, p1, p2, p3 } => p0.is_finite() && p1.is_finite() && p2.is_finite() && p3.is_finite(),
             Seg2::Conic { a, apex, b, w } => a.is_finite() && apex.is_finite() && b.is_finite() && w.is_finite() && w > 1e-9,
+            Seg2::Bezier { n, p } => (4..=solvecraft_geom::MAX_BEZIER_DEGREE as u8).contains(&n) && p.iter().all(|q| q.is_finite()),
         };
         if !ok {
             return Err(KernelError::Invalid("non-finite profile".into()));
@@ -417,7 +418,7 @@ fn revolve_touching_axis(plane: &Plane, lp: &Loop2, axis_origin: Vec2, d: Vec2) 
             edges.push(match *s {
                 Seg2::Line { .. } => builder::line(a, b),
                 Seg2::Arc { .. } => builder::circle_arc(a, b, p3(plane.to_world(s.mid()))),
-                Seg2::Cubic { .. } | Seg2::Conic { .. } => match crate::freeform::edge(plane, s, a, b) {
+                Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => match crate::freeform::edge(plane, s, a, b) {
                     Some(e) => e,
                     None => builder::line(a, b),
                 },

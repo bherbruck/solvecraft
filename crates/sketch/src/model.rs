@@ -904,20 +904,10 @@ impl Sketch {
                 let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
                 Some(crate::curves::fit_beziers(&p).into_iter().map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 }).collect())
             }
-            CurveKind::Spline { pts, control: true, degree } if *degree <= 3 => {
+            CurveKind::Spline { pts, control: true, degree } if (*degree as usize) <= solvecraft_geom::MAX_BEZIER_DEGREE => {
                 let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
                 let k = (*degree as usize).min(p.len().saturating_sub(1)).max(1);
-                Some(
-                    crate::curves::bspline_beziers(&p, k)
-                        .into_iter()
-                        .filter_map(|c| match c[..] {
-                            [a, b] => Some(Seg2::Line { a, b }),
-                            [a, x, b] => Some(Seg2::Conic { a, apex: x, b, w: 1.0 }),
-                            [p0, p1, p2, p3] => Some(Seg2::Cubic { p0, p1, p2, p3 }),
-                            _ => None,
-                        })
-                        .collect(),
-                )
+                Some(crate::curves::bspline_beziers(&p, k).iter().filter_map(|c| solvecraft_geom::bezier(c)).collect())
             }
             _ => None,
         }
