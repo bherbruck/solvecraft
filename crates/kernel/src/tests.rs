@@ -1211,3 +1211,30 @@ fn fillet_three_edges_at_a_corner() {
     let m = measure(&f).unwrap().merged;
     assert_eq!(m.face_types.get("sphere"), Some(&1), "{m:?}");
 }
+
+#[test]
+fn shell_with_spherical_and_conical_faces() {
+    // A cylinder capped by a hemisphere (a dome), revolved, opened at the bottom.
+    use solvecraft_geom::Seg2;
+    let xz = Plane::new(Vec3::ZERO, Vec3::X, Vec3::new(0.0, 0.0, -1.0)).unwrap();
+    let segs = vec![
+        Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) },
+        Seg2::Line { a: Vec2::new(10.0, 0.0), b: Vec2::new(10.0, -20.0) },
+        Seg2::Arc { center: Vec2::new(0.0, -20.0), radius: 10.0, start: 0.0, sweep: -PI / 2.0 },
+        Seg2::Line { a: Vec2::new(0.0, -30.0), b: Vec2::new(0.0, 0.0) },
+    ];
+    let b = revolve(&xz, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], Vec2::ZERO, Vec2::new(0.0, -1.0), 2.0 * PI).unwrap().pop().unwrap();
+    let s = shell(&b, &[Vec3::new(0.0, 0.0, 0.0)], 1.0).unwrap();
+    let outer = PI * 100.0 * 20.0 + 2.0 / 3.0 * PI * 1000.0;
+    let inner = PI * 81.0 * 20.0 + 2.0 / 3.0 * PI * 729.0;
+    let v = measure(&s).unwrap().volume;
+    assert!(rel(v, outer - inner) < 2e-3, "{v} vs {}", outer - inner);
+    // A cone frustum (a revolved trapezoid), opened at its wide base.
+    let prof =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(5.0, -10.0), Vec2::new(0.0, -10.0)]), holes: vec![] };
+    let fr = revolve(&xz, &[prof], Vec2::ZERO, Vec2::new(0.0, -1.0), 2.0 * PI).unwrap().pop().unwrap();
+    let v0 = measure(&fr).unwrap().volume;
+    let s = shell(&fr, &[Vec3::new(0.0, 0.0, 0.0)], 1.0).unwrap();
+    let v = measure(&s).unwrap().volume;
+    assert!(v > 0.1 * v0 && v < 0.6 * v0, "{v} of {v0}");
+}

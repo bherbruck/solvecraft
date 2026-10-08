@@ -20,6 +20,11 @@ enum Surf {
     /// Axis point and direction, radius; `convex` when the outward normal points away from
     /// the axis.
     Cylinder { o: Vec3, a: Vec3, r: f64, convex: bool },
+    /// Centre and radius; `convex` when the outward normal points away from the centre.
+    Sphere { c: Vec3, r: f64, convex: bool },
+    /// Apex, unit axis (into the cone, away from the apex) and half-angle; `convex` when the
+    /// outward normal points away from the axis.
+    Cone { v: Vec3, a: Vec3, half: f64, convex: bool },
 }
 
 impl Surf {
@@ -32,6 +37,16 @@ impl Surf {
                 let radial = (v - a * v.dot(a)).normalized()?;
                 Some(if convex { radial } else { -radial })
             }
+            Surf::Sphere { c, convex, .. } => {
+                let radial = (p - c).normalized()?;
+                Some(if convex { radial } else { -radial })
+            }
+            Surf::Cone { v, a, half, convex } => {
+                let w = p - v;
+                let q = (w - a * w.dot(a)).normalized()?;
+                let n = q * half.cos() - a * half.sin();
+                Some(if convex { n } else { -n })
+            }
         }
     }
     fn moved(&self, s: f64) -> Option<Surf> {
@@ -40,6 +55,16 @@ impl Surf {
             Surf::Cylinder { o, a, r, convex } => {
                 let r2 = if convex { r + s } else { r - s };
                 (r2 > 1e-9).then_some(Surf::Cylinder { o, a, r: r2, convex })
+            }
+            Surf::Sphere { c, r, convex } => {
+                let r2 = if convex { r + s } else { r - s };
+                (r2 > 1e-9).then_some(Surf::Sphere { c, r: r2, convex })
+            }
+            // Moving a cone along its normal moves its apex along the axis.
+            Surf::Cone { v, a, half, convex } => {
+                let s = if convex { s } else { -s };
+                let sh = half.sin();
+                (sh > 1e-9).then_some(Surf::Cone { v: v - a * (s / sh), a, half, convex })
             }
         }
     }
@@ -50,11 +75,26 @@ impl Surf {
                 let v = p - o;
                 (v - a * v.dot(a)).len() - r
             }
+            Surf::Sphere { c, r, .. } => p.dist(c) - r,
+            Surf::Cone { v, a, half, .. } => {
+                let w = p - v;
+                let h = w.dot(a);
+                (w - a * h).len() * half.cos() - h * half.sin()
+            }
         }
     }
     /// The affine map taking this surface onto `to` (same kind, same axis).
     fn map_to(&self, to: &Surf) -> Option<mt::Matrix4> {
         match (*self, *to) {
+            (Surf::Sphere { c, r, .. }, Surf::Sphere { r: r2, .. }) => {
+                let k = r2 / r;
+                let t = c * (1.0 - k);
+                Some(mt::Matrix4::from_translation(mt::Vector3::new(t.x, t.y, t.z)) * mt::Matrix4::from_scale(k))
+            }
+            (Surf::Cone { v, .. }, Surf::Cone { v: v2, .. }) => {
+                let t = v2 - v;
+                Some(mt::Matrix4::from_translation(mt::Vector3::new(t.x, t.y, t.z)))
+            }
             (Surf::Plane { n, d }, Surf::Plane { d: d2, .. }) => {
                 let t = n * (d2 - d);
                 Some(mt::Matrix4::from_translation(mt::Vector3::new(t.x, t.y, t.z)))
@@ -109,7 +149,15 @@ fn samples(f: &mt::Face) -> Vec<(Vec3, Vec3)> {
             let c = e.oriented_curve();
             let (t0, t1) = c.range_tuple();
             for k in 0..5 {
-                if let Some(x) = surf.search_nearest_parameter(c.subs(t0 + (t1 - t0) * k as f64 / 5.0), uv.last().copied(), 50) {
+                // The previous point's parameters as a hint, unless that lands elsewhere (a
+                // singular point such as a pole holds the search).
+                let q = c.subs(t0 + (t1 - t0) * k as f64 / 5.0);
+                let near = |x: (f64, f64)| from_p3(surf.subs(x.0, x.1)).dist(from_p3(q)) < 1e-6 * (1.0 + from_p3(q).len());
+                let found = surf
+                    .search_nearest_parameter(q, uv.last().copied(), 50)
+                    .filter(|x| near(*x))
+                    .or_else(|| surf.search_nearest_parameter(q, None, 100).filter(|x| near(*x)));
+                if let Some(x) = found {
                     uv.push(x);
                 }
             }
@@ -143,13 +191,14 @@ fn surf_of(f: &mt::Face, tol: f64) -> Option<Surf> {
     }
     let s = samples(f);
     let (p0, n0) = *s.first()?;
-    let far = s.iter().map(|x| x.1).min_by(|a, b| a.dot(n0).total_cmp(&b.dot(n0)))?;
-    let a = n0.cross(far).normalized()?;
+    // The normal most square to the first (a half cylinder's two ends are opposite).
+    let far = s.iter().map(|x| x.1).min_by(|a, b| a.dot(n0).abs().total_cmp(&b.dot(n0).abs()))?;
+    let Some(a) = n0.cross(far).normalized() else { return sphere_or_cone(&s, tol) };
     if s.iter().any(|(_, n)| n.dot(a).abs() > 1e-6) {
-        return None;
+        return sphere_or_cone(&s, tol);
     }
     // The axis: where the normal lines through two samples meet (seen along a).
-    let (p1, n1) = *s.iter().max_by(|x, y| (x.1 - n0).len().total_cmp(&(y.1 - n0).len()))?;
+    let (p1, n1) = *s.iter().min_by(|x, y| x.1.dot(n0).abs().total_cmp(&y.1.dot(n0).abs()))?;
     // p0 + t0 n0 = p1 + t1 n1 (projected): solve in the plane ⟂ a.
     let w = p1 - p0;
     let c = n0.dot(n1);
@@ -166,6 +215,72 @@ fn surf_of(f: &mt::Face, tol: f64) -> Option<Surf> {
     let cyl = Surf::Cylinder { o, a, r, convex };
     let ok = s.iter().all(|(p, n)| cyl.dist(*p).abs() < tol && cyl.normal(*p).is_some_and(|m| m.dot(*n) > 1.0 - 1e-6));
     ok.then_some(cyl)
+}
+
+/// A sphere (normal lines all through one point) or a cone (tangent planes all through one
+/// point, normals at one angle to an axis) through the samples.
+fn sphere_or_cone(s: &[(Vec3, Vec3)], tol: f64) -> Option<Surf> {
+    // Least squares point nearest all the normal lines: Σ (I − n nᵀ) x = Σ (I − n nᵀ) p.
+    let mut m = [[0.0f64; 3]; 3];
+    let mut r = [0.0f64; 3];
+    for (p, n) in s {
+        let nv = [n.x, n.y, n.z];
+        let pv = [p.x, p.y, p.z];
+        for i in 0..3 {
+            for j in 0..3 {
+                let a = (if i == j { 1.0 } else { 0.0 }) - nv[i] * nv[j];
+                m[i][j] += a;
+                r[i] += a * pv[j];
+            }
+        }
+    }
+    if let Some(x) = crate::polyhedron::solve3_pub(m, r) {
+        let c = Vec3::new(x[0], x[1], x[2]);
+        let (p0, n0) = *s.first()?;
+        let rad = p0.dist(c);
+        let convex = (p0 - c).dot(n0) > 0.0;
+        let sp = Surf::Sphere { c, r: rad, convex };
+        if rad > tol && s.iter().all(|(p, n)| sp.dist(*p).abs() < tol && sp.normal(*p).is_some_and(|q| q.dot(*n) > 1.0 - 1e-6)) {
+            return Some(sp);
+        }
+    }
+    // Cone: the apex lies on every tangent plane, n·(v − p) = 0.
+    let mut m = [[0.0f64; 3]; 3];
+    let mut r = [0.0f64; 3];
+    for (p, n) in s {
+        let nv = [n.x, n.y, n.z];
+        let k = n.dot(*p);
+        for i in 0..3 {
+            for j in 0..3 {
+                m[i][j] += nv[i] * nv[j];
+            }
+            r[i] += nv[i] * k;
+        }
+    }
+    let x = crate::polyhedron::solve3_pub(m, r)?;
+    let v = Vec3::new(x[0], x[1], x[2]);
+    // Axis: from the apex toward the samples' centroid (the cone opens that way).
+    let cen = s.iter().fold(Vec3::ZERO, |acc, (p, _)| acc + *p) * (1.0 / s.len() as f64);
+    // Normals make a constant angle with the axis: fit it from three spread normals.
+    let n0 = s.first()?.1;
+    let n1 = s.iter().map(|x| x.1).max_by(|a, b| (*a - n0).len().total_cmp(&(*b - n0).len()))?;
+    let n2 = s.iter().map(|x| x.1).max_by(|a, b| (*a - n0).cross(n1 - n0).len().total_cmp(&(*b - n0).cross(n1 - n0).len()))?;
+    let mut a = (n1 - n0).cross(n2 - n0).normalized()?;
+    if a.dot(cen - v) < 0.0 {
+        a = -a;
+    }
+    let half = n0.dot(a).abs().clamp(0.0, 1.0).asin();
+    if !(half > 1e-3 && half < std::f64::consts::FRAC_PI_2 - 1e-3) {
+        return None;
+    }
+    let (p0, n0) = *s.first()?;
+    let q = {
+        let w = p0 - v;
+        (w - a * w.dot(a)).normalized()?
+    };
+    let convex = n0.dot(q) > 0.0;
+    let cone = Surf::Cone { v, a, half, convex };
+    s.iter().all(|(p, n)| cone.dist(*p).abs() < tol && cone.normal(*p).is_some_and(|m| m.dot(*n) > 1.0 - 1e-6)).then_some(cone)
 }
 
 /// Move `p` (on all of `old`) onto the moved surfaces `new`: the smallest displacement δ with
@@ -242,10 +357,11 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
     let mut new = Vec::with_capacity(faces.len());
     let mut shifts = Vec::with_capacity(faces.len());
     for (i, f) in faces.iter().enumerate() {
-        let sf = surf_of(f, tol * 100.0).ok_or_else(|| fail("only bodies with planar and cylindrical faces"))?;
+        let sf = surf_of(f, tol * 100.0).ok_or_else(|| fail("only bodies with planes, cylinders, cones and spheres"))?;
         let n = match sf {
             Surf::Plane { n, .. } => n,
-            Surf::Cylinder { a, .. } => a.any_perp(),
+            Surf::Cylinder { a, .. } | Surf::Cone { a, .. } => a.any_perp(),
+            Surf::Sphere { .. } => Vec3::Z,
         };
         let s = shift(i, n);
         old.push(sf);
@@ -356,6 +472,7 @@ pub(crate) fn draft_walls(b: &Body, chosen: &[usize], neutral: &solvecraft_geom:
         let wall = match sf {
             Surf::Plane { n, .. } => n.dot(pull).abs() < 1e-9,
             Surf::Cylinder { a, .. } => a.dot(pull).abs() > 1.0 - 1e-9,
+            Surf::Sphere { .. } | Surf::Cone { .. } => false,
         };
         let cap = matches!(sf, Surf::Plane { n, .. } if n.dot(pull).abs() > 1.0 - 1e-9);
         if chosen.contains(&i) && !wall {
@@ -446,6 +563,7 @@ pub(crate) fn draft_walls(b: &Body, chosen: &[usize], neutral: &solvecraft_geom:
                 let rc = mt::RevolutedCurve::by_revolution(line, p3(o), mt::Vector3::new(a.x, a.y, a.z));
                 mt::Surface::RevolutedCurve(mt::Processor::new(rc))
             }
+            Surf::Sphere { .. } | Surf::Cone { .. } => return Err(fail("draft: only planes and cylinders along the pull can be drafted")),
         };
         if let Some(slot) = surfaces.get_mut(i) {
             *slot = Some(surface);

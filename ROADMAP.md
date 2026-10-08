@@ -83,8 +83,8 @@ headline counts in-scope tabs only and lists the deferred ones separately.
 - No persistent naming (fillet edges are re-found by position; projected sketch geometry too).
 - Free-form curves cut at a tangent touch (no clean crossing) enter that profile as polylines.
   Sweeps along 3D sketch curves follow their polyline (smooth walls when the path is smooth).
-- Shell and offset faces work on bodies of planes and cylinders (convex or not: filleted boxes,
-  bosses); draft on convex planar bodies and on walls (planes, cylinders → cones) between caps; loft is ruled.
+- Shell and offset faces work on bodies of planes, cylinders, cones and spheres (convex or not:
+  filleted boxes, bosses, domes, countersinks); draft on convex planar bodies and on walls (planes, cylinders → cones) between caps; loft is ruled.
 
 ## Kernel
 

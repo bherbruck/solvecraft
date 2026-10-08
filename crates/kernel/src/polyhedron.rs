@@ -362,8 +362,18 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     }
     let margin = thickness + size * 0.05;
     let cavity = offset_planar(&healed, |fi, _| if opened.contains(&fi) { margin } else { -thickness })?;
-    let r = crate::ops::boolean(&healed, &cavity, crate::BoolOp::Cut)?.ok_or_else(|| KernelError::Failed("the shell removed everything".into()))?;
-    Ok(r)
+    match crate::ops::boolean(&healed, &cavity, crate::BoolOp::Cut) {
+        Ok(Some(r)) => Ok(r),
+        Ok(None) => Err(KernelError::Failed("the shell removed everything".into())),
+        // Healing can leave faces the boolean dislikes (revolved patches): the body as it was.
+        Err(e) if healed.face_count() == b.face_count() => {
+            let cavity = offset_planar(b, |fi, _| if opened.contains(&fi) { margin } else { -thickness }).map_err(|_| e.clone())?;
+            crate::ops::boolean(b, &cavity, crate::BoolOp::Cut)
+                .map_err(|_| e)?
+                .ok_or_else(|| KernelError::Failed("the shell removed everything".into()))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 fn point_tri(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
