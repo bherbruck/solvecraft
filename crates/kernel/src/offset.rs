@@ -334,3 +334,198 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
         Body::new(solid)
     })
 }
+
+/// Draft walls parallel to `pull` (planes, and cylinders about axes along `pull`) by `angle`
+/// about their line on the neutral plane: at height h along `pull` a wall moves along its
+/// outward normal by −h·tan(angle), so planes tilt and cylinders become cones. The other
+/// faces must be caps square to `pull`; the topology is kept.
+pub(crate) fn draft_walls(b: &Body, chosen: &[usize], neutral: &solvecraft_geom::Plane, pull: Vec3, angle: f64) -> Result<Body> {
+    let faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
+    let size = b.size();
+    let tol = (size * 1e-7).max(1e-9);
+    let nn = neutral.normal();
+    let den = pull.dot(nn);
+    if den.abs() < 1e-9 {
+        return Err(fail("the neutral plane is parallel to the pull direction"));
+    }
+    let height = |p: Vec3| (p - neutral.origin).dot(nn) / den;
+    let tan = angle.tan();
+    let mut old = Vec::with_capacity(faces.len());
+    for (i, f) in faces.iter().enumerate() {
+        let sf = surf_of(f, tol * 100.0).ok_or_else(|| fail("draft: only bodies with planar and cylindrical faces"))?;
+        let wall = match sf {
+            Surf::Plane { n, .. } => n.dot(pull).abs() < 1e-9,
+            Surf::Cylinder { a, .. } => a.dot(pull).abs() > 1.0 - 1e-9,
+        };
+        let cap = matches!(sf, Surf::Plane { n, .. } if n.dot(pull).abs() > 1.0 - 1e-9);
+        if chosen.contains(&i) && !wall {
+            return Err(fail("draft: a chosen face isn't parallel to the pull direction"));
+        }
+        if !chosen.contains(&i) && !cap && !wall {
+            return Err(fail("draft: faces next to the drafted walls must be square to the pull direction"));
+        }
+        old.push(sf);
+    }
+    // Shifts and moved surfaces at a height.
+    let at = |ids: &[usize], h: f64| -> Option<(Vec<Surf>, Vec<f64>, Vec<Surf>)> {
+        let mut o = Vec::new();
+        let mut s = Vec::new();
+        let mut n = Vec::new();
+        for i in ids {
+            let sf = *old.get(*i)?;
+            let sh = if chosen.contains(i) { -h * tan } else { 0.0 };
+            o.push(sf);
+            s.push(sh);
+            n.push(sf.moved(sh)?);
+        }
+        Some((o, s, n))
+    };
+    let mut vfaces: HashMap<mt::VertexID, Vec<usize>> = HashMap::new();
+    let mut efaces: HashMap<mt::EdgeID, Vec<usize>> = HashMap::new();
+    for (i, f) in faces.iter().enumerate() {
+        for v in f.vertex_iter() {
+            let e = vfaces.entry(v.id()).or_default();
+            if !e.contains(&i) {
+                e.push(i);
+            }
+        }
+        for ed in f.edge_iter() {
+            let e = efaces.entry(ed.id()).or_default();
+            if !e.contains(&i) {
+                e.push(i);
+            }
+        }
+    }
+    let mut newpos: HashMap<mt::VertexID, Vec3> = HashMap::new();
+    for v in b.solid.vertex_iter() {
+        let p = from_p3(v.point());
+        let fs = vfaces.get(&v.id()).ok_or_else(|| fail("vertex"))?;
+        let (o, s, n) = at(fs, height(p)).ok_or_else(|| fail("draft: a wall shrinks to nothing"))?;
+        let q = move_point(p, &o, &s, &n, size * 1e-6).ok_or_else(|| fail("draft: a corner whose faces don't meet the same way after the draft"))?;
+        newpos.insert(v.id(), q);
+    }
+    // New surfaces for the drafted walls: planes through their hinge line, cylinders → cones.
+    let mut surfaces: Vec<Option<mt::Surface>> = vec![None; faces.len()];
+    for (i, sf) in old.iter().enumerate() {
+        if !chosen.contains(&i) {
+            continue;
+        }
+        let surface = match *sf {
+            Surf::Plane { n, d } => {
+                let n2 = (n * angle.cos() + pull * angle.sin()).normalized().ok_or_else(|| fail("draft"))?;
+                // A point of the old plane on the neutral plane: the hinge.
+                let o = neutral.intersect_ray(n * d, pull).ok_or_else(|| fail("draft: hinge"))?;
+                let u = n2.cross(pull).normalized().ok_or_else(|| fail("draft"))?;
+                let w = n2.cross(u);
+                mt::Surface::Plane(mt::Plane::new(p3(o), p3(o + u), p3(o + w)))
+            }
+            Surf::Cylinder { o, a, r, convex } => {
+                // Generator: the wall at two heights along one radial direction.
+                let u = a.any_perp();
+                // Over the face's heights (and a little beyond), short of the apex.
+                let hs: Vec<f64> = faces.get(i).map(|f| f.vertex_iter().map(|v| height(from_p3(v.point()))).collect()).unwrap_or_default();
+                let (lo, hi) = hs.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |m, h| (m.0.min(*h), m.1.max(*h)));
+                if !(lo.is_finite() && hi.is_finite()) {
+                    return Err(fail("draft: a wall without corners"));
+                }
+                let pad = (hi - lo).max(size * 1e-3) * 0.25;
+                let (mut h0, mut h1) = (lo - pad, hi + pad);
+                // Keep the radius positive along the generator.
+                let r_at = |h: f64| if convex { r - h * tan } else { r + h * tan };
+                for h in [&mut h0, &mut h1] {
+                    if r_at(*h) <= r * 1e-3 {
+                        *h = if (*h - lo).abs() < (*h - hi).abs() { lo } else { hi };
+                    }
+                }
+                let base = |h: f64| {
+                    let rr = if convex { r - h * tan } else { r + h * tan };
+                    o + pull * (h - height(o)) + u * rr
+                };
+                let (pa, pb) = (base(h0), base(h1));
+                let line = mt::Curve::Line(mt::Line(p3(pa), p3(pb)));
+                let rc = mt::RevolutedCurve::by_revolution(line, p3(o), mt::Vector3::new(a.x, a.y, a.z));
+                mt::Surface::RevolutedCurve(mt::Processor::new(rc))
+            }
+        };
+        if let Some(slot) = surfaces.get_mut(i) {
+            *slot = Some(surface);
+        }
+    }
+    guard("draft", || {
+        let verts: HashMap<mt::VertexID, mt::Vertex> = newpos.iter().map(|(k, p)| (*k, builder::vertex(p3(*p)))).collect();
+        let mut edges: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
+        for e in b.solid.edge_iter() {
+            if edges.contains_key(&e.id()) {
+                continue;
+            }
+            let (Some(a), Some(c)) = (verts.get(&e.absolute_front().id()), verts.get(&e.absolute_back().id())) else { return Err(fail("edge")) };
+            let kind = arc_mid(&e, size * 1e-6).ok_or_else(|| fail("draft: edges must be lines or arcs"))?;
+            let ne = match kind {
+                None => builder::line(a, c),
+                Some(m) => {
+                    let fs = efaces.get(&e.id()).ok_or_else(|| fail("edge faces"))?;
+                    let (o, s, n) = at(fs, height(m)).ok_or_else(|| fail("draft"))?;
+                    let m2 = move_point(m, &o, &s, &n, size * 1e-6).ok_or_else(|| fail("draft: an arc that can't follow its faces"))?;
+                    builder::circle_arc(a, c, p3(m2))
+                }
+            };
+            edges.insert(e.id(), ne);
+        }
+        let mut out = Vec::new();
+        for (i, f) in faces.iter().enumerate() {
+            let wires: Vec<mt::Wire> = f
+                .boundaries()
+                .iter()
+                .map(|w| {
+                    w.edge_iter()
+                        .filter_map(|e| edges.get(&e.id()).map(|ne| if e.front() == e.absolute_front() { ne.clone() } else { ne.inverse() }))
+                        .collect::<Vec<_>>()
+                        .into()
+                })
+                .collect();
+            let nf = match surfaces.get(i).cloned().flatten() {
+                Some(mut surface) => {
+                    // Outward like the old face (checked at a boundary point).
+                    let probe = f.boundaries().first().and_then(|w| w.vertex_iter().next()).map(|v| from_p3(v.point()));
+                    let want = probe.and_then(|p| old.get(i).and_then(|s| s.normal(p)));
+                    if let (Some(p), Some(want)) = (probe, want) {
+                        use mt::{ParametricSurface3D, SearchNearestParameter};
+                        if let Some((u, v)) = surface.search_nearest_parameter(p3(p), None, 100) {
+                            let nn = surface.normal(u, v);
+                            if Vec3::new(nn.x, nn.y, nn.z).dot(want) < 0.0 {
+                                surface = mt::Invertible::inverse(&surface);
+                            }
+                        }
+                    }
+                    mt::Face::try_new(wires, surface).map_err(|e| fail(&e.to_string()))?
+                }
+                None => {
+                    // Unchanged surface: rebuild on the oriented boundary.
+                    let mut nf = mt::Face::try_new(
+                        f.absolute_boundaries()
+                            .iter()
+                            .map(|w| {
+                                w.edge_iter()
+                                    .filter_map(|e| {
+                                        edges.get(&e.id()).map(|ne| if e.front() == e.absolute_front() { ne.clone() } else { ne.inverse() })
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .into()
+                            })
+                            .collect(),
+                        f.surface(),
+                    )
+                    .map_err(|e| fail(&e.to_string()))?;
+                    if !f.orientation() {
+                        nf.invert();
+                    }
+                    nf
+                }
+            };
+            out.push(nf);
+        }
+        let shell: mt::Shell = out.into();
+        let solid = Solid::try_new(vec![shell]).map_err(|e| fail(&e.to_string()))?;
+        Body::new(solid)
+    })
+}

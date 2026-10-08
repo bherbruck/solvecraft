@@ -932,3 +932,29 @@ fn shell_with_cylindrical_faces() {
     let v = measure(&s).unwrap().volume;
     assert!(rel(v, outer - cavity) < 1e-4, "{v} vs {}", outer - cavity);
 }
+
+#[test]
+fn draft_of_a_round_ended_pocket() {
+    use solvecraft_geom::Seg2;
+    use std::f64::consts::FRAC_PI_2;
+    let block = box_solid(Vec3::ZERO, Vec3::new(80.0, 60.0, 25.0)).unwrap();
+    let segs = vec![
+        Seg2::Line { a: Vec2::new(25.0, 20.0), b: Vec2::new(55.0, 20.0) },
+        Seg2::Arc { center: Vec2::new(55.0, 30.0), radius: 10.0, start: -FRAC_PI_2, sweep: PI },
+        Seg2::Line { a: Vec2::new(55.0, 40.0), b: Vec2::new(25.0, 40.0) },
+        Seg2::Arc { center: Vec2::new(25.0, 30.0), radius: 10.0, start: FRAC_PI_2, sweep: PI },
+    ];
+    let tool = extrude(&Plane::XY, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], 15.0, 30.0).unwrap().pop().unwrap();
+    let b = boolean(&block, &tool, BoolOp::Cut).unwrap().unwrap();
+    let walls = [Vec3::new(15.0, 30.0, 20.0), Vec3::new(40.0, 20.0, 20.0), Vec3::new(65.0, 30.0, 20.0), Vec3::new(40.0, 40.0, 20.0)];
+    let a = 5f64.to_radians();
+    let d = draft(&b, &walls, &Plane::XY.offset(25.0), Vec3::Z, a).unwrap();
+    // The pocket narrows going down: at depth t its walls stand t·tan(a) further in.
+    let (n, mut pocket) = (2000, 0.0);
+    for k in 0..n {
+        let e = (k as f64 + 0.5) / n as f64 * 10.0 * a.tan();
+        pocket += (30.0 * (20.0 - 2.0 * e) + PI * (10.0 - e).powi(2)) * 10.0 / n as f64;
+    }
+    let v = measure(&d).unwrap().volume;
+    assert!(rel(v, 80.0 * 60.0 * 25.0 - pocket) < 1e-4, "{v} vs {}", 80.0 * 60.0 * 25.0 - pocket);
+}

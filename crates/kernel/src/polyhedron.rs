@@ -161,7 +161,10 @@ pub fn draft(b: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) 
         return Err(KernelError::Invalid("draft angle must be between −90° and 90°".into()));
     }
     let pull = pull.normalized().ok_or_else(|| KernelError::Invalid("pull direction".into()))?;
-    let hs = planar_convex(b)?;
+    let hs = match planar_convex(b) {
+        Ok(h) => h,
+        Err(_) => return draft_walls(b, faces, neutral, pull, angle),
+    };
     let size = b.size();
     let mut out = Vec::new();
     let mut moved = 0;
@@ -185,6 +188,31 @@ pub fn draft(b: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) 
         return Err(KernelError::Invalid("no faces to draft".into()));
     }
     convex_polyhedron(&out)
+}
+
+/// Draft of a non-convex body: walls (planes, cylinders) next to caps square to `pull`.
+fn draft_walls(b: &Body, at: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Body> {
+    let healed = Body::new(crate::heal::heal(b.deep_copy(), b.size()))?;
+    let size = healed.size();
+    let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
+    let mut chosen: Vec<usize> = Vec::new();
+    for p in at {
+        let near = mesh
+            .triangles
+            .iter()
+            .zip(&mesh.tri_face)
+            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (point_tri(*p, x, y, z), *f as usize)))
+            .min_by(|a, c| a.0.total_cmp(&c.0));
+        match near {
+            Some((d, f)) if d < size * 1e-3 + 1e-6 => {
+                if !chosen.contains(&f) {
+                    chosen.push(f);
+                }
+            }
+            _ => return Err(KernelError::Invalid(format!("no face at {:?}", [p.x, p.y, p.z]))),
+        }
+    }
+    crate::offset::draft_walls(&healed, &chosen, neutral, pull, angle)
 }
 
 /// Round every edge of a convex body with planar faces by `r`: faces shrink, each edge becomes a
