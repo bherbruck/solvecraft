@@ -55,7 +55,6 @@ pub enum Mo {
     },
     Configurations {
         new_row: String,
-        new_column: usize,
         error: Option<String>,
     },
 }
@@ -98,7 +97,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             Mo::MotionStudy {
                 name: n("Motion Study", "motion.list"),
                 study: None,
-                steps: "60".into(),
+                steps: "100".into(),
                 tracks: Vec::new(),
                 step: 0.0,
                 playing: false,
@@ -109,9 +108,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             vec![],
         ),
         "explode.create" => (Mo::Explode { name: n("Exploded View", "explode.list"), scale: 1.0, shown: None, saved: None, error: None }, vec![]),
-        "FusionShowDesignConfigPanelCmd" | "FusionStartDesignConfigModeCmd" => {
-            (Mo::Configurations { new_row: String::new(), new_column: 0, error: None }, vec![])
-        }
+        "FusionShowDesignConfigPanelCmd" | "FusionStartDesignConfigModeCmd" => (Mo::Configurations { new_row: String::new(), error: None }, vec![]),
         _ => return None,
     };
     Some((Kind::Motion(mo), inputs))
@@ -174,6 +171,15 @@ pub fn table(v: &Value) -> Table {
         })
         .collect();
     Table { columns, rows, active: v.get("active").and_then(Value::as_str).map(str::to_string) }
+}
+
+/// The unit a value of this kind is shown in.
+fn unit_of(k: solvecraft_engine::doc::expr::Kind) -> Option<&'static str> {
+    match k {
+        solvecraft_engine::doc::expr::Kind::Length => Some("mm"),
+        solvecraft_engine::doc::expr::Kind::Angle => Some("deg"),
+        _ => None,
+    }
 }
 
 /// A column key ("param:width", "suppress:Fillet1") as (kind, name).
@@ -322,7 +328,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             row_label(ui, "Steps");
             enter |= field(ui, steps);
             ui.end_row();
-            let total = steps.trim().parse::<u32>().unwrap_or(60).clamp(1, 100_000);
+            let total = steps.trim().parse::<u32>().unwrap_or(100).clamp(1, 100_000);
             let moving = joints_moving(app);
             if moving.is_empty() {
                 row_label(ui, "");
@@ -364,7 +370,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                     tr.joint = *ji;
                     let dofs = kind.dofs();
                     if dofs.len() > 1 {
-                        row_label(ui, "  Value");
+                        row_label(ui, "  Of");
                         let caps: Vec<&str> = dofs.to_vec();
                         combo(ui, &format!("ms_idx{ti}"), &caps, &mut tr.index);
                         ui.end_row();
@@ -377,8 +383,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 ui.end_row();
                 // The key at this step, if any: its value.
                 if let Some(p) = tr.points.iter_mut().find(|(s, _)| *s == now) {
-                    row_label(ui, &format!("  At step {now}"));
-                    enter |= field(ui, &mut p.1);
+                    // The key's value (Enter commits it; OK makes the study).
+                    row_label(ui, "Value");
+                    let _ = field(ui, &mut p.1);
                     ui.end_row();
                 }
                 row_label(ui, "");
@@ -463,9 +470,22 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 ui.end_row();
             }
         }
-        Mo::Configurations { new_row, new_column, error } => {
+        Mo::Configurations { new_row, error } => {
             let v = app.session.execute("FusionShowDesignConfigPanelCmd", &json!({})).unwrap_or(Value::Null);
-            let tb = table(&v);
+            let mut tb = table(&v);
+            // Bare numbers show with their parameter's unit ("40" is 40 mm), as Fusion shows them.
+            let kinds = app.session.doc.all_param_exprs();
+            for (_, vals) in &mut tb.rows {
+                for (c, val) in tb.columns.iter().zip(vals.iter_mut()) {
+                    let (kind, n) = column_parts(c);
+                    if kind == "param"
+                        && val.trim().parse::<f64>().is_ok()
+                        && let Some(unit) = kinds.iter().find(|x| x.0 == n).and_then(|x| unit_of(x.2))
+                    {
+                        *val = format!("{} {unit}", val.trim());
+                    }
+                }
+            }
             let run = |app: &mut SolveApp, error: &mut Option<String>, id: &str, p: Value| {
                 *error = app.run(id, p).err();
             };
@@ -486,12 +506,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             for (name, vals) in &tb.rows {
                 let active = tb.active.as_deref() == Some(name.as_str());
                 ui.horizontal(|ui| {
+                    ui.label(if active { RichText::new(name).strong() } else { RichText::new(name) });
                     if active {
                         ui.label(RichText::new("Active").color(t.accent));
                     } else if ui.button("Activate").clicked() {
                         run(app, error, "config.activate", json!({ "row": name }));
                     }
-                    ui.label(if active { RichText::new(name).strong() } else { RichText::new(name) });
                 });
                 ui.horizontal(|ui| {
                     for (c, val) in tb.columns.iter().zip(vals) {
@@ -519,18 +539,24 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             // New row (a copy of the active one) and new column.
             ui.add(egui::TextEdit::singleline(new_row).hint_text("new configuration").desired_width(130.0));
             ui.horizontal(|ui| {
-                if ui.button("Add Row").clicked() && !new_row.trim().is_empty() {
-                    let mut p = json!({ "name": new_row.trim() });
+                if ui.button("Add Row").on_hover_text("A new configuration, a copy of the active one").clicked() {
+                    let name = if new_row.trim().is_empty() {
+                        (tb.rows.len() + 1..).map(|k| format!("Configuration{k}")).find(|n| !tb.rows.iter().any(|r| &r.0 == n)).unwrap_or_default()
+                    } else {
+                        new_row.trim().to_string()
+                    };
+                    let mut p = json!({ "name": name });
                     if let Some(a) = &tb.active {
                         p["from"] = json!(a);
                     }
                     run(app, error, "config.row", p);
                     new_row.clear();
                 }
+                // A column: a parameter's value or a feature's suppression.
                 let mut options: Vec<(String, Value)> = Vec::new();
-                for p in app.session.doc.params.iter().filter(|p| !p.model) {
-                    if !tb.columns.contains(&format!("param:{}", p.name)) {
-                        options.push((format!("Parameter {}", p.name), json!({ "param": p.name })));
+                for p in app.session.doc.all_param_exprs() {
+                    if !tb.columns.contains(&format!("param:{}", p.0)) {
+                        options.push((format!("{} (parameter)", p.0), json!({ "param": p.0 })));
                     }
                 }
                 for f in &app.session.doc.features {
@@ -538,24 +564,31 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                         options.push((format!("Suppress {}", f.name), json!({ "feature": f.name })));
                     }
                 }
-                if !options.is_empty() {
-                    let labels: Vec<&str> = options.iter().map(|o| o.0.as_str()).collect();
-                    *new_column = (*new_column).min(labels.len() - 1);
-                    combo(ui, "cfg_col", &labels, new_column);
-                    if ui.button("Add Column").clicked()
-                        && let Some((_, p)) = options.get(*new_column)
-                    {
-                        let id = if tb.columns.is_empty() { "FusionStartDesignConfigModeCmd" } else { "config.column" };
-                        let p = if tb.columns.is_empty() {
+                let mut pick: Option<Value> = None;
+                ui.menu_button("Add Column", |ui| {
+                    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                        for (label, p) in &options {
+                            if ui.button(label.as_str()).clicked() {
+                                pick = Some(p.clone());
+                                ui.close();
+                            }
+                        }
+                    });
+                });
+                if let Some(p) = pick {
+                    // The first column starts the table (with a Default row of the current values).
+                    let (id, p) = if tb.columns.is_empty() {
+                        (
+                            "FusionStartDesignConfigModeCmd",
                             match p.get("param") {
                                 Some(n) => json!({ "params": [n] }),
                                 None => json!({ "features": [p.get("feature")] }),
-                            }
-                        } else {
-                            p.clone()
-                        };
-                        run(app, error, id, p);
-                    }
+                            },
+                        )
+                    } else {
+                        ("config.column", p)
+                    };
+                    run(app, error, id, p);
                 }
             });
             ui.end_row();

@@ -1465,7 +1465,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (enter_free, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
     let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::new("sc_canvas_value")));
-    let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::ConfirmDelete { .. } | Kind::Preferences);
+    // Tables (configurations, a study's keys) take Enter for their cells.
+    let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::ConfirmDelete { .. } | Kind::Preferences)
+        && !matches!(&d.kind, Kind::Motion(k) if k.wide());
     if enter_applies && (enter || canvas_enter || (enter_free && nothing_focused)) {
         ok = true;
     }

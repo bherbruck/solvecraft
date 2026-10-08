@@ -13,9 +13,11 @@ use solvecraft_engine::geom::Vec3;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, edge_sel, face_sel, field, profile_indices, row_label};
-use crate::selection::{BODIES, CURVES, EDGES, PLANAR_FACES, PROFILES, SelInput};
+use crate::selection::{AXES, BODIES, CURVES, EDGES, PLANAR_FACES, PROFILES, SelInput};
 use crate::theme::Tokens;
 
+const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
+const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
 const FLANGE_TYPES: [&str; 3] = ["Base", "Edge", "Contour"];
 const POSITIONS: [&str; 3] = ["inside", "outside", "middle"];
 const POSITION_LABELS: [&str; 3] = ["Inside", "Outside", "Middle"];
@@ -50,6 +52,13 @@ pub enum Sm {
         gap: String,
         flip: bool,
     },
+    /// Fold (bend) along a sketch line; `position`: where the line sits in the bend.
+    Fold {
+        angle: String,
+        radius: String,
+        position: usize,
+        flip: bool,
+    },
     Unfold {
         refold: bool,
     },
@@ -77,6 +86,7 @@ impl Sm {
         match self {
             Sm::Flange { .. } => "FLANGE",
             Sm::Hem { .. } => "HEM",
+            Sm::Fold { .. } => "FOLD",
             Sm::Unfold { refold: false } => "UNFOLD",
             Sm::Unfold { refold: true } => "REFOLD",
             Sm::Convert { .. } => "CONVERT TO SHEET METAL",
@@ -98,6 +108,7 @@ impl Sm {
             Sm::Flange { ty: 1, height, .. } => ("Height", ValueKind::Length, height),
             Sm::Flange { ty: 2, distance, .. } => ("Distance", ValueKind::Length, distance),
             Sm::Hem { length, .. } => ("Length", ValueKind::Length, length),
+            Sm::Fold { angle, .. } => ("Angle", ValueKind::Angle, angle),
             _ => return None,
         })
     }
@@ -124,6 +135,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "FusionSheetMetalHemFlangeCommand" => {
             (Sm::Hem { length: "5 mm".into(), gap: String::new(), flip: false }, vec![SelInput::new("Edges", EDGES, true)])
         }
+        "SheetMetalFoldCmd" => (
+            Sm::Fold { angle: "90 deg".into(), radius: String::new(), position: 0, flip: false },
+            vec![SelInput::new("Bend Line", AXES, false), SelInput::new("Stationary Side", PLANAR_FACES, false)],
+        ),
         "FusionSheetmetalUnfoldCommand" => (Sm::Unfold { refold: false }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         "sheet.refold" => (Sm::Unfold { refold: true }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         "ConvertToSheetMetalCmd" => (Sm::Convert { rule: 0 }, vec![SelInput::new("Face", PLANAR_FACES, false)]),
@@ -224,6 +239,22 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             row_label(ui, "Gap");
             let r = ui.add(egui::TextEdit::singleline(gap).hint_text("from the rule"));
             crate::params_dialog::complete(ui, &r, gap);
+            enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            ui.end_row();
+            row_label(ui, "Flip");
+            ui.checkbox(flip, "");
+            ui.end_row();
+        }
+        Sm::Fold { angle, radius, position, flip } => {
+            row_label(ui, "Bend Line Position");
+            combo(ui, "sm_fold_pos", &FOLD_POSITION_LABELS, position);
+            ui.end_row();
+            row_label(ui, "Angle");
+            enter |= field(ui, angle);
+            ui.end_row();
+            row_label(ui, "Bend Radius");
+            let r = ui.add(egui::TextEdit::singleline(radius).hint_text("from the rule"));
+            crate::params_dialog::complete(ui, &r, radius);
             enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             ui.end_row();
             row_label(ui, "Flip");
@@ -440,6 +471,33 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             ("FusionSheetMetalHemFlangeCommand", p)
         }
+        Sm::Fold { angle, radius, position, flip } => {
+            let mut p = json!({"angle": angle, "position": FOLD_POSITIONS.get(*position).copied().unwrap_or("centerline"), "flip": flip});
+            match items(inputs, 0).first() {
+                Some(Sel::SketchCurve { id }) => {
+                    let st = s.model.state();
+                    let sketch = st
+                        .sketches
+                        .iter()
+                        .rev()
+                        .find(|ss| ss.sketch.curve_index(id).is_some())
+                        .map(|ss| ss.feature)
+                        .ok_or("the line's sketch is gone")?;
+                    p["sketch"] = json!(sketch);
+                    p["curve"] = json!(id);
+                }
+                // An edited fold made from two points keeps them (in `extra`).
+                _ if extra.contains_key("points") => {}
+                _ => return Err("select the bend line (a sketch line) first".into()),
+            }
+            if !radius.trim().is_empty() {
+                p["radius"] = json!(radius);
+            }
+            if let Some(Sel::Face { point, .. }) = items(inputs, 1).first() {
+                p["fixed"] = pt(*point);
+            }
+            ("SheetMetalFoldCmd", p)
+        }
         Sm::Unfold { refold } => {
             let mut p = json!({});
             if let Some(Sel::Body { name }) = items(inputs, 0).first() {
@@ -533,6 +591,33 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 Sm::Hem { length: length.clone(), gap: gap.clone().unwrap_or_default(), flip: *flip },
                 edges.iter().filter_map(|p| edge_sel(s, *p)).collect(),
             )
+        }
+        FeatureKind::SheetFold { curve, a, b, angle, radius, position, flip, fixed, body, .. } => {
+            if let Some(bd) = body {
+                extra.insert("body".into(), json!(bd));
+            }
+            let k = Sm::Fold {
+                angle: angle.clone(),
+                radius: radius.clone().unwrap_or_default(),
+                position: FOLD_POSITIONS.iter().position(|x| x == position || (*x == "mould" && position == "mold")).unwrap_or(0),
+                flip: *flip,
+            };
+            let (_, mut ins) = start(app, "SheetMetalFoldCmd")?;
+            match curve {
+                Some(c) => {
+                    if let Some(i) = ins.first_mut() {
+                        i.items = vec![Sel::SketchCurve { id: c.clone() }];
+                    }
+                }
+                // A fold given by two points keeps them.
+                None => {
+                    extra.insert("points".into(), json!([pt(*a), pt(*b)]));
+                }
+            }
+            if let Some(i) = ins.get_mut(1) {
+                i.items = fixed.and_then(|f| face_sel(s, f)).into_iter().collect();
+            }
+            return Some((Kind::Sheet(k), ins, extra));
         }
         FeatureKind::SheetUnfold { body, refold } => (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.clone() }).collect()),
         FeatureKind::SheetConvert { face, rule, .. } => (Sm::Convert { rule: rule_index(rule) }, face_sel(s, *face).into_iter().collect()),

@@ -44,7 +44,10 @@ scenarios!(
     s19_canvas_calibrate,
     s20_section_with_joint_drive,
     s21_named_views,
-    s26_drive_joint_typed
+    s26_drive_joint_typed,
+    s22_sheet_metal_fold,
+    s23_configurations,
+    s24_motion_study
 );
 
 /// Scenarios written ahead of their features (the commands are in solvecraft-params' unpushed
@@ -60,8 +63,5 @@ macro_rules! pending {
 }
 
 pending!(
-    s22_sheet_metal_fold: "waits for SheetMetalFoldCmd and its dialog",
-    s23_configurations: "waits for configurations (FusionStartDesignConfigModeCmd, config.activate) and their panel",
-    s24_motion_study: "waits for FusionMotionStudyCommand and its dialog",
     s25_autosave_recovery: "waits for autosave and Recover unsaved design",
 );

@@ -29,6 +29,7 @@ const SHEET_CREATE: &[&str] = &[
     "FusionSheetMetalFlangeCommand",
     "FusionSheetMetalFlatPatternCmd",
     "FusionSheetMetalHemFlangeCommand",
+    "SheetMetalFoldCmd",
     "ConvertToSheetMetalCmd",
     "FusionCreateNewComponentCommand",
     "Extrude",
@@ -123,6 +124,7 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
     Some(match k {
         FeatureKind::SheetBase { .. } | FeatureKind::SheetContour { .. } | FeatureKind::SheetFlange { .. } => "flange",
         FeatureKind::SheetHem { .. } => "hem",
+        FeatureKind::SheetFold { .. } => "fold",
         FeatureKind::SheetUnfold { refold: false, .. } => "unfold",
         FeatureKind::SheetUnfold { .. } => "refold",
         FeatureKind::SheetConvert { .. } => "convert_sheet",

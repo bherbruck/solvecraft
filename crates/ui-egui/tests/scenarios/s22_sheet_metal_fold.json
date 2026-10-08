@@ -1,32 +1,152 @@
 [
-  {"note": "Target: sheet metal plate folded along a sketch line (SheetMetalFoldCmd, solvecraft-params; dialog by solvecraft-dialogs). Adjust the dialog steps when it lands."},
-  {"call": "ui.set", "params": {"tab": "SHEET METAL"}},
-  {"start": "SketchCreate"},
-  {"click": {"plane": "XY"}},
-  {"start": "ShapeRectangleTwoPoint"},
-  {"click": {"sketch": [0, 0]}},
-  {"click": {"sketch": [60, 40]}},
-  {"key": "Escape"},
-  {"start": "SketchStop"},
-  {"call": "ui.view", "params": {"view": "iso"}},
-  {"start": "FusionSheetMetalFlangeCommand"},
-  {"click": {"world": [30, 20, 0]}},
-  {"key": "Enter"},
-  {"expect": {"bodies": 1, "volume": 6000}},
-  {"start": "SketchCreate"},
-  {"click": {"world": [30, 20, 2.5]}},
-  {"start": "DrawPolyline"},
-  {"click": {"sketch": [40, -5]}},
-  {"click": {"sketch": [40, 45]}},
-  {"key": "Escape"},
-  {"key": "Escape"},
-  {"start": "SketchStop"},
-  {"start": "SheetMetalFoldCmd"},
-  {"click": {"world": [40, 20, 2.5]}},
-  {"key": "Enter"},
-  {"expect": {"bodies": 1, "errors": 0, "dialog": null, "volume": [6000, 1e-3]}},
-  {"shot": "s22_folded"},
-  {"start": "FusionSheetMetalFlatPatternCmd"},
-  {"widget": "Export DXF…"},
-  {"expect": {"file": "Untitled-Body1.dxf"}}
+ {
+  "note": "Target: sheet metal plate folded along a sketch line (SheetMetalFoldCmd, solvecraft-params; dialog by solvecraft-dialogs). Adjust the dialog steps when it lands."
+ },
+ {
+  "call": "ui.set",
+  "params": {
+   "tab": "SHEET METAL"
+  }
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    60,
+    40
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "FusionSheetMetalFlangeCommand"
+ },
+ {
+  "click": {
+   "world": [
+    30,
+    20,
+    0
+   ]
+  }
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "volume": 6000
+  }
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "world": [
+    30,
+    20,
+    2.5
+   ]
+  }
+ },
+ {
+  "start": "DrawPolyline"
+ },
+ {
+  "click": {
+   "sketch": [
+    40,
+    -5
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    40,
+    45
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "start": "SheetMetalFoldCmd"
+ },
+ {
+  "click": {
+   "world": [
+    40,
+    20,
+    2.5
+   ]
+  }
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "errors": 0,
+   "dialog": null,
+   "volume": [
+    6023.5,
+    0.001
+   ]
+  },
+  "note": "the bend keeps the neutral layer (K 0.44): the bend zone holds \u03b8\u00b7T\u00b7(T/2 \u2212 K\u00b7T)\u00b7w = 23.6 mm\u00b3 more than the flat strip it replaces"
+ },
+ {
+  "shot": "s22_folded"
+ },
+ {
+  "start": "FusionSheetMetalFlatPatternCmd"
+ },
+ {
+  "widget": "Export DXF\u2026"
+ },
+ {
+  "expect": {
+   "file": "Untitled-Body1.dxf"
+  }
+ }
 ]
