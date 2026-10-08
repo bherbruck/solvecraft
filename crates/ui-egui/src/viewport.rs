@@ -967,6 +967,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         }
+        // Double-click an edge: select the edges that continue it smoothly (the loop).
+        if resp.double_clicked()
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && let Some(Hit::Edge { body, index, .. }) = app.viewport.hover.clone()
+            && let Some(b) = app.session.model.state().body(&body).cloned()
+        {
+            let m = b.mesh();
+            let items: Vec<Sel> = m
+                .tangent_chain(index, 2f64.to_radians())
+                .into_iter()
+                .filter_map(|i| m.edges.get(i).map(|e| Sel::Edge { body: body.clone(), index: i, point: polyline_mid(e) }))
+                .collect();
+            let _ = app.run("select.set", json!({ "items": items, "add": add }));
+        }
         if resp.secondary_clicked() && delta == egui::Vec2::ZERO {
             if app.tool.is_some() {
                 crate::tools::finish(app);
