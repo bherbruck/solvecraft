@@ -18,7 +18,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parts.library", "Standard Parts", library)
         .noundo()
         .params("family? → families (name, standard, sizes, lengths) and, with family, each size's dimensions (mm)"),
-    CommandSpec::new("parts.insert", "Insert Part", insert).at("SOLID", "INSERT").icon("import").params(
+    CommandSpec::new("FusionFastenersCommand", "Insert Fastener", insert).at("SOLID", "INSERT").icon("fastener").params(
+        "the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction?, name?",
+    ),
+    CommandSpec::new("parts.insert", "Insert Part", insert).icon("fastener").params(
         "family (socket_head_cap_screw | hex_bolt | hex_nut | washer | set_screw | dowel_pin | bearing); size (\"M6\", or \"608\" for bearings); \
          length? (mm; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
          at?: [x,y,z] on a hole's rim or wall (the part seats on the hole's face with a rigid joint) | point?: [x,y,z] with direction?: [x,y,z] (no joint); name?",
@@ -336,7 +339,7 @@ fn length_param(p: &Value, cmd: &str) -> Result<Option<f64>> {
 }
 
 fn insert(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "parts.insert";
+    let cmd = "parts.insert (Insert Fastener)";
     let family = str_(p, "family").ok_or_else(|| bad(cmd, "`family` is required (parts.library)"))?.to_string();
     let size = str_(p, "size").ok_or_else(|| bad(cmd, "`size` is required"))?.to_string();
     let sh = shape(&family, &size, length_param(p, cmd)?).map_err(|e| bad(cmd, e))?;
