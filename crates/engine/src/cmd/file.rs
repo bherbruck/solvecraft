@@ -162,9 +162,10 @@ fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Resu
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
     let bytes = if format == Format::Step && bodies.is_empty() && !s.doc.occurrences.is_empty() {
-        solvecraft_io::step_assembly(&s.doc, &s.model.state(), &name)?
+        solvecraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?
     } else {
-        solvecraft_io::export(&s.world_state(), bodies, format, &name)?
+        // Bodies carry the colour they are shown in (appearance, material or imported).
+        solvecraft_io::export(&s.doc.painted(&s.world_state()), bodies, format, &name)?
     };
     std::fs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))

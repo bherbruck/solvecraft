@@ -1040,6 +1040,9 @@ pub struct Document {
     /// Physical material per body (by body name); others use the default.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub materials: std::collections::BTreeMap<String, String>,
+    /// Appearance colour per body (by body name, sRGB); it overrides the material's look.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub appearances: std::collections::BTreeMap<String, [u8; 3]>,
     /// Bodies moved into another component than their feature's (by body name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub body_components: std::collections::BTreeMap<String, u64>,
@@ -1094,12 +1097,32 @@ impl Document {
             plastic: Default::default(),
             body_components: Default::default(),
             materials: Default::default(),
+            appearances: Default::default(),
             favorites: Default::default(),
             canvases: Vec::new(),
             param_comments: Default::default(),
             browser_groups: Vec::new(),
             browser_order: Default::default(),
         }
+    }
+
+    /// The colour a body is shown and exported in (sRGB as 0–1 fractions): its
+    /// appearance, else its material's look, else the colour it was imported with.
+    pub fn body_color(&self, name: &str, body: &solvecraft_kernel::Body) -> Option<[f32; 3]> {
+        let rgb = |c: [u8; 3]| c.map(|x| x as f32 / 255.0);
+        self.appearances.get(name).copied().or_else(|| self.materials.get(name).and_then(|m| material_color(m))).map(rgb).or_else(|| body.color())
+    }
+
+    /// The model with each body carrying the colour it is shown in (for export).
+    pub fn painted(&self, state: &crate::ModelState) -> crate::ModelState {
+        let mut st = state.clone();
+        for b in &mut st.bodies {
+            let c = self.body_color(&b.name, &b.body);
+            if c != b.body.color() {
+                b.body = b.body.clone().with_color(c);
+            }
+        }
+        st
     }
 
     /// Density of a body's material (g/cm³).
@@ -1444,6 +1467,26 @@ pub const MATERIALS: [(&str, f64); 14] = [
     ("Oak", 0.75),
     ("Glass", 2.50),
 ];
+
+/// How a physical material looks (sRGB); the default material has no colour of its own.
+pub fn material_color(name: &str) -> Option<[u8; 3]> {
+    Some(match name {
+        "Steel" => [158, 164, 172],
+        "Stainless Steel" => [186, 191, 198],
+        "Aluminum" => [204, 208, 214],
+        "Brass" => [208, 172, 88],
+        "Copper" => [204, 122, 80],
+        "Titanium" => [150, 148, 158],
+        "Cast Iron" => [104, 104, 110],
+        "ABS Plastic" => [222, 222, 216],
+        "PLA" => [110, 160, 222],
+        "Nylon" => [236, 230, 214],
+        "Polycarbonate" => [196, 216, 232],
+        "Oak" => [190, 146, 92],
+        "Glass" => [170, 208, 218],
+        _ => return None,
+    })
+}
 
 pub fn material_density(name: &str) -> Option<f64> {
     MATERIALS.iter().find(|(n, _)| n.eq_ignore_ascii_case(name.trim())).map(|(_, d)| *d)

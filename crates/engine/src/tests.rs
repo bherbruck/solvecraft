@@ -951,6 +951,42 @@ fn sample_plate_step_round_trip() {
     }
 }
 
+/// Bodies export in the colour they are shown in: a material's look, an appearance over it,
+/// none for the default; and colours read from a STEP file survive the next export.
+#[test]
+fn material_and_appearance_colours_export_to_step() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10, "body_name": "BrassBox"}));
+    run(&mut s, "PrimitiveBox", json!({"corner": [20, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "RedAbs"}));
+    run(&mut s, "PrimitiveBox", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Plain"}));
+    run(&mut s, "PhysicalMaterialCommand", json!({"bodies": ["BrassBox"], "material": "Brass"}));
+    run(&mut s, "PhysicalMaterialCommand", json!({"bodies": ["RedAbs"], "material": "ABS Plastic"}));
+    run(&mut s, "AppearanceCommand", json!({"bodies": ["RedAbs"], "color": "#d01c1c"}));
+    assert!(s.execute("AppearanceCommand", &json!({"bodies": ["RedAbs"], "color": "#12"})).is_err());
+    let rgb = |c: [u8; 3]| c.map(|x| x as f32 / 255.0);
+    let want =
+        [("BrassBox", Some(rgb(solvecraft_doc::material_color("Brass").unwrap()))), ("RedAbs", Some(rgb([0xd0, 0x1c, 0x1c]))), ("Plain", None)];
+    let same = |a: Option<[f32; 3]>, b: Option<[f32; 3]>| match (a, b) {
+        (Some(a), Some(b)) => a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3),
+        (None, None) => true,
+        _ => false,
+    };
+    let check = |imp: &solvecraft_kernel::StepImport| {
+        for (name, c) in want {
+            let b = imp.bodies.iter().find(|b| b.name == name).unwrap_or_else(|| panic!("no body {name}"));
+            assert!(same(b.body.color(), c), "{name}: {:?} vs {c:?}", b.body.color());
+        }
+    };
+    check(&step_round_trip(&mut s, "colours"));
+    // Open the export and export again: the file's colours are kept.
+    let p = std::env::temp_dir().join(format!("solvecraft-colours-{}.step", std::process::id()));
+    run(&mut s, "ExportCommand", json!({"path": p.to_string_lossy()}));
+    let mut s2 = Session::default();
+    run(&mut s2, "doc.open", json!({"path": p.to_string_lossy()}));
+    let _ = std::fs::remove_file(&p);
+    check(&step_round_trip(&mut s2, "colours2"));
+}
+
 /// Components export as a STEP assembly: products, occurrences, placements.
 #[test]
 fn components_export_as_step_assembly() {

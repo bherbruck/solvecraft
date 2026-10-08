@@ -23,6 +23,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("material")
         .params("bodies: [names]; material: name (Steel, Aluminum, ABS Plastic, …; `material.list`)"),
+    CommandSpec::new("AppearanceCommand", "Appearance", appearance)
+        .at("SOLID", "MODIFY")
+        .icon("appearance")
+        .params("bodies: [names]; color: \"#rrggbb\" or [r, g, b] (0–255), or null to follow the material"),
     CommandSpec::new("material.list", "List Materials", material_list).noundo(),
     CommandSpec::new("engine.commands", "List Commands", commands).noundo(),
 ];
@@ -269,6 +273,41 @@ fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     Ok(json!({"bodies": bodies, "material": canonical}))
+}
+
+/// A colour parameter: `"#rrggbb"` or `[r, g, b]` (0–255).
+fn color_param(v: &Value) -> Option<[u8; 3]> {
+    if let Some(t) = v.as_str() {
+        let h = t.trim().trim_start_matches('#');
+        if h.len() != 6 || !h.is_ascii() {
+            return None;
+        }
+        let byte = |i: usize| h.get(i..i + 2).and_then(|x| u8::from_str_radix(x, 16).ok());
+        return Some([byte(0)?, byte(2)?, byte(4)?]);
+    }
+    let a = v.as_array().filter(|a| a.len() == 3)?;
+    let c = |i: usize| a.get(i).and_then(Value::as_f64).filter(|x| x.is_finite() && (0.0..=255.0).contains(x)).map(|x| x.round() as u8);
+    Some([c(0)?, c(1)?, c(2)?])
+}
+
+fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "AppearanceCommand";
+    let bodies = string_list(p, "bodies");
+    let st = s.model.state();
+    if bodies.is_empty() || bodies.iter().any(|b| st.body(b).is_none()) {
+        return Err(bad(cmd, "`bodies` must list existing bodies"));
+    }
+    let color = match p.get("color") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(color_param(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0–255"))?),
+    };
+    for b in &bodies {
+        match color {
+            Some(c) => s.doc_mut().appearances.insert(b.clone(), c),
+            None => s.doc_mut().appearances.remove(b),
+        };
+    }
+    Ok(json!({"bodies": bodies, "color": color.map(|c| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]))}))
 }
 
 fn material_list(_s: &mut Session, _p: &Value) -> Result<Value> {
