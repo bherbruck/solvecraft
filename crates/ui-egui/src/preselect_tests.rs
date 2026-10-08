@@ -176,3 +176,17 @@ fn a_hole_is_patterned_as_a_feature() {
     assert_eq!(e.inputs[0].accept, crate::selection::FEATURES);
     assert_eq!(e.inputs[0].items, vec![Sel::Feature { id: hole }]);
 }
+
+#[test]
+fn a_hole_is_mirrored_as_a_feature() {
+    let mut app = app_with(json!([
+        {"command": "PrimitiveBox", "params": {"length": 60, "width": 40, "height": 10}},
+        {"command": "FusionHoleCommand", "params": {"position": [10, 10, 10], "diameter": 5}}
+    ]));
+    let hole = app.session.doc.features.last().unwrap().id;
+    let mut d = start(&mut app, vec![Sel::Feature { id: hole }], "MirrorCommand");
+    assert_eq!(d.inputs[0].accept, crate::selection::FEATURES);
+    d.inputs[1].items = vec![Sel::Plane { name: "YZ".into() }];
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["features"], json!(["Hole1"]));
+}

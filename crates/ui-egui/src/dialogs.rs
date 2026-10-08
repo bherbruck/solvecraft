@@ -873,7 +873,7 @@ fn objects_label(accept: Accept) -> &'static str {
 }
 
 fn is_pattern(k: &Kind) -> bool {
-    matches!(k, Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. })
+    matches!(k, Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. } | Kind::Mirror)
 }
 
 /// The Object Type row of a pattern: bodies (picked in the view) or features (picked in the
@@ -896,6 +896,10 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
 /// Rows above the selection inputs: the pattern type and object type, the Hole placement (one
 /// face point, or sketch points).
 fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
+    if matches!(d.kind, Kind::Mirror) {
+        object_type_row(d, ui);
+        return;
+    }
     if matches!(d.kind, Kind::Move { .. }) {
         crate::dialogs_move::type_row(d, ui);
         return;
@@ -1331,15 +1335,22 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                     Kind::Thread { designation, length } => {
+                        // Fusion's order: Full Length, then the size; a length only when not full.
+                        row_label(ui, "Full Length");
+                        let mut full = length.trim().is_empty();
+                        if ui.checkbox(&mut full, "").changed() {
+                            *length = if full { String::new() } else { "10 mm".into() };
+                        }
+                        ui.end_row();
                         row_label(ui, "Size");
                         let r = ui.add(egui::TextEdit::singleline(designation).hint_text("fits the face, e.g. M8"));
                         enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.end_row();
-                        row_label(ui, "Length");
-                        let r = ui.add(egui::TextEdit::singleline(length).hint_text("whole face"));
-                        crate::params_dialog::complete(ui, &r, length);
-                        enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        ui.end_row();
+                        if !full {
+                            row_label(ui, "Length");
+                            enter |= field(ui, length);
+                            ui.end_row();
+                        }
                     }
                     Kind::Material { index } => {
                         let names: Vec<&str> = solvecraft_engine::doc::MATERIALS.iter().map(|(n, _)| *n).collect();
@@ -1814,9 +1825,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             ("FusionDraftCommand", json!({"faces": face_points(0), "angle": angle, "neutral": neutral}))
         }
         Kind::Mirror => {
-            need(0, "bodies")?;
+            need(0, "objects")?;
             need(1, "the mirror plane")?;
-            let features = source_features(s, &body_names(0));
+            let features = pattern_features(s, sels(d, 0));
             let plane = plane_value(s, sels(d, 1).first()).ok_or("the mirror plane must be a plane or a planar face")?;
             ("MirrorCommand", json!({"features": features, "plane": plane}))
         }
@@ -2481,8 +2492,16 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::Mirror { features, plane, .. } => {
             let mut d = start("MirrorCommand")?;
             let ids: Vec<u64> = features.iter().filter_map(|n| s.doc.find_feature(n).map(|f| f.id)).collect();
+            // Features that made no body of their own (a hole) were picked as features.
+            let as_features = ids.iter().any(|id| !st.bodies.iter().any(|b| b.feature == *id));
             if let Some(inp) = d.inputs.get_mut(0) {
-                inp.items = st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect();
+                if as_features {
+                    inp.accept = selection::FEATURES;
+                    inp.label = objects_label(inp.accept);
+                    inp.items = ids.iter().map(|id| Sel::Feature { id: *id }).collect();
+                } else {
+                    inp.items = st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect();
+                }
             }
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = plane_sel(s, plane).into_iter().collect();
