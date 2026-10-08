@@ -1,0 +1,99 @@
+[
+ {
+  "note": "The Sketch Palette shows docked at the right whenever a sketch is active and no command dialog is open, comes back when the dialog closes, and goes with the sketch."
+ },
+ {
+  "expect": {
+   "not_shown": "SKETCH PALETTE"
+  }
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "expect": {
+   "dialog": "Sketch",
+   "not_shown": "SKETCH PALETTE"
+  }
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "expect": {
+   "sketching": true,
+   "dialog": null,
+   "shown": "SKETCH PALETTE"
+  }
+ },
+ {
+  "expect": {
+   "shown": "Finish Sketch"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "expect": {
+   "shown": "SKETCH PALETTE"
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    20,
+    10
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "ChangeParameterCommand"
+ },
+ {
+  "widget": "Close window"
+ },
+ {
+  "expect": {
+   "shown": "SKETCH PALETTE"
+  }
+ },
+ {
+  "call": "ui.set",
+  "params": {
+   "dark": false
+  }
+ },
+ {
+  "expect": {
+   "shown": "SKETCH PALETTE"
+  }
+ },
+ {
+  "expect": {
+   "shown": "Finish Sketch"
+  }
+ },
+ {
+  "widget": "Finish Sketch"
+ },
+ {
+  "expect": {
+   "sketching": false,
+   "not_shown": "SKETCH PALETTE"
+  }
+ }
+]

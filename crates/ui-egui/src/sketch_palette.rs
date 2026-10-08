@@ -4,6 +4,9 @@
 //! profiles, points, dimensions, constraints, projected geometry, 3D sketch); the sketch's
 //! degrees of freedom; Finish Sketch. Toggles run `sketch.options`, line types
 //! `sketch.construction` / `sketch.centerline`.
+//!
+//! The line type is also a drawing mode, as in Fusion: with nothing selected, Construction (or
+//! X) makes what is drawn next construction geometry until it is switched back.
 
 use std::cell::Cell;
 
@@ -15,6 +18,8 @@ use crate::SolveApp;
 use crate::theme::Tokens;
 
 thread_local! {
+    /// The drawing line type (0 normal, 1 construction, 2 centerline) and the sketch it is for.
+    static MODE: Cell<(u8, Option<u64>)> = const { Cell::new((0, None)) };
     static FOLDED: Cell<bool> = const { Cell::new(false) };
     static OPTIONS_FOLDED: Cell<bool> = const { Cell::new(false) };
 }
@@ -46,6 +51,74 @@ pub fn dof_text(dof: usize, ok: bool) -> String {
     } else {
         format!("{dof} degrees of freedom")
     }
+}
+
+/// The line type new curves get in the sketch being edited (0 normal, 1 construction,
+/// 2 centerline); a new sketch starts normal.
+pub fn mode(app: &SolveApp) -> u8 {
+    let (m, sk) = MODE.with(Cell::get);
+    if sk.is_some() && sk == app.session.active_sketch { m } else { 0 }
+}
+
+/// Switch the drawing line type (with a status hint).
+pub fn set_mode(app: &mut SolveApp, m: u8) {
+    MODE.with(|c| c.set((m, app.session.active_sketch)));
+    let hint = match m {
+        1 => "Construction mode: new curves are construction geometry (X or the palette's Normal to leave)",
+        2 => "Centerline mode: new lines are centerlines",
+        _ => "Normal mode",
+    };
+    app.set_status(hint, false);
+}
+
+/// X / the toolbar's Construction: convert the selected curves, or with nothing selected
+/// switch construction mode on or off.
+pub fn toggle_construction(app: &mut SolveApp) {
+    let curves = selected_curves(app);
+    if curves.is_empty() {
+        let m = if mode(app) == 1 { 0 } else { 1 };
+        set_mode(app, m);
+    } else {
+        let _ = app.run("sketch.construction", json!({ "curves": curves }));
+    }
+}
+
+/// Curves a drawing command just made take the drawing line type.
+pub fn apply_mode(app: &mut SolveApp, id: &str, result: &Value) {
+    let m = mode(app);
+    if m == 0 || !solvecraft_engine::find_command(id).is_some_and(|c| c.tab == "SKETCH" && c.panel == "CREATE") {
+        return;
+    }
+    let curves: Vec<String> = result["curves"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(str::to_string)).collect();
+    if curves.is_empty() {
+        return;
+    }
+    let lines: Vec<String> = if m == 2 {
+        let st = app.session.model.state();
+        let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
+        curves
+            .iter()
+            .filter(|c| {
+                ss.sketch
+                    .curve_index(c)
+                    .and_then(|i| ss.sketch.curves.get(i))
+                    .is_some_and(|c| matches!(c.kind, solvecraft_engine::sketch::CurveKind::Line { .. }))
+            })
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let rest: Vec<String> = curves.iter().filter(|c| !lines.contains(c)).cloned().collect();
+    // Part of the drawing's own undo step.
+    let depth = app.session.undo.len();
+    if !lines.is_empty() {
+        let _ = app.session.execute("sketch.centerline", &json!({ "curves": lines, "value": true }));
+    }
+    if !rest.is_empty() {
+        let _ = app.session.execute("sketch.construction", &json!({ "curves": rest, "value": true }));
+    }
+    app.session.undo.truncate(depth);
 }
 
 /// Selected curves of the active sketch.
@@ -154,8 +227,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 egui::Grid::new("sc_palette_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
                     ui.label("Linetype");
                     ui.horizontal(|ui| {
+                        // With a selection: convert it; without: the mode new curves are drawn in.
+                        let current = mode(app);
                         for (i, (label, tip)) in [("—", "Normal"), ("- -", "Construction"), ("-·-", "Centerline")].iter().enumerate() {
-                            if ui.add_enabled(has_curves, egui::Button::new(*label).min_size(vec2(30.0, 20.0))).on_hover_text(*tip).clicked() {
+                            let on = !has_curves && current == i as u8;
+                            let tip = if has_curves { format!("Make the selection {tip}") } else { format!("Draw {tip} curves") };
+                            if ui.add(egui::Button::new(*label).selected(on).min_size(vec2(30.0, 20.0))).on_hover_text(tip).clicked() {
                                 linetype = Some(i as u8);
                             }
                         }
@@ -194,7 +271,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     if let Some(k) = linetype {
-        set_linetype(app, k);
+        if has_curves {
+            set_linetype(app, k);
+        } else {
+            set_mode(app, k);
+        }
     }
     if look {
         crate::dialogs::look_at_sketch(app);

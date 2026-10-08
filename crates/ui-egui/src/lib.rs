@@ -340,6 +340,10 @@ impl SolveApp {
         let t0 = now_ms();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
+        if let Ok(v) = &r {
+            // Curves drawn in construction (or centerline) mode take that line type.
+            sketch_palette::apply_mode(self, id, v);
+        }
         match &r {
             Ok(_) => {
                 self.session.echo(format!("{id}: done"));
@@ -416,17 +420,10 @@ impl SolveApp {
             }
         }
         // Construction toggle: selected sketch curves switch at once, otherwise pick them.
-        if id == "sketch.construction" {
-            let curves: Vec<String> = self
-                .session
-                .selection
-                .iter()
-                .filter_map(|s| if let solvecraft_engine::Sel::SketchCurve { id } = s { Some(id.clone()) } else { None })
-                .collect();
-            if !curves.is_empty() {
-                let _ = self.run(id, json!({ "curves": curves }));
-                return;
-            }
+        // Construction (X): convert the selection, or switch construction mode.
+        if id == "sketch.construction" && self.session.active_sketch.is_some() {
+            sketch_palette::toggle_construction(self);
+            return;
         }
         if let Some(spec) = solvecraft_engine::find_command(id)
             && (tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some())

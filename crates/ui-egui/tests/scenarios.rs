@@ -52,6 +52,8 @@ scenarios!(
     s27_move_triad,
     s33_move_x_arrow,
     s34_component_move_carries_sketches,
+    s35_construction_mode,
+    s36_sketch_palette_visible
 );
 
 /// Scenarios written ahead of their fixes or features (the user's open bugs): run with

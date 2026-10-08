@@ -563,6 +563,13 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                     }
                 }
             }
+            "shown" | "not_shown" => {
+                // A widget with this text is (not) on screen.
+                let t = v.as_str().unwrap_or_default();
+                if h.widget(t).is_some() != (k == "shown") {
+                    return Err(format!("widget `{t}`: want {}", if k == "shown" { "shown" } else { "not shown" }));
+                }
+            }
             "home" => {
                 if ui["home"] != *v {
                     return Err(format!("start page open: got {}, want {v}", ui["home"]));
