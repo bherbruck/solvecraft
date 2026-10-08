@@ -32,6 +32,7 @@ pub mod selection;
 pub mod sketch_dims;
 #[cfg(test)]
 mod sketch_edit_tests;
+pub mod sketch_palette;
 pub mod sketch_tools;
 pub mod theme;
 pub mod timeline;
@@ -609,6 +610,7 @@ impl SolveApp {
             viewport::show(self, ui);
         });
         dialogs::show(self, ui.ctx());
+        sketch_palette::show(self, ui.ctx());
         params_dialog::show(self, ui.ctx());
         context_menu::show(self, ui.ctx());
         delete::show(self, ui.ctx());

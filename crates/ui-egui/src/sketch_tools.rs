@@ -710,6 +710,10 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some(sid) = active_sketch(app) else { return };
     let st = app.session.model.state();
     let Some(ss) = st.sketch(sid) else { return };
+    if ss.sketch.view.hide_constraints {
+        GLYPHS.with(|g| g.borrow_mut().clear());
+        return;
+    }
     let tk = crate::theme::Tokens::get();
     let mut placed: Vec<Pos2> = Vec::new();
     let picked = PICKED.with(|p| p.borrow().clone());

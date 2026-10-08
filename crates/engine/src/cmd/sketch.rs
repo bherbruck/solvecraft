@@ -157,6 +157,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.dimension_text", "Move Dimension Text", dimension_text)
         .enabled(in_sketch)
         .params("dimension: constraint id or parameter name; at: [x,y] text centre (sketch coordinates) | reset: true (default place)"),
+    CommandSpec::new("sketch.options", "Sketch Palette Options", sketch_options).icon("sketch").params(
+        "sketch?: id|name (default active); any of show_profile, show_points, show_dimensions, show_constraints, show_projected, grid, snap, slice, sketch_3d: bool. Returns them all",
+    ),
     CommandSpec::new("sketch.solve", "Solve Sketch", solve_cmd)
         .enabled(in_sketch)
         .noundo()
@@ -1512,6 +1515,55 @@ fn move_point(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(json!({"sketch": info}))
+}
+
+/// The Sketch Palette options of a sketch, by their palette names (true = shown / on).
+fn options_json(v: &solvecraft_sketch::SketchView) -> Value {
+    json!({
+        "show_profile": !v.hide_profile,
+        "show_points": !v.hide_points,
+        "show_dimensions": !v.hide_dimensions,
+        "show_constraints": !v.hide_constraints,
+        "show_projected": !v.hide_projected,
+        "grid": !v.hide_grid,
+        "snap": !v.no_snap,
+        "slice": v.slice,
+        "sketch_3d": v.three_d,
+    })
+}
+
+fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.options";
+    let keys = ["show_profile", "show_points", "show_dimensions", "show_constraints", "show_projected", "grid", "snap", "slice", "sketch_3d"];
+    if let Some(o) = p.as_object()
+        && let Some(k) = o.keys().find(|k| *k != "sketch" && !keys.contains(&k.as_str()))
+    {
+        return Err(bad(cmd, format!("unknown option `{k}`")));
+    }
+    let set = |k: &str| bool_(p, k);
+    if keys.iter().all(|k| set(k).is_none()) {
+        let id = target_sketch(s, p, cmd)?;
+        return Ok(json!({"options": options_json(&s.doc.sketch(id)?.view)}));
+    }
+    let (v, info) = edit(s, p, cmd, false, |sk, _| {
+        let v = &mut sk.view;
+        let put = |k: &str, flag: &mut bool, shown_means_off: bool| {
+            if let Some(b) = set(k) {
+                *flag = if shown_means_off { !b } else { b };
+            }
+        };
+        put("show_profile", &mut v.hide_profile, true);
+        put("show_points", &mut v.hide_points, true);
+        put("show_dimensions", &mut v.hide_dimensions, true);
+        put("show_constraints", &mut v.hide_constraints, true);
+        put("show_projected", &mut v.hide_projected, true);
+        put("grid", &mut v.hide_grid, true);
+        put("snap", &mut v.no_snap, true);
+        put("slice", &mut v.slice, false);
+        put("sketch_3d", &mut v.three_d, false);
+        Ok(options_json(v))
+    })?;
+    Ok(json!({"options": v, "sketch": info}))
 }
 
 fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {

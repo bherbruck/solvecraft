@@ -400,3 +400,36 @@ fn point_constraints_keep_the_first_pick() {
     assert!(same(&snap(&s, "p1"), &a0) && same(&snap(&s, "l1"), &l0));
     assert!(pt(&s, "p2").dist(solvecraft_geom::Vec2::new(3.0, -7.0)) < 1e-6, "{:?}", pt(&s, "p2"));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Sketch Palette options
+
+#[test]
+fn palette_options_are_kept_with_each_sketch() {
+    let mut s = new_sketch();
+    let o = run(&mut s, "sketch.options", json!({}));
+    assert_eq!(o["options"]["show_dimensions"], true);
+    assert_eq!(o["options"]["slice"], false);
+    let o = run(&mut s, "sketch.options", json!({"show_dimensions": false, "snap": false, "slice": true, "sketch_3d": true}));
+    assert_eq!(o["options"]["show_dimensions"], false);
+    assert_eq!(o["options"]["snap"], false);
+    assert_eq!(o["options"]["slice"], true);
+    let v = sketch(&s).view;
+    assert!(v.hide_dimensions && v.no_snap && v.slice && v.three_d && !v.hide_points);
+    // Another sketch starts with the defaults; the first keeps its options after finishing.
+    let first = s.active_sketch.expect("sketch");
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "SketchCreate", json!({"plane": "XZ"}));
+    assert_eq!(sketch(&s).view, solvecraft_sketch::SketchView::default());
+    let o = run(&mut s, "sketch.options", json!({"sketch": first}));
+    assert_eq!(o["options"]["show_dimensions"], false);
+    // Saved with the design.
+    let text = serde_json::to_string(&s.doc.sketch(first).expect("first").clone()).expect("json");
+    let back: Sketch = serde_json::from_str(&text).expect("parse");
+    assert!(back.view.slice);
+    assert!(s.execute("sketch.options", &json!({"bogus": true})).is_err());
+    // Undo restores the option.
+    run(&mut s, "sketch.options", json!({"show_points": false}));
+    run(&mut s, "UndoCommand", json!({}));
+    assert!(!sketch(&s).view.hide_points);
+}

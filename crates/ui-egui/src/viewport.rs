@@ -195,7 +195,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
     let s = &app.session;
     // Bodies where their occurrences place them.
     let st = s.world_state();
-    if app.ui.show_grid {
+    if app.ui.show_grid && !active_view(app).hide_grid {
         let (minor, major) = grid_step(app.cam.half_height());
         let ext = (app.cam.half_height() * 3.0 / major).ceil() * major;
         let c = Vec3::new((app.cam.target.x / major).round() * major, (app.cam.target.y / major).round() * major, 0.0);
@@ -250,7 +250,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         let active = s.active_sketch == Some(sid);
         // Closed profiles are shaded (lifted off a face they may lie on).
         let lift = ss.plane.normal() * 0.01;
-        let profiles = if app.ui.hidden_profiles.contains(&sid) { &[][..] } else { &ss.profiles[..] };
+        let profiles = if app.ui.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile { &[][..] } else { &ss.profiles[..] };
         for p in profiles {
             for tri in p.region.triangulate(0.05) {
                 for q in tri {
@@ -469,6 +469,9 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
         let Some(ss) = st.sketch(sid) else { continue };
         let bonus = if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
         for (i, c) in ss.sketch.curves.iter().enumerate() {
+            if c.link.is_some() && ss.sketch.view.hide_projected {
+                continue;
+            }
             let straight = matches!(c.kind, CurveKind::Line { .. });
             for seg in ss.sketch.segs(i) {
                 let pts: Vec<Pos2> = seg.polyline(0.05).iter().filter_map(|q| proj.to_screen(ss.plane.to_world(*q))).collect();
@@ -578,7 +581,9 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
             continue;
         }
         let lp = ss.plane.to_local(o + d * t);
-        for (pi, p) in ss.profiles.iter().enumerate() {
+        // Show Profile off: the sketch being edited offers no profiles.
+        let profiles = if ss.sketch.view.hide_profile && s.active_sketch == Some(sid) { &[][..] } else { &ss.profiles[..] };
+        for (pi, p) in profiles.iter().enumerate() {
             if p.region.contains(lp) && bestp.as_ref().is_none_or(|(_, a, _)| p.area < *a) {
                 bestp = Some((t, p.area, Hit::Profile { sketch: sid, index: pi }));
             }
@@ -606,6 +611,12 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
 }
 
 /// The section cut shown now: the open Section Analysis dialog's plane, else the session's.
+/// The active sketch's display options (defaults when not sketching).
+pub fn active_view(app: &SolveApp) -> solvecraft_engine::sketch::SketchView {
+    let st = app.session.model.state();
+    app.session.active_sketch.and_then(|s| st.sketch(s)).map(|ss| ss.sketch.view.clone()).unwrap_or_default()
+}
+
 pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
     if let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, crate::dialogs::Kind::Section { .. })) {
         let cmds = crate::dialogs::apply_commands(app, d).ok()?;
@@ -613,6 +624,13 @@ pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
         let mut scratch = app.session.scratch();
         scratch.execute("FusionHalfSectionViewCommand", &p).ok()?;
         return scratch.section;
+    }
+    // Slice (Sketch Palette): cut the model at the plane of the sketch being edited.
+    if app.session.section.is_none() {
+        let st = app.session.model.state();
+        if let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)).filter(|ss| ss.sketch.view.slice) {
+            return Some((ss.plane.origin, ss.plane.normal()));
+        }
     }
     app.session.section
 }
@@ -957,6 +975,10 @@ pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, 
     let step = minor / 10.0;
     if let Some(p) = crate::sketch_tools::refine_snap(app, proj, &ss.sketch, &ss.plane, lp) {
         return Some(p);
+    }
+    // With Snap off (Sketch Palette) the point is where the cursor is.
+    if ss.sketch.view.no_snap {
+        return Some((lp, None));
     }
     Some((Vec2::new((lp.x / step).round() * step, (lp.y / step).round() * step), None))
 }
@@ -1401,7 +1423,8 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         if !solvecraft_engine::view::sketch_point_visible(sk, i) {
             continue;
         }
-        let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)) else { continue };
+        let hidden = (sk.view.hide_points && i != 0) || (sk.view.hide_projected && p.link.is_some());
+        let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)).filter(|_| !hidden) else { continue };
         let det = ss.report.point_determined.get(i).copied().unwrap_or(false);
         let c = if p.link.is_none() && locked.get(i).copied().unwrap_or(false) {
             t.sketch_locked
@@ -1416,7 +1439,7 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.rect_filled(Rect::from_center_size(sp, vec2(5.0, 5.0)), 0.0, c);
         }
     }
-    for c in sk.constraints.iter().filter(|c| !c.kind.is_dimension()) {
+    for c in sk.constraints.iter().filter(|c| !c.kind.is_dimension() && !sk.view.hide_constraints) {
         glyph(painter, proj, ss, &c.kind);
     }
     // Sketch status.

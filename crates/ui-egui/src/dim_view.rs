@@ -186,6 +186,10 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         return;
     };
     let sk = &ss.sketch;
+    if sk.view.hide_dimensions {
+        DRAWN.with(|d| d.borrow_mut().clear());
+        return;
+    }
     let tk = Tokens::get();
     let sel = selected();
     // A selected dimension that was deleted (undo, another command) is forgotten.

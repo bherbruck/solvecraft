@@ -72,6 +72,9 @@ pub fn grid_step(half_height: f64) -> (f64, f64) {
 pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool]) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
+        if c.link.is_some() && sk.view.hide_projected && !sk.is_text_curve(i) {
+            continue;
+        }
         let col = if c.link.is_some() && !sk.is_text_curve(i) {
             if sk.is_lost_curve(i) { colors::SKETCH_LOST } else { colors::SKETCH_PROJECTED }
         } else if c.fixed {
@@ -92,7 +95,7 @@ pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool
         }
     }
     // 3D curves are in world coordinates already.
-    for w in &sk.wires {
+    for w in sk.wires.iter().filter(|_| !sk.view.hide_projected) {
         out.push((w.pts.clone(), colors::SKETCH_PROJECTED, false));
     }
     out

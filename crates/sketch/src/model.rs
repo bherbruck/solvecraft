@@ -430,6 +430,34 @@ pub struct Constraint {
     pub text: Option<Vec2>,
 }
 
+/// How a sketch is shown and drawn in (the Sketch Palette options kept with the sketch). Every
+/// flag is off by default, so a sketch shows everything, with grid and snap.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SketchView {
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hide_profile: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hide_points: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hide_dimensions: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hide_constraints: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hide_projected: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hide_grid: bool,
+    /// Clicks don't snap to the grid.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub no_snap: bool,
+    /// Cut away the model in front of the sketch plane while editing.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub slice: bool,
+    /// 3D sketch: drawing may leave the sketch plane.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub three_d: bool,
+}
+
 /// A 2D sketch. Point 0 is always the fixed sketch origin (id `origin`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sketch {
@@ -445,6 +473,13 @@ pub struct Sketch {
     /// Next number per id prefix (`l` → l1, l2…).
     #[serde(default)]
     counters: std::collections::BTreeMap<String, u64>,
+    /// Display options (Sketch Palette).
+    #[serde(default, skip_serializing_if = "is_default_view")]
+    pub view: SketchView,
+}
+
+fn is_default_view(v: &SketchView) -> bool {
+    *v == SketchView::default()
 }
 
 impl Default for Sketch {
@@ -462,6 +497,7 @@ impl Sketch {
             links: Vec::new(),
             wires: Vec::new(),
             counters: Default::default(),
+            view: SketchView::default(),
         }
     }
 
