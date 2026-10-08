@@ -318,6 +318,19 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
         cur = blend(&cur, &rest, r, shape, what)?;
         return blend(&cur, &loop_pts, r, shape, what);
     }
+    // Neighbouring edges along a planar face's loop (sharp corners between them: the blends
+    // meet in mitres), ending where unblended edges go on.
+    if edges.len() >= 2 {
+        let size = cur.size();
+        let solid = cur.deep_copy();
+        let ids = edge_ids(&cur, &solid, edges)?;
+        if ids.len() == edges.len()
+            && let Some(Ok(res)) = crate::loopblend::loop_blend(&solid, &ids, size, r, shape == Shape::Round)
+            && let Ok(b) = guard(what, || Ok(res)).and_then(Body::new)
+        {
+            return Ok(b);
+        }
+    }
     if let Some(groups) = loop_groups(&cur, edges)? {
         for g in groups {
             let size = cur.size();

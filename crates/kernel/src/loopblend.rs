@@ -39,6 +39,12 @@ impl Seg {
             Seg::Line { a, .. } | Seg::Arc { a, .. } => a,
         }
     }
+    fn end(&self) -> Vec3 {
+        match *self {
+            Seg::Line { b, .. } => b,
+            Seg::Arc { a, c, axis, angle, .. } => turn(a, c, axis, angle),
+        }
+    }
     /// Unit tangent (direction of travel) at a point of the segment.
     fn tangent(&self, p: Vec3) -> Option<Vec3> {
         match *self {
@@ -144,10 +150,21 @@ pub(crate) fn loop_blend(solid: &Solid, edge_ids: &[mt::EdgeID], size: f64, r: f
             let Some(n) = plane_normal(f) else { continue };
             for (wi, w) in f.boundaries().iter().enumerate() {
                 let ids: Vec<mt::EdgeID> = w.edge_iter().map(|e| e.id()).collect();
-                if ids.len() != edge_ids.len() || !edge_ids.iter().all(|e| ids.contains(e)) {
+                if !edge_ids.iter().all(|e| ids.contains(e)) {
                     continue;
                 }
-                return Some(build(solid, si, &faces, fi, wi, n, size, tol, r, round));
+                if ids.len() == edge_ids.len() {
+                    return Some(build(solid, si, &faces, fi, wi, n, size, tol, r, round, None));
+                }
+                // A run of neighbouring edges of the loop (its ends meet unblended edges).
+                let m = ids.len();
+                let inside = |i: usize| ids.get(i % m).is_some_and(|x| edge_ids.contains(x));
+                let starts: Vec<usize> = (0..m).filter(|i| inside(*i) && !inside(*i + m - 1)).collect();
+                if let [s0] = starts[..]
+                    && (0..edge_ids.len()).all(|j| inside(s0 + j))
+                {
+                    return Some(build(solid, si, &faces, fi, wi, n, size, tol, r, round, Some((s0, edge_ids.len()))));
+                }
             }
         }
     }
@@ -155,10 +172,28 @@ pub(crate) fn loop_blend(solid: &Solid, edge_ids: &[mt::EdgeID], size: f64, r: f
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n: Vec3, size: f64, tol: f64, r: f64, round: bool) -> Result<Solid> {
+fn build(
+    solid: &Solid,
+    si: usize,
+    faces: &[&mt::Face],
+    fi: usize,
+    wi: usize,
+    n: Vec3,
+    size: f64,
+    tol: f64,
+    r: f64,
+    round: bool,
+    run: Option<(usize, usize)>,
+) -> Result<Solid> {
     let f = faces.get(fi).ok_or_else(|| KernelError::Failed("face".into()))?;
     let wire = f.boundaries().get(wi).cloned().ok_or_else(|| KernelError::Failed("loop".into()))?;
-    let edges: Vec<mt::Edge> = wire.edge_iter().cloned().collect();
+    let all_edges: Vec<mt::Edge> = wire.edge_iter().cloned().collect();
+    // The blended edges in loop order: the whole loop, or a run of it (open).
+    let open = run.is_some();
+    let edges: Vec<mt::Edge> = match run {
+        None => all_edges,
+        Some((s0, len)) => (0..len).filter_map(|j| all_edges.get((s0 + j) % all_edges.len().max(1)).cloned()).collect(),
+    };
     let edge_segs: Vec<Seg> = edges
         .iter()
         .map(|e| seg_of(e, (size * 1e-5).max(1e-6)))
@@ -169,9 +204,15 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
     let owner: Vec<usize> = split.iter().map(|x| x.0).collect();
     let segs: Vec<Seg> = split.iter().map(|x| x.1).collect();
     let k = segs.len();
+    // Joints: k round a whole loop; k + 1 along a run (its two ends included).
+    let nj = if open { k + 1 } else { k };
+    let nxt = |i: usize| if open { i + 1 } else { (i + 1) % k };
     // Joints: smooth, or sharp between two lines (the blends then meet in a mitre).
-    let mut mitre = vec![false; k];
+    let mut mitre = vec![false; nj];
     for i in 0..k {
+        if open && i == 0 {
+            continue;
+        }
         let (Some(prev), Some(cur)) = (segs.get((i + k - 1) % k), segs.get(i)) else { continue };
         let p = cur.start();
         let (Some(ta), Some(tb)) = (prev.tangent(p), cur.tangent(p)) else { return Err(unsupported("degenerate loop edge")) };
@@ -256,12 +297,14 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
             _ => None,
         }
     };
-    let mut pa = Vec::with_capacity(k);
-    let mut pb = Vec::with_capacity(k);
-    let mut centres = Vec::with_capacity(k);
-    for i in 0..k {
-        let p = segs.get(i).map(|s| s.start()).unwrap_or_default();
-        let (m, t, sb, dc) = frame(i, p).ok_or_else(|| unsupported("the face and wall meet at an angle the blend can't take"))?;
+    let mut pa = Vec::with_capacity(nj);
+    let mut pb = Vec::with_capacity(nj);
+    let mut centres = Vec::with_capacity(nj);
+    // Joint i: the start of piece i (the end of the last piece for a run's far end).
+    let joint_point = |i: usize| if i < k { segs.get(i).map(|s| s.start()) } else { segs.last().map(|s| s.end()) };
+    for i in 0..nj {
+        let p = joint_point(i).unwrap_or_default();
+        let (m, t, sb, dc) = frame(i.min(k - 1), p).ok_or_else(|| unsupported("the face and wall meet at an angle the blend can't take"))?;
         centres.push(p + (m + t).normalized().unwrap_or(m) * dc);
         if !mitre.get(i).copied().unwrap_or(false) {
             pa.push(p + m * sb);
@@ -287,14 +330,11 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
     }
     // The offset arcs must not turn inside out; an arc of exactly the blend's radius shrinks
     // to a point (a rounded corner rounded again: the blend there is a sphere).
-    let mut collapsed = vec![false; k];
+    let mut collapsed = vec![false; k.max(nj)];
     for (i, s) in segs.iter().enumerate() {
         if let Seg::Arc { a, c, .. } = *s {
             let toward = into(s, a).dot(c - a) > 0.0;
-            if toward
-                && (a.dist(c) - r).abs() <= tol * 10.0
-                && !mitre.get(i).copied().unwrap_or(true)
-                && !mitre.get((i + 1) % k).copied().unwrap_or(true)
+            if toward && (a.dist(c) - r).abs() <= tol * 10.0 && !mitre.get(i).copied().unwrap_or(true) && !mitre.get(nxt(i)).copied().unwrap_or(true)
             {
                 if let Some(x) = collapsed.get_mut(i) {
                     *x = true;
@@ -312,7 +352,7 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
     for i in 0..k {
         if collapsed.get(i).copied().unwrap_or(false)
             && let Some(v) = va.get(i).cloned()
-            && let Some(slot) = va.get_mut((i + 1) % k)
+            && let Some(slot) = va.get_mut(nxt(i))
         {
             *slot = v;
         }
@@ -320,12 +360,12 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
     let vb: Vec<mt::Vertex> = pb.iter().map(|p| builder::vertex(p3(*p))).collect();
     let centre = |i: usize| centres.get(i).copied().unwrap_or_default();
     let profile_mid = |i: usize| {
-        let (Some(s), c) = (segs.get(i), centre(i)) else { return Vec3::ZERO };
-        c + (s.start() - c).normalized().unwrap_or(n) * r
+        let (Some(p), c) = (joint_point(i), centre(i)) else { return Vec3::ZERO };
+        c + (p - c).normalized().unwrap_or(n) * r
     };
     // Profiles at the joints (face side → wall side).
-    let mut profiles: Vec<mt::Edge> = Vec::with_capacity(k);
-    for i in 0..k {
+    let mut profiles: Vec<mt::Edge> = Vec::with_capacity(nj);
+    for i in 0..nj {
         let (Some(a), Some(b)) = (va.get(i), vb.get(i)) else { return Err(KernelError::Failed("joint".into())) };
         if !round {
             profiles.push(builder::line(a, b));
@@ -368,7 +408,7 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
         if std::ptr::eq(vs, va.as_slice()) && collapsed.get(i).copied().unwrap_or(false) {
             return None;
         }
-        let (a, b) = (vs.get(i)?, vs.get((i + 1) % k)?);
+        let (a, b) = (vs.get(i)?, vs.get(nxt(i))?);
         Some(match *s {
             Seg::Line { .. } => builder::line(a, b),
             Seg::Arc { mid, .. } => builder::circle_arc(a, b, p3(offset(mid, s))),
@@ -391,16 +431,28 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
         (0..k).map(|i| rail(&vb, i, &wall_off)).collect::<Option<_>>().ok_or_else(|| KernelError::Failed("rail".into()))?;
     // Seams between neighbouring walls at the joints get shorter.
     // Model vertices at the joints (the second half of a circle starts at none).
-    let joint_vertex: Vec<Option<mt::Vertex>> = (0..k)
+    let mut joint_vertex: Vec<Option<mt::Vertex>> = (0..k)
         .map(|i| if i == 0 || owner.get(i) != owner.get(i - 1) { owner.get(i).and_then(|o| edges.get(*o)).map(|e| e.front().clone()) } else { None })
         .collect();
+    if open {
+        joint_vertex.push(edges.last().map(|e| e.back().clone()));
+    }
+    // At a run's ends the face's next loop edges stop at the face-side point.
+    let on_face = |e: &mt::Edge| f.edge_iter().any(|x| x.id() == e.id());
     let mut seam_subst: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
+    let mut seam_ends: HashMap<mt::EdgeID, (mt::Edge, Option<mt::Vertex>, Option<mt::Vertex>)> = HashMap::new();
     let loop_ids: Vec<mt::EdgeID> = edges.iter().map(|e| e.id()).collect();
     for (i, v) in joint_vertex.iter().enumerate() {
         let Some(v) = v else { continue };
         for g in faces {
             for e in g.edge_iter() {
-                if loop_ids.contains(&e.id()) || seam_subst.contains_key(&e.id()) || !(e.front() == v || e.back() == v) {
+                if loop_ids.contains(&e.id()) || !(e.front() == v || e.back() == v) {
+                    continue;
+                }
+                // Once per edge and joint (an edge between both ends of a run is met twice).
+                if seam_ends.get(&e.id()).is_some_and(|x: &(mt::Edge, Option<mt::Vertex>, Option<mt::Vertex>)| {
+                    (x.0.absolute_front() == v && x.1.is_some()) || (x.0.absolute_back() == v && x.2.is_some())
+                }) {
                     continue;
                 }
                 let (fa, fb) = (e.absolute_front().clone(), e.absolute_back().clone());
@@ -408,16 +460,30 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
                 if !matches!(e.curve(), mt::Curve::Line(_)) {
                     return Err(unsupported("the wall seams must be straight"));
                 }
-                let along = (from_p3(other.point()) - from_p3(v.point())).dot(pb.get(i).copied().unwrap_or_default() - from_p3(v.point()));
-                let reach = (pb.get(i).copied().unwrap_or_default() - from_p3(v.point())).len2();
+                let face_side = on_face(&e);
+                let target = if face_side { pa.get(i) } else { pb.get(i) }.copied().unwrap_or_default();
+                let along = (from_p3(other.point()) - from_p3(v.point())).dot(target - from_p3(v.point()));
+                let reach = (target - from_p3(v.point())).len2();
                 if along <= reach + tol {
-                    return Err(unsupported("the blend is taller than the walls"));
+                    return Err(unsupported(if face_side { "the blend is longer than the next edge" } else { "the blend is taller than the walls" }));
                 }
-                let nb = vb.get(i).ok_or_else(|| KernelError::Failed("joint".into()))?;
-                let ne = if &fa == v { builder::line(nb, &fb) } else { builder::line(&fa, nb) };
-                seam_subst.insert(e.id(), ne);
+                let nb = if face_side { va.get(i) } else { vb.get(i) }.ok_or_else(|| KernelError::Failed("joint".into()))?;
+                let slot = seam_ends.entry(e.id()).or_insert_with(|| (e.absolute_clone(), None, None));
+                if &fa == v {
+                    slot.1 = Some(nb.clone());
+                } else {
+                    slot.2 = Some(nb.clone());
+                }
             }
         }
+    }
+    for (id, (e, a, b)) in seam_ends {
+        let a = a.unwrap_or_else(|| e.absolute_front().clone());
+        let b = b.unwrap_or_else(|| e.absolute_back().clone());
+        if from_p3(a.point()).dist(from_p3(b.point())) < tol * 10.0 {
+            return Err(unsupported("the blend is longer than the next edge"));
+        }
+        seam_subst.insert(id, builder::line(&a, &b));
     }
     // Rebuild faces.
     let idx_of = |id: mt::EdgeID| loop_ids.iter().position(|x| *x == id);
@@ -444,6 +510,28 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
                 };
                 es.push(ne);
             }
+            // A run's end: the face's edge and the wall's seam now stop at the two ends of the
+            // end profile, which closes the gap between them.
+            if open {
+                let mut fixed: Vec<mt::Edge> = Vec::with_capacity(es.len() + 2);
+                let m = es.len();
+                for j in 0..m {
+                    let (Some(cur), Some(next)) = (es.get(j), es.get((j + 1) % m)) else { continue };
+                    fixed.push(cur.clone());
+                    if cur.back() == next.front() {
+                        continue;
+                    }
+                    for ji in [0, nj - 1] {
+                        let (Some(a), Some(b), Some(pr)) = (va.get(ji), vb.get(ji), profiles.get(ji)) else { continue };
+                        if cur.back() == a && next.front() == b {
+                            fixed.push(pr.clone());
+                        } else if cur.back() == b && next.front() == a {
+                            fixed.push(pr.inverse());
+                        }
+                    }
+                }
+                es = fixed;
+            }
             wires.push(mt::Wire::from(es));
         }
         crate::heal::absolute_face(g, wires).ok_or_else(|| KernelError::Failed("loop blend: a face could not be rebuilt".into()))
@@ -465,7 +553,7 @@ fn build(solid: &Solid, si: usize, faces: &[&mt::Face], fi: usize, wi: usize, n:
     use mt::{ParametricSurface3D, SearchNearestParameter};
     for i in 0..k {
         let (Some(s), Some(pr), Some(pr_next), Some(fr), Some(wr)) =
-            (segs.get(i), profiles.get(i), profiles.get((i + 1) % k), face_rails.get(i), wall_rails.get(i))
+            (segs.get(i), profiles.get(i), profiles.get(nxt(i)), face_rails.get(i), wall_rails.get(i))
         else {
             continue;
         };

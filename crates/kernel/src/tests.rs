@@ -138,8 +138,11 @@ fn fillets_on_several_edges_and_angles() {
     let removed = r * r / (phi / 2.0).tan() - r * r * (PI - phi) / 2.0;
     let v0 = measure(&p).unwrap().volume;
     assert!(rel(measure(&fp).unwrap().volume, v0 - removed * 10.0) < 2e-4, "{} vs {}", measure(&fp).unwrap().volume, v0 - removed * 10.0);
-    // Adjacent edges at a blended corner are not supported yet (an error, not a crash).
-    assert!(fillet(&b, &[Vec3::new(0.0, 0.0, 10.0), Vec3::new(0.0, 15.0, 20.0)], 2.0).is_err());
+    // Adjacent edges meeting at a corner: their blends meet in a mitre.
+    let two = fillet(&b, &[Vec3::new(0.0, 0.0, 10.0), Vec3::new(0.0, 15.0, 20.0)], 2.0).unwrap();
+    let cut = 24000.0 - measure(&two).unwrap().volume;
+    let a = 4.0 * (1.0 - PI / 4.0);
+    assert!(cut > a * (20.0 + 30.0 - 2.0) && cut < a * 50.0, "{cut}");
     // Concave edge: not supported.
     let u = boolean(&b, &box_solid(Vec3::new(10.0, 10.0, 15.0), Vec3::new(20.0, 20.0, 30.0)).unwrap(), BoolOp::Union).unwrap().unwrap();
     assert!(fillet(&u, &[Vec3::new(15.0, 10.0, 20.0)], 1.0).is_err());
@@ -1174,4 +1177,21 @@ fn booleans_found_by_the_survey() {
     let u = boolean(&cy, &bx, BoolOp::Union).unwrap().unwrap();
     let vu = measure(&u).unwrap().volume;
     assert!(vu > PI * 64.0 * 20.0 && vu < PI * 64.0 * 20.0 + 1620.0, "{vu}");
+}
+
+#[test]
+fn fillet_two_edges_meeting_at_a_corner() {
+    // Two top edges of a box meeting at a corner (the vertical edge there stays sharp): the
+    // fillets meet in a mitre and stop square at the far walls.
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let f = fillet(&b, &[Vec3::new(20.0, 0.0, 20.0), Vec3::new(0.0, 15.0, 20.0)], 3.0).unwrap();
+    let removed = 24000.0 - measure(&f).unwrap().volume;
+    // Each edge loses r²(1 − π/4) along its length; at the mitred corner the two cuts overlap
+    // in a region of volume r³(1 − π/4)·… — bounded between the sum less one corner and the sum.
+    let a = 9.0 * (1.0 - PI / 4.0);
+    let (lo, hi) = (a * (40.0 + 30.0) - a * 3.0, a * (40.0 + 30.0));
+    assert!(removed > lo && removed < hi, "removed {removed} in ({lo}, {hi})");
+    // Three edges: front, left and back.
+    let f3 = fillet(&b, &[Vec3::new(20.0, 0.0, 20.0), Vec3::new(0.0, 15.0, 20.0), Vec3::new(20.0, 30.0, 20.0)], 3.0).unwrap();
+    assert!(measure(&f3).unwrap().volume < measure(&f).unwrap().volume);
 }
