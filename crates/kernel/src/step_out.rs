@@ -1199,8 +1199,20 @@ fn brep_exchange(b: &Body, merge: bool) -> Result<(p21::Exchange, HashMap<u64, V
             }
         }
     }
+    let before = shell_face_count(&ex);
     let merged = if merge { merge_split_faces(&mut ex, &mut paint) } else { Default::default() };
+    MERGES.with(|m| m.set(m.get() + before.saturating_sub(shell_face_count(&ex))));
     Ok((ex, merged, paint))
+}
+
+/// Faces in the exchange's shells (fewer after merging).
+fn shell_face_count(ex: &p21::Exchange) -> usize {
+    ex.entities
+        .values()
+        .filter(|e| matches!(e.name(), "CLOSED_SHELL" | "OPEN_SHELL"))
+        .filter_map(|e| e.params().get(1).and_then(Param::as_list))
+        .map(<[Param]>::len)
+        .sum()
 }
 
 /// A face's own colour (0..1) and opacity.
@@ -1221,17 +1233,24 @@ fn rigid_frame(m: &[[f64; 4]; 4]) -> Result<([f64; 3], [f64; 3], [f64; 3])> {
 
 /// STEP text (AP242) for products with bodies and assembly placements; `root` is the top product.
 pub fn step_export_products(products: &[ExportProduct], root: usize, header: &StepHeader) -> Result<String> {
+    MERGES.with(|m| m.set(0));
     let text = products_text(products, root, header, true)?;
     // Faces merged per surface must read back as cleanly as the pieces they came from (a merge
-    // can leave a loop the reader cannot lay out); otherwise the pieces are written.
+    // can leave a loop the reader cannot lay out); otherwise the pieces are written. Without a
+    // merge there is nothing to check.
     let clean = |t: &str| crate::step_in::step_import(t).is_ok_and(|i| i.warnings.is_empty());
-    if !clean(&text) {
+    if MERGES.with(|m| m.get()) > 0 && !clean(&text) {
         let plain = products_text(products, root, header, false)?;
         if clean(&plain) {
             return Ok(plain);
         }
     }
     Ok(text)
+}
+
+thread_local! {
+    /// Faces merged while writing the current export.
+    static MERGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, merge: bool) -> Result<String> {
