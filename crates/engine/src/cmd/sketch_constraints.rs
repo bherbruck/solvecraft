@@ -514,3 +514,7 @@ fn snap(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 #[path = "sketch_constraints_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "sketch_fuzz_tests.rs"]
+mod fuzz;

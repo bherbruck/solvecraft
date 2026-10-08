@@ -68,6 +68,45 @@ fn end_param(sh: &Shape, p: Vec2, tol: f64) -> Option<f64> {
     }
 }
 
+/// A uniform grid over a set of boxes (about one box per cell), for neighbour queries.
+struct Grid {
+    lo: Vec2,
+    size: f64,
+}
+
+impl Grid {
+    fn new(boxes: &[(Vec2, Vec2)]) -> Grid {
+        let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+        for (a, b) in boxes {
+            lo = Vec2::new(lo.x.min(a.x), lo.y.min(a.y));
+            hi = Vec2::new(hi.x.max(b.x), hi.y.max(b.y));
+        }
+        if !(lo.is_finite() && hi.is_finite()) {
+            return Grid { lo: Vec2::ZERO, size: 1.0 };
+        }
+        let ext = (hi.x - lo.x).max(hi.y - lo.y).max(1e-9);
+        let per_side = (boxes.len() as f64).sqrt().ceil().clamp(1.0, 512.0);
+        Grid { lo, size: ext / per_side }
+    }
+    fn cell(&self, p: Vec2) -> (i64, i64) {
+        (((p.x - self.lo.x) / self.size).floor() as i64, ((p.y - self.lo.y) / self.size).floor() as i64)
+    }
+    /// Cells a box covers; None for boxes spanning too many (they are checked against all).
+    fn cells(&self, b: &(Vec2, Vec2)) -> Option<Vec<(i64, i64)>> {
+        let (c0, c1) = (self.cell(b.0), self.cell(b.1));
+        if (c1.0 - c0.0 + 1).saturating_mul(c1.1 - c0.1 + 1) > 2048 {
+            return None;
+        }
+        let mut out = Vec::new();
+        for x in c0.0..=c1.0 {
+            for y in c0.1..=c1.1 {
+                out.push((x, y));
+            }
+        }
+        Some(out)
+    }
+}
+
 fn find(p: &mut [usize], mut i: usize) -> usize {
     while let Some(&q) = p.get(i) {
         if q == i {
@@ -150,17 +189,7 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
             Shape::Round { .. } => {}
         }
     }
-    let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); shapes.len()];
-    for (i, (_, sh)) in shapes.iter().enumerate() {
-        for p in &ends {
-            if let Some(t) = sh.param_on(*p, tol)
-                && let Some(c) = cuts.get_mut(i)
-            {
-                c.push(t);
-            }
-        }
-    }
-    // Bounding boxes: only shapes whose boxes overlap can cross.
+    // Bounding boxes, and a uniform grid over them: only shapes sharing a cell can meet.
     let boxes: Vec<(Vec2, Vec2)> = shapes
         .iter()
         .map(|(_, sh)| match *sh {
@@ -172,9 +201,69 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
         (Some((a0, a1)), Some((b0, b1))) => a0.x <= b1.x && b0.x <= a1.x && a0.y <= b1.y && b0.y <= a1.y,
         _ => false,
     };
-    if shapes.len() <= 20_000 {
+    let grid = Grid::new(&boxes);
+    let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); shapes.len()];
+    // End points of other curves lying on each shape.
+    let mut end_cells: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    for (k, p) in ends.iter().enumerate() {
+        end_cells.entry(grid.cell(*p)).or_default().push(k);
+    }
+    let all_ends: Vec<usize> = (0..ends.len()).collect();
+    for (i, (_, sh)) in shapes.iter().enumerate() {
+        let Some(b) = boxes.get(i) else { continue };
+        let cand: Vec<usize> = match grid.cells(b) {
+            Some(cs) => cs.iter().flat_map(|c| end_cells.get(c).map(Vec::as_slice).unwrap_or(&[])).copied().collect(),
+            None => all_ends.clone(),
+        };
+        for k in cand {
+            if let Some(p) = ends.get(k)
+                && let Some(t) = sh.param_on(*p, tol)
+                && let Some(cu) = cuts.get_mut(i)
+            {
+                cu.push(t);
+            }
+        }
+    }
+    let mut shape_cells: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    let mut global: Vec<usize> = Vec::new();
+    for (i, b) in boxes.iter().enumerate() {
+        match grid.cells(b) {
+            Some(cs) => {
+                for c in cs {
+                    shape_cells.entry(c).or_default().push(i);
+                }
+            }
+            None => global.push(i),
+        }
+    }
+    let mut partners: Vec<Vec<usize>> = vec![Vec::new(); shapes.len()];
+    for v in shape_cells.values() {
+        for (k, &i) in v.iter().enumerate() {
+            for &j in v.iter().skip(k + 1) {
+                let (lo, hi) = if i < j { (i, j) } else { (j, i) };
+                if let Some(p) = partners.get_mut(lo) {
+                    p.push(hi);
+                }
+            }
+        }
+    }
+    for &g in &global {
+        for j in 0..shapes.len() {
+            if j != g {
+                let (lo, hi) = if g < j { (g, j) } else { (j, g) };
+                if let Some(p) = partners.get_mut(lo) {
+                    p.push(hi);
+                }
+            }
+        }
+    }
+    for p in &mut partners {
+        p.sort_unstable();
+        p.dedup();
+    }
+    if shapes.len() <= 50_000 {
         for i in 0..shapes.len() {
-            for j in (i + 1)..shapes.len() {
+            for &j in partners.get(i).map(Vec::as_slice).unwrap_or(&[]) {
                 if !overlap(i, j) {
                     continue;
                 }
@@ -211,12 +300,24 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
     }
     // Pieces → edges between merged nodes.
     let mut nodes: Vec<Vec2> = Vec::new();
+    // Grid buckets of `tol`-sized cells: merging looks only at neighbouring cells.
+    let mut grid: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    let cell = |p: Vec2| ((p.x / tol).floor() as i64, (p.y / tol).floor() as i64);
     let mut node = |p: Vec2| -> usize {
-        if let Some(i) = nodes.iter().position(|q| q.dist(p) <= tol) {
-            return i;
+        let (cx, cy) = cell(p);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(v) = grid.get(&(cx + dx, cy + dy))
+                    && let Some(i) = v.iter().copied().find(|i| nodes.get(*i).is_some_and(|q| q.dist(p) <= tol))
+                {
+                    return i;
+                }
+            }
         }
         nodes.push(p);
-        nodes.len() - 1
+        let i = nodes.len() - 1;
+        grid.entry((cx, cy)).or_default().push(i);
+        i
     };
     let mut loops: Vec<(Loop2, Vec<String>, usize)> = Vec::new(); // (ccw loop, curve ids, component)
     let mut edges: Vec<Edge> = Vec::new();
@@ -402,8 +503,18 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
         }
     }
 
-    // Nesting: parent = smallest containing loop from another component.
+    // Nesting: parent = smallest containing loop from another component. Bounding boxes rule
+    // out most pairs before the point-in-loop test.
     let areas: Vec<f64> = loops.iter().map(|(l, _, _)| l.signed_area().abs()).collect();
+    let boxes: Vec<(Vec2, Vec2)> = loops
+        .iter()
+        .map(|(l, _, _)| {
+            l.polyline(1e-3).iter().fold((Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), p| {
+                (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y)))
+            })
+        })
+        .collect();
+    let inside_box = |j: usize, p: Vec2| boxes.get(j).is_some_and(|(lo, hi)| p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y);
     let mut parent_of: Vec<Option<usize>> = vec![None; loops.len()];
     for (i, (li, _, ci)) in loops.iter().enumerate() {
         let probe = li.segs.first().map(Seg2::mid).unwrap_or_default();
@@ -411,10 +522,10 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
         let mut best: Option<(f64, usize)> = None;
         for (j, (lj, _, cj)) in loops.iter().enumerate() {
             let aj = areas.get(j).copied().unwrap_or(0.0);
-            if i == j || ci == cj || aj <= ai {
+            if i == j || ci == cj || aj <= ai || !inside_box(j, probe) || best.is_some_and(|(ba, _)| aj >= ba) {
                 continue;
             }
-            if lj.contains(probe) && best.is_none_or(|(ba, _)| aj < ba) {
+            if lj.contains(probe) {
                 best = Some((aj, j));
             }
         }
@@ -422,11 +533,19 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
             *p = best.map(|(_, j)| j);
         }
     }
+    let mut kids_of: Vec<Vec<usize>> = vec![Vec::new(); loops.len()];
+    for (k, p) in parent_of.iter().enumerate() {
+        if let Some(p) = p
+            && let Some(v) = kids_of.get_mut(*p)
+        {
+            v.push(k);
+        }
+    }
     let mut out: Vec<Profile> = loops
         .iter()
         .enumerate()
         .map(|(i, (l, ids, _))| {
-            let kids: Vec<usize> = (0..loops.len()).filter(|k| parent_of.get(*k).copied().flatten() == Some(i)).collect();
+            let kids: Vec<usize> = kids_of.get(i).cloned().unwrap_or_default();
             let holes: Vec<Loop2> = kids.iter().filter_map(|k| loops.get(*k).map(|(h, _, _)| h.ccw().reversed())).collect();
             let hole_curves: Vec<Vec<String>> = kids.iter().filter_map(|k| loops.get(*k).map(|(_, ids, _)| ids.clone())).collect();
             let region = Region2 { outer: l.ccw(), holes };
