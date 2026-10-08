@@ -23,11 +23,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("material")
         .params("bodies: [names]; material: name (Steel, Aluminum, ABS Plastic, …; `material.list`)"),
-    CommandSpec::new("AppearanceCommand", "Appearance", appearance)
-        .at("SOLID", "MODIFY")
-        .icon("appearance")
-        .key("A")
-        .params("bodies: [names]; color: \"#rrggbb\" or [r, g, b] (0–255), or null to follow the material"),
+    CommandSpec::new("AppearanceCommand", "Appearance", appearance).at("SOLID", "MODIFY").icon("appearance").key("A").params(
+        "bodies?: [names]; faces?: [[x,y,z] on faces] (body?: which body, default the nearest); components?: [names or ids, or occurrence names]; \
+             appearance?: library name (appearance.library) | color: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1, default 1); \
+             neither (or color: null): clear, so the face follows its body, the body its component, the component its material",
+    ),
+    CommandSpec::new("appearance.library", "Appearance Library", appearance_library)
+        .noundo()
+        .params("→ the built-in appearances (name, colour, opacity)"),
+    CommandSpec::new("appearance.list", "List Appearances", appearance_list)
+        .noundo()
+        .params("body?: name → assigned appearances; with body, its resolved look and its faces' (face index, look)"),
     CommandSpec::new("material.list", "List Materials", material_list).noundo(),
     CommandSpec::new("engine.commands", "List Commands", commands).noundo(),
 ];
@@ -292,23 +298,138 @@ fn color_param(v: &Value) -> Option<[u8; 3]> {
 }
 
 fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
+    use solvecraft_doc::appearance::{FaceLook, Look, library};
     let cmd = "AppearanceCommand";
+    let look: Option<Look> = match (str_(p, "appearance"), p.get("color")) {
+        (Some(n), _) => {
+            let mut l = library(n).ok_or_else(|| bad(cmd, format!("no appearance `{n}` in the library (appearance.library)")))?;
+            if let Some(o) = p.get("opacity").and_then(Value::as_f64).filter(|x| x.is_finite()) {
+                l.opacity = o.clamp(0.0, 1.0);
+            }
+            Some(l)
+        }
+        (None, None | Some(Value::Null)) => None,
+        (None, Some(v)) => {
+            let c = color_param(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0–255"))?;
+            let o = match p.get("opacity") {
+                Some(o) => o.as_f64().filter(|x| x.is_finite() && (0.0..=1.0).contains(x)).ok_or_else(|| bad(cmd, "`opacity` must be 0…1"))?,
+                None => 1.0,
+            };
+            Some(Look::custom(c, o))
+        }
+    };
     let bodies = string_list(p, "bodies");
     let st = s.model.state();
-    if bodies.is_empty() || bodies.iter().any(|b| st.body(b).is_none()) {
+    if bodies.iter().any(|b| st.body(b).is_none()) {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
     }
-    let color = match p.get("color") {
-        None | Some(Value::Null) => None,
-        Some(v) => Some(color_param(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0–255"))?),
-    };
+    // Faces: a point on each, on the named body or the nearest one.
+    let mut faces: Vec<(String, solvecraft_geom::Vec3)> = Vec::new();
+    if let Some(list) = p.get("faces") {
+        let list = list.as_array().filter(|a| a.len() <= 10_000).ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
+        for v in list {
+            let pt = crate::params::vec3(v)
+                .or_else(|| v.get("point").and_then(crate::params::vec3))
+                .ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
+            let on = |b: &solvecraft_doc::ModelBody| solvecraft_doc::appearance::face_index_at(b, pt).is_some();
+            let body = match str_(p, "body") {
+                Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),
+                None => st.bodies.iter().filter(|b| on(b)).min_by(|a, b| dist_to(a, pt).total_cmp(&dist_to(b, pt))).map(|b| b.name.clone()),
+            };
+            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt:?}")))?, pt));
+        }
+    }
+    let mut comps: Vec<u64> = Vec::new();
+    for c in string_list(p, "components") {
+        let id = s
+            .doc
+            .find_component(&c)
+            .or_else(|| s.doc.occurrences.iter().find(|o| o.name == c).map(|o| o.component))
+            .filter(|id| *id != 0)
+            .ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
+        comps.push(id);
+    }
+    if bodies.is_empty() && faces.is_empty() && comps.is_empty() {
+        return Err(bad(cmd, "give `bodies`, `faces` or `components`"));
+    }
+    let a = &mut s.doc_mut().appearances;
     for b in &bodies {
-        match color {
-            Some(c) => s.doc_mut().appearances.insert(b.clone(), c),
-            None => s.doc_mut().appearances.remove(b),
+        match &look {
+            Some(l) => a.bodies.insert(b.clone(), l.clone()),
+            None => a.bodies.remove(b),
         };
     }
-    Ok(json!({"bodies": bodies, "color": color.map(|c| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]))}))
+    for (body, pt) in &faces {
+        // One entry per face: a new one replaces any at the same spot.
+        a.faces.retain(|f| !(f.body == *body && f.point.dist(*pt) < 1e-9));
+        if let Some(l) = &look {
+            if a.faces.len() >= 100_000 {
+                return Err(bad(cmd, "too many face appearances"));
+            }
+            a.faces.push(FaceLook { body: body.clone(), point: *pt, look: l.clone() });
+        }
+    }
+    for c in &comps {
+        match &look {
+            Some(l) => a.components.insert(*c, l.clone()),
+            None => a.components.remove(c),
+        };
+    }
+    // Clearing a face: drop every entry on that face, not just at the same point.
+    if look.is_none() && !faces.is_empty() {
+        let st = s.model.state();
+        let doc = s.doc_mut();
+        let picked: Vec<(String, Option<usize>)> =
+            faces.iter().map(|(b, pt)| (b.clone(), st.body(b).and_then(|mb| solvecraft_doc::appearance::face_index_at(mb, *pt)))).collect();
+        doc.appearances.faces.retain(|f| {
+            let idx = st.body(&f.body).and_then(|mb| solvecraft_doc::appearance::face_index_at(mb, f.point));
+            !picked.iter().any(|(b, i)| *b == f.body && i.is_some() && *i == idx)
+        });
+    }
+    Ok(json!({
+        "bodies": bodies,
+        "faces": faces.iter().map(|(b, p)| json!({"body": b, "point": p})).collect::<Vec<_>>(),
+        "components": comps,
+        "appearance": look.as_ref().map(|l| json!({"name": l.name, "color": l.hex(), "opacity": l.opacity})),
+    }))
+}
+
+fn dist_to(b: &solvecraft_doc::ModelBody, p: solvecraft_geom::Vec3) -> f64 {
+    let bb = b.mesh().bounds();
+    let c = solvecraft_geom::Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
+    c.dist(p)
+}
+
+fn look_json(l: &solvecraft_doc::appearance::Look) -> Value {
+    json!({"name": l.name, "color": l.hex(), "opacity": l.opacity})
+}
+
+fn appearance_library(_s: &mut Session, _p: &Value) -> Result<Value> {
+    let list: Vec<Value> = solvecraft_doc::appearance::LIBRARY
+        .iter()
+        .map(|(n, c, o)| json!({"name": n, "color": format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]), "opacity": o}))
+        .collect();
+    Ok(json!({"appearances": list}))
+}
+
+fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
+    let a = &s.doc.appearances;
+    let mut out = json!({
+        "bodies": a.bodies.iter().map(|(b, l)| (b.clone(), look_json(l))).collect::<serde_json::Map<_, _>>(),
+        "faces": a.faces.iter().map(|f| json!({"body": f.body, "point": f.point, "appearance": look_json(&f.look)})).collect::<Vec<_>>(),
+        "components": a.components.iter().map(|(c, l)| json!({"component": c, "appearance": look_json(l)})).collect::<Vec<_>>(),
+    });
+    if let Some(name) = str_(p, "body") {
+        let st = s.model.state();
+        let b = st.body(name).ok_or_else(|| bad("appearance.list", format!("no body `{name}`")))?;
+        out["body"] = json!({
+            "name": name,
+            "appearance": s.doc.body_look(&b.name, b.feature).map(|l| look_json(&l)),
+            "color": s.doc.body_color(b),
+            "faces": s.doc.face_colors(b).iter().map(|(i, l)| json!({"face": i, "appearance": look_json(l)})).collect::<Vec<_>>(),
+        });
+    }
+    Ok(out)
 }
 
 fn material_list(_s: &mut Session, _p: &Value) -> Result<Value> {

@@ -10,13 +10,16 @@
 //!   have defaults; designs from before feature input names and before occurrences are filled
 //!   in on upgrade.
 //! - 2: the same shape; files say 2 once they have been upgraded, so later readers can tell.
+//! - 3: appearances per body, face and component with names and opacity
+//!   (`"appearances": {"bodies": {name: {name, color, opacity}}, "faces": […], "components": {…}}`);
+//!   before, `"appearances"` mapped body names to bare `[r, g, b]` colours.
 
 use serde_json::Value;
 
 use crate::{DocError, Document, Result};
 
 /// The format this build writes.
-pub const FORMAT: u32 = 2;
+pub const FORMAT: u32 = 3;
 
 pub fn format_string(n: u32) -> String {
     format!("solvecraft/{n}")
@@ -29,7 +32,21 @@ pub fn version_of(s: &str) -> Option<u32> {
 
 /// JSON-level upgrades: entry `i` turns format `i + 1` into `i + 2`.
 type JsonStep = fn(&mut Value) -> Result<()>;
-const JSON_STEPS: [JsonStep; 1] = [|_| Ok(())];
+const JSON_STEPS: [JsonStep; 2] = [|_| Ok(()), v2_to_v3];
+
+/// Body colours `{name: [r, g, b]}` become named, opaque body appearances.
+fn v2_to_v3(v: &mut Value) -> Result<()> {
+    let Some(Value::Object(old)) = v.get("appearances") else { return Ok(()) };
+    if !old.values().all(Value::is_array) {
+        return Ok(());
+    }
+    let bodies: serde_json::Map<String, Value> =
+        old.iter().map(|(k, c)| (k.clone(), serde_json::json!({"name": "Custom", "color": c, "opacity": 1.0}))).collect();
+    if let Some(o) = v.as_object_mut() {
+        o.insert("appearances".into(), serde_json::json!({ "bodies": bodies }));
+    }
+    Ok(())
+}
 
 /// Read a design file's JSON, upgrading older formats.
 pub fn read(s: &str) -> Result<Document> {
@@ -160,6 +177,13 @@ mod tests {
             assert!(read(&v.to_string()).is_err(), "{bad}");
         }
         assert!(read("[]").is_err());
+        // Format 2 body colours become body appearances.
+        let mut old: Value = serde_json::from_str(&Document::new("A").to_json()).unwrap();
+        old["format"] = Value::from("solvecraft/2");
+        old["appearances"] = serde_json::json!({"Body1": [200, 10, 20]});
+        let d = read(&old.to_string()).unwrap();
+        let l = d.appearances.bodies.get("Body1").unwrap();
+        assert_eq!((l.color, l.opacity, l.name.as_str()), ([200, 10, 20], 1.0, "Custom"));
         let mut v: Value = serde_json::from_str(&Document::new("A").to_json()).unwrap();
         v["huge"] = Value::from(1e300);
         assert!(read(&v.to_string()).is_err(), "out-of-range numbers anywhere");

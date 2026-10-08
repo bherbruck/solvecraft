@@ -215,7 +215,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         }
         // With a component active, bodies outside it are drawn faded.
         let faded = s.active_component != 0 && !s.doc.component_within(s.doc.body_component(&b.name, b.feature), s.active_component);
-        let base = body_color(&s.doc, &b.name, &b.body).unwrap_or(tk.body);
+        let base = body_color(&s.doc, b).unwrap_or(tk.body);
         let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
         let m = b.mesh();
         let (shaded, edges) = match app.ui.visual_style {
@@ -968,15 +968,15 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
 }
 
 /// A body's display colour (appearance, material or imported colour), if it has one.
-fn body_color(doc: &solvecraft_engine::doc::Document, name: &str, body: &solvecraft_engine::kernel::Body) -> Option<Color32> {
+fn body_color(doc: &solvecraft_engine::doc::Document, b: &solvecraft_engine::doc::ModelBody) -> Option<Color32> {
     let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
-    doc.body_color(name, body).map(|[r, g, b]| Color32::from_rgb(to8(r), to8(g), to8(b)))
+    doc.body_color(b).map(|[r, g, b]| Color32::from_rgb(to8(r), to8(g), to8(b)))
 }
 
 /// A body's display colour (else the theme's) as RGB.
 fn body_rgb(app: &SolveApp, name: &str) -> (u8, u8, u8) {
     let st = app.session.model.state();
-    let c = st.body(name).and_then(|b| body_color(&app.session.doc, name, &b.body)).unwrap_or(Tokens::get().body);
+    let c = st.body(name).and_then(|b| body_color(&app.session.doc, b)).unwrap_or(Tokens::get().body);
     (c.r(), c.g(), c.b())
 }
 

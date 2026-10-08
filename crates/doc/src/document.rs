@@ -1070,8 +1070,8 @@ pub struct Document {
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub materials: std::collections::BTreeMap<String, String>,
     /// Appearance colour per body (by body name, sRGB); it overrides the material's look.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub appearances: std::collections::BTreeMap<String, [u8; 3]>,
+    #[serde(default, skip_serializing_if = "crate::appearance::Appearances::is_empty")]
+    pub appearances: crate::appearance::Appearances,
     /// Bodies moved into another component than their feature's (by body name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub body_components: std::collections::BTreeMap<String, u64>,
@@ -1152,18 +1152,18 @@ impl Document {
         }
     }
 
-    /// The colour a body is shown and exported in (sRGB as 0–1 fractions): its
-    /// appearance, else its material's look, else the colour it was imported with.
-    pub fn body_color(&self, name: &str, body: &solvecraft_kernel::Body) -> Option<[f32; 3]> {
-        let rgb = |c: [u8; 3]| c.map(|x| x as f32 / 255.0);
-        self.appearances.get(name).copied().or_else(|| self.materials.get(name).and_then(|m| material_color(m))).map(rgb).or_else(|| body.color())
+    /// The colour a body is shown and exported in (sRGB as 0–1 fractions): its appearance,
+    /// else its component's, else its material's look, else the colour it was imported with.
+    /// (Faces may have their own: `face_looks`.)
+    pub fn body_color(&self, b: &crate::ModelBody) -> Option<[f32; 3]> {
+        self.body_look(&b.name, b.feature).map(|l| l.rgb()).or_else(|| b.body.color())
     }
 
     /// The model with each body carrying the colour it is shown in (for export).
     pub fn painted(&self, state: &crate::ModelState) -> crate::ModelState {
         let mut st = state.clone();
         for b in &mut st.bodies {
-            let c = self.body_color(&b.name, &b.body);
+            let c = self.body_color(b);
             if c != b.body.color() {
                 b.body = b.body.clone().with_color(c);
             }

@@ -1032,3 +1032,45 @@ fn face_extrude_follows_edits() {
     let want = 30.0 * 20.0 * 20.0 * PI / 2.0;
     assert!(rel(added, want) < 1e-4, "{added} vs {want}");
 }
+
+/// Appearances on faces, bodies and components: face > body > component > material.
+#[test]
+fn appearances_by_face_body_and_component() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10, "body_name": "Root"}));
+    run(&mut s, "FusionCreateNewComponentCommand", json!({"name": "Case"}));
+    run(&mut s, "PrimitiveBox", json!({"corner": [20, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Shell"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let lib = run(&mut s, "appearance.library", json!({}));
+    assert!(lib["appearances"].as_array().is_some_and(|a| a.len() >= 15 && a.iter().any(|x| x["name"] == "Glass - Clear")));
+    let look = |s: &mut Session, b: &str| run(s, "appearance.list", json!({"body": b}))["body"].clone();
+    // Material, then component, then body.
+    run(&mut s, "PhysicalMaterialCommand", json!({"bodies": ["Shell"], "material": "Brass"}));
+    assert_eq!(look(&mut s, "Shell")["appearance"]["name"], "Brass");
+    run(&mut s, "AppearanceCommand", json!({"components": ["Case"], "appearance": "ABS - Blue"}));
+    assert_eq!(look(&mut s, "Shell")["appearance"]["name"], "ABS - Blue");
+    assert!(look(&mut s, "Root")["appearance"].is_null(), "root bodies have no component look");
+    run(&mut s, "AppearanceCommand", json!({"bodies": ["Shell"], "color": [255, 0, 0], "opacity": 0.5}));
+    let l = look(&mut s, "Shell");
+    assert_eq!((l["appearance"]["color"].as_str(), l["appearance"]["opacity"].as_f64()), (Some("#ff0000"), Some(0.5)), "{l}");
+    // A face: the top of Shell.
+    run(&mut s, "AppearanceCommand", json!({"faces": [[25, 5, 10]], "appearance": "Glass - Clear"}));
+    let l = look(&mut s, "Shell");
+    let faces = l["faces"].as_array().cloned().unwrap_or_default();
+    assert_eq!(faces.len(), 1, "{l}");
+    assert_eq!(faces[0]["appearance"]["name"], "Glass - Clear");
+    // Clearing goes back down the chain.
+    run(&mut s, "AppearanceCommand", json!({"faces": [[26, 6, 10]]}));
+    assert_eq!(look(&mut s, "Shell")["faces"].as_array().map(Vec::len), Some(0), "cleared by another point on the same face");
+    run(&mut s, "AppearanceCommand", json!({"bodies": ["Shell"], "color": null}));
+    assert_eq!(look(&mut s, "Shell")["appearance"]["name"], "ABS - Blue");
+    run(&mut s, "AppearanceCommand", json!({"components": ["Case"]}));
+    assert_eq!(look(&mut s, "Shell")["appearance"]["name"], "Brass");
+    // Saved and opened again.
+    run(&mut s, "AppearanceCommand", json!({"faces": [[5, 5, 10]], "color": "#00ff00"}));
+    let back = solvecraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(back.appearances, s.doc.appearances);
+    assert!(s.execute("AppearanceCommand", &json!({"bodies": ["Shell"], "appearance": "Unobtainium"})).is_err());
+    assert!(s.execute("AppearanceCommand", &json!({"color": "#ffffff"})).is_err(), "no target");
+    assert!(s.execute("AppearanceCommand", &json!({"faces": [[500, 500, 500]], "color": "#ffffff"})).is_err(), "no face there");
+}
