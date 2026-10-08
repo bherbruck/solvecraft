@@ -566,6 +566,23 @@ fn seam_frame(f: &Frame, extent: &[mt::Point3], seam: &[mt::Point3]) -> Frame {
     }
 }
 
+/// Length of the mean unit direction from the frame origin to the points (1: all in one
+/// direction, 0: spread all round).
+fn mean_direction(f: &Frame, pts: &[mt::Point3]) -> f64 {
+    let dirs: Vec<mt::Vector3> = pts
+        .iter()
+        .filter_map(|p| {
+            let d = p - f.o;
+            let m = d.magnitude();
+            (m > 1e-12).then(|| d / m)
+        })
+        .collect();
+    if dirs.is_empty() {
+        return 0.0;
+    }
+    (dirs.iter().fold(mt::Vector3::new(0.0, 0.0, 0.0), |a, d| a + d) / dirs.len() as f64).magnitude()
+}
+
 /// Polar axis for a sphere: far from every boundary point, and (for a face concentrated on
 /// one side) with both poles outside the face, so every loop closes in parameter space.
 fn sphere_axis(f: &Frame, extent: &[mt::Point3]) -> mt::Vector3 {
@@ -810,7 +827,10 @@ pub(crate) fn surface(cx: &Ctx, id: u64, extent: &[mt::Point3], seam: &[mt::Poin
             }
             // With seam edges the file's own parameterisation fits the loops; else pick poles
             // away from the boundary.
-            let f = if seam.is_empty() {
+            // A small patch (a corner blend) gets poles away from it even when the file runs a
+            // seam through it: a seam ending at a pole on the patch boundary leaves the mesher
+            // no way to tell the patch from the rest of the sphere.
+            let f = if seam.is_empty() || mean_direction(&f, extent) > 0.3 {
                 let z = sphere_axis(&f, extent);
                 let x = any_perpendicular(z);
                 seam_frame(&Frame { o: f.o, x, y: z.cross(x), z }, extent, seam)

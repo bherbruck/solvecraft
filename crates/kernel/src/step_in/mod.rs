@@ -233,6 +233,8 @@ struct Reader<'a> {
     node_items: HashSet<u64>,
     /// Occurrences and mapped representations visited so far.
     visits: usize,
+    /// Items whose meshing was checked.
+    unmeshed_checked: HashSet<u64>,
     bodies: Vec<ImportedBody>,
 }
 
@@ -454,6 +456,13 @@ impl<'a> Reader<'a> {
                         Ok(body) => {
                             let own = e.params().first().and_then(Param::as_str).unwrap_or("").trim().to_string();
                             let name = if own.is_empty() { product.to_string() } else { own };
+                            // Faces the mesher gives up on (or that the budget cut short) are reported.
+                            if self.unmeshed_checked.insert(item) {
+                                let n = body.unmeshed_faces();
+                                if n > 0 {
+                                    self.warn(format!("solid '{name}': {n} face(s) could not be meshed and are not shown"));
+                                }
+                            }
                             out.push(self.bodies.len());
                             let color = self.colors.get(&item).copied();
                             self.bodies.push(ImportedBody { name, body: body.with_color(color), color, path: path.to_vec(), closed, file_faces });
@@ -682,6 +691,7 @@ pub fn step_import(text: &str) -> Result<StepImport> {
         used_items: HashSet::new(),
         node_items: HashSet::new(),
         visits: 0,
+        unmeshed_checked: HashSet::new(),
         bodies: Vec::new(),
     };
     rd.index();

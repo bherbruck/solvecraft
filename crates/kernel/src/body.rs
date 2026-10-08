@@ -291,6 +291,21 @@ impl Body {
         })
     }
 
+    /// Faces with no triangles in a coarse tessellation (the mesher failed or gave up).
+    pub fn unmeshed_faces(&self) -> usize {
+        if self.is_mesh() {
+            return 0;
+        }
+        let Ok(m) = self.tessellate((self.size() * 1e-2).max(1e-3)) else { return self.face_count() };
+        let mut has = vec![false; self.face_count()];
+        for f in &m.tri_face {
+            if let Some(h) = has.get_mut(*f as usize) {
+                *h = true;
+            }
+        }
+        has.iter().filter(|h| !**h).count()
+    }
+
     /// Display mesh: like [`Body::tessellate`], with seam edges flagged.
     pub fn display_mesh(&self, tol: f64) -> Result<Mesh> {
         let mut m = self.tessellate(tol)?;

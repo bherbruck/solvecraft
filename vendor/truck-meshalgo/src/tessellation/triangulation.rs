@@ -98,6 +98,7 @@ where
     C: PolylineableCurve + 'a,
     S: PreMeshableSurface + 'a,
 {
+    let cap = face_cap(shell.len());
     let vmap: HashMap<_, _> = shell
         .vertex_par_iter()
         .map(|v| (v.id(), v.mapped(Point3::clone)))
@@ -109,7 +110,7 @@ where
             let v0 = vmap.get(&edge.absolute_front().id()).unwrap();
             let v1 = vmap.get(&edge.absolute_back().id()).unwrap();
             let curve = edge.curve();
-            let poly = PolylineCurve::from_curve(&curve, curve.range_tuple(), tol);
+            let poly = bounded_polyline(&curve, curve.range_tuple(), tol);
             (id, Edge::debug_new(v0, v1, poly))
         })
         .collect();
@@ -128,7 +129,7 @@ where
             .iter()
             .map(create_boundary)
             .collect();
-        shell_create_polygon(&face.surface(), wires, face.orientation(), tol, &sp)
+        shell_create_polygon(&face.surface(), wires, face.orientation(), tol, &sp, cap)
     };
     shell.face_par_iter().map(create_face).collect()
 }
@@ -146,6 +147,7 @@ where
 {
     use truck_base::entry_map::FxEntryMap as EntryMap;
     use truck_topology::Vertex as TVertex;
+    let cap = face_cap(shell.len());
     let mut vmap = EntryMap::new(
         move |v: &TVertex<Point3>| v.id(),
         move |v| v.mapped(Point3::clone),
@@ -158,7 +160,7 @@ where
             let vb = edge.absolute_back();
             let v1 = vmap.entry_or_insert(vb).clone();
             let curve = edge.curve();
-            let poly = PolylineCurve::from_curve(&curve, curve.range_tuple(), tol);
+            let poly = bounded_polyline(&curve, curve.range_tuple(), tol);
             Edge::debug_new(&v0, &v1, poly)
         },
     );
@@ -178,7 +180,7 @@ where
             .iter()
             .map(&mut create_boundary)
             .collect();
-        shell_create_polygon(&face.surface(), wires, face.orientation(), tol, &sp)
+        shell_create_polygon(&face.surface(), wires, face.orientation(), tol, &sp, cap)
     };
     shell.face_iter().map(create_face).collect()
 }
@@ -194,11 +196,12 @@ where
     S: PreMeshableSurface + 'a,
 {
     let vertices = shell.vertices.clone();
+    let cap = face_cap(shell.faces.len());
     let tessellate_edge = |edge: &CompressedEdge<C>| {
         let curve = &edge.curve;
         CompressedEdge {
             vertices: edge.vertices,
-            curve: PolylineCurve::from_curve(curve, curve.range_tuple(), tol),
+            curve: bounded_polyline(curve, curve.range_tuple(), tol),
         }
     };
     #[cfg(not(target_arch = "wasm32"))]
@@ -219,7 +222,7 @@ where
         let preboundary: Option<Vec<_>> = boundaries.iter().map(create_boundary).collect();
         let polygon: Option<PolygonMesh> = (|| {
             let boundary = PolyBoundary::new(preboundary?, &surface, tol);
-            Some(trimming_tessellation(&surface, &boundary, tol))
+            Some(trimming_tessellation(&surface, &boundary, tol, cap))
         })();
         CompressedFace {
             boundaries,
@@ -244,6 +247,7 @@ fn shell_create_polygon<S: PreMeshableSurface>(
     orientation: bool,
     tol: f64,
     sp: impl SP<S>,
+    cap: usize,
 ) -> Face<Point3, PolylineCurve, Option<PolygonMesh>> {
     let preboundary = wires
         .iter()
@@ -254,7 +258,7 @@ fn shell_create_polygon<S: PreMeshableSurface>(
         .collect::<Option<Vec<_>>>();
     let polygon: Option<PolygonMesh> = (|| {
         let boundary = PolyBoundary::new(preboundary?, &surface, tol);
-        Some(trimming_tessellation(surface, &boundary, tol))
+        Some(trimming_tessellation(surface, &boundary, tol, cap))
     })();
     let mut new_face = Face::debug_new(wires, polygon);
     if !orientation {
@@ -559,11 +563,11 @@ fn spade_round(x: f64) -> f64 {
 }
 
 /// Tessellates one surface trimmed by polyline.
-fn trimming_tessellation<S>(surface: &S, polyboundary: &PolyBoundary, tol: f64) -> PolygonMesh
+fn trimming_tessellation<S>(surface: &S, polyboundary: &PolyBoundary, tol: f64, cap: usize) -> PolygonMesh
 where S: PreMeshableSurface {
     let mut triangulation = Cdt::new();
     polyboundary.insert_to(&mut triangulation);
-    insert_surface(&mut triangulation, surface, polyboundary, tol);
+    insert_surface(&mut triangulation, surface, polyboundary, tol, cap);
     let mut mesh = triangulation_into_polymesh(
         triangulation.vertices(),
         triangulation.inner_faces(),
@@ -580,10 +584,15 @@ fn insert_surface(
     surface: impl PreMeshableSurface,
     polyline: &PolyBoundary,
     tol: f64,
+    cap: usize,
 ) {
     let bdb: BoundingBox<Point2> = polyline.0.iter().flatten().collect();
     let range = ((bdb.min()[0], bdb.max()[0]), (bdb.min()[1], bdb.max()[1]));
-    let (udiv, vdiv) = surface.parameter_division(range, tol);
+    if !(range.0 .0.is_finite() && range.0 .1.is_finite() && range.1 .0.is_finite() && range.1 .1.is_finite()) {
+        return;
+    }
+    let (udiv, vdiv) = bounded_surface_division(&surface, range, tol, cap);
+    let (udiv, vdiv) = balanced_grid(&surface, udiv, vdiv, cap);
     let insert_res: Vec<Vec<Option<_>>> = udiv
         .into_iter()
         .map(|u| {
@@ -617,6 +626,162 @@ fn insert_surface(
             }
         }
     });
+}
+
+/// SolveCraft: most grid points a face gets (keeps hostile or huge faces bounded).
+pub(super) const MAX_GRID: usize = 150_000;
+/// SolveCraft: grid points shared by all faces of one shell; many faces get fewer each.
+pub(super) const SHELL_GRID_BUDGET: usize = 10_000_000;
+/// SolveCraft: most points on one edge's polyline.
+const MAX_EDGE_POINTS: usize = 20_000;
+
+/// SolveCraft: the grid budget of each face of a shell with `faces` faces.
+pub(super) fn face_cap(faces: usize) -> usize {
+    (SHELL_GRID_BUDGET / faces.max(1)).clamp(2_000, MAX_GRID)
+}
+
+/// SolveCraft: truck's curve division, bounded: at most `MAX_EDGE_POINTS` points and a
+/// bisection depth of 24; a midpoint that does not evaluate (NaN) counts as flat (truck's
+/// version recursed on it 100 levels deep, which never finishes).
+fn bounded_polyline<C: PolylineableCurve>(curve: &C, range: (f64, f64), tol: f64) -> PolylineCurve {
+    let mut out = vec![curve.subs(range.0)];
+    let mut stack: Vec<(f64, f64, usize)> = vec![(range.0, range.1, 0)];
+    while let Some((a, b, depth)) = stack.pop() {
+        let (pa, pb) = (curve.subs(a), curve.subs(b));
+        let t = a + (b - a) * 0.4729;
+        let chord = pa + (pb - pa) * 0.4729;
+        let d2 = curve.subs(t).distance2(chord);
+        let tm = 0.5 * (a + b);
+        let dm = curve.subs(tm).distance2(pa.midpoint(pb));
+        let flat = !(d2 >= tol * tol || dm >= tol * tol);
+        if flat || depth >= 24 || out.len() + stack.len() >= MAX_EDGE_POINTS {
+            out.push(pb);
+        } else {
+            // Right half after the left one (stack order).
+            stack.push((tm, b, depth + 1));
+            stack.push((a, tm, depth + 1));
+        }
+    }
+    PolylineCurve(out)
+}
+
+/// SolveCraft: truck's surface division, bounded: stops refining when the grid would exceed
+/// `cap` points or after 24 rounds; cells that do not evaluate (NaN) are not refined.
+fn bounded_surface_division<S: PreMeshableSurface>(surface: &S, (ur, vr): ((f64, f64), (f64, f64)), tol: f64, cap: usize) -> (Vec<f64>, Vec<f64>) {
+    let (mut udiv, mut vdiv) = (vec![ur.0, ur.1], vec![vr.0, vr.1]);
+    for _ in 0..24 {
+        let mut fu = vec![false; udiv.len() - 1];
+        let mut fv = vec![false; vdiv.len() - 1];
+        for (i, u) in udiv.windows(2).enumerate() {
+            for (j, v) in vdiv.windows(2).enumerate() {
+                if fu[i] && fv[j] {
+                    continue;
+                }
+                let (p, q) = (0.4729, 0.5271);
+                let (u0, v0) = (u[0] * (1.0 - p) + u[1] * p, v[0] * (1.0 - q) + v[1] * q);
+                let p0 = surface.subs(u0, v0);
+                let pt00 = surface.subs(u[0], v[0]).to_vec();
+                let pt01 = surface.subs(u[0], v[1]).to_vec();
+                let pt10 = surface.subs(u[1], v[0]).to_vec();
+                let pt11 = surface.subs(u[1], v[1]).to_vec();
+                let pt = Point3::from_vec(pt00 * (1.0 - p) * (1.0 - q) + pt01 * (1.0 - p) * q + pt10 * p * (1.0 - q) + pt11 * p * q);
+                let far = p0.distance2(pt) > tol * tol;
+                // Which direction bends: refine only that one (a cylinder needs no division
+                // along its rulings).
+                let alu = surface.subs(u[0], v0).to_vec() * (1.0 - p) + surface.subs(u[1], v0).to_vec() * p;
+                let alv = surface.subs(u0, v[0]).to_vec() * (1.0 - q) + surface.subs(u0, v[1]).to_vec() * q;
+                let bend_u = p0.distance2(Point3::from_vec(alu)) > tol * tol;
+                let bend_v = p0.distance2(Point3::from_vec(alv)) > tol * tol;
+                if bend_u || bend_v {
+                    fu[i] |= bend_u;
+                    fv[j] |= bend_v;
+                } else if far {
+                    fu[i] = true;
+                    fv[j] = true;
+                }
+            }
+        }
+        let nu = udiv.len() + fu.iter().filter(|x| **x).count();
+        let nv = vdiv.len() + fv.iter().filter(|x| **x).count();
+        if nu == udiv.len() && nv == vdiv.len() {
+            break;
+        }
+        if nu.saturating_mul(nv) > cap {
+            break;
+        }
+        let refine = |d: &[f64], f: &[bool]| {
+            let mut n = vec![d[0]];
+            for (w, b) in d.windows(2).zip(f) {
+                if *b {
+                    n.push(0.5 * (w[0] + w[1]));
+                }
+                n.push(w[1]);
+            }
+            n
+        };
+        udiv = refine(&udiv, &fu);
+        vdiv = refine(&vdiv, &fv);
+    }
+    (udiv, vdiv)
+}
+
+/// SolveCraft: refine the parameter grid so its cells are not much longer in one direction than
+/// the other. A ruled surface (cylinder, cone) needs no division along its rulings, and the
+/// triangles that then join a trimming loop to the far ends of the grid cut through the
+/// surface (a cylinder with a hole lost volume this way).
+fn balanced_grid(surface: &impl PreMeshableSurface, udiv: Vec<f64>, vdiv: Vec<f64>, cap: usize) -> (Vec<f64>, Vec<f64>) {
+    let mid = |d: &[f64]| if d.is_empty() { 0.0 } else { d[d.len() / 2] };
+    let (um, vm) = (mid(&udiv), mid(&vdiv));
+    let step = |d: &[f64], along_u: bool| -> Vec<f64> {
+        d.windows(2)
+            .map(|w| {
+                let (a, b) = (w[0], w[1]);
+                if along_u { surface.subs(a, vm).distance(surface.subs(b, vm)) } else { surface.subs(um, a).distance(surface.subs(um, b)) }
+            })
+            .collect()
+    };
+    let (lu, lv) = (step(&udiv, true), step(&vdiv, false));
+    let typical = |l: &[f64]| {
+        let mut v: Vec<f64> = l.iter().copied().filter(|x| x.is_finite() && *x > 0.0).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        if v.is_empty() { None } else { Some(v[v.len() / 2]) }
+    };
+    let refine = |d: &[f64], l: &[f64], target: Option<f64>| -> Vec<f64> {
+        let Some(t) = target.filter(|t| *t > 0.0) else { return d.to_vec() };
+        // At most 24 cells along a ruling: enough for holes and trims to get short triangles.
+        let total: f64 = l.iter().filter(|x| x.is_finite()).sum();
+        let t = t.max(total / 24.0 / 4.0);
+        let mut out = Vec::with_capacity(d.len());
+        for (i, w) in d.windows(2).enumerate() {
+            let n = l.get(i).map(|x| (x / (4.0 * t)).ceil()).filter(|n| n.is_finite()).unwrap_or(1.0).clamp(1.0, 64.0) as usize;
+            for k in 0..n {
+                out.push(w[0] + (w[1] - w[0]) * k as f64 / n as f64);
+            }
+        }
+        if let Some(last) = d.last() {
+            out.push(*last);
+        }
+        out
+    };
+    // Only a direction left undivided (a ruling) needs it; curved directions already follow
+    // the tolerance.
+    let u2 = if udiv.len() <= 3 { refine(&udiv, &lu, typical(&lv)) } else { udiv.clone() };
+    let v2 = if vdiv.len() <= 3 { refine(&vdiv, &lv, typical(&lu)) } else { vdiv.clone() };
+    let (u2, v2) = if u2.len().saturating_mul(v2.len()) > cap { (udiv, vdiv) } else { (u2, v2) };
+    // Never more than MAX_GRID points: thin out evenly (the mesh gets coarser, not endless).
+    let total = u2.len().saturating_mul(v2.len());
+    if total <= cap {
+        return (u2, v2);
+    }
+    let f = (total as f64 / cap.max(4) as f64).sqrt();
+    let thin = |d: Vec<f64>| -> Vec<f64> {
+        let n = ((d.len() as f64 / f).ceil() as usize).max(2);
+        if d.len() <= n {
+            return d;
+        }
+        (0..n).map(|i| d[i * (d.len() - 1) / (n - 1)]).collect()
+    };
+    (thin(u2), thin(v2))
 }
 
 /// Converts triangulation into `PolygonMesh`.

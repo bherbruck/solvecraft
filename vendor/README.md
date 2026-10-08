@@ -34,5 +34,11 @@ Changes:
   non-periodic domain are rejected (a hinted B-spline search can run off and extrapolate to
   thousands of parameter units, and meshing that grid never finishes); the last-resort nearest
   search is clamped into the domain.
+- `tessellation/triangulation.rs`, bounded work (hostile files must not hang): edge polylines
+  and surface grids come from our own bounded divisions (at most 20 000 points per edge, a
+  grid budget per face shared out of 10 million points per shell, 24 refinement rounds; a
+  point that does not evaluate counts as flat instead of recursing). Surface grids refine only
+  the direction that bends, and a ruling left undivided gets cells comparable to the other
+  direction (long triangles from a trim loop to the grid's far ends cut through cylinders).
 - `lib.rs`: compiler warnings no longer fail the build. Example, test and bench targets are
   dropped (their sources are not vendored).

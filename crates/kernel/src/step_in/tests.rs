@@ -367,3 +367,70 @@ fn mirrored_revolved_faces_round_trip() {
         round_trip(&boolean(&plate, &tool, BoolOp::Cut).unwrap().unwrap());
     }
 }
+
+/// Faces whose boundaries are nowhere near their surfaces, or wild B-spline surfaces, mesh
+/// within bounded work (the mesher once looped for ever on such input) and are reported if
+/// they cannot be meshed.
+#[test]
+fn hostile_boundaries_mesh_in_bounded_time() {
+    let t0 = std::time::Instant::now();
+    // A wild 24 × 24 B-spline patch (alternating ±50 mm) bounded by four straight edges that
+    // lie far from it, plus a plane face bounded by a circle 500 mm off the plane.
+    let n = 24;
+    let mut t = String::from(HEAD);
+    let mut rows = Vec::new();
+    for i in 0..n {
+        let mut row = Vec::new();
+        for j in 0..n {
+            let id = 1000 + i * n + j;
+            let z = if (i * 7 + j * 13) % 2 == 0 { 50.0 } else { -50.0 };
+            t += &format!("#{id}=CARTESIAN_POINT('',({}.,{}.,{z}));\n", i * 10, j * 10);
+            row.push(format!("#{id}"));
+        }
+        rows.push(format!("({})", row.join(",")));
+    }
+    let knots = |m: usize| {
+        let mut mult = vec!["4".to_string()];
+        mult.extend(std::iter::repeat_n("1".to_string(), m - 4));
+        mult.push("4".into());
+        let ks: Vec<String> = (0..=(m - 3)).map(|k| format!("{k}.")).collect();
+        (mult.join(","), ks.join(","))
+    };
+    let (mu, ku) = knots(n);
+    t += &format!(
+        "#10=B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.F.,.F.,.F.,({mu}),({mu}),({ku}),({ku}),.UNSPECIFIED.);\n",
+        rows.join(",")
+    );
+    let corners = [(0, 0), (390, 0), (390, 390), (0, 390)];
+    for (k, (x, y)) in corners.iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',({x}.,{y}.,300.));\n#{}=VERTEX_POINT('',#{});\n", 20 + k, 30 + k, 20 + k);
+    }
+    t += "#40=DIRECTION('',(1.,0.,0.));\n#41=VECTOR('',#40,1.);\n";
+    for k in 0..4 {
+        t += &format!(
+            "#{}=LINE('',#{},#41);\n#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n",
+            50 + k,
+            20 + k,
+            60 + k,
+            30 + k,
+            30 + (k + 1) % 4,
+            50 + k,
+            70 + k,
+            60 + k
+        );
+    }
+    t += "#80=EDGE_LOOP('',(#70,#71,#72,#73));\n#81=FACE_OUTER_BOUND('',#80,.T.);\n#82=ADVANCED_FACE('',(#81),#10,.T.);\n";
+    t += "#90=CARTESIAN_POINT('',(0.,0.,0.));\n#91=DIRECTION('',(0.,0.,1.));\n#92=AXIS2_PLACEMENT_3D('',#90,#91,#40);\n#93=PLANE('',#92);\n";
+    t += "#94=CARTESIAN_POINT('',(0.,0.,500.));\n#95=AXIS2_PLACEMENT_3D('',#94,#91,#40);\n#96=CIRCLE('',#95,30.);\n#97=CARTESIAN_POINT('',(30.,0.,500.));\n#98=VERTEX_POINT('',#97);\n";
+    t += "#99=EDGE_CURVE('',#98,#98,#96,.T.);\n#100=ORIENTED_EDGE('',*,*,#99,.T.);\n#101=EDGE_LOOP('',(#100));\n#102=FACE_OUTER_BOUND('',#101,.T.);\n#103=ADVANCED_FACE('',(#102),#93,.T.);\n";
+    t += "#110=OPEN_SHELL('',(#82,#103));\n#111=SHELL_BASED_SURFACE_MODEL('Wild',(#110));\n#112=SHAPE_REPRESENTATION('',(#111),$);\n";
+    t += TAIL;
+    let r = std::panic::catch_unwind(|| step_import(&t));
+    assert!(r.is_ok(), "panicked");
+    if let Ok(Ok(imp)) = r {
+        for b in &imp.bodies {
+            let _ = measure(&b.body);
+        }
+    }
+    assert!(t0.elapsed().as_secs_f64() < 60.0, "took {:?}", t0.elapsed());
+}
