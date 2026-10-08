@@ -176,9 +176,14 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             taper_handle(ui, painter, proj, base - e * (40.0 * px), n * l, -e, ang, taper);
         }
     }
-    if let (Kind::Hole { depth, .. }, Some(n)) = (&mut d.kind, dir) {
-        let l = app.session.doc.eval(depth, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+    if let (Kind::Hole { depth, opts, .. }, Some(n)) = (&mut d.kind, dir) {
+        let l = if opts.all { 0.0 } else { app.session.doc.eval(depth, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0) };
+        let before = depth.clone();
         drag_arrow(ui, painter, proj, base, bs, -n, l, false, egui::Id::new("sc_manipulator_depth"), half_height, depth);
+        // Dragging the depth turns "through all" into a distance.
+        if *depth != before {
+            opts.all = false;
+        }
         dir = None;
     }
     let Some((label, kind, value)) = d.primary() else { return };

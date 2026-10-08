@@ -4,7 +4,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use egui::{Color32, RichText, vec2};
+use egui::{Color32, RichText, Stroke, vec2};
 use serde_json::{Value, json};
 use solvecraft_engine::Sel;
 use solvecraft_engine::Session;
@@ -20,7 +20,6 @@ use crate::viewport::Hit;
 const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
 const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
 const DIRS: [&str; 4] = ["positive", "negative", "symmetric", "positive"];
-const DIR_LABELS: [&str; 4] = ["One side", "Flip", "Symmetric", "Two sides"];
 /// The "Two sides" direction (a second distance the other way).
 pub const TWO_SIDES: usize = 3;
 const HOLE_TYPES: [&str; 3] = ["simple", "counterbore", "countersink"];
@@ -39,8 +38,12 @@ pub enum Kind {
         auto_op: bool,
         /// The other side's distance (two sides).
         distance2: String,
-        /// Taper angle (empty: none).
+        /// Taper angle (empty or zero: none).
         taper: String,
+        /// Start offset from the profile plane (empty: start on the profile plane).
+        start: String,
+        /// Extent type All (through everything) instead of a distance.
+        all: bool,
     },
     Revolve {
         angle: String,
@@ -166,6 +169,7 @@ pub enum Kind {
         cb_depth: String,
         cs_diameter: String,
         cs_angle: String,
+        opts: HoleOpts,
     },
     Primitive {
         cmd: &'static str,
@@ -196,6 +200,27 @@ pub enum Kind {
     },
 }
 
+/// The rest of the Hole dialog: placement, extents, tap type and drill point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HoleOpts {
+    /// Placement at several sketch points instead of one face point.
+    pub multiple: bool,
+    /// Extents: through all instead of a distance.
+    pub all: bool,
+    /// Drill point: an angled tip instead of a flat bottom.
+    pub angled: bool,
+    pub tip_angle: String,
+    /// Tap type: tapped (a cosmetic thread) instead of simple.
+    pub tapped: bool,
+    pub thread: String,
+}
+
+impl Default for HoleOpts {
+    fn default() -> Self {
+        HoleOpts { multiple: false, all: false, angled: true, tip_angle: "118 deg".into(), tapped: false, thread: "M5".into() }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Dialog {
     pub kind: Kind,
@@ -207,6 +232,8 @@ pub struct Dialog {
     pub editing: Option<(u64, Option<usize>)>,
     /// Give the on-canvas value box the keyboard (and select its text) on the next frame.
     pub focus: bool,
+    /// Folded to its header (the "−" glyph).
+    pub collapsed: bool,
     /// Parameters the dialog doesn't show but the command needs (kept when editing).
     pub extra: serde_json::Map<String, Value>,
 }
@@ -228,7 +255,7 @@ fn fits(a: Accept, s: &Sel) -> bool {
 
 impl Dialog {
     fn new(kind: Kind, inputs: Vec<SelInput>) -> Dialog {
-        Dialog { kind, inputs, active: 0, error: None, editing: None, focus: true, extra: serde_json::Map::new() }
+        Dialog { kind, inputs, active: 0, error: None, editing: None, focus: true, collapsed: false, extra: serde_json::Map::new() }
     }
 
     pub fn for_command(app: &SolveApp, id: &str) -> Option<Dialog> {
@@ -243,13 +270,15 @@ impl Dialog {
                     operation: usize::from(has_bodies),
                     auto_op: true,
                     distance2: "10 mm".into(),
-                    taper: String::new(),
+                    taper: "0 deg".into(),
+                    start: String::new(),
+                    all: false,
                 },
                 vec![SelInput::new("Profiles", PROFILES | PLANAR_FACES, true)],
             ),
             "Revolve" => Dialog::new(
                 Kind::Revolve { angle: "360 deg".into(), operation: 0 },
-                vec![SelInput::new("Profiles", PROFILES, true), SelInput::new("Axis", AXES, false)],
+                vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Axis", AXES, false)],
             ),
             "FusionFilletEdgesCommand" => {
                 Dialog::new(Kind::Fillet { radius: "2 mm".into(), chamfer: false, chain: true }, vec![SelInput::new("Edges", EDGES | FACES, true)])
@@ -257,13 +286,13 @@ impl Dialog {
             "FusionChamferCommand" => {
                 Dialog::new(Kind::Fillet { radius: "1 mm".into(), chamfer: true, chain: true }, vec![SelInput::new("Edges", EDGES | FACES, true)])
             }
-            "FusionShellBodyCommand" => Dialog::new(Kind::Shell { thickness: "2 mm".into() }, vec![SelInput::new("Faces", FACES, true)]),
+            "FusionShellBodyCommand" => Dialog::new(Kind::Shell { thickness: "2 mm".into() }, vec![SelInput::new("Faces/Body", FACES, true)]),
             "FusionDraftCommand" => Dialog::new(
                 Kind::Draft { angle: "5 deg".into() },
                 vec![SelInput::new("Faces", FACES, true), SelInput::new("Neutral plane", PLANES | PLANAR_FACES, false)],
             ),
             "MirrorCommand" => {
-                Dialog::new(Kind::Mirror, vec![SelInput::new("Bodies", BODIES, true), SelInput::new("Mirror plane", PLANES | PLANAR_FACES, false)])
+                Dialog::new(Kind::Mirror, vec![SelInput::new("Objects", BODIES, true), SelInput::new("Mirror Plane", PLANES | PLANAR_FACES, false)])
             }
             "FusionRibCommand" | "FusionWebCommand" => Dialog::new(
                 Kind::Rib { web: id == "FusionWebCommand", thickness: "2 mm".into(), depth: String::new(), flip: false },
@@ -330,7 +359,7 @@ impl Dialog {
             "FusionMoveCommand" => {
                 Dialog::new(Kind::Move { x: "0 mm".into(), y: "0 mm".into(), z: "10 mm".into() }, vec![SelInput::new("Bodies", BODIES, true)])
             }
-            "FusionHoleCommand" => Dialog::new(hole_defaults(), vec![SelInput::new("Position", FACES, true)]),
+            "FusionHoleCommand" => Dialog::new(hole_defaults(), vec![SelInput::new("Face", PLANAR_FACES, true)]),
             "PrimitiveBox" => Dialog::new(
                 Kind::Primitive {
                     cmd: "PrimitiveBox",
@@ -360,7 +389,7 @@ impl Dialog {
             ),
             "FusionCombineCommand" => Dialog::new(
                 Kind::Combine { operation: 1, keep_tools: false },
-                vec![SelInput::new("Target body", BODIES, false), SelInput::new("Tool bodies", BODIES, true)],
+                vec![SelInput::new("Target Body", BODIES, false), SelInput::new("Tool Bodies", BODIES, true)],
             ),
             "ChangeParameterCommand" => Dialog::new(Kind::Params { new_name: String::new(), new_expr: String::new() }, vec![]),
             _ => return None,
@@ -380,8 +409,36 @@ impl Dialog {
                 }
                 continue;
             }
-            if let Some(inp) = d.inputs.iter_mut().find(|i| fits(i.accept, sel) && (i.multi || i.items.is_empty())) {
-                inp.items.push(sel.clone());
+            // Planar-only inputs take planar faces only.
+            let planar_ok = match sel {
+                Sel::Face { body, index, .. } => planar_face(s, body, *index).is_some(),
+                _ => true,
+            };
+            let takes = |i: &SelInput| {
+                fits(i.accept, sel) && (i.multi || i.items.is_empty()) && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
+            };
+            if let Some(inp) = d.inputs.iter_mut().find(|i| takes(i)) {
+                // Fillets and chamfers take an edge with its tangent chain, as a pick does.
+                let picked = match (&d.kind, sel) {
+                    (Kind::Fillet { chain: true, .. }, Sel::Edge { body, index, .. }) => s
+                        .model
+                        .state()
+                        .body(body)
+                        .map(|b| {
+                            let m = b.mesh();
+                            m.tangent_chain(*index, 2f64.to_radians())
+                                .into_iter()
+                                .filter_map(|i| m.edges.get(i).map(|e| Sel::Edge { body: body.clone(), index: i, point: polyline_mid(e) }))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_else(|| vec![sel.clone()]),
+                    _ => vec![sel.clone()],
+                };
+                for x in picked {
+                    if !inp.items.contains(&x) {
+                        inp.items.push(x);
+                    }
+                }
             }
         }
         // With nothing pre-selected, a single profile in the sketch being used is taken.
@@ -686,6 +743,71 @@ fn hint(inp: &SelInput) -> &'static str {
     }
 }
 
+/// Width of the label column; longer labels are cut with "…".
+const LABEL_W: f32 = 92.0;
+
+/// A row label in the dialog's label column.
+fn row_label(ui: &mut egui::Ui, text: &str) {
+    ui.allocate_ui_with_layout(vec2(LABEL_W, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_width(LABEL_W);
+        ui.add(egui::Label::new(text).truncate()).on_hover_text(text);
+    });
+}
+
+/// Rows above the selection inputs: the pattern type, the Hole placement (one face point, or
+/// sketch points).
+fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
+    let current = match d.kind {
+        Kind::PatternRect { .. } => Some(0),
+        Kind::PatternCirc { .. } => Some(1),
+        Kind::PathPattern { .. } => Some(2),
+        _ => None,
+    };
+    if let Some(cur) = current {
+        row_label(ui, "Type");
+        let mut ty = cur;
+        combo(ui, "pat_type", &["Rectangular", "Circular", "Path"], &mut ty);
+        ui.end_row();
+        if ty != cur {
+            // Same objects, the new pattern's other inputs.
+            let objects = d.inputs.first().map(|i| i.items.clone()).unwrap_or_default();
+            let (kind, mut inputs) = match ty {
+                0 => (
+                    Kind::PatternRect { count: "3".into(), spacing: "20 mm".into(), count2: "1".into(), spacing2: "20 mm".into() },
+                    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Direction", AXES, false), SelInput::new("Direction 2", AXES, false)],
+                ),
+                1 => (
+                    Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
+                    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXES, false)],
+                ),
+                _ => (
+                    Kind::PathPattern { count: "4".into(), spacing: "20 mm".into() },
+                    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
+                ),
+            };
+            if let Some(i) = inputs.first_mut() {
+                i.items = objects;
+            }
+            d.kind = kind;
+            d.inputs = inputs;
+            d.extra.clear();
+            d.advance();
+        }
+        return;
+    }
+    let Kind::Hole { opts, .. } = &mut d.kind else { return };
+    row_label(ui, "Placement");
+    let mut m = usize::from(opts.multiple);
+    combo(ui, "hole_place", &["Single", "Multiple"], &mut m);
+    ui.end_row();
+    if (m == 1) != opts.multiple {
+        opts.multiple = m == 1;
+        d.inputs = vec![if opts.multiple { SelInput::new("Points", selection::POINTS, true) } else { SelInput::new("Face", PLANAR_FACES, true) }];
+        d.active = 0;
+        d.extra.remove("direction");
+    }
+}
+
 /// Selection input rows: label, "N selected" (or a hint) and a clear button; clicking a row
 /// makes it the active input.
 fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
@@ -693,20 +815,24 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
     let mut clear: Option<usize> = None;
     let mut activate: Option<usize> = None;
     for (i, inp) in d.inputs.iter().enumerate() {
-        ui.label(inp.label);
+        row_label(ui, inp.label);
         ui.horizontal(|ui| {
             let active = i == d.active;
-            let text = if inp.items.is_empty() {
-                RichText::new(hint(inp)).color(if active { t.warning } else { t.text_dim })
+            // A chip: "↖ Select" (outlined) while empty, "N selected" (filled) once picked.
+            let filled = !inp.items.is_empty();
+            let text = if filled {
+                RichText::new(format!("↖ {} selected", inp.items.len())).color(Color32::WHITE)
             } else {
-                RichText::new(format!("{} selected", inp.items.len())).color(t.text)
+                RichText::new("↖ Select").color(t.text)
             };
+            let stroke = if active { Stroke::new(1.5, t.accent) } else { Stroke::new(1.0, t.dialog_border.gamma_multiply(1.6)) };
             // Not in the Tab order: Tab moves between values.
             let b = egui::Button::new(text)
-                .fill(if active { t.accent_soft } else { Color32::TRANSPARENT })
-                .min_size(vec2(FIELD_W, 22.0))
+                .fill(if filled { t.chip } else { Color32::TRANSPARENT })
+                .stroke(stroke)
+                .min_size(vec2(0.0, 22.0))
                 .sense(egui::Sense::CLICK);
-            if ui.add(b).on_hover_text("Click to make this the input that viewport picks go to").clicked() {
+            if ui.add(b).on_hover_text(format!("{} (click to pick into this input)", hint(inp))).clicked() {
                 activate = Some(i);
             }
             if !inp.items.is_empty() && ui.small_button("×").on_hover_text("Clear the selection").clicked() {
@@ -727,10 +853,10 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
 }
 
 /// Width limits of a docked dialog: shrink-wrapped to its content within these.
-const DIALOG_MIN_W: f32 = 260.0;
+const DIALOG_MIN_W: f32 = 252.0;
 const DIALOG_MAX_W: f32 = 380.0;
 /// Width of value fields and choice boxes in a dialog.
-const FIELD_W: f32 = 140.0;
+const FIELD_W: f32 = 124.0;
 
 /// Measure again when the picked items changed.
 fn update_measure(app: &SolveApp, d: &mut Dialog) {
@@ -850,14 +976,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut enter = false;
     let wide = matches!(d.kind, Kind::Params { .. });
     let heading = if d.editing.is_some() { format!("EDIT {}", title(&d.kind)) } else { title(&d.kind).to_string() };
-    let frame = egui::Frame::window(&ctx.global_style()).corner_radius(egui::CornerRadius { nw: 6, sw: 6, ne: 0, se: 0 }).shadow(egui::Shadow {
-        offset: [-2, 2],
-        blur: 8,
-        spread: 0,
-        color: Color32::from_black_alpha(40),
-    });
-    egui::Window::new(RichText::new(heading).strong().size(13.0))
+    let frame = egui::Frame::window(&ctx.global_style())
+        .fill(t.dialog_bg)
+        .stroke(Stroke::new(1.0, t.dialog_border))
+        .corner_radius(egui::CornerRadius { nw: 4, sw: 4, ne: 0, se: 0 })
+        .shadow(egui::Shadow { offset: [-2, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(40) });
+    // OK is offered once the inputs make a feature.
+    let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::Preferences);
+    let valid = !has_ok || !d.previews() || (apply_commands(app, &d).is_ok() && app.preview.error.is_none());
+    egui::Window::new(RichText::new(heading.clone()).strong().size(13.0))
         .id(egui::Id::new("sc_dialog"))
+        .title_bar(false)
         .frame(frame)
         .pivot(egui::Align2::RIGHT_TOP)
         .fixed_pos(anchor)
@@ -872,29 +1001,73 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let margin = 2.0 * ui.style().spacing.window_margin.leftf();
             ui.set_min_width(if wide { 480.0 } else { DIALOG_MIN_W } - margin);
             ui.set_max_width(if wide { 560.0 } else { DIALOG_MAX_W } - margin);
+            // Header: "−" folds the dialog, the command name, "»" at the right.
+            ui.horizontal(|ui| {
+                let fold = if d.collapsed { "+" } else { "−" };
+                if ui
+                    .add(egui::Button::new(RichText::new(fold).size(14.0)).frame(false))
+                    .on_hover_text(if d.collapsed { "Expand" } else { "Collapse" })
+                    .clicked()
+                {
+                    d.collapsed = !d.collapsed;
+                }
+                ui.label(RichText::new(heading.as_str()).strong().size(12.5));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(RichText::new("»").color(t.text_dim));
+                });
+            });
+            if d.collapsed {
+                return;
+            }
+            ui.add_space(2.0);
             egui::Grid::new("sc_dialog_grid").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
+                placement_row(&mut d, ui);
                 input_rows(&mut d, ui);
                 match &mut d.kind {
                     Kind::Sketch => {}
-                    Kind::Extrude { distance, direction, operation, auto_op, distance2, taper } => {
-                        ui.label("Direction");
-                        combo(ui, "ex_dir", &DIR_LABELS, direction);
+                    Kind::Extrude { distance, direction, operation, auto_op, distance2, taper, start, all } => {
+                        row_label(ui, "Start");
+                        let mut st = usize::from(!start.is_empty());
+                        combo(ui, "ex_start", &["Profile Plane", "Offset"], &mut st);
+                        if st == 1 && start.is_empty() {
+                            *start = "5 mm".into();
+                        } else if st == 0 {
+                            start.clear();
+                        }
                         ui.end_row();
-                        ui.label("Distance");
-                        enter |= field(ui, distance);
-                        ui.end_row();
-                        if *direction == TWO_SIDES {
-                            ui.label("Distance 2");
-                            enter |= field(ui, distance2);
-                            ui.end_row();
-                        } else if *direction < 2 {
-                            ui.label("Taper angle");
-                            let r = ui.add(egui::TextEdit::singleline(taper).hint_text("0 deg"));
-                            crate::params_dialog::complete(ui, &r, taper);
-                            enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if !start.is_empty() {
+                            row_label(ui, "Offset");
+                            enter |= field(ui, start);
                             ui.end_row();
                         }
-                        ui.label("Operation");
+                        row_label(ui, "Direction");
+                        // One Side, Two Sides, Symmetric (a flip is a negative distance).
+                        let order = [0usize, TWO_SIDES, 2];
+                        let mut pos = order.iter().position(|o| o == direction).unwrap_or(0);
+                        combo(ui, "ex_dir", &["One Side", "Two Sides", "Symmetric"], &mut pos);
+                        *direction = order.get(pos).copied().unwrap_or(0);
+                        ui.end_row();
+                        row_label(ui, "Extent Type");
+                        let mut ext = usize::from(*all);
+                        combo(ui, "ex_ext", &["Distance", "All"], &mut ext);
+                        *all = ext == 1;
+                        ui.end_row();
+                        if !*all {
+                            row_label(ui, "Distance");
+                            enter |= field(ui, distance);
+                            ui.end_row();
+                            if *direction == TWO_SIDES {
+                                row_label(ui, "Distance 2");
+                                enter |= field(ui, distance2);
+                                ui.end_row();
+                            }
+                        }
+                        if *direction < 2 {
+                            row_label(ui, "Taper Angle");
+                            enter |= field(ui, taper);
+                            ui.end_row();
+                        }
+                        row_label(ui, "Operation");
                         let before = *operation;
                         combo(ui, "ex_op", &OP_LABELS, operation);
                         // A choice made by hand sticks.
@@ -904,111 +1077,117 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                     Kind::Revolve { angle, operation } => {
-                        ui.label("Angle");
+                        row_label(ui, "Angle");
                         enter |= field(ui, angle);
                         ui.end_row();
-                        ui.label("Operation");
+                        row_label(ui, "Operation");
                         combo(ui, "rv_op", &OP_LABELS, operation);
                         ui.end_row();
                     }
                     Kind::Fillet { radius, chamfer, chain } => {
-                        ui.label(if *chamfer { "Distance" } else { "Radius" });
+                        row_label(ui, if *chamfer { "Distance" } else { "Radius" });
                         enter |= field(ui, radius);
                         ui.end_row();
-                        ui.label("Tangent chain");
+                        row_label(ui, "Tangent Chain");
                         ui.checkbox(chain, "");
                         ui.end_row();
                     }
                     Kind::Shell { thickness } => {
-                        ui.label("Inside thickness");
+                        row_label(ui, "Inside Thickness");
                         enter |= field(ui, thickness);
                         ui.end_row();
                     }
                     Kind::Draft { angle } => {
-                        ui.label("Angle");
+                        row_label(ui, "Angle");
                         enter |= field(ui, angle);
                         ui.end_row();
                     }
-                    Kind::Mirror => {}
+                    Kind::Mirror => {
+                        row_label(ui, "Operation");
+                        let mut op = usize::from(d.extra.get("combine").and_then(Value::as_bool).unwrap_or(false));
+                        combo(ui, "mi_op", &["New Body", "Join"], &mut op);
+                        d.extra.insert("combine".into(), json!(op == 1));
+                        ui.end_row();
+                    }
                     Kind::Measure { result, .. } => measure_rows(ui, result.as_ref()),
                     Kind::Preferences => preferences_rows(app, ui),
                     Kind::OffsetPlane { offset } => {
-                        ui.label("Distance");
+                        row_label(ui, "Distance");
                         enter |= field(ui, offset);
                         ui.end_row();
                     }
                     Kind::AnglePlane { angle } => {
-                        ui.label("Angle");
+                        row_label(ui, "Angle");
                         enter |= field(ui, angle);
                         ui.end_row();
                     }
                     Kind::Split | Kind::ReplaceFace | Kind::Remove => {}
                     Kind::Rib { thickness, depth, flip, .. } => {
-                        ui.label("Thickness");
+                        row_label(ui, "Thickness");
                         enter |= field(ui, thickness);
                         ui.end_row();
-                        ui.label("Depth");
+                        row_label(ui, "Depth");
                         let r = ui.add(egui::TextEdit::singleline(depth).hint_text("to the next face"));
                         crate::params_dialog::complete(ui, &r, depth);
                         enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.end_row();
-                        ui.label("Flip");
+                        row_label(ui, "Flip");
                         ui.checkbox(flip, "");
                         ui.end_row();
                     }
                     Kind::Emboss { depth, deboss } => {
-                        ui.label("Depth");
+                        row_label(ui, "Depth");
                         enter |= field(ui, depth);
                         ui.end_row();
-                        ui.label("Type");
+                        row_label(ui, "Type");
                         let mut i = usize::from(*deboss);
                         combo(ui, "emb_mode", &["Emboss", "Deboss"], &mut i);
                         *deboss = i == 1;
                         ui.end_row();
                     }
                     Kind::Align { flip } => {
-                        ui.label("Flip");
+                        row_label(ui, "Flip");
                         ui.checkbox(flip, "");
                         ui.end_row();
                     }
                     Kind::PathPattern { count, spacing } => {
                         for (l, v) in [("Quantity", count), ("Spacing", spacing)] {
-                            ui.label(l);
+                            row_label(ui, l);
                             enter |= field(ui, v);
                             ui.end_row();
                         }
                     }
                     Kind::Pipe { diameter, wall } => {
-                        ui.label("Diameter");
+                        row_label(ui, "Diameter");
                         enter |= field(ui, diameter);
                         ui.end_row();
-                        ui.label("Wall");
+                        row_label(ui, "Wall");
                         let r = ui.add(egui::TextEdit::singleline(wall).hint_text("solid"));
                         crate::params_dialog::complete(ui, &r, wall);
                         enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.end_row();
                     }
                     Kind::Stock { margin } => {
-                        ui.label("Margin");
+                        row_label(ui, "Margin");
                         enter |= field(ui, margin);
                         ui.end_row();
                     }
                     Kind::Scale { factor } => {
-                        ui.label("Scale factor");
+                        row_label(ui, "Scale factor");
                         enter |= field(ui, factor);
                         ui.end_row();
                     }
                     Kind::OffsetFaces { distance } => {
-                        ui.label("Distance");
+                        row_label(ui, "Distance");
                         enter |= field(ui, distance);
                         ui.end_row();
                     }
                     Kind::Thread { designation, length } => {
-                        ui.label("Size");
+                        row_label(ui, "Size");
                         let r = ui.add(egui::TextEdit::singleline(designation).hint_text("fits the face, e.g. M8"));
                         enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.end_row();
-                        ui.label("Length");
+                        row_label(ui, "Length");
                         let r = ui.add(egui::TextEdit::singleline(length).hint_text("whole face"));
                         crate::params_dialog::complete(ui, &r, length);
                         enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -1016,95 +1195,123 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     Kind::Material { index } => {
                         let names: Vec<&str> = solvecraft_engine::doc::MATERIALS.iter().map(|(n, _)| *n).collect();
-                        ui.label("Material");
+                        row_label(ui, "Material");
                         combo(ui, "mat", &names, index);
                         ui.end_row();
                     }
                     Kind::Section { offset, flip } => {
-                        ui.label("Distance");
+                        row_label(ui, "Distance");
                         enter |= field(ui, offset);
                         ui.end_row();
-                        ui.label("Flip");
+                        row_label(ui, "Flip");
                         ui.checkbox(flip, "");
                         ui.end_row();
                     }
                     Kind::PatternRect { count, spacing, count2, spacing2 } => {
                         for (l, v) in [("Quantity", count), ("Spacing", spacing), ("Quantity 2", count2), ("Spacing 2", spacing2)] {
-                            ui.label(l);
+                            row_label(ui, l);
                             enter |= field(ui, v);
                             ui.end_row();
                         }
                     }
                     Kind::PatternCirc { count, angle } => {
                         for (l, v) in [("Quantity", count), ("Total angle", angle)] {
-                            ui.label(l);
+                            row_label(ui, l);
                             enter |= field(ui, v);
                             ui.end_row();
                         }
                     }
                     Kind::Loft { operation } => {
-                        ui.label("Operation");
+                        row_label(ui, "Operation");
                         combo(ui, "lf_op", &OP_LABELS, operation);
                         ui.end_row();
                     }
                     Kind::Sweep { operation } => {
-                        ui.label("Operation");
+                        row_label(ui, "Operation");
                         combo(ui, "sw_op", &OP_LABELS, operation);
                         ui.end_row();
                     }
                     Kind::Move { x, y, z } => {
                         for (l, v) in [("X distance", x), ("Y distance", y), ("Z distance", z)] {
-                            ui.label(l);
+                            row_label(ui, l);
                             enter |= field(ui, v);
                             ui.end_row();
                         }
                     }
-                    Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle } => {
-                        ui.label("Type");
+                    Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
+                        row_label(ui, "Extents");
+                        let mut ext = usize::from(opts.all);
+                        combo(ui, "hole_ext", &["Distance", "All"], &mut ext);
+                        opts.all = ext == 1;
+                        ui.end_row();
+                        row_label(ui, "Hole Type");
                         combo(ui, "hole_kind", &HOLE_LABELS, kind);
                         ui.end_row();
-                        ui.label("Diameter");
+                        row_label(ui, "Hole Tap Type");
+                        let mut tap = usize::from(opts.tapped);
+                        combo(ui, "hole_tap", &["Simple", "Tapped"], &mut tap);
+                        opts.tapped = tap == 1;
+                        ui.end_row();
+                        if opts.tapped {
+                            row_label(ui, "Size");
+                            let r = ui.add(egui::TextEdit::singleline(&mut opts.thread).hint_text("M5"));
+                            enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            ui.end_row();
+                        }
+                        if *kind == 0 {
+                            row_label(ui, "Drill Point");
+                            let mut tip = usize::from(opts.angled);
+                            combo(ui, "hole_tip", &["Flat", "Angle"], &mut tip);
+                            opts.angled = tip == 1;
+                            ui.end_row();
+                        }
+                        if !opts.all {
+                            row_label(ui, "Depth");
+                            enter |= field(ui, depth);
+                            ui.end_row();
+                        }
+                        if *kind == 0 && opts.angled {
+                            row_label(ui, "Tip Angle");
+                            enter |= field(ui, &mut opts.tip_angle);
+                            ui.end_row();
+                        }
+                        row_label(ui, "Diameter");
                         enter |= field(ui, diameter);
                         ui.end_row();
-                        ui.label("Depth");
-                        let r = ui.add(egui::TextEdit::singleline(depth).hint_text("through all"));
-                        crate::params_dialog::complete(ui, &r, depth);
-                        enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        ui.end_row();
                         if *kind == 1 {
-                            ui.label("Counterbore Ø");
+                            row_label(ui, "Counterbore Ø");
                             enter |= field(ui, cb_diameter);
                             ui.end_row();
-                            ui.label("Counterbore depth");
+                            row_label(ui, "Counterbore depth");
                             enter |= field(ui, cb_depth);
                             ui.end_row();
                         }
                         if *kind == 2 {
-                            ui.label("Countersink Ø");
+                            row_label(ui, "Countersink Ø");
                             enter |= field(ui, cs_diameter);
                             ui.end_row();
-                            ui.label("Countersink angle");
+                            row_label(ui, "Countersink angle");
                             enter |= field(ui, cs_angle);
                             ui.end_row();
                         }
                     }
                     Kind::Primitive { fields, operation, .. } => {
                         for (k, v) in fields.iter_mut() {
-                            ui.label(*k);
+                            row_label(ui, k);
                             enter |= field(ui, v);
                             ui.end_row();
                         }
-                        ui.label("Operation");
+                        row_label(ui, "Operation");
                         combo(ui, "pr_op", &OP_LABELS, operation);
                         ui.end_row();
                     }
                     Kind::Combine { operation, keep_tools } => {
-                        ui.label("Operation");
+                        row_label(ui, "Operation");
                         let mut op = operation.saturating_sub(1);
                         combo(ui, "cb_op", &OP_LABELS[1..], &mut op);
                         *operation = op + 1;
                         ui.end_row();
-                        ui.label("Keep tools");
+                        row_label(ui, "Keep Tools");
                         ui.checkbox(keep_tools, "");
                         ui.end_row();
                     }
@@ -1120,7 +1327,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                     Kind::Rename { name, .. } => {
-                        ui.label("Name");
+                        row_label(ui, "Name");
                         let r = ui.text_edit_singleline(name);
                         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                             ok = true;
@@ -1130,45 +1337,48 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     Kind::ConfirmDelete { with, fail, .. } => {
                         if !with.is_empty() {
-                            ui.label("Also deletes");
+                            row_label(ui, "Also deletes");
                             ui.label(with.join(", "));
                             ui.end_row();
                         }
                         if !fail.is_empty() {
-                            ui.label("Will fail");
+                            row_label(ui, "Will fail");
                             ui.label(RichText::new(fail.join(", ")).color(t.warning));
                             ui.end_row();
                         }
                     }
                 }
                 if let Some(e) = d.error.as_ref().or(app.preview.error.as_ref()) {
-                    ui.label("");
+                    row_label(ui, "");
                     ui.add(egui::Label::new(RichText::new(e.as_str()).color(t.error)).wrap());
                     ui.end_row();
                 }
             });
             ui.add_space(6.0);
+            // Footer: an info glyph at the left, OK and Cancel at the right.
             ui.horizontal(|ui| {
-                if !matches!(d.kind, Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::Preferences)
-                    && ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new(if matches!(d.kind, Kind::ConfirmDelete { .. }) { "Delete" } else { "OK" }).color(Color32::WHITE),
-                            )
-                            .fill(t.accent)
-                            .min_size(vec2(70.0, 24.0)),
-                        )
-                        .clicked()
-                {
-                    ok = true;
-                }
-                let close = if matches!(d.kind, Kind::Params { .. } | Kind::Measure { .. } | Kind::Preferences) { "Close" } else { "Cancel" };
-                if ui.add(egui::Button::new(close).min_size(vec2(70.0, 24.0))).clicked() {
-                    cancel = true;
-                }
+                let (r, resp) = ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::hover());
+                ui.painter().circle_stroke(r.center(), 7.0, Stroke::new(1.2, t.text_dim));
+                ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, "i", egui::FontId::proportional(11.0), t.text_dim);
+                resp.on_hover_text(heading.as_str());
                 if app.preview.busy {
                     ui.add(egui::Spinner::new().size(14.0)).on_hover_text("Updating the preview");
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let close = if matches!(d.kind, Kind::Params { .. } | Kind::Measure { .. } | Kind::Preferences) { "Close" } else { "Cancel" };
+                    if ui.add(egui::Button::new(close).min_size(vec2(64.0, 24.0))).clicked() {
+                        cancel = true;
+                    }
+                    if has_ok {
+                        let label = if matches!(d.kind, Kind::ConfirmDelete { .. }) { "Delete" } else { "OK" };
+                        let b = egui::Button::new(RichText::new(label).color(if valid { Color32::WHITE } else { t.text_dim }))
+                            .fill(if valid { t.accent } else { Color32::TRANSPARENT })
+                            .min_size(vec2(64.0, 24.0));
+                        if ui.add_enabled(valid, b).clicked() {
+                            ok = true;
+                        }
+                    }
+                });
             });
         });
     // Keyboard: Enter applies (from a value field, or with nothing focused), Esc cancels.
@@ -1216,12 +1426,13 @@ pub fn cancel(app: &mut SolveApp) {
 fn hole_defaults() -> Kind {
     Kind::Hole {
         diameter: "5 mm".into(),
-        depth: String::new(),
+        depth: "10 mm".into(),
         kind: 0,
         cb_diameter: "9 mm".into(),
         cb_depth: "3 mm".into(),
         cs_diameter: "10 mm".into(),
         cs_angle: "90 deg".into(),
+        opts: HoleOpts::default(),
     }
 }
 
@@ -1333,13 +1544,20 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         sels(d, i).iter().filter_map(|x| if let Sel::Face { point, .. } = x { Some(pt(*point)) } else { None }).collect()
     };
     let (cmd, params): (&str, Value) = match &d.kind {
-        Kind::Extrude { distance, direction, operation, distance2, taper, .. } => {
+        Kind::Extrude { distance, direction, operation, distance2, taper, start, all, .. } => {
             need(0, "profiles or a planar face")?;
             let mut common = json!({"distance": distance, "direction": DIRS.get(*direction).copied().unwrap_or("positive"), "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            let tapered = s.doc.eval(taper, ValueKind::Angle).map(|v| v.abs() > 1e-12).unwrap_or(!taper.trim().is_empty());
             if *direction == TWO_SIDES {
                 common["distance2"] = json!(distance2);
-            } else if *direction < 2 && !taper.trim().is_empty() {
+            } else if *direction < 2 && tapered {
                 common["taper"] = json!(taper);
+            }
+            if !start.trim().is_empty() {
+                common["start_offset"] = json!(start);
+            }
+            if *all {
+                common["through_all"] = json!(true);
             }
             let with = |extra: Value| -> Value {
                 let mut p = common.clone();
@@ -1641,15 +1859,44 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "bodies")?;
             ("FusionMoveCommand", json!({"bodies": body_names(0), "translate": [x, y, z]}))
         }
-        Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle } => {
-            need(0, "a face position")?;
-            let ty = HOLE_TYPES.get(*kind).copied().unwrap_or("simple");
-            // One hole per picked position.
+        Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
+            need(0, if opts.multiple { "sketch points" } else { "a face position" })?;
+            let ty = match *kind {
+                0 if opts.angled => "drilled",
+                k => HOLE_TYPES.get(k).copied().unwrap_or("simple"),
+            };
+            // One hole per picked face position, or one Hole feature per sketch for sketch points.
+            let mut places: Vec<Value> = Vec::new();
+            if opts.multiple {
+                let mut by_sketch: Vec<(u64, Vec<String>)> = Vec::new();
+                for x in sels(d, 0) {
+                    if let Sel::SketchPoint { id } = x
+                        && let Some((sk, pid)) = id.split_once(':')
+                        && let Ok(sk) = sk.parse::<u64>()
+                    {
+                        match by_sketch.iter_mut().find(|(s, _)| *s == sk) {
+                            Some((_, v)) => v.push(pid.to_string()),
+                            None => by_sketch.push((sk, vec![pid.to_string()])),
+                        }
+                    }
+                }
+                places.extend(by_sketch.into_iter().map(|(sk, ids)| json!({"sketch": sk, "points": ids})));
+            } else {
+                places.extend(face_points(0).into_iter().map(|p| json!({ "position": p })));
+            }
             let mut out = Vec::new();
-            for p in face_points(0) {
-                let mut params = json!({"position": p, "diameter": diameter, "type": ty});
-                if !depth.trim().is_empty() {
+            for place in places {
+                let mut params = place;
+                params["diameter"] = json!(diameter);
+                params["type"] = json!(ty);
+                if !opts.all {
                     params["depth"] = json!(depth);
+                }
+                if ty == "drilled" {
+                    params["tip_angle"] = json!(opts.tip_angle);
+                }
+                if opts.tapped && !opts.thread.trim().is_empty() {
+                    params["thread"] = json!(opts.thread.trim());
                 }
                 match *kind {
                     1 => {
@@ -1860,17 +2107,22 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 operation: op_index(operation),
                 auto_op: false,
                 distance2: extent.distance2.clone().unwrap_or_else(|| "10 mm".into()),
-                taper: extent.taper.clone().unwrap_or_default(),
+                taper: extent.taper.clone().unwrap_or_else(|| "0 deg".into()),
+                start: extent.start_offset.clone().unwrap_or_default(),
+                all: extent.through_all,
             };
+            // The dialog has no "flip": a flipped extrude is a negative distance.
+            if let Kind::Extrude { direction, distance, .. } = &mut d.kind
+                && *direction == 1
+            {
+                *direction = 0;
+                *distance = format!("-({distance})");
+            }
             let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = items.into_iter().map(|index| Sel::Profile { sketch: *sketch, index }).collect();
             }
-            for (k, v) in [
-                ("start_offset", extent.start_offset.as_ref().map(|x| json!(x))),
-                ("through_all", extent.through_all.then_some(json!(true))),
-                ("targets", (!targets.is_empty()).then(|| json!(targets))),
-            ] {
+            for (k, v) in [("targets", (!targets.is_empty()).then(|| json!(targets)))] {
                 if let Some(v) = v {
                     d.extra.insert(k.into(), v);
                 }
@@ -1926,12 +2178,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("pull".into(), pt3(*pull));
             d
         }
-        FeatureKind::Hole { position, direction, diameter, depth, hole, .. } => {
+        FeatureKind::Hole { position, direction, diameter, depth, hole, points, thread } => {
             let mut d = start("FusionHoleCommand")?;
             let mut k = hole_defaults();
-            if let Kind::Hole { diameter: dia, depth: dep, kind, cb_diameter, cb_depth, cs_diameter, cs_angle } = &mut k {
+            if let Kind::Hole { diameter: dia, depth: dep, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = &mut k {
                 *dia = diameter.clone();
-                *dep = depth.clone().unwrap_or_default();
+                opts.all = depth.is_none();
+                opts.angled = matches!(hole, HoleKind::Drilled { .. });
+                opts.multiple = points.is_some();
+                if let Some(th) = thread {
+                    opts.tapped = true;
+                    opts.thread = th.clone();
+                }
+                if let Some(dd) = depth {
+                    *dep = dd.clone();
+                }
                 match hole {
                     HoleKind::Counterbore { cb_diameter: a, cb_depth: b } => {
                         *kind = 1;
@@ -1944,16 +2205,26 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         *cs_angle = b.clone();
                     }
                     HoleKind::Drilled { tip_angle } => {
-                        d.extra.insert("tip_angle".into(), json!(tip_angle));
+                        opts.tip_angle = tip_angle.clone();
                     }
                     HoleKind::Simple => {}
                 }
             }
             d.kind = k;
-            if let Some(inp) = d.inputs.first_mut() {
-                inp.items = vec![face_sel(s, *position).unwrap_or(Sel::Face { body: String::new(), index: 0, point: *position })];
+            match points {
+                Some(sp) => {
+                    d.inputs = vec![SelInput::new("Points", selection::POINTS, true)];
+                    if let Some(inp) = d.inputs.first_mut() {
+                        inp.items = sp.ids.iter().map(|id| Sel::SketchPoint { id: format!("{}:{id}", sp.sketch) }).collect();
+                    }
+                }
+                None => {
+                    if let Some(inp) = d.inputs.first_mut() {
+                        inp.items = vec![face_sel(s, *position).unwrap_or(Sel::Face { body: String::new(), index: 0, point: *position })];
+                    }
+                    d.extra.insert("direction".into(), pt3(*direction));
+                }
             }
-            d.extra.insert("direction".into(), pt3(*direction));
             d
         }
         FeatureKind::Box { corner, length, width, height, operation } => {

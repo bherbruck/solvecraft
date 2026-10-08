@@ -88,6 +88,10 @@ pub struct Tokens {
     /// Sketch points: fully constrained, free.
     pub sketch_point: Color32,
     pub sketch_point_free: Color32,
+    /// Command dialogs: panel, border, and the filled selection chip.
+    pub dialog_bg: Color32,
+    pub dialog_border: Color32,
+    pub chip: Color32,
     /// Inside of bodies cut by a section.
     pub section_cap: Color32,
     /// Closed sketch profiles (translucent fill).
@@ -178,6 +182,9 @@ impl Tokens {
             dimension_driven: Color32::from_rgb(120, 126, 138),
             sketch_point_free: Color32::from_rgb(30, 90, 200),
             section_cap: Color32::from_rgb(214, 128, 72),
+            dialog_bg: Color32::from_rgb(250, 251, 252),
+            dialog_border: Color32::from_rgb(208, 212, 220),
+            chip: Color32::from_rgb(38, 120, 218),
             profile_fill: Color32::from_rgba_unmultiplied_const(255, 196, 120, 70),
             glyph_bg: Color32::WHITE,
             glyph_edge: Color32::from_rgb(90, 150, 90),
@@ -233,6 +240,9 @@ impl Tokens {
         t.dimension_driven = Color32::from_rgb(142, 150, 164);
         t.sketch_point_free = Color32::from_rgb(92, 150, 255);
         t.profile_fill = Color32::from_rgba_unmultiplied_const(120, 150, 200, 40);
+        t.dialog_bg = Color32::from_rgb(59, 68, 83);
+        t.dialog_border = Color32::from_rgb(72, 83, 99);
+        t.chip = Color32::from_rgb(59, 101, 168);
         t.glyph_bg = Color32::from_rgb(44, 50, 60);
         t.glyph_edge = Color32::from_rgb(96, 170, 110);
         t.glyph_text = Color32::from_rgb(150, 220, 160);

@@ -347,11 +347,12 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     let st = s.world_state();
     let mut hits = Vec::new();
     let (o, d) = proj.ray(pos);
-    // Sketch points of the active sketch.
-    if let Some(sid) = s.active_sketch
-        && let Some(ss) = st.sketch(sid)
-    {
-        let mut best: Option<(f32, Hit)> = None;
+    // Sketch points of the active sketch (of every shown sketch while a command takes points).
+    let wants_points = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::POINTS != 0);
+    let point_sketches: Vec<u64> = if wants_points { visible_sketches(app) } else { s.active_sketch.into_iter().collect() };
+    let mut best: Option<(f32, Hit)> = None;
+    for ss in point_sketches.iter().filter_map(|sid| st.sketch(*sid)) {
+        let sid = ss.feature;
         for p in &ss.sketch.points {
             if let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)) {
                 let dd = sp.distance(pos);
@@ -360,9 +361,9 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
                 }
             }
         }
-        if let Some((_, h)) = best {
-            hits.push(h);
-        }
+    }
+    if let Some((_, h)) = best {
+        hits.push(h);
     }
     // Sketch curves (the active sketch wins ties).
     let mut bestc: Option<(f32, Hit)> = None;

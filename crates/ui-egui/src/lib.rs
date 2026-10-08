@@ -20,6 +20,8 @@ pub mod icons;
 mod menu_tests;
 pub mod palette;
 pub mod params_dialog;
+#[cfg(test)]
+mod preselect_tests;
 pub mod preview;
 pub mod ref_images;
 pub mod selection;

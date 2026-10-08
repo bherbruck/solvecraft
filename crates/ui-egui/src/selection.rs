@@ -23,6 +23,8 @@ pub const AXES: Accept = 64;
 pub const VERTICES: Accept = 128;
 /// Any sketch curve (a sweep path).
 pub const CURVES: Accept = 256;
+/// Sketch points of any visible sketch (hole centres); picked as "<sketch id>:<point id>".
+pub const POINTS: Accept = 512;
 
 /// One selection input of a command dialog ("Profiles", "Edges", "Plane", ...).
 #[derive(Clone, Debug, PartialEq)]
@@ -53,6 +55,7 @@ impl SelInput {
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::SketchCurve { id, straight: true, .. } if a & AXES != 0 => Some(Sel::SketchCurve { id: id.clone() }),
             Hit::SketchCurve { id, .. } if a & CURVES != 0 => Some(Sel::SketchCurve { id: id.clone() }),
+            Hit::SketchPoint { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
             Hit::Vertex { body, point } if a & VERTICES != 0 => Some(Sel::Vertex { body: body.clone(), point: *point }),
             _ => None,
         }
