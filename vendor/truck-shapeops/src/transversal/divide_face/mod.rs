@@ -86,7 +86,16 @@ where
     }
     negative_wires.into_iter().try_for_each(|chunk| {
         let pt = chunk.poly.front();
-        let op = crate::tr!(pre_faces.iter_mut().find(|face| face[0].poly.include(pt)), "loop not inside any face piece");
+        // SolveCraft: the innermost piece that holds the loop (nested intersection loops, such
+        // as both walls of a tube crossing one face), never the loop's own twin.
+        let hole = -chunk.poly.area();
+        let op = crate::tr!(
+            pre_faces
+                .iter_mut()
+                .filter(|face| face[0].poly.area() > hole * (1.0 + 1e-6) && face[0].poly.include(pt))
+                .min_by(|x, y| x[0].poly.area().total_cmp(&y[0].poly.area())),
+            "loop not inside any face piece"
+        );
         op.push(chunk);
         Some(())
     })?;

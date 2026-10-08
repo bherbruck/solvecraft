@@ -144,7 +144,42 @@ pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: 
                 })
                 .collect(),
         };
-        let r = &Region2 { outer: snap_loop(&r.outer), holes: r.holes.iter().map(snap_loop).collect() };
+        // Full circles start at an odd angle: their seam points then don't lie in the planes
+        // through the profile's centre that other bodies tend to cut along.
+        let reseam = |l: Loop2| -> Loop2 {
+            let c = match l.segs.first() {
+                Some(Seg2::Arc { center, radius, .. }) => Some((*center, *radius)),
+                _ => None,
+            };
+            // (A circle touching the axis keeps its vertex there.)
+            let touches = c.is_some_and(|(center, radius)| (d.cross(center - axis_origin).abs() - radius).abs() < 1e-7);
+            match c {
+                Some((center, radius))
+                    if !touches
+                        && l.segs.iter().all(
+                            |s| matches!(s, Seg2::Arc { center: c2, radius: r2, .. } if c2.dist(center) < 1e-9 && (r2 - radius).abs() < 1e-9),
+                        )
+                        && (l
+                            .segs
+                            .iter()
+                            .map(|s| match s {
+                                Seg2::Arc { sweep, .. } => *sweep,
+                                _ => 0.0,
+                            })
+                            .sum::<f64>()
+                            .abs()
+                            - std::f64::consts::TAU)
+                            .abs()
+                            < 1e-6 =>
+                {
+                    let ccw = l.signed_area() > 0.0;
+                    let n = Loop2::circle_from(center, radius, 0.4142);
+                    if ccw { n } else { n.reversed() }
+                }
+                _ => l,
+            }
+        };
+        let r = &Region2 { outer: reseam(snap_loop(&r.outer)), holes: r.holes.iter().map(|h| reseam(snap_loop(h))).collect() };
         // A half disc on the axis revolved fully is a sphere: build it without poles.
         if angle.abs() >= std::f64::consts::TAU - 1e-9
             && r.holes.is_empty()

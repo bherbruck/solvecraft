@@ -1037,3 +1037,26 @@ fn overlapping_holes_and_mirror_joins() {
     assert!(rel(u.volume, v1 * 5.0 / 3.0) < 2e-4, "{} (one: {v1})", u.volume);
     assert_eq!(u.merged.faces, 3, "{:?}", u.merged);
 }
+
+#[test]
+fn torus_cut_through_its_middle_plane() {
+    // A torus whose tube centre lies in a box's top face: the box's top cuts the torus where
+    // the tube is vertical. (The revolve profile's seam points used to lie in that plane.)
+    let bx = box_solid(Vec3::new(-30.0, -30.0, -10.0), Vec3::new(30.0, 30.0, 0.0)).unwrap();
+    let xz = Plane::new(Vec3::ZERO, Vec3::X, Vec3::new(0.0, 0.0, -1.0)).unwrap();
+    let ring = Region2 { outer: Loop2::circle(Vec2::new(22.0, 0.0), 4.0), holes: vec![] };
+    let torus = revolve(&xz, &[ring], Vec2::ZERO, Vec2::new(0.0, -1.0), 2.0 * PI).unwrap().pop().unwrap();
+    let c = boolean(&bx, &torus, BoolOp::Cut).unwrap().unwrap();
+    // Half the torus volume (2π²Rr²) is removed.
+    let want = 36000.0 - PI * PI * 22.0 * 16.0;
+    let v = measure(&c).unwrap().volume;
+    assert!(rel(v, want) < 1e-4, "{v} vs {want}");
+    // A revolved tube cut across: both walls cross the box's top face (nested loops on it).
+    let tube =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(5.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, -30.0), Vec2::new(5.0, -30.0)]), holes: vec![] };
+    let t = revolve(&xz, &[tube], Vec2::ZERO, Vec2::new(0.0, -1.0), 2.0 * PI).unwrap().pop().unwrap();
+    let bx = box_solid(Vec3::new(-40.0, -40.0, -40.0), Vec3::new(40.0, 40.0, 10.0)).unwrap();
+    let i = boolean(&t, &bx, BoolOp::Intersect).unwrap().unwrap();
+    let v = measure(&i).unwrap().volume;
+    assert!(rel(v, PI * 75.0 * 10.0) < 1e-4, "{v}");
+}
