@@ -70,7 +70,7 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
         ("DrawPolyline", _) | ("ShapeSlotCenterToCenter" | "ShapeSlotOverall", 1) => {
             let v = h - a;
             let len = lk("Length").unwrap_or(v.len());
-            let ang = lk("Angle").unwrap_or_else(|| v.angle());
+            let ang = lk("Angle").unwrap_or_else(|| snap_axis(v.angle()));
             a + Vec2::from_angle(ang) * len
         }
         ("ShapeRectangleTwoPoint", 1) => {
@@ -105,23 +105,56 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
     }
 }
 
+/// Angles within a few degrees of horizontal or vertical snap to it (the line is drawn
+/// horizontal or vertical, and the command infers the constraint).
+pub fn snap_axis(ang: f64) -> f64 {
+    let q = std::f64::consts::FRAC_PI_2;
+    let k = (ang / q).round();
+    if (ang - k * q).abs() < 2.5f64.to_radians() { k * q } else { ang }
+}
+
+/// Is the segment exactly horizontal or vertical (an inferred constraint)?
+pub fn axis_aligned(a: Vec2, b: Vec2) -> Option<bool> {
+    let d = b - a;
+    if d.len() < 1e-9 {
+        return None;
+    }
+    if d.y.abs() < 1e-9 * d.len() {
+        Some(true)
+    } else if d.x.abs() < 1e-9 * d.len() {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// The value each box shows while it follows the cursor, and where it sits (sketch coordinates).
-fn live(t: &Tool, e: Vec2) -> Vec<(f64, Vec2)> {
+/// `px` is the size of a screen pixel in sketch units: boxes sit a little off the segment they
+/// measure so they don't cover it.
+fn live(t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
     let Some(a) = t.pts.last().map(|p| p.0) else { return Vec::new() };
     let first = t.pts.first().map(|p| p.0).unwrap_or(a);
+    let off = 20.0 * px;
     match (t.cmd, t.pts.len()) {
         ("DrawPolyline", _) | ("ShapeSlotCenterToCenter" | "ShapeSlotOverall", 1) => {
             let v = e - a;
-            vec![(v.len(), (a + e) * 0.5), (v.angle(), a + dir_or_x(v) * (v.len() * 0.2).min(12.0))]
+            let d = dir_or_x(v);
+            let n = d.perp();
+            vec![(v.len(), (a + e) * 0.5 + n * off), (v.angle(), a + d * (v.len() * 0.3).min(60.0 * px) - n * off)]
         }
         ("ShapeRectangleTwoPoint", 1) => {
-            vec![((e.x - a.x).abs(), Vec2::new((a.x + e.x) * 0.5, a.y)), ((e.y - a.y).abs(), Vec2::new(e.x, (a.y + e.y) * 0.5))]
+            let (sx, sy) = (sign(e.x - a.x), sign(e.y - a.y));
+            vec![
+                ((e.x - a.x).abs(), Vec2::new((a.x + e.x) * 0.5, a.y - sy * off)),
+                ((e.y - a.y).abs(), Vec2::new(e.x + sx * 2.0 * off, (a.y + e.y) * 0.5)),
+            ]
         }
         ("ShapeRectangleCenter", 1) => {
             let d = e - a;
-            vec![(2.0 * d.x.abs(), Vec2::new(a.x, a.y - d.y)), (2.0 * d.y.abs(), Vec2::new(a.x + d.x, a.y))]
+            let (sx, sy) = (sign(d.x), sign(d.y));
+            vec![(2.0 * d.x.abs(), Vec2::new(a.x, a.y - d.y - sy * off)), (2.0 * d.y.abs(), Vec2::new(a.x + d.x + sx * 2.0 * off, a.y))]
         }
-        ("CircleCenterRadius", 1) => vec![(2.0 * (e - a).len(), (a + e) * 0.5)],
+        ("CircleCenterRadius", 1) => vec![(2.0 * (e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
         ("ArcCenterTwoPoint", 1) | ("ShapePolygonInscribed" | "ShapePolygonCircumscribed", 1) => {
             vec![((e - a).len(), (a + e) * 0.5), (6.0, a + (e - a) * 0.5 + (e - a).perp() * 0.3)]
         }
@@ -183,7 +216,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     // Esc in a box ends the shape (the box had the keyboard, so the shortcut didn't see it).
     let in_box =
         app.tool.as_ref().is_some_and(|t| (0..t.dims.len()).any(|i| ui.ctx().memory(|m| m.had_focus_last_frame(egui::Id::new(("sc_dim", i))))));
-    if in_box && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+    if in_box && !app.esc_handled && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        app.esc_handled = true;
         crate::tools::finish(app);
         return;
     }
@@ -203,7 +237,8 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let plane = st.sketch(sid)?.plane;
     let h = t.hover.as_ref().map(|x| x.0)?;
     let e = effective(app, t, h);
-    let lv = live(t, e);
+    let px = 2.0 * app.cam.half_height() / f64::from(proj.rect.height().max(1.0));
+    let lv = live(t, e, px);
     let focus = std::mem::take(&mut t.dims_focus);
     let mut any_focused = false;
     for (i, b) in t.dims.iter_mut().enumerate() {

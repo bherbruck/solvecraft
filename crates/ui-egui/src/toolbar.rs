@@ -406,6 +406,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         }
         match k {
             Key::Escape => {
+                app.esc_handled = true;
                 if app.tool.is_some() {
                     crate::tools::finish(app);
                 } else if app.dialog.is_some() {

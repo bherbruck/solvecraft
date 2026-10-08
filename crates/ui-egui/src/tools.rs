@@ -111,8 +111,8 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
     match tool.kind {
         Kind::Draw(_) => {
             if let Some(mut p) = sketch_point_at(app, proj, pos) {
-                // Typed values win over the cursor.
-                if tool.dims.iter().any(|b| b.locked) {
+                // Typed values win over the cursor; lines snap to horizontal/vertical.
+                if tool.dims.iter().any(|b| b.locked) || (tool.cmd == "DrawPolyline" && p.1.is_none()) {
                     p = (crate::sketch_dims::effective(app, &tool, p.0), None);
                 }
                 app.tool = Some(tool);
@@ -304,7 +304,22 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         painter.add(Shape::line(v, stroke));
     };
     match (t.cmd, pts.as_slice()) {
-        ("DrawPolyline", [.., last]) => line(*last, h),
+        ("DrawPolyline", [.., last]) => {
+            line(*last, h);
+            // Horizontal/vertical inference marker.
+            if let Some(horizontal) = crate::sketch_dims::axis_aligned(*last, h)
+                && let Some(m) = to((*last + h) * 0.5)
+            {
+                let g = if horizontal { egui::vec2(0.0, -12.0) } else { egui::vec2(12.0, 0.0) };
+                painter.text(
+                    m + g,
+                    egui::Align2::CENTER_CENTER,
+                    if horizontal { "H" } else { "V" },
+                    egui::FontId::proportional(10.0),
+                    tk.sketch_accent,
+                );
+            }
+        }
         ("ShapeRectangleTwoPoint", [a]) => {
             let (b, c) = (Vec2::new(h.x, a.y), Vec2::new(a.x, h.y));
             line(*a, b);

@@ -1179,7 +1179,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if enter_applies && (enter || canvas_enter || (enter_free && nothing_focused)) {
         ok = true;
     }
-    if esc {
+    if esc && !app.esc_handled {
+        app.esc_handled = true;
         cancel = true;
     }
     // A plane picked for a new sketch starts it right away.

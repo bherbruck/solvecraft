@@ -134,6 +134,8 @@ pub struct SolveApp {
     pub preview: preview::PreviewState,
     /// The last command started interactively (id, label), for Repeat.
     pub last_command: Option<(String, String)>,
+    /// Esc was already acted on this frame (by the shortcuts), so later handlers skip it.
+    pub esc_handled: bool,
     pub status: Option<(String, f64, bool)>,
     pub quit_requested: bool,
     /// The application bar is the window's title bar (Windows, Linux: no OS decorations).
@@ -170,6 +172,7 @@ impl SolveApp {
             tree: browser::TreeState::default(),
             preview: preview::PreviewState::default(),
             last_command: None,
+            esc_handled: false,
             status: None,
             quit_requested: false,
             custom_titlebar: false,
@@ -508,6 +511,7 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        self.esc_handled = false;
         if !self.styled || theme::is_dark() != self.ui.dark {
             theme::set_dark(self.ui.dark);
             theme::apply(ctx);
