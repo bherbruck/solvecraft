@@ -416,11 +416,12 @@ fn inside(poly: &[(f64, f64)], q: (f64, f64)) -> bool {
 
 /// Split one face (index `fi` in `faces`) by one field; `faces` is updated (the face replaced
 /// by its pieces, boundary edges cut in every face).
-fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64) -> Result<usize> {
-    let Some(face) = faces.get(fi).cloned() else { return Ok(0) };
+/// Returns how many lines split it and how many faces now stand in its place (at `fi`).
+fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64, new_edges: &mut Vec<mt::Edge>) -> Result<(usize, usize)> {
+    let Some(face) = faces.get(fi).cloned() else { return Ok((0, 1)) };
     let chains = trace(&face, g, size)?;
     if chains.is_empty() {
-        return Ok(0);
+        return Ok((0, 1));
     }
     let tol = size * 1e-7 + 1e-9;
     let snap = size * 1e-3;
@@ -440,6 +441,7 @@ fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64) -> Resu
             let Some(&(p0, uv0)) = ch.pts.first() else { continue };
             let v = mt::Vertex::new(p0);
             let e = mt::Edge::new_unchecked(&v, &v, curve);
+            new_edges.push(e.clone());
             let uv: Vec<(f64, f64)> = ch.pts.iter().map(|x| x.1).collect();
             let area: f64 = (0..uv.len())
                 .map(|i| {
@@ -532,6 +534,7 @@ fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64) -> Resu
             };
             let (Some(w1), Some(w2)) = (ws.get(wa_i), ws.get(wb_i)) else { continue };
             let slit = mt::Edge::new_unchecked(&va, &vb, fit(&pts, size)?);
+            new_edges.push(slit.clone());
             let mut joined = from(w1, &va);
             joined.push(slit.clone());
             joined.extend(from(w2, &vb));
@@ -572,6 +575,7 @@ fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64) -> Resu
             continue;
         };
         let split = mt::Edge::new_unchecked(&va, &vb, fit(&pts, size)?);
+        new_edges.push(split.clone());
         let run = |from: usize, to: usize| -> Vec<mt::Edge> {
             let mut out = Vec::new();
             let mut i = from;
@@ -612,8 +616,9 @@ fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64) -> Resu
         made += 1;
     }
     if made == 0 {
-        return Ok(0);
+        return Ok((0, 1));
     }
+    let count = pieces.len();
     // Neighbours take the cut edges.
     let rest: Vec<mt::Face> = faces.iter().enumerate().filter(|(k, _)| *k != fi).map(|(_, f)| recut(f, &all_cuts)).collect();
     let mut out = Vec::with_capacity(rest.len() + pieces.len());
@@ -621,19 +626,12 @@ fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64) -> Resu
     out.extend(pieces);
     out.extend(rest.iter().skip(fi).cloned());
     *faces = out;
-    Ok(made)
+    Ok((made, count))
 }
 
-/// Split the given faces (indices in `body`'s face order) where the tool meets them. The solid
-/// is unchanged; faces the tool misses stay whole.
-pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Body> {
-    body.require_brep("split face")?;
-    let size = body.size();
-    let fields: Vec<Field> = match tool {
-        SplitTool::Plane(p) => {
-            let n = p.normal();
-            vec![Field::Plane { o: p.origin, n }]
-        }
+fn fields(tool: &SplitTool) -> Result<Vec<Field>> {
+    Ok(match tool {
+        SplitTool::Plane(p) => vec![Field::Plane { o: p.origin, n: p.normal() }],
         SplitTool::Face { body: other, face } => {
             other.require_brep("a split tool")?;
             let f = other.solid.face_iter().nth(*face).ok_or_else(|| KernelError::Invalid(format!("the tool body has no face {face}")))?;
@@ -645,44 +643,59 @@ pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Bod
             }
             curves.iter().map(|c| Field::Curve { plane: *plane, pts: c.clone() }).collect()
         }
-    };
+    })
+}
+
+/// The body's shells with the chosen faces split by each field in turn, the new edges, and
+/// how many lines split something.
+fn imprint(body: &Body, faces: &[usize], fields: &[Field], size: f64) -> Result<(Vec<Vec<mt::Face>>, Vec<mt::Edge>, usize)> {
+    let mut out_shells = Vec::new();
+    let mut new_edges = Vec::new();
+    let mut base = 0;
+    let mut made = 0;
+    for sh in body.solid.boundaries() {
+        let mut fs: Vec<mt::Face> = sh.face_iter().cloned().collect();
+        // Which faces (by position) are to be split: the chosen ones and, later, their pieces.
+        let mut target: Vec<bool> = (0..fs.len()).map(|k| faces.contains(&(base + k))).collect();
+        base += fs.len();
+        for g in fields {
+            let mut k = 0;
+            while k < fs.len() {
+                if !target.get(k).copied().unwrap_or(false) {
+                    k += 1;
+                    continue;
+                }
+                let (m, pieces) = split_one(&mut fs, k, g, size, &mut new_edges)?;
+                made += m;
+                // The pieces stand at k..k + pieces; positions after shift.
+                let mut t: Vec<bool> = target.iter().take(k).copied().collect();
+                t.extend(std::iter::repeat_n(true, pieces));
+                t.extend(target.iter().skip(k + 1).copied());
+                target = t;
+                k += pieces;
+            }
+        }
+        out_shells.push(fs);
+    }
+    Ok((out_shells, new_edges, made))
+}
+
+/// Split the given faces (indices in `body`'s face order) where the tool meets them. The solid
+/// is unchanged; faces the tool misses stay whole.
+pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Body> {
+    body.require_brep("split face")?;
+    let size = body.size();
+    let fields = fields(tool)?;
     let total = body.solid.face_iter().count();
     if faces.iter().any(|f| *f >= total) {
         return Err(KernelError::Invalid("no such face".into()));
     }
     guard("split face", || {
-        let shells: Vec<mt::Shell> = body.solid.boundaries().clone();
-        // Faces to split, by shell, tracked as faces are replaced by pieces.
-        let mut out_shells = Vec::new();
-        let mut base = 0;
-        let mut made = 0;
-        for sh in shells {
-            let mut fs: Vec<mt::Face> = sh.face_iter().cloned().collect();
-            let mut targets: Vec<mt::FaceID> =
-                faces.iter().filter(|f| **f >= base && **f < base + fs.len()).filter_map(|f| fs.get(*f - base).map(mt::Face::id)).collect();
-            base += fs.len();
-            for g in &fields {
-                let mut next_targets = Vec::new();
-                for id in targets.clone() {
-                    let Some(fi) = fs.iter().position(|f| f.id() == id) else { continue };
-                    let before: Vec<mt::FaceID> = fs.iter().map(mt::Face::id).collect();
-                    made += split_one(&mut fs, fi, g, size)?;
-                    // The face and any pieces of it stay targets for the next curve.
-                    for f in &fs {
-                        if !before.contains(&f.id()) || f.id() == id {
-                            next_targets.push(f.id());
-                        }
-                    }
-                }
-                // Recut neighbours change ids too: keep pieces only.
-                targets = next_targets;
-            }
-            out_shells.push(mt::Shell::from(fs));
-        }
+        let (shells, _, made) = imprint(body, faces, &fields, size)?;
         if made == 0 {
             return Err(KernelError::Invalid("the tool does not cross the selected faces".into()));
         }
-        let solid = mt::Solid::new_unchecked(out_shells);
+        let solid = mt::Solid::new_unchecked(shells.into_iter().map(mt::Shell::from).collect());
         Ok(Body { solid: std::sync::Arc::new(solid), mesh: None, color: body.color, paint: None })
     })
 }
