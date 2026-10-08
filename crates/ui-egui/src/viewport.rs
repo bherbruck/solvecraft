@@ -1070,6 +1070,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         app.viewport.boxsel = None;
     }
+    crate::ref_images::show(app, ui, &painter, &proj);
     overlays(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);
     hover_highlight(app, &painter, &proj);

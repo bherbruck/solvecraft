@@ -21,6 +21,7 @@ mod menu_tests;
 pub mod palette;
 pub mod params_dialog;
 pub mod preview;
+pub mod ref_images;
 pub mod selection;
 pub mod sketch_dims;
 #[cfg(test)]
@@ -280,6 +281,9 @@ impl SolveApp {
             if let Some(p) = self.services.pick_open.as_ref().and_then(|f| f()) {
                 self.insert_path(&p);
             }
+            return;
+        }
+        if !sketch_tools::pick_image(self, id) {
             return;
         }
         if id == "ChangeParameterCommand" {

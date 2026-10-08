@@ -990,6 +990,9 @@ pub struct Document {
     /// Favourite parameters (by name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub favorites: std::collections::BTreeSet<String>,
+    /// Reference images on planes (Insert Canvas).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub canvases: Vec<crate::canvas::Canvas>,
     /// Comments of feature-input parameters (by name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub param_comments: std::collections::BTreeMap<String, String>,
@@ -1050,6 +1053,7 @@ impl Document {
             body_components: Default::default(),
             materials: Default::default(),
             favorites: Default::default(),
+            canvases: Vec::new(),
             param_comments: Default::default(),
             browser_groups: Vec::new(),
             browser_order: Default::default(),

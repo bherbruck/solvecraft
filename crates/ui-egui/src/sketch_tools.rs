@@ -26,6 +26,19 @@ thread_local! {
     static PREV: Cell<Option<Vec2>> = const { Cell::new(None) };
     /// Curvature comb teeth (foot, tip) shown while the comb tool is active.
     static COMBS: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
+    /// The image file a Canvas or Decal tool places.
+    static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Canvas and Decal start by asking for the image; false when none was chosen.
+pub fn pick_image(app: &SolveApp, id: &str) -> bool {
+    if !matches!(id, "FusionAddCanvasCommand" | "FusionAddEditDecalCommand") {
+        return true;
+    }
+    let path = app.services.pick_open.as_ref().and_then(|f| f());
+    let ok = path.is_some();
+    IMAGE.with(|i| *i.borrow_mut() = path);
+    ok
 }
 
 fn v3(v: &Value) -> Option<Vec3> {
@@ -175,7 +188,7 @@ enum Mode {
 fn mode(id: &str) -> Option<Mode> {
     Some(match id {
         "ProjectNewCmd" | "IntersectCmd" | "Include3DGeometry" | "FitCurvesToSectionCommand" | "SketchIsoparametricCurve" => Mode::ModelRef,
-        "FusionCurvatureCombAnalysisCommand" => Mode::ModelRef,
+        "FusionCurvatureCombAnalysisCommand" | "FusionAddCanvasCommand" | "FusionAddEditDecalCommand" => Mode::ModelRef,
         "TrimSketchCmd" | "ExtendSketchCmd" | "BreakSketchCmd" => Mode::CurveAt,
         "SketchMidpointLine" => Mode::Points(2),
         "ArcTangent" => Mode::Points(2),
@@ -221,6 +234,8 @@ pub fn hint(id: &str) -> Option<String> {
             "FitCurvesToSectionCommand" => "Fit Curves to Mesh Section: click a body",
             "SketchIsoparametricCurve" => "Isoparametric Curve: click a point on a face (Shift: along)",
             "FusionCurvatureCombAnalysisCommand" => "Curvature comb: click sketch curves or model edges",
+            "FusionAddCanvasCommand" => "Canvas: click a plane or a planar face where the image's centre goes",
+            "FusionAddEditDecalCommand" => "Decal: click a planar face where the image's centre goes",
             "TrimSketchCmd" => "Trim: click the piece of a curve to remove",
             "ExtendSketchCmd" => "Extend: click a curve near the end to extend",
             "BreakSketchCmd" => "Break: click a curve where it should split",
@@ -357,6 +372,37 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                         comb["teeth"].as_array().into_iter().flatten().filter_map(|t| Some([v3(t.get(0)?)?, v3(t.get(1)?)?])).collect();
                     COMBS.with(|c| c.borrow_mut().push(teeth));
                 }
+            }
+        }
+        Mode::ModelRef if matches!(cmd, "FusionAddCanvasCommand" | "FusionAddEditDecalCommand") => {
+            let Some(path) = IMAGE.with(|i| i.borrow().clone()) else { return };
+            let decal = cmd == "FusionAddEditDecalCommand";
+            let target = hits.iter().find_map(|h| match h {
+                Hit::Face { point, .. } => Some((json!({"face": [point.x, point.y, point.z]}), *point)),
+                Hit::Plane { name, point } if !decal => Some((json!(name), *point)),
+                _ => None,
+            });
+            // Empty space while sketching: the sketch plane.
+            let target = target.or_else(|| {
+                let st = app.session.model.state();
+                let ss = st.sketch(app.session.active_sketch?)?;
+                let (o, d) = proj.ray(pos);
+                let w = ss.plane.intersect_ray(o, d)?;
+                let pl = &ss.plane;
+                Some((
+                    json!({"origin": [pl.origin.x, pl.origin.y, pl.origin.z], "x_dir": [pl.x.x, pl.x.y, pl.x.z], "y_dir": [pl.y.x, pl.y.y, pl.y.z]}),
+                    w,
+                ))
+            });
+            let Some((plane, at)) = target else { return };
+            let p = if decal {
+                json!({"path": path, "face": plane.get("face").cloned().unwrap_or(Value::Null)})
+            } else {
+                json!({"path": path, "plane": plane, "at": [at.x, at.y, at.z]})
+            };
+            if app.run(cmd, p).is_ok() {
+                IMAGE.with(|i| *i.borrow_mut() = None);
+                app.tool = None;
             }
         }
         Mode::ModelRef => {
