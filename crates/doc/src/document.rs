@@ -206,10 +206,13 @@ pub enum FeatureKind {
         #[serde(default)]
         keep_tools: bool,
     },
-    /// Copies of other features' results (rectangular or circular).
+    /// Copies of other features' results, or of bodies (rectangular, circular or along a path).
     Pattern {
         features: Vec<String>,
         pattern: PatternKind,
+        /// Copy these bodies (as new bodies) instead of replaying features.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bodies: Vec<String>,
     },
     /// Mirror copies of other features' results in a plane.
     Mirror {
@@ -437,6 +440,24 @@ pub enum PatternKind {
         /// Total angle (360 deg = evenly around).
         angle: String,
     },
+    /// Copies along a chain of sketch curves: instance k moves by path(k·spacing) − path(0),
+    /// measured along the path from its start.
+    Path {
+        path_sketch: u64,
+        path: Vec<String>,
+        count: String,
+        /// Distance along the path between instances, or the whole extent when `extent`.
+        spacing: String,
+        /// `spacing` is the distance from the first to the last instance.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        extent: bool,
+        /// Run from the path's other end.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// Turn copies with the path's direction (else they keep their orientation).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        orient: bool,
+    },
 }
 
 fn plane_exprs<'a>(p: &'a PlaneRef, v: &mut Vec<&'a str>) {
@@ -475,6 +496,7 @@ impl FeatureKind {
             FeatureKind::Torus { .. } => "TorusFeature",
             FeatureKind::Combine { .. } => "CombineFeature",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPatternFeature",
+            FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPatternFeature",
             FeatureKind::Pattern { .. } => "CircularPatternFeature",
             FeatureKind::Mirror { .. } => "MirrorFeature",
             FeatureKind::ConstructionPlane { .. } => "ConstructionPlane",
@@ -508,6 +530,7 @@ impl FeatureKind {
             FeatureKind::Torus { .. } => "Torus",
             FeatureKind::Combine { .. } => "Combine",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPattern",
+            FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPattern",
             FeatureKind::Pattern { .. } => "CircularPattern",
             FeatureKind::Mirror { .. } => "Mirror",
             FeatureKind::ConstructionPlane { .. } => "Plane",
@@ -561,6 +584,7 @@ impl FeatureKind {
                     v.extend(spacing2.iter().map(String::as_str));
                 }
                 PatternKind::Circular { count, angle, .. } => v.extend([count.as_str(), angle]),
+                PatternKind::Path { count, spacing, .. } => v.extend([count.as_str(), spacing]),
             },
             FeatureKind::Mirror { plane, .. } => plane_exprs(plane, &mut v),
             FeatureKind::Shell { thickness, .. } => v.push(thickness),
@@ -826,6 +850,7 @@ impl Document {
                 FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } if *sketch == id => gone.push(f.id),
                 FeatureKind::Sweep { sketch, path_sketch, .. } if *sketch == id || *path_sketch == id => gone.push(f.id),
                 FeatureKind::Loft { sections, .. } if sections.iter().any(|s| s.sketch == id) => gone.push(f.id),
+                FeatureKind::Pattern { pattern: PatternKind::Path { path_sketch, .. }, .. } if *path_sketch == id => gone.push(f.id),
                 _ => {}
             }
         }

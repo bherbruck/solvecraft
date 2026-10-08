@@ -1567,7 +1567,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Pattern { features, pattern } => {
+        FeatureKind::Pattern { features, pattern, .. } => {
             let ids: Vec<u64> = features.iter().filter_map(|n| s.doc.find_feature(n).map(|f| f.id)).collect();
             let bodies: Vec<Sel> = st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect();
             let mut d = match pattern {
@@ -1610,6 +1610,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                     d
                 }
+                // No dialog for a path pattern yet: edit it with timeline.redefine.
+                PatternKind::Path { .. } => return None,
             };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = bodies;

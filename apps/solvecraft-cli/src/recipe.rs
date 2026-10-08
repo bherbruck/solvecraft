@@ -224,6 +224,20 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
                 let axis = f.get("axis").map(|a| json!({"origin": a.get("origin").cloned().unwrap_or(json!([0, 0, 0])), "dir": a.get("dir")})).unwrap_or(Value::Null);
                 out.push(json!({"command": "PatternCircular", "params": {"features": feature_refs(f.get("features")), "axis": axis, "count": f.get("count"), "angle": f.get("total_angle").cloned().unwrap_or(json!(360)), "name": name}}));
             }
+            Some("path_pattern") => {
+                let path = f.get("path").cloned().unwrap_or(Value::Null);
+                let mut p = json!({"path_sketch": path.get("sketch"), "path": path.get("curves"), "count": f.get("count"), "name": name});
+                match f.get("spacing") {
+                    Some(sp) => p["spacing"] = sp.clone(),
+                    None => p["distance"] = f.get("distance").cloned().unwrap_or(Value::Null),
+                }
+                if f.get("pattern_of").and_then(Value::as_str) == Some("bodies") {
+                    p["bodies"] = f.get("bodies").cloned().unwrap_or(Value::Null);
+                } else {
+                    p["features"] = feature_refs(f.get("features"));
+                }
+                out.push(json!({"command": "PatternOnPath", "params": p}));
+            }
             Some("loft") => {
                 let sections: Vec<Value> = f
                     .get("sections")

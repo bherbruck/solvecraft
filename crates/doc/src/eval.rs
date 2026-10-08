@@ -1125,7 +1125,7 @@ fn mirror_matrix(pl: &Plane) -> Mat {
 
 const MAX_INSTANCES: usize = 1000;
 
-fn pattern_transforms(vals: &BTreeMap<String, Value>, p: &crate::PatternKind) -> Result<Vec<Mat>> {
+fn pattern_transforms(vals: &BTreeMap<String, Value>, st: &ModelState, p: &crate::PatternKind) -> Result<Vec<Mat>> {
     let count = |e: &str| -> Result<usize> {
         let n = val(vals, e, Kind::Unitless)?.round();
         if !(1.0..=MAX_INSTANCES as f64).contains(&n) {
@@ -1156,6 +1156,37 @@ fn pattern_transforms(vals: &BTreeMap<String, Value>, p: &crate::PatternKind) ->
                 }
             }
         }
+        crate::PatternKind::Path { path_sketch, path, count: c, spacing, extent, flip, orient } => {
+            let n = count(c)?;
+            let d = val(vals, spacing, Kind::Length)?;
+            let ps = st.sketch(*path_sketch).ok_or_else(|| DocError::Unknown(format!("path sketch {path_sketch}")))?;
+            let mut segs = path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?;
+            if *flip {
+                segs = segs.iter().rev().map(reverse_seg).collect();
+            }
+            let total: f64 = segs.iter().map(seg_len).sum();
+            let step = if *extent { if n > 1 { d / (n - 1) as f64 } else { 0.0 } } else { d };
+            if (step * (n - 1) as f64).abs() > total * (1.0 + 1e-5) + 1e-6 {
+                return Err(DocError::Invalid(format!("the instances run past the end of the path ({total:.3} mm long)")));
+            }
+            let normal = ps.plane.normal();
+            let (p0, t0) = path_at(&segs, 0.0);
+            for i in 1..n {
+                let (pk, tk) = path_at(&segs, step * i as f64);
+                let mut m = if *orient {
+                    // Signed turn of the tangent about the sketch normal.
+                    let ang = t0.cross(tk).dot(normal).atan2(t0.dot(tk));
+                    rotation(p0, normal, ang)
+                } else {
+                    translation(Vec3::ZERO)
+                };
+                let dv = pk - p0;
+                m[3][0] += dv.x;
+                m[3][1] += dv.y;
+                m[3][2] += dv.z;
+                out.push(m);
+            }
+        }
         crate::PatternKind::Circular { origin, axis, count: c, angle } => {
             let n = count(c)?;
             let total = val(vals, angle, Kind::Angle)?;
@@ -1173,6 +1204,60 @@ fn pattern_transforms(vals: &BTreeMap<String, Value>, p: &crate::PatternKind) ->
         }
     }
     Ok(out)
+}
+
+fn seg_len(s: &kernel::PathSeg) -> f64 {
+    match *s {
+        kernel::PathSeg::Line { a, b } => (b - a).len(),
+        kernel::PathSeg::Arc { a, center, angle, .. } => (a - center).len() * angle.abs(),
+    }
+}
+
+/// Rotate `v` about the unit axis `k` by `ang` (Rodrigues).
+fn rotate_vec(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
+    v * ang.cos() + k.cross(v) * ang.sin() + k * (k.dot(v) * (1.0 - ang.cos()))
+}
+
+/// Point and unit tangent `t` mm along a segment.
+fn seg_at(s: &kernel::PathSeg, t: f64) -> (Vec3, Vec3) {
+    match *s {
+        kernel::PathSeg::Line { a, b } => {
+            let d = (b - a).normalized().unwrap_or(Vec3::X);
+            (a + d * t, d)
+        }
+        kernel::PathSeg::Arc { a, center, axis, angle } => {
+            let k = axis.normalized().unwrap_or(Vec3::Z);
+            let r = (a - center).len().max(1e-12);
+            // Sweeps turn right-handed about `axis` (angles are positive).
+            let s = if angle < 0.0 { -1.0 } else { 1.0 };
+            let v = rotate_vec(a - center, k, s * t / r);
+            (center + v, k.cross(v).normalized().unwrap_or(Vec3::X) * s)
+        }
+    }
+}
+
+fn reverse_seg(s: &kernel::PathSeg) -> kernel::PathSeg {
+    match *s {
+        kernel::PathSeg::Line { a, b } => kernel::PathSeg::Line { a: b, b: a },
+        kernel::PathSeg::Arc { a, center, axis, angle } => {
+            let k = axis.normalized().unwrap_or(Vec3::Z);
+            let end = center + rotate_vec(a - center, k, angle);
+            kernel::PathSeg::Arc { a: end, center, axis: k * -1.0, angle }
+        }
+    }
+}
+
+/// Point and tangent at arc length `d` along a chain (clamped to its ends).
+fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
+    let mut left = d.max(0.0);
+    for (i, s) in segs.iter().enumerate() {
+        let l = seg_len(s);
+        if left <= l + 1e-9 || i + 1 == segs.len() {
+            return seg_at(s, left.min(l));
+        }
+        left -= l;
+    }
+    (Vec3::ZERO, Vec3::X)
 }
 
 /// Apply transformed copies of the tools of `features` (patterns, mirrors).
@@ -1317,9 +1402,21 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
-        FeatureKind::Pattern { features, pattern } => {
-            let mats = pattern_transforms(vals, pattern)?;
-            replay(doc, vals, f, st, features, &mats)
+        FeatureKind::Pattern { features, pattern, bodies } => {
+            let mats = pattern_transforms(vals, st, pattern)?;
+            if bodies.is_empty() {
+                return replay(doc, vals, f, st, features, &mats);
+            }
+            // Bodies: each copy is a new body named after its source.
+            for n in bodies {
+                let mb = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+                for m in &mats {
+                    let copy = kernel::transform_matrix(&mb.body, *m)?;
+                    let name = unique_body_name(st, &mb.name);
+                    st.bodies.push(ModelBody::new(name, copy, f.id));
+                }
+            }
+            Ok(())
         }
         FeatureKind::Mirror { features, plane, bodies, combine } => {
             let pl = doc.resolve_plane(vals, plane, 0)?;

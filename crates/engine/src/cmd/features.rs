@@ -37,11 +37,15 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("PatternRectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
-        .params("features: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?"),
+        .params("features: [names] | bodies: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?"),
     CommandSpec::new("PatternCircular", "Circular Pattern", pattern_circ)
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
-        .params("features: [names]; axis: X|Y|Z | {origin, dir}; count; angle? (default 360 deg)"),
+        .params("features: [names] | bodies: [names]; axis: X|Y|Z | {origin, dir}; count; angle? (default 360 deg)"),
+    CommandSpec::new("PatternOnPath", "Pattern on Path", pattern_path)
+        .at("SOLID", "CREATE")
+        .icon("pattern_rect")
+        .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool"),
     CommandSpec::new("MirrorCommand", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ | {origin, x_dir, y_dir}"),
     CommandSpec::new("FusionHoleCommand", "Hole", hole)
         .at("SOLID", "CREATE")
@@ -518,9 +522,22 @@ fn axis_line(p: &Value, cmd: &str) -> Result<(Vec3, Vec3)> {
     }
 }
 
+/// What a pattern copies: features (replayed), or bodies (`bodies: [names]`).
+fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<String>, Vec<String>)> {
+    let bodies = string_list(p, "bodies");
+    if bodies.is_empty() {
+        return Ok((source_features(s, p, cmd)?, Vec::new()));
+    }
+    let st = s.model.state();
+    if let Some(b) = bodies.iter().find(|b| st.body(b).is_none()) {
+        return Err(bad(cmd, format!("no body `{b}`")));
+    }
+    Ok((Vec::new(), bodies))
+}
+
 fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "PatternRectangular";
-    let features = source_features(s, p, cmd)?;
+    let (features, bodies) = pattern_sources(s, p, cmd)?;
     let dir1 = p.get("dir1").and_then(vec3).ok_or_else(|| bad(cmd, "`dir1` must be [x, y, z]"))?;
     let count1 = req_expr(cmd, p, "count1")?;
     let spacing1 = req_expr(cmd, p, "spacing1")?;
@@ -535,19 +552,45 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, c, Kind::Length, cmd, "spacing2")?;
     }
     let pattern = solvecraft_doc::PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2 };
-    add_feature(s, p, FeatureKind::Pattern { features, pattern })
+    add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies })
 }
 
 fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "PatternCircular";
-    let features = source_features(s, p, cmd)?;
+    let (features, bodies) = pattern_sources(s, p, cmd)?;
     let (origin, axis) = axis_line(p, cmd)?;
     let count = req_expr(cmd, p, "count")?;
     check_expr(s, &count, Kind::Unitless, cmd, "count")?;
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let pattern = solvecraft_doc::PatternKind::Circular { origin, axis, count, angle };
-    add_feature(s, p, FeatureKind::Pattern { features, pattern })
+    add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies })
+}
+
+fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "PatternOnPath";
+    let (features, bodies) = pattern_sources(s, p, cmd)?;
+    let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
+    let path = string_list(p, "path");
+    if path.is_empty() || path.len() > 1000 {
+        return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
+    }
+    let count = req_expr(cmd, p, "count")?;
+    check_expr(s, &count, Kind::Unitless, cmd, "count")?;
+    let (spacing, extent) = match (expr(p, "spacing"), expr(p, "distance")) {
+        (Some(x), _) => (x, false),
+        (None, Some(x)) => (x, true),
+        (None, None) => return Err(bad(cmd, "give `spacing` (between instances) or `distance` (first to last)")),
+    };
+    check_expr(s, &spacing, Kind::Length, cmd, "spacing")?;
+    let orient = match str_(p, "orientation") {
+        None | Some("identical") => false,
+        Some("path" | "path_direction" | "along_path") => true,
+        Some(o) => return Err(bad(cmd, format!("unknown orientation `{o}` (identical or path)"))),
+    };
+    let flip = bool_(p, "flip").unwrap_or(false);
+    let pattern = solvecraft_doc::PatternKind::Path { path_sketch, path, count, spacing, extent, flip, orient };
+    add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies })
 }
 
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
@@ -863,3 +906,7 @@ fn offset_face(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
     add_feature(s, p, FeatureKind::OffsetFace { faces, distance, body: str_(p, "body").map(str::to_string) })
 }
+
+#[cfg(test)]
+#[path = "patterns_tests.rs"]
+mod patterns_tests;

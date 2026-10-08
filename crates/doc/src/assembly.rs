@@ -180,6 +180,8 @@ impl FeatureKind {
                 pt(origin);
                 dir(axis);
             }
+            // Follows its sketch.
+            FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => {}
             FeatureKind::Hole { position, direction, .. } => {
                 pt(position);
                 dir(direction);

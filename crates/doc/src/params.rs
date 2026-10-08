@@ -75,6 +75,10 @@ impl FeatureKind {
                         v.push(("Spacing 2", sp, L));
                     }
                 }
+                PatternKind::Path { count, spacing, .. } => {
+                    v.push(("Quantity", count, U));
+                    v.push(("Distance", spacing, L));
+                }
                 PatternKind::Circular { count, angle, .. } => {
                     v.push(("Quantity", count, U));
                     v.push(("Total angle", angle, A));
