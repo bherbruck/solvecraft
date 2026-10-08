@@ -191,7 +191,10 @@ fn ok_click_survives_a_busy_preview() {
     let frame = |app: &mut SolveApp, busy: bool, events: Vec<egui::Event>| {
         app.preview.busy = busy;
         let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
-        ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()))
+        let mut out = ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()));
+        // Nothing is painted: drop the texture changes (an unapplied delta panics on drop).
+        out.textures_delta.clear();
+        out
     };
     frame(&mut app, false, vec![]);
     let out = frame(&mut app, false, vec![]);

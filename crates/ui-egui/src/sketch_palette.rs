@@ -167,9 +167,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     ui.end_row();
                     for (k, label) in TOGGLES {
-                        ui.label(label);
+                        // The label is part of the checkbox: clicking it toggles too.
                         let mut on = shown(k);
-                        if ui.checkbox(&mut on, "").changed() {
+                        if ui.checkbox(&mut on, label).changed() {
                             set = Some((k.to_string(), on));
                         }
                         ui.end_row();

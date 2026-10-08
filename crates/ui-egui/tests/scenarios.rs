@@ -34,5 +34,13 @@ scenarios!(
     s09_step_roundtrip_hole,
     s10_parameters_drive_model,
     s11_sketch_constraints,
-    s12_pattern_bodies
+    s12_pattern_bodies,
+    s13_plastic_enclosure,
+    s14_appearance_export,
+    s15_start_page_sample_save_reopen,
+    s16_tabs_separate_undo,
+    s17_toolbox_and_visibility,
+    s18_3d_sketch_pipe,
+    s19_canvas_calibrate,
+    s20_section_with_joint_drive
 );

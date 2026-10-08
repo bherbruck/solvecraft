@@ -1,0 +1,72 @@
+[
+ {
+  "make_image": "pic.png"
+ },
+ {
+  "choose_file": "pic.png"
+ },
+ {
+  "start": "FusionAddCanvasCommand"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "expect": {
+   "canvas_width": [
+    100,
+    0.5
+   ]
+  }
+ },
+ {
+  "call": "ui.menu",
+  "params": {
+   "x": 100,
+   "y": 260,
+   "target": {
+    "type": "canvas",
+    "id": 1
+   }
+  }
+ },
+ {
+  "call": "ui.menuPick",
+  "params": {
+   "item": "Calibrate"
+  }
+ },
+ {
+  "widget": "100.0 mm",
+  "near": "Distance"
+ },
+ {
+  "key": "A",
+  "cmd": true
+ },
+ {
+  "text": "50"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "widget": "Calibrate"
+ },
+ {
+  "expect": {
+   "canvas_width": [
+    50,
+    0.01
+   ]
+  }
+ },
+ {
+  "shot": "s19_canvas"
+ }
+]

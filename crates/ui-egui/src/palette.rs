@@ -103,9 +103,11 @@ pub fn popup(app: &mut SolveApp, ctx: &egui::Context) {
         .open(&mut open)
         .show(ctx, |ui| {
             let r = ui.add(egui::TextEdit::singleline(&mut app.palette.text).hint_text("command name").desired_width(380.0));
+            // Read Enter before taking the focus back (lost_focus reads the focus as it is now).
+            let entered = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             r.request_focus();
             let list = matches(&app.palette.text);
-            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if entered {
                 picked = list.first().map(|x| x.0);
             }
             egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {

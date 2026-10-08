@@ -4,19 +4,21 @@
 //!
 //! A scenario is a JSON list of steps:
 //! - `{"start": "Extrude"}`: a toolbar click; `{"key": "E", "shift"?, "cmd"?}`; `{"text": "20"}`
-//! - `{"widget": "Revolute"}`: click a dialog field, choice or button by its text
+//! - `{"widget": "Revolute", "near"?: "Type"}`: click a dialog field, choice or button by its
+//!   text (with `near`: the one in that label's row)
 //! - `{"click": AT, "double"?, "shift"?, "ctrl"?, "button"?}`, `{"move": AT}`,
 //!   `{"drag": [AT, AT], "shift"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
 //!   or `{"sketch": [x,y]}` (the sketch being edited)
 //! - `{"call": "ui.view", "params": {…}}`: any other control request (`fail: true` expects an
 //!   error)
+//! - `{"make_image": "pic.png"}`: a picture in the scenario's folder
 //! - `{"choose_file": "part.step"}`: the next Open picker returns that file of the scenario's
 //!   folder (Save pickers save there)
 //! - `{"shot": "name"}`: a screenshot when run in a window; headless, a render of the model
 //!   into `$SOLVECRAFT_SCENARIO_SHOTS` when that is set; `{"debug": 1}`
 //!   prints the UI state
 //! - AT may also be `{"plane": "XY"}`: the middle of an origin plane's square
-//! - `{"expect": {…}}`: checks, see [`check`]
+//! - `{"expect": {…}}`: checks, see [`check`]; `{"until": {…}}` waits (frames) until they pass
 //!
 //! The same files drive the live app over the control channel for screenshots.
 
@@ -57,6 +59,15 @@ pub struct Harness {
 impl Default for Harness {
     fn default() -> Self {
         Harness::new()
+    }
+}
+
+impl Drop for Harness {
+    /// The scenario's files go with it (kept with SOLVECRAFT_SCENARIO_KEEP set).
+    fn drop(&mut self) {
+        if std::env::var_os("SOLVECRAFT_SCENARIO_KEEP").is_none() {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
     }
 }
 
@@ -134,7 +145,21 @@ impl Harness {
     /// The centre of the visible widget whose label or value is `text` (the last one drawn wins:
     /// popups are drawn after what opened them).
     pub fn widget(&self, text: &str) -> Option<[f64; 2]> {
-        let tree = self.output.accesskit_update.as_ref()?;
+        self.widgets(text).into_iter().next()
+    }
+
+    /// The widget showing `text` nearest the label `near` (the field in a label's row).
+    pub fn widget_near(&self, text: &str, near: &str) -> Option<[f64; 2]> {
+        let [lx, ly] = self.widgets(near).into_iter().next()?;
+        self.widgets(text).into_iter().filter(|[x, _]| *x > lx).min_by(|a, b| {
+            let d = |p: &[f64; 2]| (p[1] - ly).abs() * 4.0 + (p[0] - lx).abs();
+            d(a).total_cmp(&d(b))
+        })
+    }
+
+    /// Centres of the visible widgets whose label or value is `text`, last drawn first.
+    fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
+        let Some(tree) = self.output.accesskit_update.as_ref() else { return Vec::new() };
         tree.nodes
             .iter()
             .rev()
@@ -143,8 +168,9 @@ impl Harness {
                 n.label().is_some_and(|l| l == text || l.strip_prefix(text).is_some_and(|r| r.starts_with(' '))) || n.value() == Some(text)
             })
             .filter_map(|(_, n)| n.bounds())
-            .find(|b| b.x1 > b.x0 && b.y1 > b.y0)
+            .filter(|b| b.x1 > b.x0 && b.y1 > b.y0)
             .map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0])
+            .collect()
     }
 
     /// A step's point on screen.
@@ -165,73 +191,100 @@ impl Harness {
     /// Run one step.
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
-        let res = if let Some(id) = s.get("start").and_then(Value::as_str) {
-            self.call("ui.start", json!({ "command": id }))
-        } else if let Some(k) = s.get("key").and_then(Value::as_str) {
-            self.call("ui.key", json!({"key": k, "shift": flag("shift"), "cmd": flag("cmd")}))
-        } else if let Some(t) = s.get("text").and_then(Value::as_str) {
-            self.call("ui.text", json!({ "text": t }))
-        } else if let Some(at) = s.get("click") {
-            let [x, y] = self.at(at)?;
-            // Hover first, as a hand does.
-            self.call("ui.move", json!({"x": x, "y": y}));
-            let mut p = json!({"x": x, "y": y, "double": flag("double"), "shift": flag("shift"), "ctrl": flag("ctrl")});
-            if let Some(b) = s.get("button") {
-                p["button"] = b.clone();
-            }
-            self.call("ui.click", p)
-        } else if let Some(text) = s.get("widget").and_then(Value::as_str) {
-            // A dialog field, choice or button, found by its text.
-            let [x, y] = self.widget(text).ok_or_else(|| format!("no widget `{text}` on screen"))?;
-            self.call("ui.move", json!({"x": x, "y": y}));
-            self.call("ui.click", json!({"x": x, "y": y}))
-        } else if let Some(at) = s.get("move") {
-            let [x, y] = self.at(at)?;
-            self.call("ui.move", json!({"x": x, "y": y}))
-        } else if let Some(d) = s.get("drag") {
-            let [x0, y0] = self.at(d.get(0).unwrap_or(&Value::Null))?;
-            let [x1, y1] = self.at(d.get(1).unwrap_or(&Value::Null))?;
-            let steps = s.get("steps").cloned().unwrap_or(json!(8));
-            self.call("ui.drag", json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift")}))
-        } else if let Some(m) = s.get("call").and_then(Value::as_str) {
-            self.call(m, s.get("params").cloned().unwrap_or(json!({})))
-        } else if let Some(name) = s.get("shot").and_then(Value::as_str) {
-            // With SOLVECRAFT_SCENARIO_SHOTS set: a render of the model as the camera sees it.
-            if let Ok(dir) = std::env::var("SOLVECRAFT_SCENARIO_SHOTS") {
-                let path = std::path::Path::new(&dir).join(format!("{name}.png"));
-                self.call("ui.render", json!({"path": path.to_string_lossy(), "width": 1000, "height": 700}));
-            }
-            return Ok(());
-        } else if let Some(f) = s.get("choose_file").and_then(Value::as_str) {
-            *self.next_file.borrow_mut() = Some(self.dir.join(f).to_string_lossy().into_owned());
-            return Ok(());
-        } else if let Some(m) = s.get("print").and_then(Value::as_str) {
-            let r = self.call(m, s.get("params").cloned().unwrap_or(json!({})));
-            eprintln!("print {m}: {r}");
-            return Ok(());
-        } else if s.get("debug").is_some() {
-            let ui = self.call("ui.inspect", json!({}));
-            let sel = self.call("ui.selection", json!({}));
-            eprintln!(
-                "debug: dialog {} tool {} hover {}\nselection {}\nstatus {:?}",
-                ui["result"]["dialog"], ui["result"]["tool"], ui["result"]["hover"], sel["result"]["selection"], self.app.status
-            );
-            if s["debug"] == json!("widgets") {
-                let texts: Vec<String> = self
-                    .output
-                    .accesskit_update
-                    .iter()
-                    .flat_map(|t| t.nodes.iter())
-                    .filter_map(|(_, n)| n.label().or(n.value()).map(|l| format!("{:?} {l}", n.role())))
-                    .collect();
-                eprintln!("widgets: {texts:?}");
-            }
-            return Ok(());
-        } else if let Some(e) = s.get("expect") {
-            return check(self, e);
-        } else {
-            return Err(format!("unknown step {s}"));
-        };
+        let res =
+            if let Some(id) = s.get("start").and_then(Value::as_str) {
+                self.call("ui.start", json!({ "command": id }))
+            } else if let Some(k) = s.get("key").and_then(Value::as_str) {
+                self.call("ui.key", json!({"key": k, "shift": flag("shift"), "cmd": flag("cmd")}))
+            } else if let Some(t) = s.get("text").and_then(Value::as_str) {
+                self.call("ui.text", json!({ "text": t }))
+            } else if let Some(at) = s.get("click") {
+                let [x, y] = self.at(at)?;
+                // Hover first, as a hand does.
+                self.call("ui.move", json!({"x": x, "y": y}));
+                let mut p = json!({"x": x, "y": y, "double": flag("double"), "shift": flag("shift"), "ctrl": flag("ctrl")});
+                if let Some(b) = s.get("button") {
+                    p["button"] = b.clone();
+                }
+                self.call("ui.click", p)
+            } else if let Some(text) = s.get("widget").and_then(Value::as_str) {
+                // A dialog field, choice or button, found by its text.
+                let found = match s.get("near").and_then(Value::as_str) {
+                    Some(near) => self.widget_near(text, near),
+                    None => self.widget(text),
+                };
+                let [x, y] = found.ok_or_else(|| format!("no widget `{text}` on screen"))?;
+                self.call("ui.move", json!({"x": x, "y": y}));
+                self.call("ui.click", json!({"x": x, "y": y}))
+            } else if let Some(at) = s.get("move") {
+                let [x, y] = self.at(at)?;
+                self.call("ui.move", json!({"x": x, "y": y}))
+            } else if let Some(d) = s.get("drag") {
+                let [x0, y0] = self.at(d.get(0).unwrap_or(&Value::Null))?;
+                let [x1, y1] = self.at(d.get(1).unwrap_or(&Value::Null))?;
+                let steps = s.get("steps").cloned().unwrap_or(json!(8));
+                self.call("ui.drag", json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift")}))
+            } else if let Some(m) = s.get("call").and_then(Value::as_str) {
+                self.call(m, s.get("params").cloned().unwrap_or(json!({})))
+            } else if let Some(name) = s.get("shot").and_then(Value::as_str) {
+                // With SOLVECRAFT_SCENARIO_SHOTS set: a render of the model as the camera sees it.
+                if let Ok(dir) = std::env::var("SOLVECRAFT_SCENARIO_SHOTS") {
+                    let path = std::path::Path::new(&dir).join(format!("{name}.png"));
+                    self.call("ui.render", json!({"path": path.to_string_lossy(), "width": 1000, "height": 700}));
+                }
+                return Ok(());
+            } else if let Some(f) = s.get("make_image").and_then(Value::as_str) {
+                // A picture to insert (a 200 x 100 checkerboard PNG in the scenario's folder).
+                let img = image::RgbImage::from_fn(200, 100, |x, y| {
+                    if (x / 20 + y / 20) % 2 == 0 { image::Rgb([230, 230, 230]) } else { image::Rgb([60, 90, 160]) }
+                });
+                img.save(self.dir.join(f)).map_err(|e| format!("make_image: {e}"))?;
+                return Ok(());
+            } else if let Some(f) = s.get("choose_file").and_then(Value::as_str) {
+                *self.next_file.borrow_mut() = Some(self.dir.join(f).to_string_lossy().into_owned());
+                return Ok(());
+            } else if let Some(m) = s.get("print").and_then(Value::as_str) {
+                let r = self.call(m, s.get("params").cloned().unwrap_or(json!({})));
+                eprintln!("print {m}: {r}");
+                return Ok(());
+            } else if s.get("debug").is_some() {
+                let ui = self.call("ui.inspect", json!({}));
+                let sel = self.call("ui.selection", json!({}));
+                eprintln!(
+                    "debug: dialog {} tool {} hover {}\nselection {}\nstatus {:?}",
+                    ui["result"]["dialog"], ui["result"]["tool"], ui["result"]["hover"], sel["result"]["selection"], self.app.status
+                );
+                if s["debug"] == json!("widgets") {
+                    let texts: Vec<String> = self
+                        .output
+                        .accesskit_update
+                        .iter()
+                        .flat_map(|t| t.nodes.iter())
+                        .filter_map(|(_, n)| {
+                            let at = n.bounds().map(|b| format!(" @{:.0},{:.0}", (b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0)).unwrap_or_default();
+                            n.label().or(n.value()).map(|l| format!("{:?} {l}{at}", n.role()))
+                        })
+                        .collect();
+                    eprintln!("widgets: {texts:?}");
+                }
+                return Ok(());
+            } else if let Some(e) = s.get("until") {
+                // Background work (a sample being built, a preview): frames until the checks pass.
+                let mut last = String::new();
+                for _ in 0..600 {
+                    match check(self, e) {
+                        Ok(()) => return Ok(()),
+                        Err(m) => last = m,
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    self.frames(2);
+                }
+                return Err(format!("timed out: {last}"));
+            } else if let Some(e) = s.get("expect") {
+                return check(self, e);
+            } else {
+                return Err(format!("unknown step {s}"));
+            };
         let failed = res["ok"] != json!(true);
         if failed != flag("fail") {
             return Err(format!("{s}: {res}"));
@@ -346,6 +399,48 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 let p = h.dir.join(v.as_str().unwrap_or_default());
                 if std::fs::metadata(&p).map_or(0, |m| m.len()) == 0 {
                     return Err(format!("no file {}", p.display()));
+                }
+            }
+            "file_contains" => {
+                // {file, text}: a saved text file holds the text.
+                let p = h.dir.join(v["file"].as_str().unwrap_or_default());
+                let body = std::fs::read_to_string(&p).unwrap_or_default();
+                let t = v["text"].as_str().unwrap_or_default();
+                if !body.contains(t) {
+                    return Err(format!("{} does not contain `{t}`", p.display()));
+                }
+            }
+            "hidden" => {
+                // Bodies hidden in the view.
+                let h = &ui["ui"]["hidden_bodies"];
+                let h = if h.is_null() { &ui["ui"]["hiddenBodies"] } else { h };
+                if h != v {
+                    return Err(format!("hidden bodies: got {h}, want {v}"));
+                }
+            }
+            "canvas_width" => {
+                // The first canvas's width (mm).
+                let w = h.app.session.doc.canvases.first().map(|c| c.width).unwrap_or(f64::NAN);
+                approx(w, v, "canvas width")?;
+            }
+            "section" => {
+                if h.app.session.section.is_some() != v.as_bool().unwrap_or(false) {
+                    return Err(format!("section view: want {v}"));
+                }
+            }
+            "home" => {
+                if ui["home"] != *v {
+                    return Err(format!("start page open: got {}, want {v}", ui["home"]));
+                }
+            }
+            "documents" => {
+                if ui["documents"] != *v {
+                    return Err(format!("open designs: got {}, want {v}", ui["documents"]));
+                }
+            }
+            "name" => {
+                if doc["name"] != *v {
+                    return Err(format!("design name: got {}, want {v}", doc["name"]));
                 }
             }
             "query" => {

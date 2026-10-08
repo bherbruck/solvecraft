@@ -1,0 +1,114 @@
+[
+ {
+  "key": "S"
+ },
+ {
+  "text": "Create Sketch"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "expect": {
+   "sketching": true
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    30,
+    20
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "key": "S"
+ },
+ {
+  "text": "Finish Sketch"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "sketching": false
+  }
+ },
+ {
+  "key": "S"
+ },
+ {
+  "text": "Extrude"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "text": "10"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "volume": 6000
+  }
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "click": {
+   "world": [
+    15,
+    10,
+    10
+   ]
+  }
+ },
+ {
+  "key": "V"
+ },
+ {
+  "expect": {
+   "hidden": [
+    "Body1"
+   ]
+  }
+ },
+ {
+  "shot": "s17_hidden"
+ },
+ {
+  "key": "V"
+ },
+ {
+  "expect": {
+   "hidden": []
+  }
+ }
+]

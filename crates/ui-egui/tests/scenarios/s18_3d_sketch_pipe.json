@@ -1,0 +1,168 @@
+[
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    30,
+    20
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "text": "15"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "world": [
+    15,
+    0,
+    7
+   ]
+  }
+ },
+ {
+  "expect": {
+   "sketching": true
+  }
+ },
+ {
+  "widget": "3D Sketch"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "DrawPolyline"
+ },
+ {
+  "click": {
+   "world": [
+    30,
+    0,
+    15
+   ]
+  }
+ },
+ {
+  "click": {
+   "world": [
+    30,
+    20,
+    15
+   ]
+  }
+ },
+ {
+  "click": {
+   "world": [
+    0,
+    20,
+    15
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "shot": "s18_3d_lines"
+ },
+ {
+  "expect": {
+   "query": {
+    "command": "sketch.inspect",
+    "path": [
+     "wires",
+     1,
+     "id"
+    ],
+    "value": "w2"
+   }
+  }
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "start": "PrimitivePipe"
+ },
+ {
+  "click": {
+   "world": [
+    30,
+    10,
+    15
+   ]
+  }
+ },
+ {
+  "click": {
+   "world": [
+    15,
+    20,
+    15
+   ]
+  }
+ },
+ {
+  "text": "3"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 2,
+   "errors": 0,
+   "dialog": null
+  }
+ },
+ {
+  "shot": "s18_pipe"
+ }
+]
