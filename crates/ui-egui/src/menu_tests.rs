@@ -54,10 +54,10 @@ fn face_menu_hides_and_finds_the_body() {
     for l in ["Create Sketch", "Offset Plane", "Press Pull", "Extrude", "Measure", "Find in Browser", "Find in Timeline"] {
         assert!(find(&items, l).enabled, "{l}");
     }
-    assert!(!find(&items, "Appearance…").enabled);
+    assert!(!find(&items, "Appearance").enabled);
     context_menu::run_item(&mut app, &find(&items, "Find in Timeline"), pos2(0.0, 0.0));
     assert!(matches!(app.session.selection.as_slice(), [solvecraft_engine::Sel::Feature { .. }]));
-    context_menu::run_item(&mut app, &find(&items, "Hide Body"), pos2(0.0, 0.0));
+    context_menu::run_item(&mut app, &find(&items, "Show/Hide"), pos2(0.0, 0.0));
     assert_eq!(app.ui.hidden_bodies, vec![b]);
 }
 
@@ -104,11 +104,11 @@ fn sketch_menu_hides_and_moves_to_another_plane() {
     let t = Target::Sketch { id };
     let items = context_menu::items(&app, &t);
     let vis = crate::browser::sketch_visible(&app, id);
-    context_menu::run_item(&mut app, &find(&items, if vis { "Hide" } else { "Show" }), pos2(0.0, 0.0));
+    context_menu::run_item(&mut app, &find(&items, "Show/Hide"), pos2(0.0, 0.0));
     assert_eq!(crate::browser::sketch_visible(&app, id), !vis);
-    context_menu::run_item(&mut app, &find(&items, "Show Dimensions"), pos2(0.0, 0.0));
+    context_menu::run_item(&mut app, &find(&items, "Show Dimension"), pos2(0.0, 0.0));
     assert_eq!(app.ui.shown_dims, vec![id]);
-    assert!(find(&context_menu::items(&app, &t), "Hide Dimensions").enabled);
+    assert!(find(&context_menu::items(&app, &t), "Hide Dimension").enabled);
     context_menu::run_item(&mut app, &find(&items, "Edit Sketch"), pos2(0.0, 0.0));
     assert_eq!(app.session.active_sketch, Some(id));
     app.finish_sketch();
@@ -144,7 +144,7 @@ fn component_menu_activates_grounds_and_pastes() {
     app.run("FusionCreateComponentsFromBodiesCommand", json!({"bodies": [b]})).unwrap();
     let c = app.session.doc.components[0].id;
     let t = Target::Component { id: c };
-    act(&mut app, &t, "Activate Component");
+    act(&mut app, &t, "Activate");
     assert_eq!(app.session.active_component, c);
     act(&mut app, &t, "Ground");
     assert!(app.session.doc.occurrence_of(c).unwrap().grounded);
@@ -279,4 +279,82 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     app.tree.picked_canvases = vec![id];
     crate::delete::delete_selection(&mut app);
     assert!(app.session.doc.canvases.is_empty());
+}
+
+/// The canvas and browser menus keep Fusion's items in Fusion's order (the ones we have).
+#[test]
+fn menus_follow_fusion_order() {
+    let mut app = sample_app();
+    let b = body(&app);
+    let order = |items: &[Item], want: &[&str]| {
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        let pos: Vec<usize> = want.iter().map(|w| labels.iter().position(|l| l == w).unwrap_or_else(|| panic!("no `{w}` in {labels:?}"))).collect();
+        assert!(pos.windows(2).all(|p| p[0] < p[1]), "{want:?} out of order in {labels:?}");
+    };
+    app.run("select.set", json!({"items": [{"type": "face", "body": b, "index": 0, "point": [0, 0, 0]}]})).unwrap();
+    let face = context_menu::items(&app, &Target::Viewport);
+    order(
+        &face,
+        &[
+            "Create Sketch",
+            "Extrude",
+            "Offset Plane",
+            "Shell",
+            "Edit Feature",
+            "Edit Profile Sketch",
+            "Appearance",
+            "Properties",
+            "Delete",
+            "Show/Hide",
+            "Find in Browser",
+        ],
+    );
+    assert_eq!(find(&face, "Extrude").shortcut, "E");
+    assert!(find(&face, "Edit Profile Sketch").enabled, "the plate's extrude has a sketch");
+    let body_menu = context_menu::items(&app, &Target::Body { name: b.clone() });
+    order(
+        &body_menu,
+        &[
+            "Move/Copy",
+            "Create Components from Bodies",
+            "Physical Material",
+            "Appearance",
+            "Properties",
+            "Save As Mesh",
+            "Delete",
+            "Remove",
+            "Rename",
+            "Show/Hide",
+            "Isolate",
+        ],
+    );
+    let id = app.session.doc.features.iter().find(|f| f.name == "Base").unwrap().id;
+    let sketch = context_menu::items(&app, &Target::Sketch { id });
+    order(
+        &sketch,
+        &[
+            "Extrude",
+            "Edit Sketch",
+            "Redefine Sketch Plane",
+            "Export DXF…",
+            "Delete",
+            "Rename",
+            "Look At",
+            "Hide Profile",
+            "Show Dimension",
+            "Show/Hide",
+            "Find in Timeline",
+        ],
+    );
+    let folder = context_menu::items(&app, &Target::Folder { component: 0, folder: "bodies".into() });
+    order(&folder, &["Create Components from Bodies", "New Group", "Show/Hide", "Show All"]);
+    let origin = context_menu::items(&app, &Target::Origin);
+    order(&origin, &["Show/Hide", "Show All", "Hide Planes", "Hide Axes"]);
+    context_menu::run_item(&mut app, &find(&origin, "Hide Planes"), pos2(0.0, 0.0));
+    assert!(["XY", "XZ", "YZ"].iter().all(|p| app.ui.hidden_origin.iter().any(|h| h == p)));
+    app.run("select.clear", json!({})).unwrap();
+    let empty = context_menu::items(&app, &Target::Viewport);
+    order(&empty, &["Pan", "Zoom", "Orbit", "Show All", "Unisolate", "Extrude", "Fillet"]);
+    context_menu::run_item(&mut app, &find(&empty, "Pan"), pos2(0.0, 0.0));
+    assert!(matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan)));
 }

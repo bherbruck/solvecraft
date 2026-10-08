@@ -38,6 +38,8 @@ pub enum Target {
     Group {
         id: u64,
     },
+    /// The Origin folder.
+    Origin,
     /// A canvas (reference image).
     Canvas {
         id: u64,
@@ -202,7 +204,7 @@ pub fn target_bodies(app: &SolveApp, target: &Target) -> Vec<String> {
         Target::Body { name } => vec![name.clone()],
         Target::Component { id } => component_bodies(app, *id),
         Target::Group { id } => crate::browser::group_bodies(app, *id),
-        Target::Sketch { .. } | Target::Folder { .. } | Target::Canvas { .. } => Vec::new(),
+        Target::Sketch { .. } | Target::Folder { .. } | Target::Canvas { .. } | Target::Origin => Vec::new(),
     }
 }
 
@@ -260,6 +262,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Group { id } => crate::browser::group_items(app, *id),
         Target::Folder { component, folder } => crate::browser::folder_items(app, *component, folder),
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
+        Target::Origin => crate::browser::origin_items(app),
     };
     // Several items of the folder selected: they can be grouped.
     if let Some(p) = crate::browser::selection_group(app, target) {
@@ -269,10 +272,26 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
     v
 }
 
+/// The feature a body was made by, and that feature's sketch if it has one.
+fn body_feature_and_sketch(app: &SolveApp, body: &str) -> (Option<u64>, Option<u64>) {
+    let f = body_feature(app, body);
+    let sketch = f
+        .and_then(|f| app.session.doc.feature(f))
+        .and_then(|f| serde_json::to_value(&f.kind).ok())
+        .and_then(|v| v.get("sketch").and_then(Value::as_u64).or_else(|| v.as_object()?.values().find_map(|x| x.get("sketch")?.as_u64())));
+    (f, sketch)
+}
+
+/// The canvas menus follow Fusion's (`plan/fusion/ui/NOTES.md`, feature names only): Repeat on
+/// top, then what fits the selection, our extras after a separator.
 fn viewport_items(app: &SolveApp) -> Vec<Item> {
     let sel = &app.session.selection;
     let has = |f: fn(&Sel) -> bool| sel.iter().any(f);
     let mut v = Vec::new();
+    if let Some((_, label)) = &app.last_command {
+        v.push(act("ui.repeat", &format!("Repeat {label}"), "redo"));
+        v.push(Item::sep());
+    }
     if app.session.active_sketch.is_some() {
         v.extend(sketch_entity_items(app));
         v.push(Item::sep());
@@ -280,22 +299,44 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "Offset", "Offset"));
         v.push(Item::sep());
         v.push(act("ui.finishSketch", "Finish Sketch", "finish"));
-    } else if has(|s| matches!(s, Sel::Face { .. })) {
+        v.push(Item::sep());
+        v.push(cmd(app, "UndoCommand", "Undo").on(!app.session.undo.is_empty()));
+        v.push(cmd(app, "RedoCommand", "Redo").on(!app.session.redo.is_empty()));
+        return v;
+    }
+    if has(|s| matches!(s, Sel::Face { .. })) {
         let face = sel.iter().find_map(|s| if let Sel::Face { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
+        let (feature, sketch) = body_feature_and_sketch(app, &face);
+        let hidden = app.ui.hidden_bodies.contains(&face);
         v.push(cmd(app, "SketchCreate", "Create Sketch"));
-        v.push(cmd(app, "ConstructionPlaneOffsetFromPlaneCommand", "Offset Plane"));
-        v.push(cmd(app, "FusionPressPullCommand", "Press Pull"));
         v.push(cmd(app, "Extrude", "Extrude"));
-        v.push(cmd(app, "MeasureCommand", "Measure"));
-        v.push(act("ui.appearance", "Appearance…", "").on(false));
+        v.push(cmd(app, "ConstructionPlaneOffsetFromPlaneCommand", "Offset Plane"));
+        v.push(cmd(app, "FusionShellBodyCommand", "Shell"));
+        v.push(act("ui.editFeature", "Edit Feature", "").with(json!({ "feature": feature })).on(feature.is_some()));
+        v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
+        v.push(Item::sep());
+        v.push(act("ui.appearance", "Appearance", "").key("A").on(false));
+        v.push(act("ui.properties", "Properties", "measure").with(json!({ "bodies": [face] })));
+        v.push(Item::sep());
+        v.push(act("ui.delete", "Delete", "delete").key("Del"));
+        v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").with(json!({ "bodies": [face] })));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "").with(json!({ "body": face })));
         v.push(act("ui.findTimeline", "Find in Timeline", "").with(json!({ "body": face })));
-        v.push(act("ui.hide", "Hide Body", "eye").with(json!({ "bodies": [face] })));
-        v.push(act("ui.delete", "Delete", "delete").key("Del"));
+        v.push(Item::sep());
+        v.push(cmd(app, "FusionPressPullCommand", "Press Pull"));
+        v.push(cmd(app, "MeasureCommand", "Measure"));
     } else if has(|s| matches!(s, Sel::Edge { .. })) {
+        let body = sel.iter().find_map(|s| if let Sel::Edge { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
+        let hidden = app.ui.hidden_bodies.contains(&body);
         v.push(cmd(app, "FusionFilletEdgesCommand", "Fillet"));
         v.push(cmd(app, "FusionChamferCommand", "Chamfer"));
+        v.push(Item::sep());
+        v.push(act("ui.delete", "Delete", "delete").key("Del"));
+        v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").with(json!({ "bodies": [body] })));
+        v.push(Item::sep());
+        v.push(act("ui.findBrowser", "Find in Browser", "").with(json!({ "body": body })));
+        v.push(Item::sep());
         v.push(act("ui.tangentChain", "Select Tangent Chain", ""));
         v.push(cmd(app, "MeasureCommand", "Measure"));
     } else if has(|s| matches!(s, Sel::Body { .. })) {
@@ -303,35 +344,33 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     } else if has(|s| matches!(s, Sel::Profile { .. })) {
         v.push(cmd(app, "Extrude", "Extrude"));
         v.push(cmd(app, "Revolve", "Revolve"));
-    }
-    if !v.is_empty() {
+    } else {
+        // Empty space.
+        v.push(act("ui.nav", "Pan", "pan").with(json!({ "mode": "pan" })));
+        v.push(act("ui.nav", "Zoom", "zoom").with(json!({ "mode": "zoom" })));
+        v.push(act("ui.nav", "Orbit", "orbit").with(json!({ "mode": "orbit" })));
+        v.push(act("ui.fit", "Fit", "fit"));
+        v.push(act("ui.home", "Home View", "home"));
         v.push(Item::sep());
+        let anything_hidden = !app.ui.hidden_bodies.is_empty() || !app.ui.hidden_sketches.is_empty();
+        v.push(act("ui.showAll", "Show All", "eye").on(anything_hidden));
+        v.push(act("ui.showAll", "Unisolate", "").on(!app.ui.hidden_bodies.is_empty()));
+        v.push(Item::sep());
+        v.push(cmd(app, "Extrude", "Extrude"));
+        v.push(cmd(app, "FusionFilletEdgesCommand", "Fillet"));
+        v.push(Item::sep());
+        v.push(cmd(app, "UndoCommand", "Undo").on(!app.session.undo.is_empty()));
+        v.push(cmd(app, "RedoCommand", "Redo").on(!app.session.redo.is_empty()));
+        v.push(Item::sep());
+        if app.session.section.is_some() {
+            v.push(act("ui.unsection", "Remove Section", "section"));
+        }
+        v.push(act("ui.origin", if app.ui.show_origin { "Hide Origin" } else { "Show Origin" }, "origin"));
+        return v;
     }
-    // Empty space (and always, at the end): undo, view and selection helpers.
-    if let Some((_, label)) = &app.last_command
-        && v.is_empty()
-    {
-        v.push(act("ui.repeat", &format!("Repeat {label}"), "redo"));
-    }
-    v.push(cmd(app, "UndoCommand", "Undo").on(!app.session.undo.is_empty()));
-    v.push(cmd(app, "RedoCommand", "Redo").on(!app.session.redo.is_empty()));
-    v.push(Item::sep());
-    if app.session.section.is_some() {
-        v.push(act("ui.unsection", "Remove Section", "section"));
-    }
-    if !app.ui.hidden_bodies.is_empty() {
-        v.push(act("ui.showAll", "Show All Bodies", "eye"));
-    }
-    v.push(act("ui.origin", if app.ui.show_origin { "Hide Origin" } else { "Show Origin" }, "origin"));
     if !sel.is_empty() {
+        v.push(Item::sep());
         v.push(act("ui.clear", "Clear Selection", "").key("Esc"));
-    }
-    v.push(act("ui.fit", "Fit", "fit"));
-    v.push(act("ui.home", "Home View", "home"));
-    if app.session.active_sketch.is_some() {
-        // Finish Sketch is already in the list above.
-    } else if v.last().is_some_and(Item::is_sep) {
-        v.pop();
     }
     v
 }
@@ -341,21 +380,25 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     let all_hidden = bodies.iter().all(|b| app.ui.hidden_bodies.contains(b));
     let one = bodies.len() == 1;
     let locked = bodies.iter().all(|b| app.ui.locked_bodies.contains(b));
+    let items = json!(bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>());
     let mut v = vec![
         act("ui.moveBodies", "Move/Copy", "move").key("M").with(json!({ "bodies": names })).on(!locked),
-        act(if all_hidden { "ui.show" } else { "ui.hide" }, if all_hidden { "Show Body" } else { "Hide Body" }, "eye")
-            .with(json!({ "bodies": names })),
-        act("ui.isolate", "Isolate", "").with(json!({ "bodies": names })),
-        act("ui.rename", "Rename", "").with(json!({ "body": bodies.first() })).on(one),
-        act("ui.delete", "Delete", "delete")
-            .key("Del")
-            .with(json!({ "items": bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>() }))
-            .on(!locked),
-        act("ui.lock", if locked { "Unlock" } else { "Lock" }, "").with(json!({ "bodies": names })),
-        Item::sep(),
-        act("ui.properties", "Properties", "measure").with(json!({ "bodies": names })),
         cmd(app, "FusionCreateComponentsFromBodiesCommand", "Create Components from Bodies").with(json!({ "bodies": names })),
+        Item::sep(),
+        act("ui.material", "Physical Material", "").with(json!({ "bodies": names })),
+        act("ui.appearance", "Appearance", "").key("A").on(false),
+        act("ui.properties", "Properties", "measure").with(json!({ "bodies": names })),
+        Item::sep(),
+        act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })),
         act("ui.export", "Export…", "export").with(json!({ "bodies": names })),
+        Item::sep(),
+        act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": items })).on(!locked),
+        cmd(app, "SoftDeleteCommand", "Remove").with(json!({ "bodies": names })).on(!locked),
+        act("ui.rename", "Rename", "").with(json!({ "body": bodies.first() })).on(one),
+        Item::sep(),
+        act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").with(json!({ "bodies": names })),
+        act("ui.lock", if locked { "Unlock" } else { "Lock" }, "").with(json!({ "bodies": names })),
+        act("ui.isolate", "Isolate", "").with(json!({ "bodies": names })),
     ];
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
@@ -373,14 +416,21 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let profiles = !app.ui.hidden_profiles.contains(&id);
     let dims = app.ui.shown_dims.contains(&id);
     let editing = app.session.active_sketch == Some(id);
+    let has_profiles = app.session.model.state().sketch(id).is_some_and(|s| !s.profiles.is_empty());
     vec![
+        act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
+        Item::sep(),
         act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
         act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id })),
-        act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, if visible { "Hide" } else { "Show" }, "eye").with(json!({ "sketch": id })),
-        act("ui.sketchDims", if dims { "Hide Dimensions" } else { "Show Dimensions" }, "dimension").with(json!({ "sketch": id })),
-        act("ui.sketchProfile", if profiles { "Hide Profile" } else { "Show Profile" }, "").with(json!({ "sketch": id })),
-        act("ui.rename", "Rename", "").with(json!({ "feature": id })),
+        act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),
+        Item::sep(),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
+        act("ui.rename", "Rename", "").with(json!({ "feature": id })),
+        Item::sep(),
+        act("ui.lookAt", "Look At", "").with(json!({ "sketch": id })),
+        act("ui.sketchProfile", if profiles { "Hide Profile" } else { "Show Profile" }, "").with(json!({ "sketch": id })),
+        act("ui.sketchDims", if dims { "Hide Dimension" } else { "Show Dimension" }, "dimension").with(json!({ "sketch": id })),
+        act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").with(json!({ "sketch": id })),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "").with(json!({ "feature": id })),
     ]
@@ -392,33 +442,47 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let active = app.session.active_component == id;
     let bodies = component_bodies(app, id);
     let hidden = !bodies.is_empty() && bodies.iter().all(|b| app.ui.hidden_bodies.contains(b));
-    let mut v = vec![
-        act("ui.activate", "Activate Component", "component").with(json!({ "component": id })).on(!active),
-        cmd(app, "FusionCreateNewComponentCommand", "New Component").with(json!({ "parent": id })),
-        cmd(app, "FusionCreateComponentsFromBodiesCommand", "Create Components from Bodies")
-            .with(json!({ "bodies": bodies }))
-            .on(!bodies.is_empty() && id == 0),
-        act("ui.newGroup", "New Group", "folder").with(json!({ "component": id })),
-        Item::sep(),
-        act(if hidden { "ui.show" } else { "ui.hide" }, if hidden { "Show" } else { "Hide" }, "eye")
-            .with(json!({ "bodies": bodies }))
-            .on(!bodies.is_empty()),
-        act("ui.isolate", "Isolate", "").with(json!({ "bodies": bodies })).on(!bodies.is_empty()),
-        act("ui.rename", "Rename", "").with(json!({ "component": id })),
-    ];
+    let names = json!(bodies);
+    let mut v = Vec::new();
     if id != 0 {
         let grounded = occ.is_some_and(|o| o.grounded);
         let oid = occ.map(|o| o.id).unwrap_or(0);
-        v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
-        v.push(Item::sep());
-        v.push(act("ui.moveOccurrence", "Move/Copy", "move").with(json!({ "occurrence": oid })).on(!grounded && occ.is_some()));
+        v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
         v.push(cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })));
+        v.push(act("ui.moveOccurrence", "Move/Copy", "move").key("M").with(json!({ "occurrence": oid })).on(!grounded && occ.is_some()));
         v.push(cmd(app, "SnapshotCmd", "Capture Position").on(!app.session.pending_moves.is_empty()));
         v.push(cmd(app, "AsBuiltPositionsCmd", "Revert Position").on(!app.session.pending_moves.is_empty()));
         v.push(Item::sep());
+    } else {
+        v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
+    }
+    v.push(cmd(app, "FusionCreateNewComponentCommand", "New Component").with(json!({ "parent": id })));
+    if id == 0 {
+        v.push(
+            cmd(app, "FusionCreateComponentsFromBodiesCommand", "Create Components from Bodies")
+                .with(json!({ "bodies": names }))
+                .on(!bodies.is_empty()),
+        );
+    }
+    v.push(Item::sep());
+    v.push(act("ui.material", "Physical Material", "").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    v.push(act("ui.appearance", "Appearance", "").key("A").on(false));
+    v.push(act("ui.properties", "Properties", "measure").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    v.push(Item::sep());
+    v.push(act("ui.export", "Export…", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    v.push(Item::sep());
+    if id != 0 {
         v.push(cmd(app, "occurrence.copy", "Paste (Instance)").with(json!({ "component": id, "translate": [10, 10, 0] })));
         v.push(cmd(app, "component.paste_new", "Paste New").with(json!({ "component": id, "translate": [10, 10, 0] })));
+        v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
     }
+    v.push(act("ui.rename", "Rename", "").with(json!({ "component": id })));
+    v.push(Item::sep());
+    v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    v.push(act("ui.showAll", "Show All Bodies", "eye"));
+    v.push(act("ui.isolate", "Isolate", "").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
+    v.push(act("ui.newGroup", "New Group", "folder").with(json!({ "component": id })));
     v
 }
 
@@ -462,6 +526,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         return v;
     }
     let ents: Vec<String> = curves.iter().chain(points.iter()).cloned().collect();
+    v.push(cmd(app, "sketch.move", "Move/Copy").key("M"));
     if !curves.is_empty() {
         v.push(cmd(app, "sketch.construction", "Normal / Construction").with(json!({ "curves": curves })));
     }
@@ -546,7 +611,10 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.show" => app.ui.hidden_bodies.retain(|b| !bodies.contains(b)),
-        "ui.showAll" => app.ui.hidden_bodies.clear(),
+        "ui.showAll" => {
+            app.ui.hidden_bodies.clear();
+            app.ui.hidden_sketches.clear();
+        }
         "ui.isolate" => {
             app.ui.hidden_bodies = app.session.model.state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
         }
@@ -655,6 +723,72 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
+        "ui.folderVisible" => {
+            if let Some(f) = p.get("folder").and_then(Value::as_str) {
+                crate::browser::toggle_folder(app, id_of(&p, "component").unwrap_or(0), f);
+            }
+        }
+        "ui.originAll" => {
+            app.ui.show_origin = true;
+            app.ui.hidden_origin.retain(|h| !["O", "X", "Y", "Z", "XY", "XZ", "YZ"].contains(&h.as_str()));
+        }
+        "ui.originPart" => {
+            let show = p.get("show").and_then(Value::as_bool).unwrap_or(true);
+            for k in strs(&p, "keys") {
+                app.ui.hidden_origin.retain(|h| *h != k);
+                if !show {
+                    app.ui.hidden_origin.push(k);
+                }
+            }
+        }
+        "ui.editFeature" => {
+            if let Some(f) = id_of(&p, "feature") {
+                app.edit_feature(f);
+            }
+        }
+        "ui.material" => {
+            let items: Vec<Value> = bodies.iter().map(|b| json!({"type": "body", "name": b})).collect();
+            let _ = app.run("select.set", json!({ "items": items }));
+            app.start("PhysicalMaterialCommand");
+        }
+        "ui.saveMesh" => {
+            let name = bodies.first().cloned().unwrap_or_else(|| app.session.doc.name.clone());
+            if let Some(path) = app.services.pick_save.as_ref().and_then(|f| f(&format!("{name}.stl"), &["stl"])) {
+                let _ = app.run("FusionSaveAsSTLCommand", json!({ "path": path, "bodies": bodies }));
+            }
+        }
+        "ui.exportDxf" => {
+            if let Some(id) = id_of(&p, "sketch") {
+                let name = app.session.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+                if let Some(path) = app.services.pick_save.as_ref().and_then(|f| f(&format!("{name}.dxf"), &["dxf"])) {
+                    let _ = app.run("sketch.export_dxf", json!({ "sketch": id, "path": path }));
+                }
+            }
+        }
+        "ui.extrudeSketch" => {
+            if let Some(id) = id_of(&p, "sketch") {
+                let n = app.session.model.state().sketch(id).map_or(0, |s| s.profiles.len());
+                let items: Vec<Value> = (0..n).map(|i| json!({"type": "profile", "sketch": id, "index": i})).collect();
+                let _ = app.run("select.set", json!({ "items": items }));
+                app.start("Extrude");
+            }
+        }
+        "ui.lookAt" => {
+            let st = app.session.world_state();
+            if let Some(ss) = id_of(&p, "sketch").and_then(|id| st.sketch(id)) {
+                let mut to = app.cam.looking_from(ss.plane.normal());
+                to.target = ss.plane.origin;
+                app.animate_to(to);
+            }
+        }
+        "ui.nav" => {
+            app.viewport.nav = match p.get("mode").and_then(Value::as_str) {
+                Some("pan") => Some(crate::viewport::NavMode::Pan),
+                Some("zoom") => Some(crate::viewport::NavMode::Zoom),
+                Some("orbit") => Some(crate::viewport::NavMode::Orbit),
+                _ => None,
+            };
+        }
         "ui.editCanvas" | "ui.calibrateCanvas" => {
             if let Some(c) = id_of(&p, "canvas") {
                 app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, c, item.id == "ui.calibrateCanvas"));

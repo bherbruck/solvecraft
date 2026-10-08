@@ -121,15 +121,50 @@ pub fn group_items(app: &SolveApp, id: u64) -> Vec<Item> {
 /// The menu of a folder row (Bodies, Sketches, Construction).
 pub fn folder_items(app: &SolveApp, component: u64, folder: &str) -> Vec<Item> {
     let sel: Vec<String> = selected_keys(app, component, folder);
-    let mut v = vec![Item::action("ui.newGroup", "New Group", "folder").with(json!({ "component": component, "folder": folder }))];
+    let all = entries(app, component, folder);
+    let mut v = Vec::new();
+    if folder == "bodies" {
+        let bodies: Vec<String> = all.iter().map(|e| e.key.clone()).collect();
+        v.push(
+            Item::action("FusionCreateComponentsFromBodiesCommand", "Create Components from Bodies", "component").with(json!({ "bodies": bodies })),
+        );
+    }
+    v.push(
+        Item::action("ui.newGroup", if folder == "sketches" { "New Sketch Group" } else { "New Group" }, "folder")
+            .with(json!({ "component": component, "folder": folder })),
+    );
     if sel.len() > 1 {
         v.push(Item::action("ui.groupSelected", "Group Selected", "folder").with(json!({ "component": component, "folder": folder, "items": sel })));
     }
-    if folder == "bodies" {
-        v.push(Item::sep());
-        v.push(Item::action("ui.showAll", "Show All Bodies", "eye"));
-    }
+    v.push(Item::sep());
+    v.push(Item::action("ui.folderVisible", "Show/Hide", "eye").with(json!({ "component": component, "folder": folder })));
+    v.push(Item::action("ui.showAll", "Show All", "eye"));
     v
+}
+
+/// The menu of the Origin folder.
+pub fn origin_items(app: &SolveApp) -> Vec<Item> {
+    let planes = ["XY", "XZ", "YZ"].iter().all(|p| !app.ui.hidden_origin.iter().any(|h| h == p));
+    let axes = ["X", "Y", "Z"].iter().all(|p| !app.ui.hidden_origin.iter().any(|h| h == p));
+    vec![
+        Item::action("ui.origin", "Show/Hide", "eye"),
+        Item::action("ui.originAll", "Show All", "eye"),
+        Item::action("ui.originPart", if planes { "Hide Planes" } else { "Show Planes" }, "plane")
+            .with(json!({ "keys": ["XY", "XZ", "YZ"], "show": !planes })),
+        Item::action("ui.originPart", if axes { "Hide Axes" } else { "Show Axes" }, "axis").with(json!({ "keys": ["X", "Y", "Z"], "show": !axes })),
+    ]
+}
+
+/// Show or hide everything in a component folder.
+pub fn toggle_folder(app: &mut SolveApp, component: u64, folder: &str) {
+    if folder == "sketches" {
+        app.ui.show_sketches = !app.ui.show_sketches;
+        return;
+    }
+    let all = entries(app, component, folder);
+    let any = all.iter().any(|e| e.visible);
+    let refs: Vec<&Entry> = all.iter().collect();
+    set_visible(app, folder, &refs, !any);
 }
 
 /// Selected browser items of the folder of a body or sketch, when more than one (for Group
@@ -533,6 +568,9 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     }
     if r.eye {
         app.ui.show_origin = !app.ui.show_origin;
+    }
+    if let Some(p) = r.secondary {
+        crate::context_menu::open_for(app, p, Target::Origin);
     }
     if !open {
         return;
