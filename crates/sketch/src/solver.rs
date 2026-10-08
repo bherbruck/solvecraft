@@ -274,7 +274,10 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             let (a0, a1) = s.line(a);
             let (b0, b1) = s.line(b);
             let (da, db) = (a1 - a0, b1 - b0);
-            let scale = (da.len() + db.len()).max(1e-12);
+            // The sine (parallel) or cosine (perpendicular) of the angle between the lines:
+            // independent of their lengths, so the solver can't satisfy it by shrinking a line
+            // to nothing (scaling by the summed lengths did, collapsing dragged rectangles).
+            let scale = (da.len() * db.len()).max(1e-12);
             let v = if matches!(k, Parallel { .. }) { da.cross(db) } else { da.dot(db) };
             out.push(v / scale);
         }

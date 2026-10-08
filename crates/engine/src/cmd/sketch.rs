@@ -1289,3 +1289,7 @@ fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch has not been evaluated".into()))?;
     Ok(json!({"status": ss.report.status, "dof": ss.report.dof, "failing": ss.report.failing, "profiles": ss.profiles.len()}))
 }
+
+#[cfg(test)]
+#[path = "sketch_rect_tests.rs"]
+mod rect_tests;
