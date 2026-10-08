@@ -272,6 +272,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 Some(l) => l,
                 None => (specs.iter().filter(|c| c.tab == tab && c.panel == *panel).copied().collect(), promoted(&tab, panel)),
             };
+            let cmds = crate::sketch_tools::also_in(&tab, panel, cmds, &specs);
             let n = promote.min(cmds.len()).max(if cmds.is_empty() { 1 } else { 0 });
             let width = (n as f32 * 40.0).max(64.0) + 8.0;
             let enabled_panel = !cmds.is_empty() || *panel == "SELECT";

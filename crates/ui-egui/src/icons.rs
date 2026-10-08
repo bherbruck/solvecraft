@@ -652,6 +652,13 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
                 pen.line(&[(3.0 + 12.0 * t, 17.0 + 2.0 * t), (9.0 + 12.0 * t, 5.0 + 2.0 * t)], a);
             }
         }
+        "accessibility" => {
+            pen.poly(&[(2.0, 20.0), (22.0, 20.0), (22.0, 15.0), (2.0, 15.0)], Color32::from_rgb(70, 180, 90), ink);
+            pen.poly(&[(8.0, 15.0), (16.0, 15.0), (16.0, 17.5), (8.0, 17.5)], Color32::from_rgb(220, 70, 60), Color32::TRANSPARENT);
+            pen.poly(&[(6.0, 10.0), (18.0, 10.0), (18.0, 12.5), (6.0, 12.5)], pen.fill, ink);
+            pen.arrow((4.0, 2.0), (4.0, 13.0), a);
+            pen.arrow((20.0, 2.0), (20.0, 13.0), a);
+        }
         "environment_map" => {
             let pts: Vec<Pos2> =
                 (0..32).map(|i| i as f32 / 32.0 * std::f32::consts::TAU).map(|t| pen.at(12.0 + 9.0 * t.cos(), 12.0 + 9.0 * t.sin())).collect();

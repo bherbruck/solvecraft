@@ -24,6 +24,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("environment_map")
         .noundo()
         .params("clear?: true turns the analysis off"),
+    CommandSpec::new("FusionAccessibilityAnalysisCommand", "Accessibility Analysis", accessibility)
+        .at("SKETCH", "INSPECT")
+        .icon("accessibility")
+        .noundo()
+        .params("direction?: [x,y,z] the tool comes from (default Z, from above); clear?: true turns the analysis off"),
     CommandSpec::new("FusionCurvatureMapAnalysisCommand", "Curvature Map Analysis", curvature_map)
         .at("SKETCH", "INSPECT")
         .icon("curvature_map")
@@ -62,6 +67,16 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     set(s, p, SurfaceAnalysis::Draft { pull, angle })
 }
 
+fn accessibility(s: &mut Session, p: &Value) -> Result<Value> {
+    let dir = match p.get("direction") {
+        Some(v) => {
+            vec3(v).and_then(Vec3::normalized).ok_or_else(|| bad("FusionAccessibilityAnalysisCommand", "`direction` must be a non-zero [x,y,z]"))?
+        }
+        None => Vec3::Z,
+    };
+    set(s, p, SurfaceAnalysis::Access { dir })
+}
+
 fn curvature_map(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "FusionCurvatureMapAnalysisCommand";
     let radius = match num(p, "radius") {
@@ -95,6 +110,8 @@ mod tests {
         assert!(matches!(s.analysis, Some(SurfaceAnalysis::Curvature { radius }) if (radius - 300f64.sqrt() / 10.0).abs() < 1e-6));
         s.execute("FusionEnvironmentMapAnalysisCommand", &json!({})).unwrap();
         assert_eq!(s.analysis, Some(SurfaceAnalysis::Environment));
+        s.execute("FusionAccessibilityAnalysisCommand", &json!({"direction": [0, 0, -3]})).unwrap();
+        assert_eq!(s.analysis, Some(SurfaceAnalysis::Access { dir: solvecraft_geom::Vec3::new(0.0, 0.0, -1.0) }));
         s.execute("FusionCurvatureMapAnalysisCommand", &json!({"clear": true})).unwrap();
         assert_eq!(s.analysis, None);
         assert_eq!(s.undo.len(), undo, "no undo steps");

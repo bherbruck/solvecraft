@@ -178,6 +178,9 @@ pub enum SurfaceAnalysis {
     Curvature { radius: f64 },
     /// Mirror finish reflecting a studio (sky, horizon, floor, light panels).
     Environment,
+    /// Green where a tool coming along `dir` reaches the face (facing it, nothing above), red
+    /// elsewhere.
+    Access { dir: Vec3 },
 }
 
 const MAX_UNDO: usize = 200;

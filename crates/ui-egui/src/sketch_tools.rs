@@ -40,6 +40,40 @@ thread_local! {
     static OPACITY: Cell<Option<(u64, f64)>> = const { Cell::new(None) };
 }
 
+/// Commands registered on one panel that Fusion also lists on another: the analyses (sketch
+/// INSPECT) on SOLID INSPECT, and Interference (SOLID INSPECT) on sketch INSPECT.
+const ALSO_IN: &[(&str, &str, &str)] = &[
+    ("SOLID", "INSPECT", "FusionZebraAnalysisCommand"),
+    ("SOLID", "INSPECT", "FusionDraftAnalysisCommand"),
+    ("SOLID", "INSPECT", "FusionCurvatureMapAnalysisCommand"),
+    ("SOLID", "INSPECT", "FusionEnvironmentMapAnalysisCommand"),
+    ("SOLID", "INSPECT", "FusionAccessibilityAnalysisCommand"),
+    ("SOLID", "INSPECT", "FusionMinimumRadiusAnalysisCommand"),
+    ("SOLID", "INSPECT", "FusionIsoCurveAnalysisCommand"),
+    ("SOLID", "INSPECT", "FusionCurvatureCombAnalysisCommand"),
+    ("SOLID", "INSPECT", "FusionCenterOfMassCommand"),
+    ("SKETCH", "INSPECT", "InterferenceCheckCommand"),
+];
+
+/// A panel's commands plus the ones it shares with another panel (see [`ALSO_IN`]).
+pub fn also_in<'a>(
+    tab: &str,
+    panel: &str,
+    mut cmds: Vec<&'a solvecraft_engine::CommandSpec>,
+    specs: &[&'a solvecraft_engine::CommandSpec],
+) -> Vec<&'a solvecraft_engine::CommandSpec> {
+    for (t, p, id) in ALSO_IN {
+        if *t == tab
+            && *p == panel
+            && !cmds.iter().any(|c| c.id == *id)
+            && let Some(c) = specs.iter().find(|c| c.id == *id)
+        {
+            cmds.push(c);
+        }
+    }
+    cmds
+}
+
 /// Run an analysis and keep its result as a marker.
 fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     let Ok(v) = app.run(cmd, p) else { return };
@@ -102,8 +136,13 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         ("FusionDraftAnalysisCommand", Some(A::Draft { .. })) => Some(true),
         ("FusionCurvatureMapAnalysisCommand", Some(A::Curvature { .. })) => Some(true),
         ("FusionEnvironmentMapAnalysisCommand", Some(A::Environment)) => Some(true),
+        ("FusionAccessibilityAnalysisCommand", Some(A::Access { .. })) => Some(true),
         (
-            "FusionZebraAnalysisCommand" | "FusionDraftAnalysisCommand" | "FusionCurvatureMapAnalysisCommand" | "FusionEnvironmentMapAnalysisCommand",
+            "FusionZebraAnalysisCommand"
+            | "FusionDraftAnalysisCommand"
+            | "FusionCurvatureMapAnalysisCommand"
+            | "FusionEnvironmentMapAnalysisCommand"
+            | "FusionAccessibilityAnalysisCommand",
             _,
         ) => Some(false),
         _ => None,

@@ -11,7 +11,7 @@ use egui_wgpu::wgpu::util::DeviceExt;
 pub const TRI_SIZE: usize = 28;
 /// Line instance: a, b (3 × f32 each), colour (4 × u8), width in pixels (f32).
 pub const LINE_SIZE: usize = 32;
-const UNIFORM_SIZE: u64 = 160;
+const UNIFORM_SIZE: u64 = 192;
 
 /// CPU-side geometry waiting to be uploaded. The model scene changes with the design; the
 /// highlight scene (hover, selection, the origin widget) changes often and is small.
@@ -120,9 +120,25 @@ pub struct ViewportCallback {
     pub cap: [f32; 4],
     /// Canvases and decals.
     pub images: Vec<GpuImage>,
-    /// Surface analysis: (mode: 0 none, 1 zebra, 2 draft, 3 curvature; parameter; 0; 0) and
-    /// the draft pull direction.
+    /// Surface analysis: (mode: 0 none, 1 zebra, 2 draft, 3 curvature, 4 environment,
+    /// 5 accessibility; parameter; scale; size) and the pull / access direction.
     pub analysis: [f32; 8],
+    /// Accessibility: the depth map seen from the access direction.
+    pub access: Option<AccessMap>,
+}
+
+/// Heights of the model seen from a direction (an orthographic depth map): a point is reachable
+/// from that direction when nothing lies above it.
+#[derive(Clone)]
+pub struct AccessMap {
+    pub version: u64,
+    pub size: u32,
+    /// Row-major heights along the direction (−∞ where nothing is).
+    pub depth: Arc<Vec<f32>>,
+    /// Map axes: pixel = (p·u + u.w, p·v + v.w) × scale.
+    pub u: [f32; 4],
+    pub v: [f32; 4],
+    pub scale: f32,
 }
 
 struct Batch {
@@ -182,6 +198,41 @@ struct Resources {
     textures: std::collections::HashMap<u64, (u64, wgpu::BindGroup)>,
     /// This frame's quads: (image id, vertices).
     quads: Vec<(u64, Batch)>,
+    access_bgl: wgpu::BindGroupLayout,
+    /// The accessibility depth map (a 1 × 1 stand-in when there is none) and its version.
+    access_bind: wgpu::BindGroup,
+    access_version: u64,
+}
+
+fn access_texture(device: &wgpu::Device, queue: Option<&wgpu::Queue>, bgl: &wgpu::BindGroupLayout, size: u32, depth: &[f32]) -> wgpu::BindGroup {
+    let extent = wgpu::Extent3d { width: size.max(1), height: size.max(1), depth_or_array_layers: 1 };
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("sc_access"),
+        size: extent,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    if let Some(q) = queue
+        && depth.len() == (size as usize) * (size as usize)
+    {
+        let bytes: Vec<u8> = depth.iter().flat_map(|x| x.to_le_bytes()).collect();
+        q.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &bytes,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * size), rows_per_image: Some(size) },
+            extent,
+        );
+    }
+    let view = tex.create_view(&Default::default());
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("sc_access"),
+        layout: bgl,
+        entries: &[wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&view) }],
+    })
 }
 
 const SHADER: &str = r#"
@@ -193,7 +244,11 @@ struct U {
     cap: vec4<f32>,    // colour of the inside of cut bodies
     ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature), parameter
     pull: vec4<f32>,   // draft pull direction
+    acc_u: vec4<f32>,  // accessibility map axes (xyz, offset)
+    acc_v: vec4<f32>,
 };
+
+@group(1) @binding(2) var acc_t: texture_2d<f32>;
 
 fn clipped(p: vec3<f32>) -> bool {
     return length(u.clip.xyz) > 0.5 && dot(u.clip.xyz, p) > u.clip.w;
@@ -256,6 +311,24 @@ fn analysis(i: TOut) -> vec4<f32> {
         let s = sin(dot(r, normalize(side)) * u.ana.y * 3.14159265);
         let c = select(0.08, 0.95, s > 0.0);
         return out_color(vec4<f32>(vec3<f32>(c), 1.0));
+    }
+    if (u.ana.x > 4.5) {
+        // Reachable from the access direction: facing it and nothing above.
+        let d = normalize(u.pull.xyz);
+        let size = i32(u.ana.w);
+        let px = vec2<i32>(floor(vec2<f32>(dot(i.wp, u.acc_u.xyz) + u.acc_u.w, dot(i.wp, u.acc_v.xyz) + u.acc_v.w) * u.ana.z));
+        var top = -1e30;
+        if (px.x >= 0 && px.y >= 0 && px.x < size && px.y < size) {
+            top = textureLoad(acc_t, px, 0).x;
+        }
+        let cn = dot(normalize(i.n), d);
+        let facing = cn > 0.02;
+        // Slack of a pixel and a half, more on slopes (the map holds the pixel's highest point).
+        let slack = u.ana.y * (1.0 + sqrt(max(1.0 - cn * cn, 0.0)) / max(cn, 0.05));
+        let clear = dot(i.wp, d) >= top - slack;
+        var c = vec3<f32>(0.85, 0.22, 0.20);
+        if (facing && clear) { c = vec3<f32>(0.20, 0.75, 0.30); }
+        return out_color(vec4<f32>(c * lit, 1.0));
     }
     if (u.ana.x > 3.5) {
         // A studio around the model: sky above, a dark floor below, a bright horizon band and
@@ -528,6 +601,46 @@ impl Resources {
             multiview_mask: None,
             cache: None,
         });
+        let access_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("sc_access"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
+        let solid_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("sc_solid"),
+            bind_group_layouts: &[Some(&bgl), Some(&access_bgl)],
+            immediate_size: 0,
+        });
+        let solid = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("sc_tris"),
+            layout: Some(&solid_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_tri"),
+                buffers: &[Some(tri_layout())],
+                compilation_options: Default::default(),
+            },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+            depth_stencil: depth(wgpu::CompareFunction::Less, true),
+            multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_solid"),
+                targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                compilation_options: Default::default(),
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let access_bind = access_texture(device, None, &access_bgl, 1, &[]);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("sc_image"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -540,7 +653,10 @@ impl Resources {
             sampler,
             textures: Default::default(),
             quads: Vec::new(),
-            tri: pipeline("sc_tris", "vs_tri", "fs_solid", tri_layout(), depth(wgpu::CompareFunction::Less, true), None),
+            tri: solid,
+            access_bgl,
+            access_bind,
+            access_version: 0,
             tri_hl: pipeline("sc_tris_hl", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             trans: pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             ghost: pipeline("sc_ghost", "vs_ghost", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
@@ -593,6 +709,12 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         res.highlight.take(device, self.hl_key, &self.hl_slot);
         res.preview.take(device, self.pv_key, &self.pv_slot);
         queue.write_buffer(&res.uniform, 0, &uniform_bytes(self, self.size_px[0], self.size_px[1], res.linear_out));
+        if let Some(a) = &self.access
+            && a.version != res.access_version
+        {
+            res.access_bind = access_texture(device, Some(queue), &res.access_bgl, a.size, &a.depth);
+            res.access_version = a.version;
+        }
         // Images: upload new or changed textures, drop removed ones, rebuild the quads.
         res.textures.retain(|id, _| self.images.iter().any(|i| i.id == *id));
         res.quads.clear();
@@ -669,6 +791,7 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         };
         let (m, h, pv) = (&res.model, &res.highlight, &res.preview);
         lines(pass, &res.overlay, &m.under);
+        pass.set_bind_group(1, &res.access_bind, &[]);
         tris(pass, &res.tri, &m.tris);
         tris(pass, &res.tri, &pv.tris);
         tris(pass, &res.tri_hl, &h.tris);
@@ -700,6 +823,13 @@ pub fn uniform_bytes(cb: &ViewportCallback, w: f32, h: f32, linear: bool) -> Vec
     v.extend(cb.clip);
     v.extend(cb.cap);
     v.extend(cb.analysis);
+    match &cb.access {
+        Some(a) => {
+            v.extend(a.u);
+            v.extend(a.v);
+        }
+        None => v.extend([0.0; 8]),
+    }
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 

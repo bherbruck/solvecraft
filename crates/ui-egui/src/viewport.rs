@@ -654,6 +654,10 @@ fn analysis_uniform(app: &SolveApp) -> [f32; 8] {
         Some(A::Draft { pull, angle }) => [2.0, angle as f32, 0.0, 0.0, pull.x as f32, pull.y as f32, pull.z as f32, 0.0],
         Some(A::Curvature { radius }) => [3.0, radius as f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         Some(A::Environment) => [4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+        Some(A::Access { dir }) => {
+            let (scale, size, eps) = crate::access::map(app).map(|m| (m.scale, m.size as f32, 1.5 / m.scale.max(1e-9))).unwrap_or((0.0, 0.0, 0.0));
+            [5.0, eps, scale, size, dir.x as f32, dir.y as f32, dir.z as f32, 0.0]
+        }
         None => [0.0; 8],
     }
 }
@@ -1139,6 +1143,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             size_px: [rect.width() * ppp, rect.height() * ppp],
             images: crate::ref_images::gpu_images(app),
             analysis: analysis_uniform(app),
+            access: crate::access::map(app),
         };
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
     } else {

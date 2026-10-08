@@ -1181,8 +1181,8 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
         return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
     }
     // A path through 3D sketch curves is followed as a 3D polyline.
-    if ids.iter().any(|id| ps.sketch.curve_index(id).is_none() && ps.sketch.wire_index(id).is_some()) {
-        return path_segments_3d(ps, ids, start);
+    if let Some(pts) = path_points(ps, ids, start)? {
+        return Ok(pts.windows(2).map(|w| kernel::PathSeg::Line { a: w[0], b: w[1] }).collect());
     }
     let mut segs: Vec<solvecraft_geom::Seg2> = Vec::new();
     for id in ids {
@@ -1228,64 +1228,6 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
             }
         })
         .collect())
-}
-
-/// A chain of sketch curves and 3D sketch curves (wires) as line segments in world space,
-/// joined end to end, starting at the end nearest `start` (no start: the first curve runs toward
-/// the second).
-fn path_segments_3d(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
-    let mut pieces: Vec<Vec<Vec3>> = Vec::new();
-    for id in ids {
-        let pts: Vec<Vec3> = if let Some(ci) = ps.sketch.curve_index(id) {
-            let mut v: Vec<Vec3> = Vec::new();
-            for s in ps.sketch.segs(ci) {
-                for q in s.polyline(1e-2) {
-                    let w = ps.plane.to_world(q);
-                    if v.last().is_none_or(|l| l.dist(w) > 1e-12) {
-                        v.push(w);
-                    }
-                }
-            }
-            v
-        } else {
-            let w = ps.sketch.wire_index(id).and_then(|i| ps.sketch.wires.get(i)).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
-            w.pts.clone()
-        };
-        if pts.len() < 2 {
-            return Err(DocError::Invalid(format!("`{id}` is not a curve")));
-        }
-        pieces.push(pts);
-    }
-    let ends = |p: &Vec<Vec3>| (p.first().copied().unwrap_or_default(), p.last().copied().unwrap_or_default());
-    let tol = 1e-5;
-    let flip_first = match (pieces.first().map(ends), pieces.get(1).map(ends)) {
-        (Some((a, b)), _) if start.is_finite() => b.dist(start) < a.dist(start),
-        (Some((a, _)), Some((c, d))) => c.dist(a) < tol || d.dist(a) < tol,
-        _ => false,
-    };
-    if flip_first && let Some(f) = pieces.first_mut() {
-        f.reverse();
-    }
-    for i in 1..pieces.len() {
-        let prev_end = pieces.get(i - 1).map(|p| ends(p).1).unwrap_or_default();
-        if let Some(p) = pieces.get_mut(i) {
-            let (a, b) = ends(p);
-            if b.dist(prev_end) < a.dist(prev_end) {
-                p.reverse();
-            }
-            if ends(p).0.dist(prev_end) > tol {
-                return Err(DocError::Invalid("the path curves are not connected end to end".into()));
-            }
-        }
-    }
-    let segs: Vec<kernel::PathSeg> = pieces
-        .iter()
-        .flat_map(|p| p.windows(2).filter(|w| w[0].dist(w[1]) > 1e-9).map(|w| kernel::PathSeg::Line { a: w[0], b: w[1] }).collect::<Vec<_>>())
-        .collect();
-    if segs.len() > 1000 {
-        return Err(DocError::Invalid("the path is too detailed (over 1000 segments)".into()));
-    }
-    Ok(segs)
 }
 
 /// Operation and targets of a feature that makes tools.
