@@ -181,7 +181,7 @@ fn drawing_on_a_model_vertex_projects_it() {
     let mut s = Session::default();
     box_part(&mut s);
     run(&mut s, "SketchCreate", json!({"plane": "XY"}));
-    let r = run(&mut s, "DrawPolyline", json!({"points": [{"vertex": [40, 30, 20]}, [60, 45]]}));
+    let r = run(&mut s, "DrawPolyline", json!({"points": ["vertex:40,30,20", [60, 45]]}));
     let l = ids(&r["curves"])[0].clone();
     let si = inspect(&mut s);
     let start = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == l).unwrap()["start"].clone();

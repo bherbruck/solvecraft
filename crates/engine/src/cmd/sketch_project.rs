@@ -329,13 +329,23 @@ fn auto_project(s: &mut Session, p: &Value) -> Result<Value> {
 /// Point arguments that snap to model geometry while drawing, rewritten to sketch point ids:
 /// `{"vertex": [x,y,z]}` projects the vertex (a linked point); `{"on_edge": [x,y,z]}` projects
 /// the edge and makes a free point on it (coincident with the projection); `"mid:<line>"`
-/// makes a point held at the line's midpoint. Everything else is left as it is. The links are added to the active sketch in the session's document.
+/// makes a point held at the line's midpoint (and `"vertex:x,y,z"` is the vertex form). Everything
+/// else is left as it is. The links are added to the active sketch in the session's document.
 pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let Some(id) = s.active_sketch else { return Ok(p.clone()) };
     let mut out = p.clone();
     let mut doc: Option<(Document, Sketch)> = None;
     let fix = |v: &mut Value, s: &Session, doc: &mut Option<(Document, Sketch)>| -> Result<()> {
         let (vertex, edge) = (v.get("vertex").and_then(vec3), v.get("on_edge").and_then(vec3));
+        // String forms from interactive snapping: "vertex:x,y,z" and "mid:<line>".
+        let vertex = vertex.or_else(|| {
+            let t = v.as_str()?.strip_prefix("vertex:")?;
+            let n: Vec<f64> = t.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            match n[..] {
+                [x, y, z] if x.is_finite() && y.is_finite() && z.is_finite() => Some(Vec3::new(x, y, z)),
+                _ => None,
+            }
+        });
         let mid = v.as_str().and_then(|x| x.strip_prefix("mid:")).map(str::to_string);
         if vertex.is_none() && edge.is_none() && mid.is_none() {
             return Ok(());
