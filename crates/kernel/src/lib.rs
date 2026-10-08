@@ -31,6 +31,7 @@ mod ops;
 mod polybool;
 mod polyhedron;
 mod prism;
+pub mod provenance;
 mod sew;
 mod splitface;
 mod step;
