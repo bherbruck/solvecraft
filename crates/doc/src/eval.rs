@@ -186,6 +186,49 @@ fn thread_on(st: &ModelState, feature: u64, p: Vec3, designation: Option<&str>, 
     })
 }
 
+/// The helical space between the teeth of a modelled ISO metric thread (ISO 68-1 basic
+/// profile, 60° flanks): cut from the shaft (external) or the hole wall (internal), running from
+/// `start` to `end` along the axis. `radius` is the face's own radius; `open` says which ends
+/// of the threaded length are free ends of the face.
+fn thread_groove(t: &ThreadInfo, radius: f64, open: (bool, bool)) -> Result<solvecraft_geom::Mesh> {
+    let (p, d) = (t.pitch, t.major_diameter);
+    let h = p * 3f64.sqrt() / 2.0;
+    let slope = (std::f64::consts::PI / 6.0).tan();
+    let len = t.end - t.start;
+    if !(p > 1e-3 && len > 1e-6) {
+        return Err(DocError::Invalid("thread too short".into()));
+    }
+    if len / p > 190.0 {
+        return Err(DocError::Invalid(format!("a modelled thread is limited to 190 turns ({:.0} mm at this pitch); use a cosmetic one", 190.0 * p)));
+    }
+    // (radius, half width of the groove) at its two ends: a trapezoid in the axial plane.
+    let (r0, w0, r1, w1) = if t.internal {
+        // From inside the hole wall out to the major diameter, where the bolt's crest sits
+        // (the root flat is P/8 wide).
+        let r_in = radius.min(d / 2.0 - 5.0 * h / 8.0) - 0.1 * p;
+        (r_in, (p / 8.0 + 2.0 * (d / 2.0 - r_in) * slope) / 2.0, d / 2.0, p / 16.0)
+    } else {
+        // From the root (5H/8 under the major diameter, flat P/4 wide) out past the surface.
+        let r_root = d / 2.0 - 5.0 * h / 8.0;
+        let r_out = radius.max(d / 2.0) + 0.05 * p;
+        (r_root, p / 8.0, r_out, (p / 4.0 + 2.0 * (r_out - r_root) * slope) / 2.0)
+    };
+    if w0.max(w1) * 2.0 >= p * 0.98 {
+        return Err(DocError::Invalid("the face is too far from the thread's diameter".into()));
+    }
+    let k = t.axis;
+    let u = k.cross(if k.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) });
+    let u = u.normalized().ok_or_else(|| DocError::Invalid("thread axis".into()))?;
+    // Past a free end of the face the groove runs out into the air; elsewhere it stops square
+    // at the threaded length's end.
+    let (s0, s1) = (if open.0 { t.start - p } else { t.start }, if open.1 { t.end + p } else { t.end });
+    let base = t.axis_point + k * s0;
+    let plane = Plane { origin: base, x: u, y: k };
+    let section = [Vec2::new(r0, -w0), Vec2::new(r1, -w1), Vec2::new(r1, w1), Vec2::new(r0, w0)];
+    // Sections 7.5° apart: the chords sag 0.2% of the radius.
+    Ok(kernel::sweep_helix_mesh(&plane, &section, base, k, p, (s1 - s0) / p, 48)?)
+}
+
 /// Model after some prefix of the timeline.
 #[derive(Clone, Debug, Default)]
 pub struct ModelState {
@@ -2272,13 +2315,28 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
-        FeatureKind::Thread { face, designation, length } => {
+        FeatureKind::Thread { face, designation, length, modeled } => {
             let l = match length {
                 Some(e) => Some(val(vals, e, Kind::Length)?),
                 None => None,
             };
             let t = thread_on(st, f.id, *face, designation.as_deref(), l)?;
-            st.threads.push(t);
+            if !*modeled {
+                st.threads.push(t);
+                return Ok(());
+            }
+            let i = st.bodies.iter().position(|b| b.name == t.body).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let cyl = kernel::cylinder_face_at(&mb.body, *face).ok_or_else(|| DocError::Invalid("no cylindrical face there to thread".into()))?;
+            let tol = t.pitch * 1e-3;
+            let groove = thread_groove(&t, cyl.radius, ((t.start - cyl.start).abs() < tol, (t.end - cyl.end).abs() < tol))?;
+            // The B-rep boolean can't take helical walls in reasonable time: the body is cut
+            // faceted (curved faces within a two-hundredth of the pitch).
+            let nb = kernel::faceted_boolean(&mb.body, &groove, BoolOp::Cut, t.pitch * 0.005)?
+                .ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody::new(mb.name, nb, mb.feature);
+            }
             Ok(())
         }
         FeatureKind::Shell { faces, thickness, body, direction, tangent_chain } => {

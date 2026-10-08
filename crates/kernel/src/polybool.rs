@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use solvecraft_geom::Vec3;
+use solvecraft_geom::{Mesh, Vec3};
 use truck_modeling::{self as mt, builder};
 
 use crate::body::{Body, Solid, p3};
@@ -220,6 +220,87 @@ fn planar_polys(b: &Body) -> Option<Vec<Poly>> {
     (out.len() <= MAX_POLYS).then_some(out)
 }
 
+/// Polygons of any body: planar faces exactly, curved ones as their triangles (within `tol`).
+fn faceted_polys(b: &Body, tol: f64) -> Option<Vec<Poly>> {
+    let faces = b.faces(tol).ok()?;
+    let mesh = b.tessellate(tol).ok()?;
+    let planes: Vec<Option<PlaneEq>> = faces.iter().map(|f| f.plane_normal.map(|n| PlaneEq { n, w: n.dot(f.centroid) })).collect();
+    let mut out = Vec::new();
+    for (t, fi) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        let [a, bb, c] = mesh.tri(t)?;
+        let plane = match planes.get(*fi as usize)? {
+            Some(pl) => *pl,
+            None => {
+                let Some(n) = (bb - a).cross(c - a).normalized() else { continue };
+                PlaneEq { n, w: n.dot(a) }
+            }
+        };
+        let snap = |p: Vec3| p - plane.n * (plane.n.dot(p) - plane.w);
+        let mut v = vec![snap(a), snap(bb), snap(c)];
+        if (v[1] - v[0]).cross(v[2] - v[0]).dot(plane.n) < 0.0 {
+            v.reverse();
+        }
+        out.push(Poly { v, plane });
+    }
+    (out.len() <= MAX_POLYS).then_some(out)
+}
+
+/// Boolean of a body, its curved faces faceted to `tol`, with a closed triangle mesh (wound
+/// outward); the result has planar faces only. For tools the B-rep boolean cannot take, such as
+/// the helical groove of a thread.
+pub fn faceted_boolean(a: &Body, b: &Mesh, op: BoolOp, tol: f64) -> Result<Option<Body>> {
+    a.require_brep("a boolean")?;
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(KernelError::Invalid("facet tolerance".into()));
+    }
+    let Some(pa) = faceted_polys(a, tol) else {
+        return Err(KernelError::Failed("the body is too detailed to facet".into()));
+    };
+    let mut pb = Vec::with_capacity(b.triangles.len());
+    for t in &b.triangles {
+        let Some([p, q, r]) = b.tri(t) else { continue };
+        let Some(n) = (q - p).cross(r - p).normalized() else { continue };
+        pb.push(Poly { v: vec![p, q, r], plane: PlaneEq { n, w: n.dot(p) } });
+    }
+    if pa.len() + pb.len() > MAX_POLYS {
+        return Err(KernelError::Failed("the bodies are too detailed to facet".into()));
+    }
+    let (lo, hi) = b
+        .positions
+        .iter()
+        .fold((Vec3::new(f64::MAX, f64::MAX, f64::MAX), Vec3::new(f64::MIN, f64::MIN, f64::MIN)), |(l, h), p| (l.min(*p), h.max(*p)));
+    let size = if b.positions.is_empty() { a.size() } else { a.size().max((hi - lo).len()) };
+    // Fine facets of curved faces meet at shallow angles, where the coplanar test decides
+    // whether the pieces' boundaries come out consistent: try a few tolerances, and take the
+    // first whose result is watertight and agrees with the complementary boolean (A − B and
+    // A ∩ B add up to A; A ∪ B is A plus B less A ∩ B).
+    let (va, vb) = (polys_volume(&pa), polys_volume(&pb));
+    let mut last = KernelError::Failed("faceted boolean".into());
+    for rel in [1e-8, 1e-7, 3e-8, 1e-9, 3e-7] {
+        let eps = size * rel;
+        let out = csg(pa.clone(), pb.clone(), op, eps)?;
+        let both = csg(pa.clone(), pb.clone(), BoolOp::Intersect, eps)?;
+        let (vo, vi) = (polys_volume(&out), polys_volume(&both));
+        let expect = match op {
+            BoolOp::Cut => va - vi,
+            BoolOp::Union => va + vb - vi,
+            BoolOp::Intersect => vi,
+        };
+        if (vo - expect).abs() > 1e-6 * (va.abs() + vb.abs()) || vi < -1e-9 * (va.abs() + vb.abs()) {
+            last = KernelError::Failed(format!("faceted boolean: inconsistent volumes ({vo} vs {expect})"));
+            continue;
+        }
+        if out.is_empty() {
+            return Ok(None);
+        }
+        match rebuild(out, size) {
+            Ok(b) => return Ok(Some(b)),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
 /// Boolean of two all-planar bodies.
 pub fn planar_boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     a.require_brep("a boolean")?;
@@ -228,7 +309,31 @@ pub fn planar_boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         return Err(KernelError::Failed("not supported yet: coincident faces on curved bodies".into()));
     };
     let size = a.size().max(b.size());
-    let eps = size * 1e-9;
+    polys_boolean(pa, pb, size, op, size * 1e-9)
+}
+
+fn polys_boolean(pa: Vec<Poly>, pb: Vec<Poly>, size: f64, op: BoolOp, eps: f64) -> Result<Option<Body>> {
+    let polys = csg(pa, pb, op, eps)?;
+    if polys.is_empty() {
+        return Ok(None);
+    }
+    rebuild(polys, size).map(Some)
+}
+
+/// Enclosed volume of a closed set of polygons (divergence theorem).
+fn polys_volume(ps: &[Poly]) -> f64 {
+    let mut v6 = 0.0;
+    for p in ps {
+        let Some(&o) = p.v.first() else { continue };
+        for w in p.v.windows(2).skip(1) {
+            v6 += o.dot(w[0].cross(w[1]));
+        }
+    }
+    v6 / 6.0
+}
+
+/// The polygons of a BSP boolean (csg.js style).
+fn csg(pa: Vec<Poly>, pb: Vec<Poly>, op: BoolOp, eps: f64) -> Result<Vec<Poly>> {
     let (mut na, mut nb) = (Node::default(), Node::default());
     na.build(pa, eps, 0)?;
     nb.build(pb, eps, 0)?;
@@ -269,10 +374,7 @@ pub fn planar_boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     }
     let mut polys = Vec::new();
     na.all(&mut polys);
-    if polys.is_empty() {
-        return Ok(None);
-    }
-    rebuild(polys, size).map(Some)
+    Ok(polys)
 }
 
 /// Position key for vertex merging.
@@ -286,12 +388,23 @@ fn rebuild(polys: Vec<Poly>, size: f64) -> Result<Body> {
     // Global vertex table.
     let mut index: HashMap<(i64, i64, i64), usize> = HashMap::new();
     let mut verts: Vec<Vec3> = Vec::new();
+    // Points within `q` share a vertex, also across the rounding grid's cell boundaries.
     let mut id = |p: Vec3, verts: &mut Vec<Vec3>| -> usize {
         let k = key(p, q);
-        *index.entry(k).or_insert_with(|| {
-            verts.push(p);
-            verts.len() - 1
-        })
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if let Some(&i) = index.get(&(k.0 + dx, k.1 + dy, k.2 + dz))
+                        && verts.get(i).is_some_and(|v| (*v - p).len() <= q)
+                    {
+                        return i;
+                    }
+                }
+            }
+        }
+        verts.push(p);
+        index.insert(k, verts.len() - 1);
+        verts.len() - 1
     };
     let mut loops: Vec<(PlaneEq, Vec<usize>)> = Vec::new();
     for p in &polys {
@@ -304,29 +417,58 @@ fn rebuild(polys: Vec<Poly>, size: f64) -> Result<Body> {
             loops.push((p.plane, l));
         }
     }
-    // Split every polygon edge at vertices lying on it (T-junctions).
+    // Split every polygon edge at vertices lying on it (T-junctions). Vertices are binned in a
+    // grid sized to the typical edge, so each edge only looks at its neighbourhood.
     let tol = size * 1e-7;
+    let edge_len: Vec<f64> = loops
+        .iter()
+        .flat_map(|(_, l)| (0..l.len()).filter_map(move |i| Some((*l.get(i)?, *l.get((i + 1) % l.len())?))))
+        .filter_map(|(a, b)| Some((*verts.get(b)? - *verts.get(a)?).len()))
+        .collect();
+    let mean = edge_len.iter().sum::<f64>() / edge_len.len().max(1) as f64;
+    let cell = mean.max(size * 1e-4).max(1e-9);
+    let ckey = |p: Vec3| ((p.x / cell).floor() as i64, (p.y / cell).floor() as i64, (p.z / cell).floor() as i64);
+    let mut grid: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
+    for (k, v) in verts.iter().enumerate() {
+        grid.entry(ckey(*v)).or_default().push(k);
+    }
     let mut directed: Vec<(usize, usize, usize)> = Vec::new(); // (plane group, from, to)
     let mut groups: Vec<PlaneEq> = Vec::new();
+    let mut group_of: HashMap<(i64, i64, i64, i64), usize> = HashMap::new();
     for (pl, l) in &loops {
-        let g = match groups.iter().position(|g| g.n.dot(pl.n) > 1.0 - 1e-9 && (g.w - pl.w).abs() < tol * 10.0) {
-            Some(g) => g,
-            None => {
-                groups.push(*pl);
-                groups.len() - 1
-            }
-        };
+        let gk = ((pl.n.x * 1e8).round() as i64, (pl.n.y * 1e8).round() as i64, (pl.n.z * 1e8).round() as i64, (pl.w / (tol * 10.0)).round() as i64);
+        let g = *group_of.entry(gk).or_insert_with(|| {
+            groups.push(*pl);
+            groups.len() - 1
+        });
         let n = l.len();
         for i in 0..n {
             let (Some(&a), Some(&b)) = (l.get(i), l.get((i + 1) % n)) else { continue };
             let (Some(&pa), Some(&pb)) = (verts.get(a), verts.get(b)) else { continue };
             let d = pb - pa;
             let len2 = d.len2();
-            let mut on: Vec<(f64, usize)> = verts
-                .iter()
-                .enumerate()
-                .filter(|(k, _)| *k != a && *k != b)
-                .filter_map(|(k, v)| {
+            let (lo, hi) = (ckey(pa.min(pb) - Vec3::new(tol, tol, tol)), ckey(pa.max(pb) + Vec3::new(tol, tol, tol)));
+            let cells = (hi.0 - lo.0 + 1) * (hi.1 - lo.1 + 1) * (hi.2 - lo.2 + 1);
+            let candidates: Vec<usize> = if cells > 4096 {
+                (0..verts.len()).collect()
+            } else {
+                let mut c = Vec::new();
+                for x in lo.0..=hi.0 {
+                    for y in lo.1..=hi.1 {
+                        for z in lo.2..=hi.2 {
+                            if let Some(ks) = grid.get(&(x, y, z)) {
+                                c.extend(ks.iter().copied());
+                            }
+                        }
+                    }
+                }
+                c
+            };
+            let mut on: Vec<(f64, usize)> = candidates
+                .into_iter()
+                .filter(|k| *k != a && *k != b)
+                .filter_map(|k| {
+                    let v = verts.get(k)?;
                     let t = (*v - pa).dot(d) / len2.max(1e-300);
                     (t > 1e-9 && t < 1.0 - 1e-9 && v.dist_to_segment(pa, pb) < tol).then_some((t, k))
                 })
@@ -374,7 +516,21 @@ fn rebuild(polys: Vec<Poly>, size: f64) -> Result<Body> {
                 }
                 if cur == s {
                     lp.pop();
-                    loops_g.push(lp);
+                    // A walk through a vertex twice (two loops touching there) is split into
+                    // simple loops at that vertex.
+                    let mut stack: Vec<usize> = Vec::new();
+                    for v in lp {
+                        if let Some(at) = stack.iter().position(|x| *x == v) {
+                            let sub: Vec<usize> = stack.split_off(at);
+                            if sub.len() >= 3 {
+                                loops_g.push(sub);
+                            }
+                        }
+                        stack.push(v);
+                    }
+                    if stack.len() >= 3 {
+                        loops_g.push(stack);
+                    }
                 }
             }
             for lp in &loops_g {
@@ -447,7 +603,16 @@ fn rebuild(polys: Vec<Poly>, size: f64) -> Result<Body> {
                     }
                 }
                 let _ = ol;
-                let face = builder::try_attach_plane(&ws).map_err(|e| KernelError::Failed(format!("planar boolean face: {e}")))?;
+                // A loop a hair off flat (fine facets of a curved face) takes the group's plane.
+                let face = match builder::try_attach_plane(&ws) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        let o = plane.n * plane.w;
+                        let surface = mt::Plane::new(p3(o), p3(o + u), p3(o + w));
+                        mt::Face::try_new(ws, mt::Surface::Plane(surface))
+                            .map_err(|e2| KernelError::Failed(format!("planar boolean face: {e}; {e2}")))?
+                    }
+                };
                 faces.push(face);
             }
         }

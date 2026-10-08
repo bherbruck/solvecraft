@@ -1131,7 +1131,8 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(l) = &length {
         check_expr(s, l, Kind::Length, cmd, "length")?;
     }
-    let v = add_feature(s, p, FeatureKind::Thread { face, designation, length })?;
+    let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+    let v = add_feature(s, p, FeatureKind::Thread { face, designation, length, modeled })?;
     let st = s.model.state();
     let t = v.get("feature").and_then(Value::as_u64).and_then(|id| st.threads.iter().find(|t| t.feature == id).cloned());
     Ok(json!({"feature": v.get("feature"), "name": v.get("name"), "thread": t}))

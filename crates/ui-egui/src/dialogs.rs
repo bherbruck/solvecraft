@@ -2736,7 +2736,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Thread { face, designation, length } => {
+        FeatureKind::Thread { face, designation, length, .. } => {
             let mut d = start("solid.thread")?;
             d.kind = Kind::Thread { designation: designation.clone().unwrap_or_default(), length: length.clone().unwrap_or_default() };
             if let Some(inp) = d.inputs.first_mut() {

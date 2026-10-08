@@ -289,8 +289,9 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<Vec3>,
     },
-    /// A cosmetic thread on a cylindrical face (no geometry change; drawn and exported as an
-    /// annotation). `designation` is an ISO metric size such as "M8" or "M8x1".
+    /// A thread on a cylindrical face. Cosmetic by default (no geometry change; drawn and
+    /// exported as an annotation); `modeled` cuts the real helical ISO profile into the face.
+    /// `designation` is an ISO metric size such as "M8" or "M8x1".
     Thread {
         face: Vec3,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -298,6 +299,8 @@ pub enum FeatureKind {
         /// Thread length from the face's end nearest `face`; `None` = full length.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         length: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        modeled: bool,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
@@ -1033,6 +1036,7 @@ impl FeatureKind {
             FeatureKind::Hole { to: Some(t), .. } => vec![t],
             FeatureKind::Extrude { extent, .. } => extent.to.iter_mut().chain(extent.from.iter_mut()).collect(),
             FeatureKind::Revolve { to: Some(p), .. } => vec![p],
+            FeatureKind::Thread { face, .. } => vec![face],
             _ => Vec::new(),
         }
     }

@@ -41,6 +41,8 @@ mod step_in;
 mod step_out;
 mod surfaces;
 mod sweep_path;
+#[cfg(test)]
+mod thread_tests;
 mod topo;
 
 pub use blend::{ChamferSide, chamfer, chamfer_sides, fillet};
@@ -50,12 +52,13 @@ pub use body::{Body, EdgeInfo, FaceInfo, FacePaint, Paint};
 pub use build::{PathSeg, box_solid, cylinder, extrude, extrude_tapered, loft, revolve, sphere, sweep, torus};
 pub use delete_face::delete_faces;
 pub use helix::{loft_to_point, sweep_helix};
+pub use helix::{loft_to_point, sweep_helix, sweep_helix_mesh};
 pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
 pub use measure::{BodyMeasure, measure};
 pub use meshbody::{MAX_TRIANGLES, mesh_body};
 pub use ops::{BoolOp, boolean, split_by_plane, transform, transform_matrix};
-pub use polybool::planar_boolean;
+pub use polybool::{faceted_boolean, planar_boolean};
 pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew};
 pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
