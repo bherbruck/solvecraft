@@ -19,6 +19,8 @@ pub struct NamingOrigin {
     pub feature: Feature,
     pub before: Arc<ModelState>,
     pub depth: usize,
+    /// Instance transforms of a pattern or mirror (its copies are named after their sources).
+    pub mats: Vec<crate::Mat>,
 }
 
 /// The lazily computed names of a body, shared by its clones.
@@ -193,30 +195,68 @@ fn derive(b: &ModelBody, o: &NamingOrigin, nf: usize) -> Vec<String> {
         .collect();
     let fid = o.feature.id;
     let ns = normals(&m, nf);
-    let mut names: Vec<String> = Vec::with_capacity(nf);
-    for (fi, ps) in pts.iter().enumerate() {
-        // Vote: the input face most samples lie on, if it holds at least half of them.
-        let mut votes: Vec<(String, usize)> = Vec::new();
-        for p in ps {
-            for (_, idx, nm) in &inputs {
-                if let Some(f) = idx.face_at(*p, tol)
-                    && let Some(n) = nm.get(f)
-                {
-                    match votes.iter_mut().find(|(v, _)| v == n) {
-                        Some(v) => v.1 += 1,
-                        None => votes.push((n.clone(), 1)),
-                    }
-                    break;
-                }
+    let mut names: Vec<Option<String>> = pts.iter().map(|ps| vote(ps, &inputs, tol, None)).collect();
+    // A pattern or mirror copy: its faces lie on its source's faces moved by one instance.
+    let found = names.iter().filter(|n| n.is_some()).count();
+    if !o.mats.is_empty() && found * 2 < nf.max(1) {
+        let all: Vec<(&ModelBody, FaceIndex, Arc<Vec<String>>)> = o
+            .before
+            .bodies
+            .iter()
+            .filter(|x| !x.body.is_mesh())
+            .take(64)
+            .map(|x| (x, FaceIndex::new(&x.mesh(), face_count(x)), face_names(x)))
+            .collect();
+        let mut best: Option<(usize, usize, Vec<Option<String>>)> = None;
+        for (k, mat) in o.mats.iter().enumerate() {
+            let Some(inv) = crate::mat_inverse(mat) else { continue };
+            let got: Vec<Option<String>> = pts.iter().map(|ps| vote(ps, &all, tol, Some(&inv))).collect();
+            let n = got.iter().filter(|x| x.is_some()).count();
+            if n > found && best.as_ref().is_none_or(|(bn, _, _)| n > *bn) {
+                best = Some((n, k, got));
             }
         }
-        votes.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        let inherited = votes.first().filter(|(_, n)| *n * 2 >= ps.len().max(1)).map(|(n, _)| strip_piece(n).to_string());
-        let empty = Vec::new();
-        names.push(inherited.unwrap_or_else(|| role_name(&o.feature, &o.before, ps, ns.get(fi).unwrap_or(&empty), fi, fid)));
+        if let Some((_, k, got)) = best {
+            names = got.into_iter().map(|n| n.map(|n| format!("{n}@F{fid}.{}", k + 1))).collect();
+        }
     }
+    let empty = Vec::new();
+    let mut names: Vec<String> = names
+        .into_iter()
+        .enumerate()
+        .map(|(fi, n)| {
+            n.unwrap_or_else(|| {
+                role_name(&o.feature, &o.before, pts.get(fi).map(Vec::as_slice).unwrap_or(&[]), ns.get(fi).unwrap_or(&empty), fi, fid)
+            })
+        })
+        .collect();
     number_pieces(&mut names, &pts, '#');
     names
+}
+
+/// The input face most of a face's sample points lie on (mapped by `map` first), if it holds
+/// at least half of them.
+fn vote(ps: &[Vec3], inputs: &[(&ModelBody, FaceIndex, Arc<Vec<String>>)], tol: f64, map: Option<&crate::Mat>) -> Option<String> {
+    let mut votes: Vec<(String, usize)> = Vec::new();
+    for p in ps {
+        let p = match map {
+            Some(m) => crate::apply_point(m, *p),
+            None => *p,
+        };
+        for (_, idx, nm) in inputs {
+            if let Some(f) = idx.face_at(p, tol)
+                && let Some(n) = nm.get(f)
+            {
+                match votes.iter_mut().find(|(v, _)| v == n) {
+                    Some(v) => v.1 += 1,
+                    None => votes.push((n.clone(), 1)),
+                }
+                break;
+            }
+        }
+    }
+    votes.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    votes.first().filter(|(_, n)| *n * 2 >= ps.len().max(1)).map(|(n, _)| strip_piece(n).to_string())
 }
 
 /// A face name without its piece number (`#k`).
@@ -317,6 +357,57 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
             let q = ss.plane.to_local(c);
             nearest_curve(ss, Vec2::new(q.x, q.y)).map(|id| format!("F{fid}:side:{id}")).unwrap_or_else(|| format!("F{fid}:face:{fi}"))
         }
+        FeatureKind::Revolve { sketch, axis, .. } => {
+            let Some(ss) = before.sketch(*sketch) else { return format!("F{fid}:face:{fi}") };
+            let Ok((o2, d2)) = crate::eval::revolve_axis(ss, axis) else { return format!("F{fid}:face:{fi}") };
+            let (o, d) = (ss.plane.to_world(o2), (ss.plane.to_world(o2 + d2) - ss.plane.to_world(o2)).normalized().unwrap_or(Vec3::Z));
+            // A flat face holding the axis is an angle cap: on the sketch plane, or the far one.
+            let flat = !ns.is_empty() && ns.windows(2).all(|w| w[0].cross(w[1]).len() < 1e-6) && ns.iter().all(|m| m.dot(d).abs() < 1e-6);
+            if flat {
+                let on_plane = ps.iter().all(|p| (*p - ss.plane.origin).dot(ss.plane.normal()).abs() < 1e-6 * (1.0 + p.len()));
+                return format!("F{fid}:{}", if on_plane { "start" } else { "end" });
+            }
+            // A swept face: turn its centre back into the sketch plane and find the curve.
+            let q = c - o;
+            let t = q.dot(d);
+            let r = (q - d * t).len();
+            let u3 = ss.plane.normal().cross(d).normalized().unwrap_or(Vec3::X);
+            let best = [u3, u3 * -1.0]
+                .iter()
+                .filter_map(|u| {
+                    let w = ss.plane.to_local(o + d * t + *u * r);
+                    let q2 = Vec2::new(w.x, w.y);
+                    nearest_curve_dist(ss, q2)
+                })
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            best.map(|(_, id)| format!("F{fid}:side:{id}")).unwrap_or_else(|| format!("F{fid}:face:{fi}"))
+        }
+        FeatureKind::Box { .. } => {
+            let n = ns.first().copied().unwrap_or(Vec3::Z);
+            let axis = |v: f64, p: &str, m: &str| {
+                if v > 0.5 {
+                    Some(p.to_string())
+                } else if v < -0.5 {
+                    Some(m.to_string())
+                } else {
+                    None
+                }
+            };
+            let role =
+                axis(n.x, "+x", "-x").or_else(|| axis(n.y, "+y", "-y")).or_else(|| axis(n.z, "+z", "-z")).unwrap_or_else(|| format!("face:{fi}"));
+            format!("F{fid}:{role}")
+        }
+        FeatureKind::Cylinder { axis, .. } => {
+            let flat = !ns.is_empty() && ns.iter().all(|m| m.cross(*axis).len() < 1e-6);
+            let role = if !flat {
+                "side"
+            } else if ns.first().is_some_and(|m| m.dot(*axis) > 0.0) {
+                "top"
+            } else {
+                "bottom"
+            };
+            format!("F{fid}:{role}")
+        }
         FeatureKind::Fillet { edges, .. } | FeatureKind::Chamfer { edges, .. } => {
             let k = edges.iter().enumerate().min_by(|a, b| a.1.dist(c).total_cmp(&b.1.dist(c))).map(|(k, _)| k).unwrap_or(0);
             match f.edge_names.get(k) {
@@ -326,6 +417,23 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
         }
         _ => format!("F{fid}:face:{fi}"),
     }
+}
+
+/// The sketch curve (id) nearest a point in the sketch plane, and how near.
+fn nearest_curve_dist(ss: &crate::SolvedSketch, q: Vec2) -> Option<(f64, String)> {
+    let mut best: Option<(f64, String)> = None;
+    for (ci, c) in ss.sketch.curves.iter().enumerate() {
+        if c.construction {
+            continue;
+        }
+        for s in ss.sketch.segs(ci) {
+            let d = seg_dist(&s, q);
+            if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                best = Some((d, c.id.clone()));
+            }
+        }
+    }
+    best
 }
 
 /// The sketch curve (id) nearest a point in the sketch plane.

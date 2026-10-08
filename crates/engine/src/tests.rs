@@ -1266,4 +1266,34 @@ mod naming {
         let w = warning(&s, "Round").unwrap_or_default();
         assert!(w.contains("no longer exists"), "{w}");
     }
+
+    fn face_names(s: &mut Session, body: &str) -> Vec<String> {
+        let f = run(s, "model.faces", json!({ "body": body }));
+        f["faces"].as_array().into_iter().flatten().filter_map(|x| x["name"].as_str().map(str::to_string)).collect()
+    }
+
+    #[test]
+    fn primitives_revolves_and_pattern_copies_are_named() {
+        let mut s = Session::default();
+        run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10, "body_name": "B"}));
+        let n = face_names(&mut s, "B");
+        for want in ["F1:+x", "F1:-x", "F1:+y", "F1:-y", "F1:+z", "F1:-z"] {
+            assert!(n.contains(&want.to_string()), "{want} in {n:?}");
+        }
+        run(&mut s, "PatternRectangular", json!({"bodies": ["B"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20}));
+        let bodies: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        let copy = face_names(&mut s, &bodies[2]);
+        assert!(copy.iter().all(|x| x.starts_with("F1:") && x.contains("@F2.")), "{copy:?}");
+        // A revolved ring: the section's four lines name the four faces.
+        let mut r = Session::default();
+        run(&mut r, "SketchCreate", json!({"plane": "XZ"}));
+        run(&mut r, "DrawPolyline", json!({"points": [[10, 0], [15, 0], [15, 5], [10, 5]], "closed": true, "ids": ["a", "b", "c", "d"]}));
+        run(&mut r, "SketchStop", json!({}));
+        run(&mut r, "Revolve", json!({"axis": "y", "angle": "270 deg"}));
+        let body = r.model.state().bodies[0].name.clone();
+        let n = face_names(&mut r, &body);
+        for want in ["F2:side:a", "F2:side:b", "F2:side:c", "F2:side:d", "F2:start", "F2:end"] {
+            assert!(n.iter().any(|x| x.starts_with(want)), "{want} in {n:?}");
+        }
+    }
 }

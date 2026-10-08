@@ -218,10 +218,10 @@ impl ModelState {
 
     /// After a feature evaluated to this state from `before` with cache key `key`: bodies it
     /// made or changed, and sketches it made, take that key; the rest keep theirs.
-    fn stamp(&mut self, before: &Arc<ModelState>, f: &Feature, key: u64) {
+    fn stamp(&mut self, before: &Arc<ModelState>, f: &Feature, key: u64, mats: Vec<Mat>) {
         let feature = f.id;
         let depth = before.bodies.iter().filter_map(|b| b.names.origin.as_ref().map(|o| o.depth)).max().unwrap_or(0) + 1;
-        let origin = Arc::new(crate::naming::NamingOrigin { feature: f.clone(), before: before.clone(), depth });
+        let origin = Arc::new(crate::naming::NamingOrigin { feature: f.clone(), before: before.clone(), depth, mats });
         for b in &mut self.bodies {
             let kept = before.bodies.iter().find(|x| x.name == b.name && x.body.same(&b.body));
             match kept {
@@ -528,7 +528,15 @@ impl Model {
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
             let error = match r {
                 Ok(()) => {
-                    next.stamp(&state, f, key);
+                    // Copies are named after their sources through the instance transforms.
+                    let mats = match &f.kind {
+                        FeatureKind::Pattern { pattern, .. } => pattern_transforms(&vals, &state, pattern).unwrap_or_default(),
+                        FeatureKind::Mirror { plane, .. } => {
+                            doc.resolve_plane(&vals, plane, 0).map(|pl| vec![mirror_matrix(&pl)]).unwrap_or_default()
+                        }
+                        _ => Vec::new(),
+                    };
+                    next.stamp(&state, f, key, mats);
                     state = Arc::new(next);
                     None
                 }
@@ -1007,7 +1015,7 @@ fn blend_target(state: &ModelState, body: &Option<String>, edges: &[Vec3]) -> Re
     })
 }
 
-fn revolve_axis(ss: &SolvedSketch, axis: &AxisRef) -> Result<(Vec2, Vec2)> {
+pub(crate) fn revolve_axis(ss: &SolvedSketch, axis: &AxisRef) -> Result<(Vec2, Vec2)> {
     match axis {
         AxisRef::SketchLine { curve } => {
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
