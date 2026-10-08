@@ -1772,3 +1772,20 @@ fn hole_to_object_and_at_sketch_points() {
     let r = run(&mut t, "solid.hole", json!({"sketch": "Spots", "diameter": 3}));
     assert!(rel(w0 - volume(&mut t), 3.0 * PI * 2.25 * 10.0) < 1e-3, "{r} {}", w0 - volume(&mut t));
 }
+
+/// Combine keeps its tools on request and can put its result in a new component.
+#[test]
+fn combine_keep_tools_and_new_component() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 0, 0], "length": 20, "width": 20, "height": 20, "body_name": "B"}));
+    let r =
+        run(&mut s, "solid.combine", json!({"target": "A", "tools": ["B"], "operation": "cut", "keep_tools": true, "new_component": true}));
+    let comp = r["component"].as_u64().unwrap_or(0);
+    assert!(comp > 0, "{r}");
+    let st = s.model.state();
+    assert!(st.body("B").is_some(), "the tool is kept");
+    let a = st.body("A").unwrap();
+    assert_eq!(s.doc.body_component("A", a.feature), comp);
+    assert!(rel(solvecraft_kernel::measure(&a.body).unwrap().volume, 4000.0) < 1e-9);
+}

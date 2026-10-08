@@ -34,6 +34,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("edges: [[x,y,z] point on edge | {body, index}]; radius: expr; body?; type?: constant|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other); radius2?; start?: [x,y,z]"),
     CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
     CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool"),
+    CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; body?"),
+    CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
@@ -597,7 +599,19 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
         None => Operation::Join,
         Some(o) => Operation::parse(o).filter(|o| *o != Operation::NewBody).ok_or_else(|| bad(cmd, "operation must be join, cut or intersect"))?,
     };
-    add_feature(s, p, FeatureKind::Combine { target, tools, operation: op, keep_tools: bool_(p, "keep_tools").unwrap_or(false) })
+    let mut out = add_feature(
+        s,
+        p,
+        FeatureKind::Combine { target: target.clone(), tools, operation: op, keep_tools: bool_(p, "keep_tools").unwrap_or(false) },
+    )?;
+    // New Component: the result goes into a component of its own.
+    if bool_(p, "new_component").unwrap_or(false) {
+        let name = str_(p, "component_name").map(str::to_string).unwrap_or_else(|| format!("{target} Combined"));
+        let c = s.execute("component.create", &json!({"name": name, "activate": false}))?;
+        s.execute("component.move_bodies", &json!({"bodies": [target], "component": c["component"]}))?;
+        out["component"] = c["component"].clone();
+    }
+    Ok(out)
 }
 
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
