@@ -10,6 +10,7 @@ mod assembly;
 pub mod canvas;
 mod clipboard;
 pub mod config;
+pub mod construct;
 mod document;
 mod eval;
 pub mod expr;

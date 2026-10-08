@@ -358,7 +358,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let plane = super::sketch::plane_ref(s, p, cmd)?;
     let (vals, _) = s.doc.param_values();
-    s.doc.resolve_plane(&vals, &plane, 0)?;
+    s.doc.resolve_plane_in(&vals, &plane, 0, Some(&s.model.state()))?;
     if let Some(FeatureKind::Sketch { plane: slot, .. }) = s.doc_mut().feature_mut(id).map(|f| &mut f.kind) {
         *slot = plane;
     }

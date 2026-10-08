@@ -5,6 +5,7 @@
 mod browser;
 mod clipboard;
 mod component;
+mod construct;
 mod delete;
 mod edit;
 mod face;
@@ -145,6 +146,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
+    v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());

@@ -797,7 +797,7 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A plane reference from a parameter: an origin plane, a construction plane name, or an
 /// explicit plane `{origin, x_dir, y_dir}` / `{origin, normal}`.
-pub fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solvecraft_doc::PlaneRef> {
+pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solvecraft_doc::PlaneRef> {
     use solvecraft_doc::PlaneRef;
     match v {
         Some(Value::String(n)) if solvecraft_geom::Plane::named(n).is_some() => Ok(PlaneRef::Origin { name: n.to_ascii_uppercase() }),
@@ -1080,7 +1080,7 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let neutral = plane_param(s, p.get("neutral"), cmd)?;
     let (vals, _) = s.doc.param_values();
-    let pl = s.doc.resolve_plane(&vals, &neutral, 0)?;
+    let pl = s.doc.resolve_plane_in(&vals, &neutral, 0, Some(&s.model.state()))?;
     let pull = p.get("pull").and_then(vec3).unwrap_or_else(|| pl.normal());
     add_feature(s, p, FeatureKind::Draft { faces, angle, neutral, pull, body: str_(p, "body").map(str::to_string) })
 }

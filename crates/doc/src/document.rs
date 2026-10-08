@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use solvecraft_geom::{Plane, Vec2, Vec3};
 use solvecraft_sketch::Sketch;
 
+use crate::construct::{AxisDef, GeoRef, PointDef};
 use crate::expr::{self, Kind};
 use crate::{DocError, Result};
 
@@ -43,6 +44,16 @@ pub enum PlaneRef {
     AtAngle { base: Box<PlaneRef>, axis_origin: Vec3, axis_dir: Vec3, angle: String },
     /// A construction plane feature (by name).
     Construction { name: String },
+    /// Halfway between two planes (or planar faces); bisecting them when they meet at an angle.
+    Midplane { a: Box<GeoRef>, b: Box<GeoRef> },
+    /// Through two straight edges (lines) that lie in one plane.
+    TwoEdges { a: Box<GeoRef>, b: Box<GeoRef> },
+    /// Through three points.
+    ThreePoints { a: Box<GeoRef>, b: Box<GeoRef>, c: Box<GeoRef> },
+    /// Tangent to a face (cylinder, cone, sphere, torus) where the point `at` lies over it.
+    Tangent { face: Box<GeoRef>, at: Vec3 },
+    /// Square to an edge or sketch curve, a fraction `t` (expression, 0…1) of the way along it.
+    AlongPath { path: Box<GeoRef>, t: String },
     /// A planar body face: found again on each evaluation (the face with this plane's normal
     /// nearest `at`), so sketches on it follow when earlier features change; `plane` is the
     /// plane as picked (its frame, and the fallback when the face is gone). `name` is the face's
@@ -354,6 +365,14 @@ pub enum FeatureKind {
         plane: PlaneRef,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
+    },
+    /// A construction axis (Fusion's CONSTRUCT axes).
+    ConstructionAxis {
+        def: AxisDef,
+    },
+    /// A construction point (Fusion's CONSTRUCT points).
+    ConstructionPoint {
+        def: PointDef,
     },
     /// Split faces (at the given points) where a tool meets them, the solid unchanged: a plane,
     /// a face of a body (`tool`, its surface extended) or a sketch's curves (`sketch`, swept
@@ -896,6 +915,10 @@ fn plane_exprs<'a>(p: &'a PlaneRef, v: &mut Vec<&'a str>) {
                 v.push(angle);
                 p = base;
             }
+            PlaneRef::AlongPath { t, .. } => {
+                v.push(t);
+                break;
+            }
             _ => break,
         }
     }
@@ -950,6 +973,8 @@ impl FeatureKind {
             FeatureKind::Draft { .. } => "DraftFeature",
             FeatureKind::Split { .. } => "SplitBodyFeature",
             FeatureKind::SplitFace { .. } => "SplitFaceFeature",
+            FeatureKind::ConstructionAxis { .. } => "ConstructionAxis",
+            FeatureKind::ConstructionPoint { .. } => "ConstructionPoint",
             FeatureKind::Move { .. } => "MoveFeature",
             FeatureKind::Scale { .. } => "ScaleFeature",
             FeatureKind::OffsetFace { .. } => "OffsetFacesFeature",
@@ -1012,6 +1037,8 @@ impl FeatureKind {
             FeatureKind::Draft { .. } => "Draft",
             FeatureKind::Split { .. } => "Split",
             FeatureKind::SplitFace { .. } => "SplitFace",
+            FeatureKind::ConstructionAxis { .. } => "Axis",
+            FeatureKind::ConstructionPoint { .. } => "Point",
             FeatureKind::Move { .. } => "Move",
             FeatureKind::Scale { .. } => "Scale",
             FeatureKind::OffsetFace { .. } => "OffsetFace",
@@ -1076,6 +1103,13 @@ impl FeatureKind {
     pub fn expressions(&self) -> Vec<&str> {
         let mut v: Vec<&str> = Vec::new();
         match self {
+            FeatureKind::ConstructionAxis { def } => def.planes().into_iter().for_each(|p| plane_exprs(p, &mut v)),
+            FeatureKind::ConstructionPoint { def } => {
+                if let PointDef::AlongPath { t, .. } = def {
+                    v.push(t);
+                }
+                def.planes().into_iter().for_each(|p| plane_exprs(p, &mut v));
+            }
             FeatureKind::Sketch { plane, .. }
             | FeatureKind::ConstructionPlane { plane }
             | FeatureKind::Split { plane, .. }
@@ -1712,6 +1746,18 @@ impl Document {
 
     /// Resolve a plane reference.
     pub fn resolve_plane(&self, vals: &std::collections::BTreeMap<String, expr::Value>, p: &PlaneRef, depth: usize) -> Result<Plane> {
+        self.resolve_plane_in(vals, p, depth, None)
+    }
+
+    /// Resolve a plane; planes built from model geometry (edges, faces, construction axes and
+    /// points) need the model state `st`, and construction planes are read from it when given.
+    pub fn resolve_plane_in(
+        &self,
+        vals: &std::collections::BTreeMap<String, expr::Value>,
+        p: &PlaneRef,
+        depth: usize,
+        st: Option<&crate::ModelState>,
+    ) -> Result<Plane> {
         if depth > 32 {
             return Err(DocError::Invalid("plane offsets nested too deeply".into()));
         }
@@ -1721,21 +1767,37 @@ impl Document {
                 Plane::new(plane.origin, plane.x, plane.y).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
             }
             PlaneRef::Offset { base, distance } => {
-                let b = self.resolve_plane(vals, base, depth + 1)?;
+                let b = self.resolve_plane_in(vals, base, depth + 1, st)?;
                 Ok(b.offset(Self::eval_in(vals, distance, Kind::Length)?))
             }
             PlaneRef::AtAngle { base, axis_origin, axis_dir, angle } => {
-                let b = self.resolve_plane(vals, base, depth + 1)?;
+                let b = self.resolve_plane_in(vals, base, depth + 1, st)?;
                 let a = Self::eval_in(vals, angle, Kind::Angle)?;
                 let d = axis_dir.normalized().ok_or_else(|| DocError::Invalid("rotation axis".into()))?;
                 let rot = |v: Vec3| v * a.cos() + d.cross(v) * a.sin() + d * (d.dot(v) * (1.0 - a.cos()));
                 let o = *axis_origin + rot(b.origin - *axis_origin);
                 Plane::new(o, rot(b.x), rot(b.y)).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
             }
-            PlaneRef::Construction { name } => match self.find_feature(name).map(|f| &f.kind) {
-                Some(FeatureKind::ConstructionPlane { plane }) => self.resolve_plane(vals, plane, depth + 1),
-                _ => Err(DocError::Unknown(format!("construction plane `{name}`"))),
-            },
+            PlaneRef::Construction { name } => {
+                // Evaluated already: as it came out.
+                if let Some(c) = st.and_then(|st| st.construct.iter().find(|c| &c.name == name))
+                    && let crate::construct::ConstructGeom::Plane(pl) = &c.geom
+                {
+                    return Ok(*pl);
+                }
+                match self.find_feature(name).map(|f| &f.kind) {
+                    Some(FeatureKind::ConstructionPlane { plane }) => self.resolve_plane_in(vals, plane, depth + 1, st),
+                    _ => Err(DocError::Unknown(format!("construction plane `{name}`"))),
+                }
+            }
+            PlaneRef::Midplane { .. }
+            | PlaneRef::TwoEdges { .. }
+            | PlaneRef::ThreePoints { .. }
+            | PlaneRef::Tangent { .. }
+            | PlaneRef::AlongPath { .. } => {
+                let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
+                crate::construct::resolve_geo_plane(&crate::construct::Ctx { doc: self, vals, st }, p)
+            }
         }
     }
 

@@ -67,7 +67,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                         .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at the tool point", t.body)))?;
                     kernel::trim(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face }, *keep)?
                 }
-                None => kernel::trim(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane(vals, plane, 0)?), *keep)?,
+                None => kernel::trim(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, Some(st))?), *keep)?,
             };
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = ModelBody::new(mb.name, trimmed, mb.feature);

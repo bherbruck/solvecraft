@@ -181,30 +181,58 @@ pub fn home_camera(s: &Session) -> Camera {
     c
 }
 
-/// Construction planes of the timeline: (feature id, name, plane).
+/// Construction planes of the timeline, as evaluated: (feature id, name, plane).
 pub fn construction_planes(s: &Session) -> Vec<(u64, String, Plane)> {
-    use solvecraft_doc::FeatureKind;
-    let (vals, _) = s.doc.param_values();
-    s.doc
-        .features
-        .iter()
-        .filter_map(|f| match &f.kind {
-            FeatureKind::ConstructionPlane { plane } if !f.suppressed => s.doc.resolve_plane(&vals, plane, 0).ok().map(|p| {
-                // Shown where its component is placed.
-                let m = s.doc.component_transform(f.component);
-                let p = if solvecraft_doc::is_identity(&m) {
-                    p
-                } else {
-                    Plane::new(
-                        solvecraft_doc::apply_point(&m, p.origin),
-                        solvecraft_doc::apply_vector(&m, p.x),
-                        solvecraft_doc::apply_vector(&m, p.y),
-                    )
-                    .unwrap_or(p)
-                };
-                (f.id, f.name.clone(), p)
-            }),
+    constructs(s)
+        .into_iter()
+        .filter_map(|(id, name, g)| match g {
+            solvecraft_doc::construct::ConstructGeom::Plane(p) => Some((id, name, p)),
             _ => None,
+        })
+        .collect()
+}
+
+/// Construction axes, as evaluated: (feature id, name, origin, unit direction).
+pub fn construction_axes(s: &Session) -> Vec<(u64, String, Vec3, Vec3)> {
+    constructs(s)
+        .into_iter()
+        .filter_map(|(id, name, g)| match g {
+            solvecraft_doc::construct::ConstructGeom::Axis { origin, dir } => Some((id, name, origin, dir)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Construction points, as evaluated: (feature id, name, position).
+pub fn construction_points(s: &Session) -> Vec<(u64, String, Vec3)> {
+    constructs(s)
+        .into_iter()
+        .filter_map(|(id, name, g)| match g {
+            solvecraft_doc::construct::ConstructGeom::Point(p) => Some((id, name, p)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Construction geometry of unsuppressed features, shown where its component is placed.
+fn constructs(s: &Session) -> Vec<(u64, String, solvecraft_doc::construct::ConstructGeom)> {
+    use solvecraft_doc::construct::ConstructGeom;
+    let st = s.model.state();
+    st.construct
+        .iter()
+        .filter_map(|c| {
+            let f = s.doc.feature(c.feature).filter(|f| !f.suppressed)?;
+            let m = s.doc.component_transform(f.component);
+            if solvecraft_doc::is_identity(&m) {
+                return Some((c.feature, c.name.clone(), c.geom.clone()));
+            }
+            let (pt, v) = (|p: Vec3| solvecraft_doc::apply_point(&m, p), |d: Vec3| solvecraft_doc::apply_vector(&m, d));
+            let g = match &c.geom {
+                ConstructGeom::Plane(p) => ConstructGeom::Plane(Plane::new(pt(p.origin), v(p.x), v(p.y)).unwrap_or(*p)),
+                ConstructGeom::Axis { origin, dir } => ConstructGeom::Axis { origin: pt(*origin), dir: v(*dir) },
+                ConstructGeom::Point(p) => ConstructGeom::Point(pt(*p)),
+            };
+            Some((c.feature, c.name.clone(), g))
         })
         .collect()
 }

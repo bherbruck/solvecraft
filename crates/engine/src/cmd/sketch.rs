@@ -367,7 +367,7 @@ fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let plane = plane_ref(s, p, cmd)?;
     // Validate the plane resolves.
     let (vals, _) = s.doc.param_values();
-    s.doc.resolve_plane(&vals, &plane, 0)?;
+    s.doc.resolve_plane_in(&vals, &plane, 0, Some(&s.model.state()))?;
     let name = str_(p, "name");
     let mut kind = FeatureKind::Sketch { plane, sketch: Sketch::new() };
     super::component::to_active_frame(s, &mut kind);

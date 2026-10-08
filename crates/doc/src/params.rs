@@ -21,6 +21,7 @@ fn plane_inputs_mut<'a>(p: &'a mut PlaneRef, v: &mut Vec<(&'static str, &'a mut 
             v.push(("Angle", angle, Kind::Angle));
             plane_inputs_mut(base, v);
         }
+        PlaneRef::AlongPath { t, .. } => v.push(("Distance (0 to 1)", t, Kind::Unitless)),
         _ => {}
     }
 }
@@ -36,6 +37,23 @@ impl FeatureKind {
             | FeatureKind::Split { plane, .. }
             | FeatureKind::SplitFace { plane, .. }
             | FeatureKind::Mirror { plane, .. } => plane_inputs_mut(plane, &mut v),
+            FeatureKind::ConstructionAxis { def } => {
+                for r in def.refs_mut() {
+                    if let crate::construct::GeoRef::Plane { plane } = r {
+                        plane_inputs_mut(plane, &mut v);
+                    }
+                }
+            }
+            FeatureKind::ConstructionPoint { def } => match def {
+                crate::construct::PointDef::AlongPath { t, .. } => v.push(("Distance (0 to 1)", t, U)),
+                other => {
+                    for r in other.refs_mut() {
+                        if let crate::construct::GeoRef::Plane { plane } = r {
+                            plane_inputs_mut(plane, &mut v);
+                        }
+                    }
+                }
+            },
             FeatureKind::Extrude { extent, .. } => {
                 v.push(("Distance", &mut extent.distance, L));
                 if let Some(d) = &mut extent.distance2 {

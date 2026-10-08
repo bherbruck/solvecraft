@@ -1,0 +1,643 @@
+//! Construction geometry from the model: references to vertices, edges, faces, planes, axes,
+//! points and sketch entities, resolved on each evaluation, and the axes, points and planes
+//! built from them (Fusion's CONSTRUCT panel).
+//!
+//! Face and edge references carry the persistent name of what was picked (see `naming`), so
+//! they follow the model when earlier features change; the picked point is the fallback.
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use solvecraft_geom::{Plane, Vec2, Vec3};
+use solvecraft_kernel::{self as kernel, FaceSurface};
+
+use crate::eval::{ModelBody, ModelState};
+use crate::expr::{Kind, Value};
+use crate::{DocError, Document, PlaneRef, Result};
+
+/// Something picked to build construction geometry from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GeoRef {
+    /// A fixed point.
+    Point { p: Vec3 },
+    /// The design origin.
+    Origin,
+    /// A body vertex (the one nearest `at`).
+    Vertex { at: Vec3 },
+    /// A body edge: the one named `name`, else the one nearest `at`.
+    Edge {
+        at: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// A body face: the one named `name`, else the one at `at`.
+    Face {
+        at: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// A plane (origin, construction, offset…).
+    Plane { plane: PlaneRef },
+    /// World X, Y or Z axis.
+    World { axis: String },
+    /// A construction axis feature, by name.
+    Axis { name: String },
+    /// A construction point feature, by name.
+    ConstructPoint { name: String },
+    /// A sketch point (by sketch feature id and point id).
+    SketchPoint { sketch: u64, point: String },
+    /// A sketch curve (by sketch feature id and curve id).
+    SketchCurve { sketch: u64, curve: String },
+}
+
+/// How a construction axis is defined.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AxisDef {
+    /// The axis of a cylinder, cone or torus face (or a circular edge).
+    ThroughFace { face: GeoRef },
+    /// Perpendicular to a face, through a point (projected onto the face).
+    NormalToFace { face: GeoRef, point: GeoRef },
+    /// Where two planes meet.
+    TwoPlanes { a: GeoRef, b: GeoRef },
+    /// Through two points.
+    TwoPoints { a: GeoRef, b: GeoRef },
+    /// Along a straight edge (or sketch line).
+    Edge { edge: GeoRef },
+}
+
+/// How a construction point is defined.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PointDef {
+    /// At a vertex, sketch point or fixed point.
+    At { point: GeoRef },
+    /// Where two edges (lines) meet, or come closest.
+    TwoEdges { a: GeoRef, b: GeoRef },
+    /// Where three planes meet.
+    ThreePlanes { a: GeoRef, b: GeoRef, c: GeoRef },
+    /// The centre of a circular edge, a sphere or a torus.
+    Center { of: GeoRef },
+    /// Where an edge (line) crosses a plane.
+    EdgeAndPlane { edge: GeoRef, plane: GeoRef },
+    /// At a fraction `t` (0…1) of the way along an edge or sketch curve.
+    AlongPath { path: GeoRef, t: String },
+}
+
+/// Resolved construction geometry, kept in the model state by feature.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConstructGeom {
+    Plane(Plane),
+    Axis { origin: Vec3, dir: Vec3 },
+    Point(Vec3),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Construct {
+    pub feature: u64,
+    pub name: String,
+    pub geom: ConstructGeom,
+}
+
+/// Everything a reference needs to be resolved.
+pub(crate) struct Ctx<'a> {
+    pub doc: &'a Document,
+    pub vals: &'a BTreeMap<String, Value>,
+    pub st: &'a ModelState,
+}
+
+fn bad(m: impl Into<String>) -> DocError {
+    DocError::Invalid(m.into())
+}
+
+fn bodies(st: &ModelState) -> impl Iterator<Item = &ModelBody> {
+    st.bodies.iter().filter(|b| !b.body.is_mesh())
+}
+
+fn construct<'a>(st: &'a ModelState, name: &str) -> Result<&'a ConstructGeom> {
+    st.construct.iter().find(|c| c.name == name).map(|c| &c.geom).ok_or_else(|| DocError::Unknown(format!("construction `{name}`")))
+}
+
+/// The face picked: (body, face index, point on it).
+fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&'a ModelBody, usize, Vec3)> {
+    let at = match name.as_deref().and_then(|n| crate::naming::point_on_face(st, n, at)) {
+        Some((q, _)) => q,
+        None => at,
+    };
+    for b in bodies(st) {
+        if let Some(fi) = crate::appearance::face_index_at(b, at) {
+            return Ok((b, fi, at));
+        }
+    }
+    Err(bad(format!("no face at {at:?}")))
+}
+
+/// The edge picked, as a polyline.
+fn edge_points(st: &ModelState, at: Vec3, name: &Option<String>) -> Result<Vec<Vec3>> {
+    let mut at = at;
+    if let Some(n) = name {
+        for b in bodies(st) {
+            if let Ok((q, _)) = crate::naming::find_edge(b, n, at) {
+                at = q;
+                break;
+            }
+        }
+    }
+    let mut best: Option<(f64, Vec<Vec3>)> = None;
+    for b in bodies(st) {
+        let tol = (b.body.size() * 1e-3).max(1e-3);
+        let Ok(edges) = b.body.edges(tol) else { continue };
+        for e in edges {
+            let d = e.points.windows(2).map(|w| at.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min);
+            if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                best = Some((d, e.points));
+            }
+        }
+    }
+    match best {
+        Some((d, pts)) if pts.len() >= 2 && d <= 1e-3 + 1e-2 * pts.iter().fold(0.0, |m: f64, p| m.max(p.len())).max(1.0) => Ok(pts),
+        _ => Err(bad(format!("no edge at {at:?}"))),
+    }
+}
+
+/// A polyline that is straight: its line.
+fn as_line(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
+    let (a, b) = (*pts.first()?, *pts.last()?);
+    let d = (b - a).normalized()?;
+    let len = (b - a).len();
+    pts.iter().all(|p| p.dist_to_segment(a, b) <= len * 1e-6 + 1e-9).then_some((a, d))
+}
+
+/// A polyline on a circle: (centre, unit normal, radius).
+fn as_circle(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64)> {
+    let n = pts.len();
+    if n < 4 {
+        return None;
+    }
+    let (a, b, c) = (*pts.first()?, *pts.get(n / 3)?, *pts.get(2 * n / 3)?);
+    let (ab, ac) = (b - a, c - a);
+    let nrm = ab.cross(ac);
+    let l2 = nrm.len2();
+    if l2 < 1e-24 {
+        return None;
+    }
+    // Circumcentre of abc.
+    let centre = a + (nrm.cross(ab) * ac.len2() + ac.cross(nrm) * ab.len2()) * (1.0 / (2.0 * l2));
+    let r = (a - centre).len();
+    let unit = nrm.normalized()?;
+    pts.iter()
+        .all(|p| ((*p - centre).len() - r).abs() <= r * 1e-3 + 1e-6 && (*p - centre).dot(unit).abs() <= r * 1e-3 + 1e-6)
+        .then_some((centre, unit, r))
+}
+
+fn sketch_world(ctx: &Ctx, sketch: u64, q: Vec2) -> Result<Vec3> {
+    let ss = ctx.st.sketch(sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
+    Ok(ss.plane.to_world(q))
+}
+
+fn sketch_curve_points(ctx: &Ctx, sketch: u64, curve: &str) -> Result<Vec<Vec3>> {
+    let ss = ctx.st.sketch(sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
+    let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("curve `{curve}`")))?;
+    let pl = ss.sketch.polyline(ci);
+    if pl.len() < 2 {
+        return Err(bad(format!("curve `{curve}` has no length")));
+    }
+    Ok(pl.into_iter().map(|q| ss.plane.to_world(q)).collect())
+}
+
+/// A reference as a point.
+pub(crate) fn point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
+    match g {
+        GeoRef::Point { p } => Ok(*p),
+        GeoRef::Origin => Ok(Vec3::ZERO),
+        GeoRef::Vertex { at } => {
+            let mut best: Option<(f64, Vec3)> = None;
+            for b in bodies(ctx.st) {
+                let tol = (b.body.size() * 1e-3).max(1e-3);
+                let Ok(edges) = b.body.edges(tol) else { continue };
+                for v in edges.iter().flat_map(|e| [e.points.first().copied(), e.points.last().copied()]).flatten() {
+                    let d = v.dist(*at);
+                    if best.is_none_or(|(bd, _)| d < bd) {
+                        best = Some((d, v));
+                    }
+                }
+            }
+            best.map(|(_, v)| v).ok_or_else(|| bad("there is no vertex"))
+        }
+        GeoRef::ConstructPoint { name } => match construct(ctx.st, name)? {
+            ConstructGeom::Point(p) => Ok(*p),
+            _ => Err(bad(format!("`{name}` is not a point"))),
+        },
+        GeoRef::SketchPoint { sketch, point } => {
+            let ss = ctx.st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
+            let q =
+                ss.sketch.point_index(point).and_then(|i| ss.sketch.point(i)).ok_or_else(|| DocError::Unknown(format!("sketch point `{point}`")))?;
+            sketch_world(ctx, *sketch, q)
+        }
+        // A round edge or face: its centre.
+        GeoRef::Edge { .. } | GeoRef::Face { .. } | GeoRef::SketchCurve { .. } => centre(ctx, g),
+        _ => Err(bad("pick a point, vertex or sketch point")),
+    }
+}
+
+/// A reference as a line (origin, unit direction).
+pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
+    match g {
+        GeoRef::Edge { at, name } => {
+            let pts = edge_points(ctx.st, *at, name)?;
+            as_line(&pts).or_else(|| as_circle(&pts).map(|(c, n, _)| (c, n))).ok_or_else(|| bad("the edge is neither straight nor circular"))
+        }
+        GeoRef::SketchCurve { sketch, curve } => {
+            let pts = sketch_curve_points(ctx, *sketch, curve)?;
+            as_line(&pts).ok_or_else(|| bad(format!("sketch curve `{curve}` is not a line")))
+        }
+        GeoRef::World { axis } => {
+            let d = match axis.to_ascii_uppercase().as_str() {
+                "X" => Vec3::X,
+                "Y" => Vec3::Y,
+                "Z" => Vec3::Z,
+                _ => return Err(DocError::Unknown(format!("axis `{axis}`"))),
+            };
+            Ok((Vec3::ZERO, d))
+        }
+        GeoRef::Axis { name } => match construct(ctx.st, name)? {
+            ConstructGeom::Axis { origin, dir } => Ok((*origin, *dir)),
+            _ => Err(bad(format!("`{name}` is not an axis"))),
+        },
+        GeoRef::Face { at, name } => {
+            let (b, fi, _) = face_of(ctx.st, *at, name)?;
+            match kernel::face_surface(&b.body, fi) {
+                Some(FaceSurface::Cylinder { origin, axis, .. }) => Ok((origin, axis)),
+                Some(FaceSurface::Cone { apex, axis, .. }) => Ok((apex, axis)),
+                Some(FaceSurface::Torus { center, axis, .. }) => Ok((center, axis)),
+                _ => Err(bad("the face is not a cylinder, cone or torus")),
+            }
+        }
+        _ => Err(bad("pick an edge, line or axis")),
+    }
+}
+
+/// A reference as a plane.
+pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
+    match g {
+        GeoRef::Plane { plane } => ctx.doc.resolve_plane_in(ctx.vals, plane, 0, Some(ctx.st)),
+        GeoRef::Face { at, name } => {
+            let (b, fi, q) = face_of(ctx.st, *at, name)?;
+            match kernel::face_surface(&b.body, fi) {
+                Some(FaceSurface::Plane { normal, point }) => {
+                    let o = q - normal * (q - point).dot(normal);
+                    Plane::from_normal(o, normal).ok_or_else(|| bad("degenerate face"))
+                }
+                _ => Err(bad("the face is not planar")),
+            }
+        }
+        _ => Err(bad("pick a plane or planar face")),
+    }
+}
+
+/// The centre of a round edge, sketch circle, sphere or torus.
+fn centre(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
+    match g {
+        GeoRef::Edge { at, name } => {
+            let pts = edge_points(ctx.st, *at, name)?;
+            as_circle(&pts).map(|(c, _, _)| c).ok_or_else(|| bad("the edge is not circular"))
+        }
+        GeoRef::SketchCurve { sketch, curve } => {
+            let pts = sketch_curve_points(ctx, *sketch, curve)?;
+            as_circle(&pts).map(|(c, _, _)| c).ok_or_else(|| bad(format!("sketch curve `{curve}` is not a circle or arc")))
+        }
+        GeoRef::Face { at, name } => {
+            let (b, fi, _) = face_of(ctx.st, *at, name)?;
+            match kernel::face_surface(&b.body, fi) {
+                Some(FaceSurface::Sphere { center, .. }) | Some(FaceSurface::Torus { center, .. }) => Ok(center),
+                _ => Err(bad("the face is not a sphere or torus")),
+            }
+        }
+        _ => Err(bad("pick a circular edge, a sphere or a torus")),
+    }
+}
+
+/// Point and unit tangent at fraction `t` along a polyline.
+fn along(pts: &[Vec3], t: f64) -> Option<(Vec3, Vec3)> {
+    let total: f64 = pts.windows(2).map(|w| (w[1] - w[0]).len()).sum();
+    if !(total > 0.0) {
+        return None;
+    }
+    let mut left = t.clamp(0.0, 1.0) * total;
+    for w in pts.windows(2) {
+        let l = (w[1] - w[0]).len();
+        if l <= 0.0 {
+            continue;
+        }
+        if left <= l {
+            return Some((w[0] + (w[1] - w[0]) * (left / l), (w[1] - w[0]) * (1.0 / l)));
+        }
+        left -= l;
+    }
+    let (a, b) = (pts.get(pts.len() - 2)?, pts.last()?);
+    Some((*b, (*b - *a).normalized()?))
+}
+
+fn path_points(ctx: &Ctx, g: &GeoRef) -> Result<Vec<Vec3>> {
+    match g {
+        GeoRef::Edge { at, name } => edge_points(ctx.st, *at, name),
+        GeoRef::SketchCurve { sketch, curve } => sketch_curve_points(ctx, *sketch, curve),
+        _ => Err(bad("pick an edge or sketch curve as the path")),
+    }
+}
+
+/// The surface's unit normal at (the point of the surface nearest) `p`, and that point.
+fn surface_normal(s: FaceSurface, p: Vec3) -> Option<(Vec3, Vec3)> {
+    match s {
+        FaceSurface::Plane { normal, point } => Some((p - normal * (p - point).dot(normal), normal)),
+        FaceSurface::Cylinder { origin, axis, radius } => {
+            let w = p - origin;
+            let r = (w - axis * w.dot(axis)).normalized()?;
+            Some((origin + axis * w.dot(axis) + r * radius, r))
+        }
+        FaceSurface::Sphere { center, radius } => {
+            let r = (p - center).normalized()?;
+            Some((center + r * radius, r))
+        }
+        FaceSurface::Cone { apex, axis, half_angle } => {
+            let w = p - apex;
+            let radial = (w - axis * w.dot(axis)).normalized()?;
+            // The generator through p's side, and the normal square to it in the axial plane.
+            let line = axis * half_angle.cos() + radial * half_angle.sin();
+            let n = (radial * half_angle.cos() - axis * half_angle.sin()).normalized()?;
+            Some((apex + line * w.dot(line), n))
+        }
+        FaceSurface::Torus { center, axis, major, minor } => {
+            let w = p - center;
+            let radial = (w - axis * w.dot(axis)).normalized()?;
+            let tube = center + radial * major;
+            let n = (p - tube).normalized()?;
+            Some((tube + n * minor, n))
+        }
+    }
+}
+
+fn face_surface_at(ctx: &Ctx, g: &GeoRef) -> Result<(FaceSurface, Vec3)> {
+    match g {
+        GeoRef::Face { at, name } => {
+            let (b, fi, q) = face_of(ctx.st, *at, name)?;
+            kernel::face_surface(&b.body, fi).map(|s| (s, q)).ok_or_else(|| bad("the face's surface is not a plane, cylinder, cone, sphere or torus"))
+        }
+        GeoRef::Plane { .. } => {
+            let pl = plane(ctx, g)?;
+            Ok((FaceSurface::Plane { normal: pl.normal(), point: pl.origin }, pl.origin))
+        }
+        _ => Err(bad("pick a face")),
+    }
+}
+
+/// Where two planes meet.
+fn plane_plane(a: &Plane, b: &Plane) -> Option<(Vec3, Vec3)> {
+    let (n1, n2) = (a.normal(), b.normal());
+    let d = n1.cross(n2);
+    let l2 = d.len2();
+    if l2 < 1e-18 {
+        return None;
+    }
+    let (h1, h2) = (n1.dot(a.origin), n2.dot(b.origin));
+    let o = (n2.cross(d) * h1 + d.cross(n1) * h2) * (1.0 / l2);
+    Some((o, d.normalized()?))
+}
+
+/// Closest points of two lines: their midpoint (where they meet, if they do).
+fn line_line(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> Option<Vec3> {
+    let ((p, u), (q, v)) = (a, b);
+    let w = p - q;
+    let (uu, uv, vv, uw, vw) = (u.dot(u), u.dot(v), v.dot(v), u.dot(w), v.dot(w));
+    let den = uu * vv - uv * uv;
+    if den.abs() < 1e-12 {
+        return None;
+    }
+    let s = (uv * vw - vv * uw) / den;
+    let t = (uu * vw - uv * uw) / den;
+    Some(((p + u * s) + (q + v * t)) * 0.5)
+}
+
+pub(crate) fn resolve_axis(ctx: &Ctx, d: &AxisDef) -> Result<(Vec3, Vec3)> {
+    match d {
+        AxisDef::ThroughFace { face } => line(ctx, face),
+        AxisDef::Edge { edge } => {
+            let (o, dir) = line(ctx, edge)?;
+            if let GeoRef::Edge { at, name } = edge
+                && as_line(&edge_points(ctx.st, *at, name)?).is_none()
+            {
+                return Err(bad("the edge is not straight"));
+            }
+            Ok((o, dir))
+        }
+        AxisDef::NormalToFace { face, point: p } => {
+            let (s, _) = face_surface_at(ctx, face)?;
+            let q = point(ctx, p)?;
+            let (on, n) = surface_normal(s, q).ok_or_else(|| bad("the point is on the face's axis"))?;
+            Ok((on, n))
+        }
+        AxisDef::TwoPlanes { a, b } => plane_plane(&plane(ctx, a)?, &plane(ctx, b)?).ok_or_else(|| bad("the planes are parallel")),
+        AxisDef::TwoPoints { a, b } => {
+            let (p, q) = (point(ctx, a)?, point(ctx, b)?);
+            Ok((p, (q - p).normalized().ok_or_else(|| bad("the two points coincide"))?))
+        }
+    }
+}
+
+pub(crate) fn resolve_point(ctx: &Ctx, d: &PointDef) -> Result<Vec3> {
+    match d {
+        PointDef::At { point: p } => point(ctx, p),
+        PointDef::Center { of } => centre(ctx, of),
+        PointDef::TwoEdges { a, b } => line_line(line(ctx, a)?, line(ctx, b)?).ok_or_else(|| bad("the edges are parallel")),
+        PointDef::ThreePlanes { a, b, c } => {
+            let (pa, pb, pc) = (plane(ctx, a)?, plane(ctx, b)?, plane(ctx, c)?);
+            let (o, dir) = plane_plane(&pa, &pb).ok_or_else(|| bad("two of the planes are parallel"))?;
+            line_plane(o, dir, &pc).ok_or_else(|| bad("the planes don't meet in a point"))
+        }
+        PointDef::EdgeAndPlane { edge, plane: p } => {
+            let (o, dir) = line(ctx, edge)?;
+            line_plane(o, dir, &plane(ctx, p)?).ok_or_else(|| bad("the edge is parallel to the plane"))
+        }
+        PointDef::AlongPath { path, t } => {
+            let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
+            along(&path_points(ctx, path)?, t).map(|(p, _)| p).ok_or_else(|| bad("the path has no length"))
+        }
+    }
+}
+
+fn line_plane(o: Vec3, d: Vec3, p: &Plane) -> Option<Vec3> {
+    let n = p.normal();
+    let den = d.dot(n);
+    if den.abs() < 1e-12 {
+        return None;
+    }
+    Some(o + d * ((p.origin - o).dot(n) / den))
+}
+
+/// Planes built from model geometry (the `PlaneRef` kinds that need the model).
+pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
+    let degenerate = || bad("degenerate plane");
+    match p {
+        PlaneRef::Midplane { a, b } => {
+            let (pa, pb) = (plane(ctx, a)?, plane(ctx, b)?);
+            let (na, nb) = (pa.normal(), pb.normal());
+            if na.cross(nb).len() < 1e-9 {
+                // Parallel: halfway between, facing as the first.
+                let half = nb * ((pb.origin - pa.origin).dot(nb) * 0.5);
+                return Plane::new(pa.origin + half, pa.x, pa.y).ok_or_else(degenerate);
+            }
+            // Meeting at an angle: the plane through their line that halves the angle.
+            let (o, dir) = plane_plane(&pa, &pb).ok_or_else(degenerate)?;
+            let n = (na - nb).normalized().ok_or_else(degenerate)?;
+            Plane::new(o, dir, n.cross(dir)).ok_or_else(degenerate)
+        }
+        PlaneRef::TwoEdges { a, b } => {
+            let ((o1, d1), (o2, d2)) = (line(ctx, a)?, line(ctx, b)?);
+            let n = match d1.cross(d2).normalized() {
+                Some(n) if (o2 - o1).dot(n).abs() <= 1e-6 * (1.0 + (o2 - o1).len()) => n,
+                Some(_) => return Err(bad("the edges are not in one plane")),
+                None => d1.cross(o2 - o1).normalized().ok_or_else(|| bad("the edges are on one line"))?,
+            };
+            Plane::new(o1, d1, n.cross(d1)).ok_or_else(degenerate)
+        }
+        PlaneRef::ThreePoints { a, b, c } => {
+            let (pa, pb, pc) = (point(ctx, a)?, point(ctx, b)?, point(ctx, c)?);
+            if (pb - pa).cross(pc - pa).len() < 1e-9 {
+                return Err(bad("the three points are on one line"));
+            }
+            Plane::new(pa, pb - pa, pc - pa).ok_or_else(degenerate)
+        }
+        PlaneRef::Tangent { face, at } => {
+            let (s, _) = face_surface_at(ctx, face)?;
+            let (on, n) = surface_normal(s, *at).ok_or_else(|| bad("the point is on the face's axis"))?;
+            Plane::from_normal(on, n).ok_or_else(degenerate)
+        }
+        PlaneRef::AlongPath { path, t } => {
+            let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
+            let (p, tan) = along(&path_points(ctx, path)?, t).ok_or_else(|| bad("the path has no length"))?;
+            Plane::from_normal(p, tan).ok_or_else(degenerate)
+        }
+        _ => ctx.doc.resolve_plane_in(ctx.vals, p, 0, Some(ctx.st)),
+    }
+}
+
+impl GeoRef {
+    /// Map the reference's world points (component frames).
+    pub fn map_points(&mut self, pt: &mut dyn FnMut(&mut Vec3), plane: &mut dyn FnMut(&mut PlaneRef)) {
+        match self {
+            GeoRef::Point { p } => pt(p),
+            GeoRef::Vertex { at } | GeoRef::Edge { at, .. } | GeoRef::Face { at, .. } => pt(at),
+            GeoRef::Plane { plane: p } => plane(p),
+            _ => {}
+        }
+    }
+
+    /// Picked faces and edges get their persistent names (and only those still missing one).
+    pub fn name_picks(&mut self, st: &ModelState) {
+        match self {
+            GeoRef::Face { at, name: name @ None } => {
+                *name = crate::naming::face_names_at(st, &[*at]).into_iter().next().filter(|n| !n.is_empty());
+            }
+            GeoRef::Edge { at, name: name @ None } => {
+                for b in bodies(st) {
+                    let tol = (b.body.size() * 1e-3).max(1e-3);
+                    if b.body.nearest_edge(*at, tol).ok().flatten().is_some_and(|(_, d)| d <= tol * 10.0) {
+                        *name = crate::naming::edge_names_at(b, &[*at]).into_iter().next().filter(|n| !n.is_empty());
+                        break;
+                    }
+                }
+            }
+            GeoRef::Plane { plane } => plane.name_picks(st),
+            _ => {}
+        }
+    }
+}
+
+impl GeoRef {
+    fn plane_ref(&self) -> Option<&PlaneRef> {
+        match self {
+            GeoRef::Plane { plane } => Some(plane),
+            _ => None,
+        }
+    }
+}
+
+impl AxisDef {
+    pub fn refs(&self) -> Vec<&GeoRef> {
+        match self {
+            AxisDef::ThroughFace { face } => vec![face],
+            AxisDef::Edge { edge } => vec![edge],
+            AxisDef::NormalToFace { face, point } => vec![face, point],
+            AxisDef::TwoPlanes { a, b } | AxisDef::TwoPoints { a, b } => vec![a, b],
+        }
+    }
+
+    /// Planes it refers to (whose expressions it depends on).
+    pub fn planes(&self) -> Vec<&PlaneRef> {
+        self.refs().into_iter().filter_map(GeoRef::plane_ref).collect()
+    }
+
+    pub fn refs_mut(&mut self) -> Vec<&mut GeoRef> {
+        match self {
+            AxisDef::ThroughFace { face } => vec![face],
+            AxisDef::Edge { edge } => vec![edge],
+            AxisDef::NormalToFace { face, point } => vec![face, point],
+            AxisDef::TwoPlanes { a, b } | AxisDef::TwoPoints { a, b } => vec![a, b],
+        }
+    }
+}
+
+impl PointDef {
+    pub fn refs(&self) -> Vec<&GeoRef> {
+        match self {
+            PointDef::At { point } => vec![point],
+            PointDef::Center { of } => vec![of],
+            PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
+            PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
+            PointDef::AlongPath { path, .. } => vec![path],
+        }
+    }
+
+    pub fn planes(&self) -> Vec<&PlaneRef> {
+        self.refs().into_iter().filter_map(GeoRef::plane_ref).collect()
+    }
+
+    pub fn refs_mut(&mut self) -> Vec<&mut GeoRef> {
+        match self {
+            PointDef::At { point } => vec![point],
+            PointDef::Center { of } => vec![of],
+            PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
+            PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
+            PointDef::AlongPath { path, .. } => vec![path],
+        }
+    }
+}
+
+impl PlaneRef {
+    /// The references of a plane built from model geometry.
+    pub fn refs_mut(&mut self) -> Vec<&mut GeoRef> {
+        match self {
+            PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } => vec![a.as_mut(), b.as_mut()],
+            PlaneRef::ThreePoints { a, b, c } => vec![a.as_mut(), b.as_mut(), c.as_mut()],
+            PlaneRef::Tangent { face, .. } => vec![face.as_mut()],
+            PlaneRef::AlongPath { path, .. } => vec![path.as_mut()],
+            PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } => base.refs_mut(),
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn name_picks(&mut self, st: &ModelState) {
+        for r in self.refs_mut() {
+            r.name_picks(st);
+        }
+    }
+
+    /// Does resolving it need the model (edges, faces, construction axes and points)?
+    pub fn needs_model(&self) -> bool {
+        let mut k = self.clone();
+        !k.refs_mut().is_empty()
+    }
+}

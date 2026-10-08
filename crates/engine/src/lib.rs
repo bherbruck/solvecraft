@@ -426,6 +426,8 @@ impl Session {
 }
 
 #[cfg(test)]
+mod construct_tests;
+#[cfg(test)]
 mod delete_face_tests;
 #[cfg(test)]
 mod extent_tests;

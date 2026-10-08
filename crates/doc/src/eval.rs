@@ -239,6 +239,8 @@ pub struct ModelState {
     pub body_counter: usize,
     /// Sheet metal bodies (by body name) and their flat patterns.
     pub sheets: Vec<crate::sheet::SheetBody>,
+    /// Construction planes, axes and points as evaluated (by feature).
+    pub construct: Vec<crate::construct::Construct>,
     /// Evaluation-cache keys of the sketches (by sketch feature id).
     sketch_keys: BTreeMap<u64, u64>,
 }
@@ -410,7 +412,9 @@ fn fingerprint(prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_ba
 /// metal and plastic rules (and the parameters they use), components and body placement.
 fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    for f in doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. })) {
+    for f in doc.features.iter().filter(|f| {
+        matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+    }) {
         fingerprint(0, f, vals, false).hash(&mut h);
     }
     doc.units.hash(&mut h);
@@ -620,7 +624,7 @@ impl Model {
                     let mats = match &f.kind {
                         FeatureKind::Pattern { pattern, .. } => pattern_transforms(&vals, &state, pattern).unwrap_or_default(),
                         FeatureKind::Mirror { plane, .. } => {
-                            doc.resolve_plane(&vals, plane, 0).map(|pl| vec![mirror_matrix(&pl)]).unwrap_or_default()
+                            doc.resolve_plane_in(&vals, plane, 0, Some(&state)).map(|pl| vec![mirror_matrix(&pl)]).unwrap_or_default()
                         }
                         _ => Vec::new(),
                     };
@@ -2255,7 +2259,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         FeatureKind::Sketch { plane, sketch } => {
             let (plane, face_warning) = match plane {
                 PlaneRef::Face { plane: picked, at, name } => face_plane(st, picked, *at, name.as_deref()),
-                other => (doc.resolve_plane(vals, other, 0)?, None),
+                other => (doc.resolve_plane_in(vals, other, 0, Some(st))?, None),
             };
             let mut sk = sketch.clone();
             let mut warns = crate::project::refresh_links(doc, vals, st, &plane, &mut sk);
@@ -2371,7 +2375,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         }
         FeatureKind::Draft { faces, angle, neutral, pull, body } => {
             let a = val(vals, angle, Kind::Angle)?;
-            let pl = doc.resolve_plane(vals, neutral, 0)?;
+            let pl = doc.resolve_plane_in(vals, neutral, 0, Some(st))?;
             let i = body_at(st, body, faces)?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let nb = kernel::draft(&mb.body, faces, &pl, *pull, a)?;
@@ -2381,7 +2385,22 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             Ok(())
         }
         FeatureKind::ConstructionPlane { plane } => {
-            doc.resolve_plane(vals, plane, 0)?;
+            let pl = doc.resolve_plane_in(vals, plane, 0, Some(st))?;
+            st.construct.push(crate::construct::Construct { feature: f.id, name: f.name.clone(), geom: crate::construct::ConstructGeom::Plane(pl) });
+            Ok(())
+        }
+        FeatureKind::ConstructionAxis { def } => {
+            let (origin, dir) = crate::construct::resolve_axis(&crate::construct::Ctx { doc, vals, st }, def)?;
+            st.construct.push(crate::construct::Construct {
+                feature: f.id,
+                name: f.name.clone(),
+                geom: crate::construct::ConstructGeom::Axis { origin, dir },
+            });
+            Ok(())
+        }
+        FeatureKind::ConstructionPoint { def } => {
+            let p = crate::construct::resolve_point(&crate::construct::Ctx { doc, vals, st }, def)?;
+            st.construct.push(crate::construct::Construct { feature: f.id, name: f.name.clone(), geom: crate::construct::ConstructGeom::Point(p) });
             Ok(())
         }
         FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {
@@ -2445,7 +2464,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Curves { plane: ss.plane, curves })?
                 }
                 (None, None) => {
-                    let pl = doc.resolve_plane(vals, plane, 0)?;
+                    let pl = doc.resolve_plane_in(vals, plane, 0, Some(st))?;
                     kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Plane(pl))?
                 }
             };
@@ -2466,7 +2485,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?
                 }
                 None => {
-                    let pl = doc.resolve_plane(vals, plane, 0)?;
+                    let pl = doc.resolve_plane_in(vals, plane, 0, Some(st))?;
                     kernel::split_by_plane(&mb.body, &pl)?
                 }
             };
@@ -2503,7 +2522,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             Ok(())
         }
         FeatureKind::Mirror { features, plane, bodies, combine } => {
-            let pl = doc.resolve_plane(vals, plane, 0)?;
+            let pl = doc.resolve_plane_in(vals, plane, 0, Some(st))?;
             if bodies.is_empty() {
                 return replay(doc, vals, f, st, features, &[mirror_matrix(&pl)]);
             }

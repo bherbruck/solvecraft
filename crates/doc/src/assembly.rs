@@ -144,7 +144,20 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
         }
         // Named origin planes and construction planes are the component's own.
         PlaneRef::Origin { .. } | PlaneRef::Construction { .. } => {}
+        PlaneRef::Tangent { face, at } => {
+            *at = apply_point(m, *at);
+            map_geo_ref(m, face);
+        }
+        PlaneRef::Midplane { .. } | PlaneRef::TwoEdges { .. } | PlaneRef::ThreePoints { .. } | PlaneRef::AlongPath { .. } => {
+            for r in p.refs_mut() {
+                map_geo_ref(m, r);
+            }
+        }
     }
+}
+
+fn map_geo_ref(m: &Mat, g: &mut crate::construct::GeoRef) {
+    g.map_points(&mut |p: &mut Vec3| *p = apply_point(m, *p), &mut |pl: &mut PlaneRef| map_plane_ref(m, pl));
 }
 
 impl FeatureKind {
@@ -156,6 +169,8 @@ impl FeatureKind {
             FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } | FeatureKind::Mirror { plane, .. } => {
                 map_plane_ref(m, plane)
             }
+            FeatureKind::ConstructionAxis { def } => def.refs_mut().into_iter().for_each(|r| map_geo_ref(m, r)),
+            FeatureKind::ConstructionPoint { def } => def.refs_mut().into_iter().for_each(|r| map_geo_ref(m, r)),
             FeatureKind::Split { plane, tool, .. } => {
                 map_plane_ref(m, plane);
                 if let Some(t) = tool {

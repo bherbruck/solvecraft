@@ -14,7 +14,7 @@ use crate::body::{Body, Solid, from_p3, p3};
 use crate::{KernelError, Result, guard};
 
 #[derive(Clone, Copy, Debug)]
-enum Surf {
+pub(crate) enum Surf {
     /// Outward normal and offset: n·x = d.
     Plane { n: Vec3, d: f64 },
     /// Axis point and direction, radius; `convex` when the outward normal points away from
@@ -211,7 +211,7 @@ fn samples(f: &mt::Face) -> Vec<(Vec3, Vec3)> {
 }
 
 /// What surface a face lies on (planes and cylinders only).
-fn surf_of(f: &mt::Face, tol: f64) -> Option<Surf> {
+pub(crate) fn surf_of(f: &mt::Face, tol: f64) -> Option<Surf> {
     if let mt::Surface::Plane(pl) = f.oriented_surface() {
         let n = pl.normal();
         let n = Vec3::new(n.x, n.y, n.z).normalized()?;

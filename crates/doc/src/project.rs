@@ -257,7 +257,7 @@ fn resolve_uncached(
         LinkSource::Plane { name } => {
             let pr =
                 if Plane::named(name).is_some() { PlaneRef::Origin { name: name.clone() } } else { PlaneRef::Construction { name: name.clone() } };
-            let other = doc.resolve_plane(vals, &pr, 0).map_err(|_| lost(&format!("plane {name}")))?;
+            let other = doc.resolve_plane_in(vals, &pr, 0, Some(st)).map_err(|_| lost(&format!("plane {name}")))?;
             plane_trace(plane, &other).into_iter().collect()
         }
     };
