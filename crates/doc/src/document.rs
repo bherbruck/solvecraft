@@ -121,6 +121,16 @@ pub struct Extent {
     /// Taper angle (expression; positive grows the profile).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub taper: Option<String>,
+    /// To Object: end at the face (or vertex/point) at this point, instead of `distance`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Vec3>,
+    /// Offset past the To Object face (expression; negative stops short).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_offset: Option<String>,
+    /// From Object: start at the face (or point) here instead of the sketch plane (plus
+    /// `start_offset`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Vec3>,
 }
 
 /// Revolve axis.
@@ -989,6 +999,7 @@ impl FeatureKind {
             | FeatureKind::OffsetFace { faces, .. }
             | FeatureKind::ReplaceFace { faces, .. } => faces.iter_mut().collect(),
             FeatureKind::Hole { position, points: None, .. } => vec![position],
+            FeatureKind::Extrude { extent, .. } => extent.to.iter_mut().chain(extent.from.iter_mut()).collect(),
             _ => Vec::new(),
         }
     }

@@ -13,7 +13,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("extrude")
         .key("E")
-        .params("distance: expr (or through_all: true); taper?: angle expr; sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [[curve ids]] | [{point:[x,y]}]; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); direction?: positive|negative|symmetric; distance2?; start_offset?; operation?: new|join|cut|intersect|auto (cut into a body, join out of one, else new); targets?: [body]; name?; body_name?"),
+        .params("distance: expr (or through_all: true); taper?: angle expr; sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [[curve ids]] | [{point:[x,y]}]; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); direction?: positive|negative|symmetric; distance2?; start_offset?; to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); from?: [x,y,z] (From Object: start at that face or point); operation?: new|join|cut|intersect|auto (cut into a body, join out of one, else new); targets?: [body]; name?; body_name?"),
     CommandSpec::new("solid.revolve", "Revolve", revolve)
         .at("SOLID", "CREATE")
         .icon("revolve")
@@ -326,7 +326,14 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
         None => (feature_sketch(s, p, cmd)?, None),
     };
     let through_all = bool_(p, "through_all").unwrap_or(false) || str_(p, "extent").is_some_and(|e| e.eq_ignore_ascii_case("through_all"));
-    let distance = if through_all { expr(p, "distance").unwrap_or_else(|| "0".into()) } else { req_expr(cmd, p, "distance")? };
+    let to_object = p.get("to").is_some();
+    if to_object && p.get("to").and_then(vec3).is_none() {
+        return Err(bad(cmd, "`to` must be a point [x, y, z] on the face, vertex or point to extrude to"));
+    }
+    if p.get("from").is_some() && p.get("from").and_then(vec3).is_none() {
+        return Err(bad(cmd, "`from` must be a point [x, y, z] on the face or point to start from"));
+    }
+    let distance = if through_all || to_object { expr(p, "distance").unwrap_or_else(|| "0".into()) } else { req_expr(cmd, p, "distance")? };
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
     let taper = expr(p, "taper");
     if let Some(t) = &taper {
@@ -352,7 +359,17 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
             Some(f) => f,
             None => profiles(p, cmd)?,
         },
-        extent: Extent { distance, direction, distance2, start_offset, through_all, taper },
+        extent: Extent {
+            distance,
+            direction,
+            distance2,
+            start_offset,
+            through_all,
+            taper,
+            to: p.get("to").and_then(vec3),
+            to_offset: expr(p, "to_offset"),
+            from: p.get("from").and_then(vec3),
+        },
         operation: match str_(p, "operation") {
             Some(o) if o.eq_ignore_ascii_case("auto") => Operation::parse(auto_operation(s, p).unwrap_or("new")).unwrap_or(Operation::NewBody),
             _ => operation(p, cmd)?,

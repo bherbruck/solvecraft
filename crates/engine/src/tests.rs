@@ -1655,3 +1655,31 @@ fn appearances_survive_later_features() {
     assert!(red(&mut t, &body), "the imported red face carries on");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Extrude To Object (a parallel face, with an offset; a slanted face) and From Object.
+#[test]
+fn extrude_to_and_from_objects() {
+    let mut s = Session::default();
+    // A 10 mm plate at z 30…40 to extrude up to, and a profile on XY.
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 30], "length": 40, "width": 40, "height": 10, "body_name": "Roof"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let top = |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["bodies"][0]["bbox"]["max"][2].as_f64().unwrap_or(0.0);
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [20, 20, 30], "body_name": "Post"}));
+    assert!((top(&mut s, "Post") - 30.0).abs() < 1e-6, "{}", top(&mut s, "Post"));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [20, 20, 30], "to_offset": -5, "body_name": "Post"}));
+    assert!((top(&mut s, "Post") - 25.0).abs() < 1e-6);
+    run(&mut s, "edit.undo", json!({}));
+    // From the roof's top face (z 40) to 10 mm above it.
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "from": [20, 20, 40], "distance": 10, "body_name": "Post"}));
+    let m = run(&mut s, "inspect.measure", json!({"bodies": ["Post"]}));
+    assert!((m["bodies"][0]["bbox"]["min"][2].as_f64().unwrap_or(0.0) - 40.0).abs() < 1e-6 && (top(&mut s, "Post") - 50.0).abs() < 1e-6, "{m}");
+    // The To face is kept by its persistent name, so it is followed when it moves.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [20, 20, 30], "body_name": "Post"}));
+    let name = s.doc.features.last().map(|f| f.face_names.clone()).unwrap_or_default();
+    assert_eq!(name, vec!["F1:-z".to_string()], "the To face is stored by name");
+    assert!(s.execute("solid.extrude", &json!({"sketch": "P", "to": "nope"})).is_err());
+}

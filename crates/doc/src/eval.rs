@@ -1249,7 +1249,37 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
         FeatureKind::Extrude { sketch, profiles, extent, operation, targets } => {
             let ss = st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?.clone();
             let regions = solvecraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
-            let d = if extent.through_all { through_all_distance(st, &ss.plane, targets)? } else { val(vals, &extent.distance, Kind::Length)? };
+            // From / To Object: where the face or point lies along the normal, measured over the
+            // middle of the profiles.
+            let n = ss.plane.normal();
+            let centre = {
+                let pts: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
+                let c = pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64);
+                ss.plane.to_world(c)
+            };
+            let from = match extent.from {
+                Some(p) => object_height(st, &ss.plane, centre, p),
+                None => 0.0,
+            };
+            let d = match extent.to {
+                Some(p) => {
+                    let off = match &extent.to_offset {
+                        Some(e) => val(vals, e, Kind::Length)?,
+                        None => 0.0,
+                    };
+                    let h = object_height(st, &ss.plane, centre, p);
+                    let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+                    // Past the face by the offset, in the direction travelled.
+                    let to = h + if h >= start { off } else { -off };
+                    if (to - start).abs() < 1e-9 {
+                        return Err(DocError::Invalid("the To object is where the extrude starts".into()));
+                    }
+                    to - start
+                }
+                None if extent.through_all => through_all_distance(st, &ss.plane, targets)?,
+                None => val(vals, &extent.distance, Kind::Length)?,
+            };
+            let _ = n;
             if let Some(tp) = &extent.taper {
                 let taper = val(vals, tp, Kind::Angle)?;
                 if extent.distance2.is_some() || extent.start_offset.is_some() || extent.direction == crate::Direction::Symmetric {
@@ -1262,11 +1292,14 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
                     .map(|r| kernel::extrude_tapered(&ss.plane, r, len, sign, taper))
                     .collect::<std::result::Result<Vec<_>, _>>()?);
             }
-            let off = match &extent.start_offset {
-                Some(e) => val(vals, e, Kind::Length)?,
-                None => 0.0,
-            };
-            let (a, b) = match (&extent.distance2, extent.direction) {
+            let off = from
+                + match &extent.start_offset {
+                    Some(e) => val(vals, e, Kind::Length)?,
+                    None => 0.0,
+                };
+            // To Object gives a signed distance from the start: one side only.
+            let direction = if extent.to.is_some() { crate::Direction::Positive } else { extent.direction };
+            let (a, b) = match (&extent.distance2, direction) {
                 (Some(d2), _) => (-val(vals, d2, Kind::Length)?, d),
                 (None, crate::Direction::Positive) => (0.0, d),
                 (None, crate::Direction::Negative) => (-d, 0.0),
@@ -1826,6 +1859,36 @@ fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut 
 mod more;
 #[path = "eval_surface.rs"]
 mod surface;
+
+/// Height above `plane` (along its normal) of the object at `p` as seen from `centre`: the face
+/// there if it is planar and parallel (its plane), else where a ray from `centre` along the
+/// normal meets the body there, else the point itself.
+fn object_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> f64 {
+    let n = plane.normal();
+    let h = |q: Vec3| (q - plane.origin).dot(n);
+    for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+        let tol = (b.body.size() * 1e-3).max(1e-3);
+        let Ok(faces) = b.body.faces(tol) else { continue };
+        let m = b.mesh();
+        let on: Vec<usize> = faces.iter().filter(|f| crate::appearance::face_index_at(b, p) == Some(f.index)).map(|f| f.index).collect();
+        let Some(&fi) = on.first() else { continue };
+        if let Some(f) = faces.iter().find(|f| f.index == fi)
+            && f.plane_normal.is_some_and(|fnrm| fnrm.cross(n).len() < 1e-6)
+        {
+            return h(f.centroid);
+        }
+        // A curved or slanted face: where the profile's middle meets it.
+        for dir in [n, n * -1.0] {
+            if let Some((t, tri)) = m.raycast(centre, dir)
+                && m.tri_face.get(tri).is_some_and(|x| *x as usize == fi)
+            {
+                return h(centre + dir * t);
+            }
+        }
+        return h(p);
+    }
+    h(p)
+}
 
 /// The plane of the body face a sketch sits on, found again: among planar faces with the
 /// picked plane's normal, the one nearest `at`. The picked frame moves along its normal onto it.
