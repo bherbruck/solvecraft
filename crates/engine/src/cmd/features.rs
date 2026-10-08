@@ -32,7 +32,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("fillet")
         .key("F")
         .params("edges: [[x,y,z] point on edge | {body, index}]; radius: expr; body?"),
-    CommandSpec::new("FusionChamferCommand", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; body?"),
+    CommandSpec::new("FusionChamferCommand", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
     CommandSpec::new("FusionCombineCommand", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool"),
     CommandSpec::new("PatternRectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
@@ -520,7 +520,18 @@ fn chamfer(s: &mut Session, p: &Value) -> Result<Value> {
     let edges = edge_points(s, p, cmd)?;
     let distance = req_expr(cmd, p, "distance")?;
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
-    add_feature(s, p, FeatureKind::Chamfer { edges, distance, body: str_(p, "body").map(str::to_string) })
+    let (distance2, angle) = (expr(p, "distance2"), expr(p, "angle"));
+    if let Some(d) = &distance2 {
+        check_expr(s, d, Kind::Length, cmd, "distance2")?;
+    }
+    if let Some(a) = &angle {
+        check_expr(s, a, Kind::Angle, cmd, "angle")?;
+    }
+    if distance2.is_some() && angle.is_some() {
+        return Err(bad(cmd, "give `distance2` or `angle`, not both"));
+    }
+    let flip = bool_(p, "flip").unwrap_or(false);
+    add_feature(s, p, FeatureKind::Chamfer { edges, distance, distance2, angle, flip, body: str_(p, "body").map(str::to_string) })
 }
 
 fn combine(s: &mut Session, p: &Value) -> Result<Value> {

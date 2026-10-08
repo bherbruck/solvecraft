@@ -762,16 +762,79 @@ fn edge_frame(cur: &Body, p: Vec3) -> Result<EdgeFrame> {
 
 /// The prism that cuts a chamfer of size `s` on the edge nearest `p`. `k` varies the parts that
 /// stay outside the body so that neighbouring cutters don't share edges.
+/// The second side of an unequal chamfer: a distance along the other face, or the angle the
+/// chamfer makes with the first face.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ChamferSide {
+    Distance(f64),
+    Angle(f64),
+}
+
+/// A chamfer with different setbacks on the two faces of each (straight) edge: `d1` along the
+/// first face (the one facing up most, the other with `flip`), the second side by distance or
+/// angle.
+pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
+    body.require_brep("chamfer")?;
+    let ok = |x: f64| x.is_finite() && x > 1e-6 && x < 1e6;
+    let valid = ok(d1)
+        && match side {
+            ChamferSide::Distance(d) => ok(d),
+            ChamferSide::Angle(a) => a.is_finite() && a > 1e-3 && a < std::f64::consts::PI - 1e-3,
+        };
+    if !valid {
+        return Err(KernelError::Invalid("chamfer sizes must be positive (the angle within 0°…180°)".into()));
+    }
+    if edges.is_empty() || edges.len() > 1000 {
+        return Err(KernelError::Invalid("select 1…1000 edges".into()));
+    }
+    let mut cur = body.clone();
+    for (k, p) in edges.iter().enumerate() {
+        let t = chamfer_tool_sides(&cur, *p, d1, Some((side, flip)), k)?;
+        cur = crate::ops::boolean(&cur, &t, crate::BoolOp::Cut)?.ok_or_else(|| KernelError::Failed("the chamfer removed everything".into()))?;
+    }
+    Ok(cur)
+}
+
 pub(crate) fn chamfer_tool(cur: &Body, p: Vec3, s: f64, k: usize) -> Result<Body> {
-    let f = edge_frame(cur, p)?;
+    chamfer_tool_sides(cur, p, s, None, k)
+}
+
+fn chamfer_tool_sides(cur: &Body, p: Vec3, s: f64, sides: Option<(ChamferSide, bool)>, k: usize) -> Result<Body> {
+    let mut f = edge_frame(cur, p)?;
+    // Setbacks along each face: equal, or by the second side's rule.
+    let (s1, s2) = match sides {
+        None => (s, s),
+        Some((side, flip)) => {
+            // Side 1: the face facing up most (then +y, +x), unless flipped.
+            let up = Vec3::new(1e-6, 1e-3, 1.0);
+            if (f.n2.dot(up) > f.n1.dot(up)) != flip {
+                std::mem::swap(&mut f.n1, &mut f.n2);
+                std::mem::swap(&mut f.t1, &mut f.t2);
+            }
+            let s2 = match side {
+                ChamferSide::Distance(d) => d,
+                ChamferSide::Angle(a) => {
+                    // The triangle edge–A–B: angle φ at the edge, `a` at A (on face 1).
+                    let phi = f.t1.dot(f.t2).clamp(-1.0, 1.0).acos();
+                    let den = (phi + a).sin();
+                    if den <= 1e-9 {
+                        return Err(KernelError::Invalid("that chamfer angle runs past the other face".into()));
+                    }
+                    s * a.sin() / den
+                }
+            };
+            (s, s2)
+        }
+    };
+    let s = s1.max(s2);
     let size = cur.size();
     let len = f.p0.dist(f.p1);
     let ext = (s * 2.0).max(size * 0.01) * (1.0 + 0.093 * (k % 5) as f64);
     // Cross-section at p0 - d*ext, in a plane with normal d.
     let base = f.p0 - f.d * ext;
     let plane = solvecraft_geom::Plane::from_normal(base, f.d).ok_or_else(|| KernelError::Failed("chamfer plane".into()))?;
-    let a = base + f.t1 * s;
-    let b = base + f.t2 * s;
+    let a = base + f.t1 * s1;
+    let b = base + f.t2 * s2;
     let ab = (a - b).normalized().ok_or_else(|| KernelError::Failed("chamfer".into()))?;
     let out = (f.n1 + f.n2).normalized().ok_or_else(|| KernelError::Failed("chamfer".into()))?;
     let vary = 1.0 + 0.137 * (k % 7) as f64;

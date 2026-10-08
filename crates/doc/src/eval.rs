@@ -1769,10 +1769,9 @@ fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut 
                 let moved: Vec<Vec3> = edges.iter().map(|p| crate::apply_point(m, *p)).collect();
                 let ti = blend_target(st, &None, &moved)?;
                 let Some(mb) = st.bodies.get(ti).cloned() else { continue };
-                let nb = if matches!(src.kind, FeatureKind::Fillet { .. }) {
-                    kernel::fillet(&mb.body, &moved, r)?
-                } else {
-                    kernel::chamfer(&mb.body, &moved, r)?
+                let nb = match &src.kind {
+                    FeatureKind::Chamfer { distance2, angle, flip, .. } => chamfer_with(vals, &mb.body, &moved, r, distance2, angle, *flip)?,
+                    _ => kernel::fillet(&mb.body, &moved, r)?,
                 };
                 if let Some(slot) = st.bodies.get_mut(ti) {
                     *slot = ModelBody::new(mb.name, nb, mb.feature);
@@ -1874,6 +1873,27 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
         }
         None => (*picked, Some("the face the sketch was on is gone; the sketch stays where it was".into())),
     }
+}
+
+/// A chamfer, equal or by its second distance or angle.
+fn chamfer_with(
+    vals: &BTreeMap<String, Value>,
+    b: &kernel::Body,
+    edges: &[Vec3],
+    d: f64,
+    distance2: &Option<String>,
+    angle: &Option<String>,
+    flip: bool,
+) -> Result<kernel::Body> {
+    let side = match (distance2, angle) {
+        (Some(e), _) => Some(kernel::ChamferSide::Distance(val(vals, e, Kind::Length)?)),
+        (None, Some(e)) => Some(kernel::ChamferSide::Angle(val(vals, e, Kind::Angle)?)),
+        (None, None) => None,
+    };
+    Ok(match side {
+        Some(s) => kernel::chamfer_sides(b, edges, d, s, flip)?,
+        None => kernel::chamfer(b, edges, d)?,
+    })
 }
 
 fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
@@ -2057,7 +2077,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
-        FeatureKind::Fillet { edges, radius, body } | FeatureKind::Chamfer { edges, distance: radius, body } => {
+        FeatureKind::Fillet { edges, radius, body } | FeatureKind::Chamfer { edges, distance: radius, body, .. } => {
             let r = val(vals, radius, Kind::Length)?;
             let ti = blend_target(st, body, edges)?;
             let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
@@ -2099,10 +2119,10 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             } else {
                 resolve_edges(&mb.body, edges, &f.edge_refs, warning)?
             };
-            let nb = if matches!(f.kind, FeatureKind::Fillet { .. }) {
-                kernel::fillet(&mb.body, &edges, r)?
-            } else {
-                kernel::chamfer(&mb.body, &edges, r)?
+            let nb = match &f.kind {
+                FeatureKind::Fillet { .. } => kernel::fillet(&mb.body, &edges, r)?,
+                FeatureKind::Chamfer { distance2, angle, flip, .. } => chamfer_with(vals, &mb.body, &edges, r, distance2, angle, *flip)?,
+                _ => return Err(DocError::Invalid("blend".into())),
             };
             let (name, feat) = (mb.name.clone(), mb.feature);
             if let Some(slot) = st.bodies.get_mut(ti) {
