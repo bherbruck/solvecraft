@@ -382,3 +382,13 @@ fn trim_and_break_free_form_curves_exactly() {
         assert!(d < 0.05, "{q:?} {d}");
     }
 }
+
+#[test]
+fn ellipse_radii_dimensions() {
+    let mut s = new_sketch();
+    let e = ids(&run(&mut s, "CircleElipse", json!({"center": [0, 0], "major": [10, 0], "minor_radius": 4}))["curves"])[0].clone();
+    run(&mut s, "SketchDimension", json!({"entities": [e], "type": "major", "value": 12}));
+    run(&mut s, "SketchDimension", json!({"entities": [e], "value": 5}));
+    let a = profiles(&s)[0];
+    assert!((a - std::f64::consts::PI * 60.0).abs() < 1e-6, "{a}");
+}

@@ -647,6 +647,8 @@ impl Sketch {
                 need_line(a)?;
                 need_line(b)?;
             }
+            // On an ellipse, a radius dimension holds its minor radius.
+            Radius { c, .. } if matches!(self.curves.get(c).map(|x| &x.kind), Some(CurveKind::Ellipse { .. })) => {}
             Radius { c, .. } | Diameter { c, .. } => need_round(c)?,
             Concentric { a, b } => {
                 need_round(a)?;

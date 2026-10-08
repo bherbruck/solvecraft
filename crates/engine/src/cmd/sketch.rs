@@ -1060,6 +1060,18 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 let len = arc_len(sk, c).ok_or_else(|| bad(cmd, "arc length needs an arc"))?;
                 (ConstraintKind::ArcLength { c, value: len }, len)
             }
+            ((None, Some(c)), None) if matches!(sk.curves.get(c).map(|x| &x.kind), Some(CurveKind::Ellipse { .. })) => {
+                // Ellipse: the major radius is the centre–axis-end distance, the minor its own.
+                let Some(CurveKind::Ellipse { c: cp, m, r }) = sk.curves.get(c).map(|x| x.kind.clone()) else {
+                    return Err(bad(cmd, "ellipse"));
+                };
+                if ty == "major" {
+                    let d = sk.point(cp).zip(sk.point(m)).map(|(a, b)| a.dist(b)).unwrap_or(0.0);
+                    (ConstraintKind::Distance { p: cp, q: m, value: d }, d)
+                } else {
+                    (ConstraintKind::Radius { c, value: r }, r)
+                }
+            }
             ((None, Some(c)), None) => {
                 let r = sk.radius(c).ok_or_else(|| bad(cmd, "cannot dimension that curve"))?;
                 let diameter = ty == "diameter" || (ty != "radius" && is_circle(c));

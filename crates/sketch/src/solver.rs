@@ -157,6 +157,16 @@ impl State<'_> {
             _ => Vec::new(),
         }
     }
+    /// Radius of a circle or arc; an ellipse's minor radius.
+    fn radius_of(&self, c: usize) -> f64 {
+        match self.sk.curves.get(c).map(|x| &x.kind) {
+            Some(CurveKind::Ellipse { r, .. }) => match self.lay.rvar.get(c).copied().flatten() {
+                Some(v) => self.x.get(v).copied().unwrap_or(*r),
+                None => *r,
+            },
+            _ => self.round(c).1,
+        }
+    }
     fn ends(&self, c: usize) -> Option<(usize, usize)> {
         self.sk.curves.get(c)?.kind.ends()
     }
@@ -358,7 +368,7 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             let (a, b) = s.line(l);
             out.push(a.dist(b) - value);
         }
-        Radius { c, value } => out.push(s.round(c).1 - value),
+        Radius { c, value } => out.push(s.radius_of(c) - value),
         Diameter { c, value } => out.push(2.0 * s.round(c).1 - value),
         Angle { a, b, value, flip } => {
             let (a0, a1) = s.line(a);
@@ -408,7 +418,7 @@ fn measure(s: &State, k: &ConstraintKind) -> Option<f64> {
             let (a, b) = s.line(l);
             a.dist(b)
         }
-        Radius { c, .. } => s.round(c).1,
+        Radius { c, .. } => s.radius_of(c),
         Diameter { c, .. } => 2.0 * s.round(c).1,
         Angle { a, b, flip, .. } => {
             let (a0, a1) = s.line(a);
