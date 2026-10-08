@@ -1296,4 +1296,33 @@ mod naming {
             assert!(n.iter().any(|x| x.starts_with(want)), "{want} in {n:?}");
         }
     }
+
+    #[test]
+    fn a_sketch_on_a_face_stays_on_that_face() {
+        let mut s = Session::default();
+        run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [40, 30]}));
+        run(&mut s, "SketchStop", json!({}));
+        run(&mut s, "Extrude", json!({"distance": 10, "name": "Block"}));
+        run(&mut s, "SketchCreate", json!({"plane": {"face": [30, 15, 10]}, "name": "Top"}));
+        run(&mut s, "CircleCenterRadius", json!({"center": [30, 15], "radius": 3}));
+        run(&mut s, "SketchStop", json!({}));
+        run(&mut s, "Extrude", json!({"sketch": "Top", "distance": 5, "operation": "join", "name": "Peg"}));
+        let top = |s: &mut Session| run(s, "MeasureCommand", json!({}))["bodies"][0]["bbox"]["max"][2].as_f64().unwrap_or(0.0);
+        assert!((top(&mut s) - 15.0).abs() < 1e-6);
+        // Upstream, a tall boss over the picked point: the nearest upward face is now its top,
+        // but the sketch keeps to the block's top face by name.
+        run(&mut s, "timeline.rollTo", json!({"feature": "Block"}));
+        run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "B"}));
+        run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [8, -5], "p1": [45, 35]}));
+        run(&mut s, "SketchStop", json!({}));
+        run(&mut s, "Extrude", json!({"sketch": "B", "distance": 20, "operation": "join", "name": "Boss"}));
+        run(&mut s, "timeline.rollTo", json!({}));
+        // (Its projected face outline changed, which it says; its plane did not.)
+        assert!(!warning(&s, "Top").unwrap_or_default().contains("no longer exists"));
+        // The peg starts on the block's top (z = 10), inside the boss: the part stays 20 tall.
+        assert!((top(&mut s) - 20.0).abs() < 1e-6, "{}", top(&mut s));
+        let sk = s.model.state().sketch(s.doc.find_feature("Top").map(|f| f.id).unwrap_or(0)).map(|x| x.plane.origin.z);
+        assert_eq!(sk.map(|z| (z * 1e6).round() / 1e6), Some(10.0));
+    }
 }

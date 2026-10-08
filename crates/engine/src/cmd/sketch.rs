@@ -314,6 +314,7 @@ pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
                 // A planar face of a body at this point.
                 let st = s.model.state();
                 let mut found = None;
+                let mut face_name = None;
                 for b in &st.bodies {
                     let tol = (b.body.size() * 1e-3).max(1e-3);
                     for f in b.body.faces(tol).unwrap_or_default() {
@@ -324,11 +325,12 @@ pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
                             // Sketch origin: the model origin projected onto the face plane.
                             let d = (f.centroid + n * (fp - f.centroid).dot(n)).dot(n);
                             found = Plane::from_normal(n * d, n);
+                            face_name = solvecraft_doc::naming::face_names(b).get(f.index).cloned();
                         }
                     }
                 }
                 let pl = found.ok_or_else(|| bad(cmd, "no planar face at that point"))?;
-                PlaneRef::Face { plane: pl, at: fp }
+                PlaneRef::Face { plane: pl, at: fp, name: face_name }
             } else {
                 let origin = v.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
                 let x = v.get("x_dir").and_then(vec3).ok_or_else(|| bad(cmd, "plane needs x_dir"))?;

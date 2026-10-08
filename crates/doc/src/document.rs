@@ -45,8 +45,14 @@ pub enum PlaneRef {
     Construction { name: String },
     /// A planar body face: found again on each evaluation (the face with this plane's normal
     /// nearest `at`), so sketches on it follow when earlier features change; `plane` is the
-    /// plane as picked (its frame, and the fallback when the face is gone).
-    Face { plane: Plane, at: Vec3 },
+    /// plane as picked (its frame, and the fallback when the face is gone). `name` is the face's
+    /// persistent name (found first; see `naming`).
+    Face {
+        plane: Plane,
+        at: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
 }
 
 /// Which closed profiles of a sketch a feature uses.

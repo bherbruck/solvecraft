@@ -1729,8 +1729,38 @@ mod more;
 
 /// The plane of the body face a sketch sits on, found again: among planar faces with the
 /// picked plane's normal, the one nearest `at`. The picked frame moves along its normal onto it.
-fn face_plane(st: &ModelState, picked: &Plane, at: Vec3) -> (Plane, Option<String>) {
+fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> (Plane, Option<String>) {
     let n = picked.normal();
+    // By name first: the face (or a piece of it) with that name, facing the same way.
+    if let Some(name) = name {
+        let stem = crate::naming::strip_piece(name);
+        let mut found: Option<(f64, f64)> = None;
+        for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+            let names = crate::naming::face_names(b);
+            let tol = (b.body.size() * 1e-3).max(1e-3);
+            let Ok(faces) = b.body.faces(tol) else { continue };
+            for f in faces {
+                let hit = names.get(f.index).is_some_and(|x| crate::naming::strip_piece(x) == stem);
+                if let (true, Some(fnrm)) = (hit, f.plane_normal)
+                    && fnrm.dot(n) > 1.0 - 1e-6
+                {
+                    let d = f.centroid.dist(at);
+                    if found.is_none_or(|x| d < x.0) {
+                        found = Some((d, f.centroid.dot(n)));
+                    }
+                }
+            }
+        }
+        if let Some((_, off)) = found {
+            return (picked.offset(off - picked.origin.dot(n)), None);
+        }
+        let (pl, w) = face_plane(st, picked, at, None);
+        let note = format!(
+            "the face `{name}` the sketch was on no longer exists; {}",
+            if w.is_some() { "the sketch stays where it was" } else { "using the face at the picked point" }
+        );
+        return (pl, Some(note));
+    }
     let mut best: Option<(f64, f64)> = None; // (distance from `at`, plane offset along n)
     for b in &st.bodies {
         let tol = (b.body.size() * 1e-3).max(1e-3);
@@ -1781,7 +1811,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st),
         FeatureKind::Sketch { plane, sketch } => {
             let (plane, face_warning) = match plane {
-                PlaneRef::Face { plane: picked, at } => face_plane(st, picked, *at),
+                PlaneRef::Face { plane: picked, at, name } => face_plane(st, picked, *at, name.as_deref()),
                 other => (doc.resolve_plane(vals, other, 0)?, None),
             };
             let mut sk = sketch.clone();
