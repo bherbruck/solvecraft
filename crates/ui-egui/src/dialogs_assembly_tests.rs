@@ -217,7 +217,7 @@ fn face_snaps_mate_face_to_face() {
     d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
     d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 10.0)).unwrap());
     let c = apply_commands(&app, &d).unwrap();
-    assert_eq!(c[0].1["flip"], true, "the mate turns B over");
+    assert_eq!(c[0].1["flip"], false, "mating is the engine's default; no flip");
     for (id, p) in c {
         app.run(&id, p).unwrap();
     }

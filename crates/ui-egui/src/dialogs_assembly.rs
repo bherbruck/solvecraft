@@ -196,7 +196,7 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let mut f = JointForm::new(false);
     f.editing = Some(id);
     f.kind = TYPES.iter().position(|t| JointKind::parse(t) == Some(j.kind)).unwrap_or(0);
-    f.flip = !j.flip;
+    f.flip = j.flip;
     f.angle = num(j.angle.to_degrees(), "deg");
     f.offset[2] = num(j.offset, "mm");
     f.fit_limits();
@@ -657,7 +657,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             let limits: Vec<Value> =
                 f.limits.iter().take(jk.dofs().len()).map(|(on, lo, hi)| if *on { json!([lo, hi]) } else { Value::Null }).collect();
             if let Some(id) = f.editing {
-                let mut out = cmd("joint.edit", json!({"joint": id, "type": kind, "flip": !f.flip, "offset": f.offset[2], "angle": f.angle}));
+                let mut out = cmd("joint.edit", json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2], "angle": f.angle}));
                 for (i, l) in limits.iter().enumerate() {
                     let p = match l.as_array() {
                         Some(a) => json!({"joint": id, "index": i, "min": a.first(), "max": a.get(1)}),
@@ -684,10 +684,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
             let (x, y) = (eval(&f.offset[0], ValueKind::Length)?, eval(&f.offset[1], ValueKind::Length)?);
             let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { shifted(&a, x, y) } else { a.param };
-            // Picked origins mate as in Fusion: B's z opposite A's (faces meet face to face, a pin
-            // goes into its hole); the dialog's Flip turns B the other way. The command's `flip`
-            // turns B over from frames that coincide.
-            let p = json!({"type": kind, "a": a_param, "b": b.param, "flip": !f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            // Picked origins mate as in Fusion (the engine's default: B's z opposite A's, faces
+            // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
+            // `flip`, which turns B the other way.
+            let p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
             cmd("JointAssembleCmdNew", p)
         }
         Asm::JointOrigin { name, .. } => {

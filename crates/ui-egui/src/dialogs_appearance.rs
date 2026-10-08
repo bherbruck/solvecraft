@@ -177,10 +177,10 @@ fn in_design(app: &mut SolveApp) -> Vec<([u8; 3], usize)> {
             .collect();
     }
     let mut out: Vec<([u8; 3], usize)> = Vec::new();
-    for c in app.session.doc.appearances.values() {
-        match out.iter_mut().find(|(x, _)| x == c) {
+    for c in app.session.doc.appearances.bodies.values().map(|l| l.color) {
+        match out.iter_mut().find(|(x, _)| *x == c) {
             Some(e) => e.1 += 1,
-            None => out.push((*c, 1)),
+            None => out.push((c, 1)),
         }
     }
     out
@@ -391,7 +391,7 @@ mod tests {
         for (id, p) in c {
             a.run(&id, p).unwrap();
         }
-        assert_eq!(a.session.doc.appearances.get("Body2"), Some(&[196, 40, 36]));
+        assert_eq!(a.session.doc.appearances.bodies.get("Body2").map(|l| l.color), Some([196, 40, 36]));
         assert_eq!(in_design(&mut a), vec![([196, 40, 36], 2)]);
     }
 

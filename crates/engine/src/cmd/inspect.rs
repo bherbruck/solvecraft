@@ -303,6 +303,14 @@ fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     use solvecraft_doc::appearance::{FaceLook, Look, library};
     let cmd = "AppearanceCommand";
     let look: Option<Look> = match (str_(p, "appearance"), p.get("color")) {
+        // A colour with a name: that colour, called that (a name not in the library is fine).
+        (Some(n), Some(v)) if !v.is_null() => {
+            let c = color_param(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0–255"))?;
+            let o = p.get("opacity").and_then(Value::as_f64).filter(|x| x.is_finite()).unwrap_or(1.0);
+            let mut l = Look::custom(c, o);
+            l.name = n.chars().take(128).collect();
+            Some(l)
+        }
         (Some(n), _) => {
             let mut l = library(n).ok_or_else(|| bad(cmd, format!("no appearance `{n}` in the library (appearance.library)")))?;
             if let Some(o) = p.get("opacity").and_then(Value::as_f64).filter(|x| x.is_finite()) {
