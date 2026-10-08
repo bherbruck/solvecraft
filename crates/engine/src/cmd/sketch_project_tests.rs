@@ -350,3 +350,48 @@ fn tilted_circles_project_to_exact_ellipses_and_splines_stay_splines() {
     assert_eq!(c["type"], "spline", "{c}");
     assert_eq!(c["points"].as_array().unwrap().len(), 3);
 }
+
+#[test]
+fn sweeps_and_pipes_follow_3d_sketch_curves() {
+    // A line projected onto a sphere: a 3D arc on its top.
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveSphere", json!({"center": [0, 0, 0], "radius": 20}));
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "offset": 50}));
+    let l = ids(&run(&mut s, "DrawPolyline", json!({"points": [[-12, 0], [12, 0]]}))["curves"])[0].clone();
+    run(&mut s, "SketchStop", json!({}));
+    let src = s.doc.features.last().unwrap().id;
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    let r = run(&mut s, "ProjectToSurface", json!({"curves": [{"sketch": src, "curve": l}], "face": [0, 0, 20]}));
+    let wid = r["links"][0]["wires"][0].as_str().unwrap().to_string();
+    let path_sketch = s.active_sketch.unwrap();
+    let pts = {
+        let st = s.model.state();
+        let sk = &st.sketch(path_sketch).unwrap().sketch;
+        sk.wires[sk.wire_index(&wid).unwrap()].pts.clone()
+    };
+    run(&mut s, "SketchStop", json!({}));
+    let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
+    // A pipe along it: volume ≈ π r² × length.
+    let before = s.model.state().bodies.len();
+    run(&mut s, "PrimitivePipe", json!({"path_sketch": path_sketch, "path": [wid.clone()], "diameter": "2 mm", "operation": "new"}));
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), before + 1);
+    let v = st.bodies.last().unwrap().mesh().measure().volume;
+    let want = std::f64::consts::PI * len;
+    assert!((v - want).abs() < 0.05 * want, "{v} vs {want}");
+    drop(st);
+    // A sweep of a square profile drawn square to the curve at its start.
+    let (a, b) = (pts[0], pts[1]);
+    let t = (b - a).normalized().unwrap();
+    let x = t.cross(solvecraft_geom::Vec3::Z).normalized().unwrap();
+    let y = t.cross(x);
+    run(&mut s, "SketchCreate", json!({"plane": {"origin": [a.x, a.y, a.z], "x_dir": [x.x, x.y, x.z], "y_dir": [y.x, y.y, y.z]}}));
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [-1, -1], "p1": [1, 1]}));
+    let prof = s.active_sketch.unwrap();
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Sweep", json!({"sketch": prof, "path_sketch": path_sketch, "path": [wid], "operation": "new"}));
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), before + 2);
+    let v = st.bodies.last().unwrap().mesh().measure().volume;
+    assert!((v - 4.0 * len).abs() < 0.05 * 4.0 * len, "{v} vs {}", 4.0 * len);
+}

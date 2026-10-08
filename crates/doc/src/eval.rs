@@ -1041,6 +1041,10 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
                 st.sketch(*path_sketch).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
             let regions = solvecraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
             let start = regions.first().map(|r| ss.plane.to_world(r.centroid())).unwrap_or_default();
+            // A path through 3D sketch curves follows them as points.
+            if let Some(pts) = path_points(ps, path, start)? {
+                return regions.iter().map(|r| kernel::sweep_path(&ss.plane, r, &pts).map_err(DocError::from)).collect();
+            }
             let segs = path_segments(ps, path, start)?;
             regions.iter().map(|r| kernel::sweep(&ss.plane, r, &segs).map_err(DocError::from)).collect()
         }
@@ -1051,6 +1055,12 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
             if !(r > 1e-6) {
                 return Err(DocError::Invalid("pipe diameter must be positive".into()));
             }
+            if let Some(pts) = path_points(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
+                let (Some(a), Some(b)) = (pts.first().copied(), pts.get(1).copied()) else { return Err(DocError::Invalid("empty path".into())) };
+                let t = (b - a).normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
+                let plane = Plane::from_normal(a, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
+                return Ok(vec![kernel::sweep_path(&plane, &pipe_region(vals, r, wall)?, &pts)?]);
+            }
             let segs = path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?;
             let first = segs.first().ok_or_else(|| DocError::Invalid("empty path".into()))?;
             let (start, tangent) = match *first {
@@ -1059,18 +1069,7 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
             };
             let t = tangent.normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
             let plane = Plane::from_normal(start, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
-            let holes = match wall {
-                Some(w) => {
-                    let wt = val(vals, w, Kind::Length)?;
-                    if !(wt > 0.0 && wt < r) {
-                        return Err(DocError::Invalid("the wall must be thinner than the radius".into()));
-                    }
-                    vec![solvecraft_geom::Loop2::circle(Vec2::ZERO, r - wt).reversed()]
-                }
-                None => Vec::new(),
-            };
-            let region = Region2 { outer: solvecraft_geom::Loop2::circle(Vec2::ZERO, r), holes };
-            Ok(vec![kernel::sweep(&plane, &region, &segs)?])
+            Ok(vec![kernel::sweep(&plane, &pipe_region(vals, r, wall)?, &segs)?])
         }
         FeatureKind::Box { corner, length, width, height, .. } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
@@ -1099,6 +1098,84 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
 }
 
 /// A chain of sketch curves as 3D path segments, starting at the end nearest `start`.
+/// A pipe's section: a circle of radius `r`, hollow when it has a wall.
+fn pipe_region(vals: &BTreeMap<String, Value>, r: f64, wall: &Option<String>) -> Result<Region2> {
+    let holes = match wall {
+        Some(w) => {
+            let wt = val(vals, w, Kind::Length)?;
+            if !(wt > 0.0 && wt < r) {
+                return Err(DocError::Invalid("the wall must be thinner than the radius".into()));
+            }
+            vec![solvecraft_geom::Loop2::circle(Vec2::ZERO, r - wt).reversed()]
+        }
+        None => Vec::new(),
+    };
+    Ok(Region2 { outer: solvecraft_geom::Loop2::circle(Vec2::ZERO, r), holes })
+}
+
+/// A path that uses 3D sketch curves (wires), as one chain of world points from the end nearest
+/// `start` (no start: the first curve runs toward the second). `None` when the path is all
+/// planar curves.
+fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<Vec<Vec3>>> {
+    if !ids.iter().any(|id| ps.sketch.wire_index(id).is_some()) {
+        return Ok(None);
+    }
+    if ids.len() > 1000 {
+        return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
+    }
+    let mut pieces: Vec<Vec<Vec3>> = Vec::with_capacity(ids.len());
+    for id in ids {
+        if let Some(wi) = ps.sketch.wire_index(id) {
+            pieces.push(ps.sketch.wires.get(wi).map(|w| w.pts.clone()).unwrap_or_default());
+        } else {
+            let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
+            let mut pts: Vec<Vec3> = Vec::new();
+            for s in ps.sketch.segs(ci) {
+                for q in s.polyline(1e-2) {
+                    let w = ps.plane.to_world(q);
+                    if pts.last().is_none_or(|l| l.dist(w) > 1e-9) {
+                        pts.push(w);
+                    }
+                }
+            }
+            pieces.push(pts);
+        }
+    }
+    // Pieces meet within the sketch's tolerance (projected curves are only that close).
+    let tol = 1e-3;
+    let ends = |p: &Vec<Vec3>| (p.first().copied().unwrap_or_default(), p.last().copied().unwrap_or_default());
+    if let Some(f) = pieces.first().cloned() {
+        let (a, b) = ends(&f);
+        let flip = if start.is_finite() {
+            b.dist(start) < a.dist(start)
+        } else {
+            pieces.get(1).is_some_and(|n| {
+                let (na, nb) = ends(n);
+                na.dist(a).min(nb.dist(a)) < na.dist(b).min(nb.dist(b))
+            })
+        };
+        if flip && let Some(p0) = pieces.first_mut() {
+            p0.reverse();
+        }
+    }
+    let mut chain: Vec<Vec3> = Vec::new();
+    for mut p in pieces {
+        if let Some(last) = chain.last().copied() {
+            let (a, b) = ends(&p);
+            if b.dist(last) < a.dist(last) {
+                p.reverse();
+            }
+            if p.first().is_some_and(|a| a.dist(last) > tol) {
+                return Err(DocError::Invalid("the path curves are not connected end to end".into()));
+            }
+            chain.extend(p.into_iter().skip(1));
+        } else {
+            chain = p;
+        }
+    }
+    Ok(Some(chain))
+}
+
 fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
     if ids.is_empty() || ids.len() > 1000 {
         return Err(DocError::Invalid("the path needs 1…1000 curves".into()));

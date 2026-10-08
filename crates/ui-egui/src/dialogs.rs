@@ -2009,7 +2009,8 @@ fn source_features(s: &Session, bodies: &[String]) -> Vec<String> {
 /// The sketch holding all these curve ids (the active sketch first, never `not`).
 fn curves_sketch(app: &SolveApp, ids: &[String], not: Option<u64>) -> Option<u64> {
     let st = app.session.model.state();
-    let has = |sid: u64| st.sketch(sid).is_some_and(|ss| ids.iter().all(|id| ss.sketch.curve_index(id).is_some()));
+    let has =
+        |sid: u64| st.sketch(sid).is_some_and(|ss| ids.iter().all(|id| ss.sketch.curve_index(id).is_some() || ss.sketch.wire_index(id).is_some()));
     if let Some(a) = app.session.active_sketch
         && Some(a) != not
         && has(a)

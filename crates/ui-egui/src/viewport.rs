@@ -483,6 +483,16 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
                 }
             }
         }
+        // 3D sketch curves (paths for sweeps and pipes).
+        for w in &ss.sketch.wires {
+            let pts: Vec<Pos2> = w.pts.iter().filter_map(|q| proj.to_screen(*q)).collect();
+            for seg in pts.windows(2) {
+                let dd = seg_dist(pos, seg[0], seg[1]) - bonus;
+                if dd < 6.0 && bestc.as_ref().is_none_or(|(b, _)| dd < *b) {
+                    bestc = Some((dd, Hit::SketchCurve { sketch: sid, id: w.id.clone(), straight: false }));
+                }
+            }
+        }
     }
     if let Some((_, h)) = bestc {
         hits.push(h);
@@ -847,6 +857,16 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
                 }
             }
             Sel::Profile { sketch, index } => profile_fill(&mut sc, app, *sketch, *index, t.sel_profile, t.sel_profile_edge),
+            // A 3D sketch curve, in whichever sketch has it.
+            Sel::SketchCurve { id } if st.sketches.iter().any(|ss| ss.sketch.wire_index(id).is_some()) => {
+                for ss in st.sketches.iter() {
+                    if let Some(w) = ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i)) {
+                        for q in w.pts.windows(2) {
+                            sc.line(q[0].to_f32(), q[1].to_f32(), c4(t.sel_edge), 3.5, true);
+                        }
+                    }
+                }
+            }
             Sel::SketchCurve { id } => {
                 if let Some(ss) = app.session.active_sketch.and_then(|sid| st.sketch(sid))
                     && let Some(ci) = ss.sketch.curve_index(id)

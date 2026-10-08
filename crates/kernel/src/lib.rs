@@ -32,6 +32,7 @@ mod sew;
 mod step;
 mod step_in;
 mod step_out;
+mod sweep_path;
 mod topo;
 
 pub use blend::{chamfer, fillet};
@@ -47,6 +48,7 @@ pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew};
 pub use step::step_export;
 pub use step_in::{ImportedBody, StepImport, StepNode, step_import, step_import_shared, step_orientation_errors, step_validate};
 pub use step_out::{ExportBody, ExportProduct, StepHeader, step_export_bodies, step_export_products};
+pub use sweep_path::sweep_path;
 pub use topo::{CylinderFace, cylinder_face_at};
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 
