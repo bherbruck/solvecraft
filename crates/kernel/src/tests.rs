@@ -1276,3 +1276,24 @@ fn tangent_holes_pinch_alike() {
     let m = measure(&b).unwrap();
     assert_eq!(m.merged.faces, 14, "{:?}", m.merged);
 }
+
+/// A d10 tube bent at R5: the inside of the bend is a horn torus pinched to a point. One torus
+/// face, with a degenerate loop at the pinch (counted as Fusion does: 5 faces, 6 edges, 4 vertices).
+#[test]
+fn tight_bend_counts() {
+    use crate::build::PathSeg;
+    let region = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![] };
+    let path = [
+        PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 0.0, 20.0) },
+        PathSeg::Arc {
+            a: Vec3::new(0.0, 0.0, 20.0),
+            center: Vec3::new(5.0, 0.0, 20.0),
+            axis: Vec3::new(0.0, 1.0, 0.0),
+            angle: std::f64::consts::FRAC_PI_2,
+        },
+        PathSeg::Line { a: Vec3::new(5.0, 0.0, 25.0), b: Vec3::new(25.0, 0.0, 25.0) },
+    ];
+    let b = sweep(&Plane::XY, &region, &path).unwrap();
+    let m = measure(&b).unwrap().merged;
+    assert_eq!((m.faces, m.edges, m.vertices), (5, 6, 4), "{m:?}");
+}

@@ -426,16 +426,26 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
         let (Some(fa), Some(fb), Some(e)) = (flist.get(a), flist.get(b), edge) else { return false };
         let (sa, sb) = (fa.oriented_surface(), fb.oriented_surface());
         let step = (e.len() / 8).max(1);
-        e.iter().step_by(step).all(|p| {
+        // Points where a surface has no normal (a horn torus pinched to its axis) don't count;
+        // nor do an edge's ends when it has points between (they can be such a pinch).
+        let inner: &[Vec3] = if e.len() > 2 { e.get(1..e.len() - 1).unwrap_or(e) } else { e };
+        let mut seen = 0;
+        let smooth = inner.iter().step_by(step).all(|p| {
             let q = crate::body::p3(*p);
             match (sa.search_nearest_parameter(q, None, 50), sb.search_nearest_parameter(q, None, 50)) {
                 (Some((u, v)), Some((s, t))) => {
                     let (x, y) = (sa.normal(u, v), sb.normal(s, t));
-                    x.x * y.x + x.y * y.y + x.z * y.z > 1.0 - 1e-3
+                    let d = x.x * y.x + x.y * y.y + x.z * y.z;
+                    if !d.is_finite() {
+                        return true;
+                    }
+                    seen += 1;
+                    d > 1.0 - 1e-3
                 }
                 _ => false,
             }
-        })
+        });
+        smooth && seen > 0
     };
     let mut fp: Vec<usize> = (0..nf).collect();
     for (ei, faces) in &edge_faces {
@@ -472,6 +482,7 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     }
     // Remaining edges, keyed by merged face pair.
     let mut remaining: Vec<(usize, (usize, usize), (usize, usize))> = Vec::new(); // (edge, verts, face pair)
+    let mut pinches: Vec<Vec3> = Vec::new();
     let mut eids: Vec<&usize> = edge_faces.keys().collect();
     eids.sort();
     for e in eids {
@@ -480,6 +491,20 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
             continue;
         }
         let gs: Vec<usize> = faces.iter().map(|f| find(&mut fp, *f)).collect();
+        // A free-form face pinched to a point (a horn torus at its axis): a zero-length edge
+        // inside one face. Fusion keeps a degenerate loop there (two edges and a vertex).
+        if let Some(g) = gs.first()
+            && gs.iter().all(|x| x == g)
+            && matches!(surfs.get(*g), Some(Surf::Other(_)))
+            && let Some(pl) = poly(*e)
+            && let Some(p0) = pl.first()
+            && pl.iter().all(|p| p.dist(*p0) < tol * 10.0)
+        {
+            if !pinches.iter().any(|q: &Vec3| q.dist(*p0) < tol * 10.0) {
+                pinches.push(*p0);
+            }
+            continue;
+        }
         let pair = match gs[..] {
             [a, b] if a == b => continue,
             [a, b] => (a.min(b), a.max(b)),
@@ -534,7 +559,13 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
             }
         }
     }
-    Ok(TopoCounts { faces: groups.len(), edges: edge_groups.len() + apexes, vertices: real_vertices + closed_loops + apexes, face_types })
+    let pinch = pinches.len();
+    Ok(TopoCounts {
+        faces: groups.len(),
+        edges: edge_groups.len() + apexes + 2 * pinch,
+        vertices: real_vertices + closed_loops + apexes + pinch,
+        face_types,
+    })
 }
 
 /// A cylindrical face of a body near a point: where its axis is, which way, its radius, the
