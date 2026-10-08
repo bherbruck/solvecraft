@@ -156,6 +156,8 @@ pub struct Session {
     world_cache: std::sync::Mutex<Option<(u64, Arc<solvecraft_doc::ModelState>)>>,
     /// Features copied with `timeline.copy` (pasted by `timeline.paste`).
     pub clipboard: Vec<solvecraft_doc::Feature>,
+    /// Section Analysis: a view cut by a plane (origin, unit normal; the normal side is hidden).
+    pub section: Option<(Vec3, Vec3)>,
 }
 
 const MAX_UNDO: usize = 200;
@@ -188,6 +190,7 @@ impl Session {
             pending_moves: Default::default(),
             world_cache: Default::default(),
             clipboard: Vec::new(),
+            section: None,
         }
     }
 
@@ -314,6 +317,7 @@ impl Session {
             pending_moves: self.pending_moves.clone(),
             world_cache: Default::default(),
             clipboard: self.clipboard.clone(),
+            section: None,
         }
     }
 

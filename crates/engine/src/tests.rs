@@ -626,6 +626,25 @@ fn measure_items() {
     assert!(s.execute("MeasureCommand", &json!({"items": [{"type": "nonsense"}]})).is_err());
 }
 
+/// Section Analysis sets and clears the view cut without touching the design or history.
+#[test]
+fn section_analysis() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    let (doc, undo) = (s.doc.clone(), s.undo.len());
+    run(&mut s, "FusionHalfSectionViewCommand", json!({"plane": "XZ", "offset": 15}));
+    let (o, n) = s.section.unwrap();
+    assert!((o - n * 15.0).len() < 1e-12 && (n.y.abs() - 1.0).abs() < 1e-12);
+    run(&mut s, "FusionHalfSectionViewCommand", json!({"plane": {"origin": [0, 0, 5], "normal": [0, 0, 2]}, "flip": true}));
+    let (o, n) = s.section.unwrap();
+    assert!((o.z - 5.0).abs() < 1e-12 && (n.z + 1.0).abs() < 1e-12);
+    assert!(s.execute("FusionHalfSectionViewCommand", &json!({"plane": {"normal": [0, 0, 0]}})).is_err());
+    run(&mut s, "FusionHalfSectionViewCommand", json!({"clear": true}));
+    assert!(s.section.is_none());
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!(s.undo.len(), undo);
+}
+
 /// Press Pull: positive pulls a face out, negative pushes it in (a cut), edges get a fillet.
 #[test]
 fn press_pull() {

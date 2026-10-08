@@ -30,10 +30,14 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         Sel::Edge { body, index, point } => (*point, st.body(body).and_then(|b| edge_bisector(&b.mesh(), *index, *point))),
         Sel::Vertex { point, .. } => (*point, None),
         Sel::Body { name } => (st.body(name)?.mesh().bounds().center(), None),
+        Sel::Plane { name } => {
+            let pl = solvecraft_engine::geom::Plane::named(name)?;
+            (pl.origin, Some(pl.normal()))
+        }
         _ => return None,
     };
     Some(match d.kind {
-        Kind::Extrude { .. } | Kind::Fillet { .. } => (at, normal),
+        Kind::Extrude { .. } | Kind::Fillet { .. } | Kind::Section { .. } => (at, normal),
         // Shell thickness grows into the body.
         Kind::Shell { .. } => (at, normal.map(|n| -n)),
         Kind::Move { .. } => (at, Some(Vec3::Z)),
@@ -118,7 +122,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     };
     let symmetric = matches!(d.kind, Kind::Extrude { direction: 2, .. });
     // Extrudes and moves go either way; radii and thicknesses stay positive.
-    let signed = matches!(d.kind, Kind::Extrude { .. } | Kind::Move { .. });
+    let signed = matches!(d.kind, Kind::Extrude { .. } | Kind::Move { .. } | Kind::Section { .. });
     let focus = std::mem::take(&mut d.focus);
     let half_height = app.cam.half_height();
     let axis = revolve_axis(app, d);

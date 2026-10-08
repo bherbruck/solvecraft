@@ -73,6 +73,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
             ui.separator();
+            if app.session.section.is_some() && item(ui, "Remove Section") {
+                other = Some("unsection");
+            }
             if !app.session.selection.is_empty() && item(ui, "Clear Selection") {
                 other = Some("clear");
             }
@@ -97,6 +100,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     match other {
         Some("clear") => drop(app.run("select.clear", json!({}))),
+        Some("unsection") => drop(app.run("FusionHalfSectionViewCommand", json!({"clear": true}))),
         Some("fit") => app.animate_view("fit"),
         Some("home") => app.animate_view("home"),
         Some("undo") => drop(app.run("UndoCommand", json!({}))),

@@ -11,7 +11,7 @@ use egui_wgpu::wgpu::util::DeviceExt;
 pub const TRI_SIZE: usize = 28;
 /// Line instance: a, b (3 × f32 each), colour (4 × u8), width in pixels (f32).
 pub const LINE_SIZE: usize = 32;
-const UNIFORM_SIZE: u64 = 112;
+const UNIFORM_SIZE: u64 = 128;
 
 /// CPU-side geometry waiting to be uploaded. The model scene changes with the design; the
 /// highlight scene (hover, selection, the origin widget) changes often and is small.
@@ -97,6 +97,10 @@ pub struct ViewportCallback {
     pub back: [f32; 3],
     /// Viewport size in physical pixels.
     pub size_px: [f32; 2],
+    /// Section cut: (normal, d); fragments with normal·p > d are hidden. A zero normal: none.
+    pub clip: [f32; 4],
+    /// Colour of the inside of cut bodies (straight sRGBA, 0..1).
+    pub cap: [f32; 4],
 }
 
 struct Batch {
@@ -156,7 +160,13 @@ struct U {
     vp: mat4x4<f32>,
     back: vec4<f32>,   // xyz = toward the eye, w = 1 for linear output
     screen: vec4<f32>, // viewport width, height (px), depth bias
+    clip: vec4<f32>,   // section plane: normal, d (zero normal: no section)
+    cap: vec4<f32>,    // colour of the inside of cut bodies
 };
+
+fn clipped(p: vec3<f32>) -> bool {
+    return length(u.clip.xyz) > 0.5 && dot(u.clip.xyz, p) > u.clip.w;
+}
 @group(0) @binding(0) var<uniform> u: U;
 
 fn to_linear(c: vec3<f32>) -> vec3<f32> {
@@ -174,6 +184,7 @@ struct TOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) n: vec3<f32>,
     @location(1) c: vec4<f32>,
+    @location(2) wp: vec3<f32>,
 };
 
 @vertex
@@ -182,11 +193,27 @@ fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: 
     o.pos = u.vp * vec4<f32>(p, 1.0);
     o.n = n;
     o.c = c;
+    o.wp = p;
     return o;
 }
 
+/// Opaque model surfaces: cut by the section plane, the inside shows as a flat cap colour.
 @fragment
-fn fs_tri(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    if (!front && length(u.clip.xyz) > 0.5) {
+        return out_color(u.cap);
+    }
+    return shade(i);
+}
+
+@fragment
+fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return shade(i);
+}
+
+fn shade(i: TOut) -> vec4<f32> {
     // A zero normal marks flat colour (selection fills, translucent planes).
     if (length(i.n) < 0.5) {
         return out_color(i.c);
@@ -210,12 +237,14 @@ fn vs_ghost(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c
     o.pos.z = o.pos.z + u.screen.z * 4.0 * o.pos.w;
     o.n = n;
     o.c = c;
+    o.wp = p;
     return o;
 }
 
 struct LOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) c: vec4<f32>,
+    @location(1) wp: vec3<f32>,
 };
 
 @vertex
@@ -239,11 +268,19 @@ fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(
     var o: LOut;
     o.pos = vec4<f32>(base.xy + off / half * base.w, base.z - u.screen.z * base.w, base.w);
     o.c = c;
+    o.wp = select(a, b, t > 0.5);
     return o;
 }
 
 @fragment
 fn fs_line(i: LOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return out_color(i.c);
+}
+
+/// Lines the section never cuts (the grid, highlights drawn on top).
+@fragment
+fn fs_line_all(i: LOut) -> @location(0) vec4<f32> {
     return out_color(i.c);
 }
 "#;
@@ -329,13 +366,13 @@ impl Resources {
         };
         let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
         Resources {
-            tri: pipeline("sc_tris", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Less, true), None),
+            tri: pipeline("sc_tris", "vs_tri", "fs_solid", tri_layout(), depth(wgpu::CompareFunction::Less, true), None),
             tri_hl: pipeline("sc_tris_hl", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             trans: pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             ghost: pipeline("sc_ghost", "vs_ghost", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             xray: pipeline("sc_xray", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             line: pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
-            overlay: pipeline("sc_overlay", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
+            overlay: pipeline("sc_overlay", "vs_line", "fs_line_all", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             uniform,
             bind,
             linear_out: t.format.is_srgb(),
@@ -429,5 +466,19 @@ pub fn uniform_bytes(cb: &ViewportCallback, w: f32, h: f32, linear: bool) -> Vec
     let mut v: Vec<f32> = cb.view_proj.iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
     v.extend([w.max(1.0), h.max(1.0), 2e-4, 0.0]);
+    v.extend(cb.clip);
+    v.extend(cb.cap);
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use egui_wgpu::wgpu::naga;
+
+    /// The viewport shader parses and validates (a bad shader would only fail at run time).
+    #[test]
+    fn shader_is_valid() {
+        let module = naga::front::wgsl::parse_str(super::SHADER).unwrap_or_else(|e| panic!("{}", e.emit_to_string(super::SHADER)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
+    }
 }

@@ -423,6 +423,26 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     hits
 }
 
+/// The section cut shown now: the open Section Analysis dialog's plane, else the session's.
+pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
+    if let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, crate::dialogs::Kind::Section { .. })) {
+        let cmds = crate::dialogs::apply_commands(app, d).ok()?;
+        let (_, p) = cmds.into_iter().next()?;
+        let mut scratch = app.session.scratch();
+        scratch.execute("FusionHalfSectionViewCommand", &p).ok()?;
+        return scratch.section;
+    }
+    app.session.section
+}
+
+/// The section as the shader's clip plane (normal, d), zero when there is none.
+fn section_clip(app: &SolveApp) -> [f32; 4] {
+    match section_plane(app) {
+        Some((o, n)) => [n.x as f32, n.y as f32, n.z as f32, n.dot(o) as f32],
+        None => [0.0; 4],
+    }
+}
+
 /// Space kept free at the top right of the viewport for the view cube (docked dialogs start below).
 pub const VIEW_CUBE_CLEARANCE: f32 = 168.0;
 
@@ -873,6 +893,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             hl_slot: app.viewport.hl_slot.clone(),
             pv_key: app.preview.key,
             pv_slot: app.preview.slot.clone(),
+            clip: section_clip(app),
+            cap: t.section_cap.to_normalized_gamma_f32(),
             view_proj: proj.vp.to_f32(),
             back: proj.cam.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],

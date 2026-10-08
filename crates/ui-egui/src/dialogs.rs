@@ -78,6 +78,11 @@ pub enum Kind {
     Sweep {
         operation: usize,
     },
+    /// Section Analysis: cut the view by a plane, moved along its normal.
+    Section {
+        offset: String,
+        flip: bool,
+    },
     /// Measure one or two picked items (vertices, edges, faces): the result of the last
     /// measurement and the items it was for.
     Measure {
@@ -196,6 +201,9 @@ impl Dialog {
             ),
             "MirrorCommand" => {
                 Dialog::new(Kind::Mirror, vec![SelInput::new("Bodies", BODIES, true), SelInput::new("Mirror plane", PLANES | PLANAR_FACES, false)])
+            }
+            "FusionHalfSectionViewCommand" => {
+                Dialog::new(Kind::Section { offset: "0 mm".into(), flip: false }, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)])
             }
             "MeasureCommand" => {
                 Dialog::new(Kind::Measure { result: None, of: Vec::new() }, vec![SelInput::new("Items", FACES | EDGES | selection::VERTICES, true)])
@@ -327,6 +335,7 @@ impl Dialog {
             Kind::Move { z, .. } => ("Z", ValueKind::Length, z),
             Kind::PatternRect { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
             Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
+            Kind::Section { offset, .. } => ("Distance", ValueKind::Length, offset),
             _ => return None,
         })
     }
@@ -480,6 +489,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Draft { .. } => "DRAFT",
         Kind::Mirror => "MIRROR",
         Kind::Measure { .. } => "MEASURE",
+        Kind::Section { .. } => "SECTION ANALYSIS",
         Kind::PatternRect { .. } => "RECTANGULAR PATTERN",
         Kind::PatternCirc { .. } => "CIRCULAR PATTERN",
         Kind::Loft { .. } => "LOFT",
@@ -739,6 +749,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     Kind::Mirror => {}
                     Kind::Measure { result, .. } => measure_rows(ui, result.as_ref()),
+                    Kind::Section { offset, flip } => {
+                        ui.label("Distance");
+                        enter |= field(ui, offset);
+                        ui.end_row();
+                        ui.label("Flip");
+                        ui.checkbox(flip, "");
+                        ui.end_row();
+                    }
                     Kind::PatternRect { count, spacing, count2, spacing2 } => {
                         for (l, v) in [("Quantity", count), ("Spacing", spacing), ("Quantity 2", count2), ("Spacing 2", spacing2)] {
                             ui.label(l);
@@ -1193,6 +1211,26 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 "Sweep",
                 json!({"sketch": sketch, "profiles": idx, "path_sketch": path_sketch, "path": path, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
+        }
+        Kind::Section { offset, flip } => {
+            need(0, "a plane or planar face")?;
+            let plane = match sels(d, 0).first() {
+                Some(Sel::Plane { name }) if matches!(name.as_str(), "XY" | "XZ" | "YZ") => json!(name),
+                Some(Sel::Face { body, index, point }) => {
+                    let (_, n) = planar_face(s, body, *index).ok_or("the face must be planar")?;
+                    json!({"origin": pt(*point), "normal": pt(n)})
+                }
+                Some(Sel::Plane { name }) => {
+                    let pl = solvecraft_engine::view::construction_planes(s)
+                        .into_iter()
+                        .find(|(_, n, _)| n == name)
+                        .map(|(_, _, pl)| pl)
+                        .ok_or("unknown plane")?;
+                    json!({"origin": pt(pl.origin), "normal": pt(pl.normal())})
+                }
+                _ => return Err("pick a plane or a planar face".into()),
+            };
+            ("FusionHalfSectionViewCommand", json!({"plane": plane, "offset": offset, "flip": flip}))
         }
         Kind::Move { x, y, z } => {
             need(0, "bodies")?;

@@ -12,6 +12,7 @@ pub use features::auto_operation;
 mod file;
 mod inspect;
 mod measure_sel;
+mod section;
 pub(crate) use measure_sel::measure_items;
 mod parameters;
 mod sketch;
@@ -129,6 +130,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
+    v.extend(section::COMMANDS.iter());
     v
 }
 

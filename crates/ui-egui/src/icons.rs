@@ -199,6 +199,11 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pts.extend(inner);
             p.add(Shape::closed_line(pts, Stroke::new(pen.w, ink)));
         }
+        "section" => {
+            pen.poly(&[(4.0, 8.0), (14.0, 4.0), (20.0, 8.0), (10.0, 12.0)], pen.fill, ink);
+            pen.poly(&[(4.0, 8.0), (10.0, 12.0), (10.0, 20.0), (4.0, 16.0)], pen.fill, ink);
+            pen.poly(&[(10.0, 12.0), (20.0, 8.0), (20.0, 16.0), (10.0, 20.0)], a, ink);
+        }
         "presspull" => {
             pen.poly(&[(3.0, 15.0), (12.0, 11.0), (21.0, 15.0), (12.0, 19.0)], pen.fill, ink);
             pen.arrow((12.0, 15.0), (12.0, 3.0), a);

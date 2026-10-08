@@ -83,6 +83,8 @@ pub struct Tokens {
     /// Sketch points: fully constrained, free.
     pub sketch_point: Color32,
     pub sketch_point_free: Color32,
+    /// Inside of bodies cut by a section.
+    pub section_cap: Color32,
     /// Closed sketch profiles (translucent fill).
     pub profile_fill: Color32,
     /// Constraint glyph boxes.
@@ -167,6 +169,7 @@ impl Tokens {
             sketch_fixed: Color32::from_rgb(20, 20, 20),
             sketch_point: Color32::BLACK,
             sketch_point_free: Color32::from_rgb(30, 90, 200),
+            section_cap: Color32::from_rgb(214, 128, 72),
             profile_fill: Color32::from_rgba_unmultiplied_const(255, 196, 120, 70),
             glyph_bg: Color32::WHITE,
             glyph_edge: Color32::from_rgb(90, 150, 90),
