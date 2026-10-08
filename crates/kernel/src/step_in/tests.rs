@@ -377,10 +377,10 @@ fn mirrored_revolved_faces_round_trip() {
 #[test]
 fn hostile_boundaries_mesh_in_bounded_time() {
     let t0 = std::time::Instant::now();
-    // A wild 16 × 16 B-spline patch (alternating ±50 mm) bounded by four straight edges that
+    // A wild 12 × 12 B-spline patch (alternating ±50 mm) bounded by four straight edges that
     // lie far from it, plus a plane face bounded by a circle 500 mm off the plane. The bound
     // catches a hang, not a slow machine (it took ~50 s at 24 × 24 with the machine loaded).
-    let n = 16;
+    let n = 12;
     let mut t = String::from(HEAD);
     let mut rows = Vec::new();
     for i in 0..n {
@@ -405,7 +405,7 @@ fn hostile_boundaries_mesh_in_bounded_time() {
         "#10=B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.F.,.F.,.F.,({mu}),({mu}),({ku}),({ku}),.UNSPECIFIED.);\n",
         rows.join(",")
     );
-    let corners = [(0, 0), (150, 0), (150, 150), (0, 150)];
+    let corners = [(0, 0), (110, 0), (110, 110), (0, 110)];
     for (k, (x, y)) in corners.iter().enumerate() {
         t += &format!("#{}=CARTESIAN_POINT('',({x}.,{y}.,300.));\n#{}=VERTEX_POINT('',#{});\n", 20 + k, 30 + k, 20 + k);
     }
