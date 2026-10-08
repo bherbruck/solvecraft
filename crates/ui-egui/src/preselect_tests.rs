@@ -156,6 +156,20 @@ fn a_hole_is_patterned_as_a_feature() {
     }
     let after = app.session.model.state().bodies[0].mesh().measure().volume;
     assert!(after < before - 500.0, "three more holes: {before} -> {after}");
+    // On the canvas, a hole's wall stands for the hole; the top face for the box.
+    let st = app.session.model.state();
+    let m = st.bodies[0].mesh();
+    let face_at = |p: Vec3| {
+        let t = m.triangles.iter().position(|t| super::dialogs::point_tri_dist(p, m.tri(t).unwrap()) < 0.05).unwrap();
+        let [a, b, c] = m.tri(&m.triangles[t]).unwrap();
+        crate::viewport::Hit::Face { body: "Body1".into(), index: m.tri_face[t] as usize, point: (a + b + c) * (1.0 / 3.0) }
+    };
+    let mut d = start(&mut app, vec![], "PatternCircular");
+    d.inputs[0].accept = crate::selection::FEATURES;
+    let box_id = app.session.doc.features[0].id;
+    assert_eq!(d.candidate(&app.session, &face_at(Vec3::new(12.5, 10.0, 5.0))), Some(Sel::Feature { id: hole }));
+    assert_eq!(d.candidate(&app.session, &face_at(Vec3::new(30.0, 30.0, 10.0))), Some(Sel::Feature { id: box_id }));
+    app.dialog = None;
     // Edit Feature shows the hole as a feature again.
     let pat = app.session.doc.features.last().unwrap().id;
     let e = crate::dialogs::for_feature(&app, pat, None).unwrap();

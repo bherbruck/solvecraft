@@ -591,7 +591,15 @@ impl Dialog {
 
     /// The selection a hit would add to the active input.
     pub fn candidate(&self, s: &Session, h: &Hit) -> Option<Sel> {
-        self.active_input()?.accepts(h, |body, face| planar_face(s, body, face).is_some())
+        let inp = self.active_input()?;
+        // Features are also picked on the canvas: a face stands for the feature that made it.
+        if inp.accept == selection::FEATURES {
+            return match h {
+                Hit::Face { body, index, point } => feature_of_face(s, body, *index, *point).map(|id| Sel::Feature { id }),
+                _ => None,
+            };
+        }
+        inp.accepts(h, |body, face| planar_face(s, body, face).is_some())
     }
 
     /// A pick in the viewport (already accepted by the active input).
@@ -791,6 +799,67 @@ pub(crate) fn row_label(ui: &mut egui::Ui, text: &str) {
         ui.set_width(LABEL_W);
         ui.add(egui::Label::new(text).truncate()).on_hover_text(text);
     });
+}
+
+thread_local! {
+    /// Faces already traced to their feature, by (revision, body, face).
+    static FACE_FEATURE: std::cell::RefCell<(u64, std::collections::HashMap<(String, usize), Option<u64>>)> = Default::default();
+}
+
+/// The feature that made a face: the latest feature before which the face's point lay on no
+/// face of the model.
+fn feature_of_face(s: &Session, body: &str, index: usize, p: Vec3) -> Option<u64> {
+    let key = (body.to_string(), index);
+    if let Some(hit) = FACE_FEATURE.with(|c| {
+        let c = c.borrow();
+        if c.0 == s.revision { c.1.get(&key).copied() } else { None }
+    }) {
+        return hit;
+    }
+    let on_model = |st: &solvecraft_engine::doc::ModelState| {
+        st.bodies.iter().any(|b| {
+            let m = b.mesh();
+            let bb = m.bounds();
+            let tol = 1e-4 * (1.0 + bb.diagonal());
+            p.x >= bb.min.x - tol
+                && p.y >= bb.min.y - tol
+                && p.z >= bb.min.z - tol
+                && p.x <= bb.max.x + tol
+                && p.y <= bb.max.y + tol
+                && p.z <= bb.max.z + tol
+                && m.triangles.iter().filter_map(|t| m.tri(t)).any(|t| point_tri_dist(p, t) < tol)
+        })
+    };
+    let found = s
+        .doc
+        .features
+        .iter()
+        .rev()
+        .filter(|f| !matches!(f.kind, FeatureKind::Sketch { .. }) && s.model.result(f.id).is_some_and(|r| r.error.is_none()))
+        .find(|f| !on_model(&s.model.state_before(f.id)))
+        .map(|f| f.id);
+    FACE_FEATURE.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.0 != s.revision {
+            *c = (s.revision, std::collections::HashMap::new());
+        }
+        c.1.insert(key, found);
+    });
+    found
+}
+
+/// Distance from a point to a triangle.
+pub(crate) fn point_tri_dist(p: Vec3, [a, b, c]: [Vec3; 3]) -> f64 {
+    let n = (b - a).cross(c - a);
+    let nn = n.dot(n);
+    if nn > 1e-24 {
+        let q = p - n * ((p - a).dot(n) / nn);
+        let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= 0.0);
+        if inside {
+            return (p - q).len();
+        }
+    }
+    p.dist_to_segment(a, b).min(p.dist_to_segment(b, c)).min(p.dist_to_segment(c, a))
 }
 
 /// The pattern objects' label: features are picked in the timeline.
