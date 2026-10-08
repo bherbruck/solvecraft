@@ -80,6 +80,11 @@ pub struct Tokens {
     /// Sketch curves: under-constrained, fully constrained (and finished sketches).
     pub sketch: Color32,
     pub sketch_fixed: Color32,
+    /// Fixed (locked) sketch geometry.
+    pub sketch_locked: Color32,
+    /// Sketch dimensions: driving, driven (reference).
+    pub dimension: Color32,
+    pub dimension_driven: Color32,
     /// Sketch points: fully constrained, free.
     pub sketch_point: Color32,
     pub sketch_point_free: Color32,
@@ -168,6 +173,9 @@ impl Tokens {
             sketch: Color32::from_rgb(30, 90, 200),
             sketch_fixed: Color32::from_rgb(20, 20, 20),
             sketch_point: Color32::BLACK,
+            sketch_locked: Color32::from_rgb(0, 140, 60),
+            dimension: Color32::from_rgb(36, 40, 48),
+            dimension_driven: Color32::from_rgb(120, 126, 138),
             sketch_point_free: Color32::from_rgb(30, 90, 200),
             section_cap: Color32::from_rgb(214, 128, 72),
             profile_fill: Color32::from_rgba_unmultiplied_const(255, 196, 120, 70),
@@ -220,6 +228,9 @@ impl Tokens {
         t.sketch = Color32::from_rgb(92, 150, 255);
         t.sketch_fixed = Color32::from_rgb(232, 234, 238);
         t.sketch_point = Color32::from_rgb(232, 234, 238);
+        t.sketch_locked = Color32::from_rgb(96, 204, 116);
+        t.dimension = Color32::from_rgb(224, 228, 234);
+        t.dimension_driven = Color32::from_rgb(142, 150, 164);
         t.sketch_point_free = Color32::from_rgb(92, 150, 255);
         t.profile_fill = Color32::from_rgba_unmultiplied_const(120, 150, 200, 40);
         t.glyph_bg = Color32::from_rgb(44, 50, 60);

@@ -13,6 +13,7 @@ pub mod canvas;
 pub mod context_menu;
 pub mod control;
 pub mod dialogs;
+pub mod dim_view;
 pub mod gpu;
 pub mod icons;
 #[cfg(test)]

@@ -154,6 +154,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params("entities: [curve, point or constraint ids]"),
     CommandSpec::new("sketch.move_point", "Drag Sketch Point", move_point).enabled(in_sketch).params("point: ref, to: [x,y]"),
+    CommandSpec::new("sketch.dimension_text", "Move Dimension Text", dimension_text)
+        .enabled(in_sketch)
+        .params("dimension: constraint id or parameter name; at: [x,y] text centre (sketch coordinates) | reset: true (default place)"),
     CommandSpec::new("sketch.solve", "Solve Sketch", solve_cmd)
         .enabled(in_sketch)
         .noundo()
@@ -1132,6 +1135,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
             // A reference dimension: measures, no parameter.
             let name = k.name();
             let id = sk.add_constraint(k, None)?;
+            place_text(sk, &id, text_at);
             if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == id) {
                 c.driven = true;
             }
@@ -1149,7 +1153,8 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let _ = vals;
         let name = k.name();
-        sk.add_constraint(k, Some(pname.clone()))?;
+        let id = sk.add_constraint(k, Some(pname.clone()))?;
+        place_text(sk, &id, text_at);
         Ok((pname, name, cur))
     })?;
     if driven {
@@ -1160,6 +1165,36 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let v = s.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
     Ok(json!({"param": param, "type": kind_name, "expression": v, "measured": current, "sketch": info}))
+}
+
+/// Keep a dimension's text where it was placed (`at`, sketch coordinates), relative to the
+/// dimension so it follows the geometry.
+fn place_text(sk: &mut Sketch, id: &str, at: Option<Vec2>) {
+    let Some(i) = sk.constraints.iter().position(|c| c.id == id) else { return };
+    let text = match (at, sk.constraints.get(i).and_then(|c| solvecraft_sketch::dim_frame(sk, &c.kind))) {
+        (Some(at), Some(f)) => Some(solvecraft_sketch::encode_text(&f, at)),
+        _ => None,
+    };
+    if let Some(c) = sk.constraints.get_mut(i) {
+        c.text = text.filter(|t| t.is_finite() && t.x.abs() < 1e9 && t.y.abs() < 1e9);
+    }
+}
+
+fn dimension_text(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.dimension_text";
+    let key = str_(p, "dimension").ok_or_else(|| bad(cmd, "`dimension` must be a dimension id or parameter name"))?.to_string();
+    let at = if bool_(p, "reset").unwrap_or(false) { None } else { Some(req_vec2(cmd, p, "at")?) };
+    let (id, info) = edit(s, p, cmd, false, |sk, _| {
+        let c = sk
+            .constraints
+            .iter()
+            .find(|c| c.kind.is_dimension() && (c.id == key || c.param.as_deref() == Some(key.as_str())))
+            .ok_or_else(|| bad(cmd, format!("no dimension `{key}` in this sketch")))?;
+        let id = c.id.clone();
+        place_text(sk, &id, at);
+        Ok(id)
+    })?;
+    Ok(json!({"dimension": id, "sketch": info}))
 }
 
 /// Dimension a point (or a parallel line) to line `l` as a diameter: when `l` is a centerline
@@ -1305,3 +1340,7 @@ fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 #[path = "sketch_rect_tests.rs"]
 mod rect_tests;
+
+#[cfg(test)]
+#[path = "sketch_ux_tests.rs"]
+mod ux_tests;

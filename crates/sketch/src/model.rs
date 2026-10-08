@@ -421,6 +421,10 @@ pub struct Constraint {
     /// A driven (reference) dimension: it measures, it does not constrain.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub driven: bool,
+    /// For dimensions: where the value text was placed, relative to the dimension's frame
+    /// (see [`crate::dim_frame`]); None for the default place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<Vec2>,
 }
 
 /// A 2D sketch. Point 0 is always the fixed sketch origin (id `origin`).
@@ -597,7 +601,7 @@ impl Sketch {
         }
         self.validate(&kind)?;
         let id = self.fresh("k");
-        self.constraints.push(Constraint { id: id.clone(), kind, param, driven: false });
+        self.constraints.push(Constraint { id: id.clone(), kind, param, driven: false, text: None });
         Ok(id)
     }
 

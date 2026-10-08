@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod curves;
+mod dims;
 mod linalg;
 mod link;
 mod model;
@@ -21,6 +22,7 @@ mod wire;
 pub use curves::{
     MAX_SPLINE_POINTS, bspline_beziers, conic_point, ellipse_point, end_curvature, fit_beziers, spline_end_tangent, spline_point, spline_polyline,
 };
+pub use dims::{DimFrame, DimLayout, chain_centres, default_text, dim_frame, dim_layout, encode_text};
 pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES};
 pub use model::{Constraint, ConstraintKind, Curve, CurveKind, SPoint, Sketch, SketchError};
 pub use profiles::{Profile, find_drawn_profiles, find_profiles, merge_regions};

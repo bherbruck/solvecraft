@@ -8,7 +8,8 @@
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
 //! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?, hold?}` (box selection, navigation;
 //!   `hold` keeps the button down that many frames before moving);
-//!   `ui.selection` (selection, dialog inputs, hover); `ui.editFeature {feature}` (edit dialog)
+//!   `ui.selection` (selection, dialog inputs, hover, drawn sketch dimensions);
+//!   `ui.sketchToScreen {points: [[x,y]…]}` (screen points of active-sketch coordinates); `ui.editFeature {feature}` (edit dialog)
 //! - `ui.set {...UiState fields}`; `ui.view {view: front|back|top|bottom|left|right|iso|home|fit, animate?: bool}` (snaps unless animate)
 //! - `ui.start {command}`: like clicking the toolbar button (starts tools/dialogs)
 //! - `ui.click {x, y, button?, shift?}`, `ui.move {x, y}`, `ui.scroll {x, y, delta}`: real
@@ -201,7 +202,31 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             "selection": app.session.selection,
             "dialog": app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| json!({"label": i.label, "items": i.items})).collect::<Vec<_>>()),
             "hover": app.viewport.hover.as_ref().map(|h| format!("{h:?}")),
+            "dimensions": crate::dim_view::drawn().into_iter().map(|(id, p)| json!({"id": id, "x": p.x, "y": p.y})).collect::<Vec<_>>(),
+            "dimension_selected": crate::dim_view::selected(),
+            "dimension_editing": crate::dim_view::editing(),
         })),
+        "ui.sketchToScreen" => {
+            // Screen points of active-sketch coordinates (for driving sketch interaction).
+            let st = app.session.model.state();
+            let (Some(rect), Some(ss)) = (app.viewport.rect, app.session.active_sketch.and_then(|s| st.sketch(s))) else {
+                return err("no active sketch in a drawn viewport");
+            };
+            let proj = crate::viewport::projection(app, rect);
+            let pts: Vec<Value> = p
+                .get("points")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .take(1000)
+                .map(|v| {
+                    let c = |i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
+                    let q = solvecraft_engine::geom::Vec2::new(c(0), c(1));
+                    proj.to_screen(ss.plane.to_world(q)).map_or(Value::Null, |p| json!([p.x, p.y]))
+                })
+                .collect();
+            ok(json!(pts))
+        }
         "ui.scroll" => {
             let (Some(x), Some(y)) = (f("x"), f("y")) else { return err("missing x/y") };
             app.synthetic.push(egui::Event::PointerMoved(egui::pos2(x as f32, y as f32)));

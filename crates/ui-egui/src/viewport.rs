@@ -806,7 +806,7 @@ pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, 
 }
 
 pub fn delete_selection(app: &mut SolveApp) {
-    if crate::sketch_tools::delete_glyph(app) {
+    if crate::dim_view::delete_selected(app) || crate::sketch_tools::delete_glyph(app) {
         return;
     }
     let sel = app.session.selection.clone();
@@ -973,13 +973,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.dialog = Some(d);
                 }
             } else {
-                if !crate::sketch_tools::click_glyph(app, &proj, p) {
+                if !crate::dim_view::click(app, p) && !crate::sketch_tools::click_glyph(app, &proj, p) {
                     select(app, cand.and_then(|c| c.1), add);
                 }
             }
         }
+        // Double-click a dimension: edit its value in place.
+        let dim_edit = resp.double_clicked() && app.tool.is_none() && app.dialog.is_none() && crate::dim_view::double_click(app, p);
         // Double-click an edge: select the edges that continue it smoothly (the loop).
         if resp.double_clicked()
+            && !dim_edit
             && app.tool.is_none()
             && app.dialog.is_none()
             && let Some(Hit::Edge { body, index, .. }) = app.viewport.hover.clone()
@@ -1003,7 +1006,26 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     // Dragging a sketch point of the active sketch moves it; the solver keeps the constraints.
     if app.tool.is_none() && app.dialog.is_none() && app.viewport.nav.is_none() && app.session.active_sketch.is_some() {
+        let on_plane = |app: &SolveApp, p: Pos2| {
+            let ss = app.session.active_sketch.and_then(|sid| app.session.model.state().sketch(sid).cloned())?;
+            let (o, d) = proj.ray(p);
+            ss.plane.intersect_ray(o, d).map(|w| ss.plane.to_local(w))
+        };
+        // A dimension's text follows a drag that starts on it.
         if resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(a) = ui.input(|i| i.pointer.press_origin())
+            && let Some(q) = on_plane(app, a)
+        {
+            crate::dim_view::drag_start(app, a, q);
+        }
+        if crate::dim_view::dragging()
+            && (resp.dragged_by(egui::PointerButton::Primary) || resp.drag_stopped())
+            && let Some(q) = hover.and_then(|p| on_plane(app, p))
+        {
+            crate::dim_view::drag_to(app, q);
+        }
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && !crate::dim_view::dragging()
             && let Some(a) = ui.input(|i| i.pointer.press_origin())
             && let Some(Hit::SketchPoint { id, .. }) = pick(app, &proj, a).into_iter().next()
         {
@@ -1025,10 +1047,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if resp.drag_stopped() {
             app.viewport.point_drag = None;
+            crate::dim_view::drag_end();
         }
     }
     // Box selection: a primary drag on the model when no navigation mode is on.
-    if app.tool.is_none() && app.viewport.nav.is_none() && app.viewport.point_drag.is_none() {
+    if app.tool.is_none() && app.viewport.nav.is_none() && app.viewport.point_drag.is_none() && !crate::dim_view::dragging() {
         let origin = ui.input(|i| i.pointer.press_origin());
         if resp.dragged_by(egui::PointerButton::Primary)
             && let (Some(a), Some(b)) = (origin, hover)
@@ -1045,7 +1068,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         app.viewport.boxsel = None;
     }
-    overlays(app, ui, &painter, &proj);
+    overlays(app, &painter, &proj);
+    crate::dim_view::show(app, ui, &painter, &proj);
     hover_highlight(app, &painter, &proj);
     points_2d(app, &painter, &proj);
     if let Some(bx) = app.viewport.boxsel {
@@ -1235,7 +1259,7 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 }
 
 /// Sketch points, dimension labels and constraint glyphs of the active sketch.
-fn overlays(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
+fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
     let st = app.session.model.state();
     let Some(sid) = app.session.active_sketch else { return };
@@ -1254,31 +1278,8 @@ fn overlays(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             painter.rect_filled(Rect::from_center_size(sp, vec2(5.0, 5.0)), 0.0, c);
         }
     }
-    let mut edit: Option<String> = None;
-    for c in &sk.constraints {
-        let Some(param) = &c.param else {
-            glyph(painter, proj, ss, &c.kind);
-            continue;
-        };
-        let expr = app.session.doc.param(param).map(|p| p.expr.clone()).unwrap_or_default();
-        let anchor = dim_anchor(sk, &c.kind);
-        let Some(a) = anchor.and_then(|a| proj.to_screen(ss.plane.to_world(a))) else { continue };
-        let text = if expr.chars().all(|ch| ch.is_ascii_digit() || ch == '.' || ch == ' ' || ch == 'm' || ch == 'd' || ch == 'e' || ch == 'g') {
-            expr.replace(" mm", "").replace(" deg", "°")
-        } else {
-            format!("{param}: {}", expr)
-        };
-        let galley = painter.layout_no_wrap(text, FontId::proportional(12.0), t.text);
-        let r = Rect::from_center_size(a, galley.size() + vec2(8.0, 4.0));
-        painter.rect(r, 2.0, t.overlay, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-        painter.galley(r.min + vec2(4.0, 2.0), galley, t.text);
-        let resp = ui.interact(r, ui.id().with(("dim", param.as_str())), Sense::click());
-        if resp.double_clicked() || resp.clicked() && app.tool.is_none() {
-            edit = Some(param.clone());
-        }
-    }
-    if let Some(p) = edit {
-        app.dialog = Some(crate::dialogs::Dialog::edit_param(&app.session, &p));
+    for c in sk.constraints.iter().filter(|c| !c.kind.is_dimension()) {
+        glyph(painter, proj, ss, &c.kind);
     }
     // Sketch status.
     if let Some(r) = app.viewport.rect {
@@ -1297,29 +1298,6 @@ fn overlays(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
 fn line_mid(sk: &solvecraft_engine::sketch::Sketch, l: usize) -> Option<(Vec2, Vec2)> {
     match sk.curves.get(l)?.kind {
         CurveKind::Line { a, b } => Some((sk.point(a)?, sk.point(b)?)),
-        _ => None,
-    }
-}
-
-/// Where a dimension label goes (sketch coordinates).
-fn dim_anchor(sk: &solvecraft_engine::sketch::Sketch, k: &ConstraintKind) -> Option<Vec2> {
-    use ConstraintKind::*;
-    match *k {
-        Length { l, .. } | PointLineDistance { l, .. } => {
-            let (a, b) = line_mid(sk, l)?;
-            let n = (b - a).perp().normalized().unwrap_or(Vec2::Y);
-            Some((a + b) * 0.5 + n * ((b - a).len() * 0.08 + 1.0))
-        }
-        Distance { p, q, .. } | DistanceX { p, q, .. } | DistanceY { p, q, .. } => Some((sk.point(p)? + sk.point(q)?) * 0.5),
-        Radius { c, .. } | Diameter { c, .. } => {
-            let r = sk.radius(c)?;
-            Some(sk.center(c)? + Vec2::new(std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2) * r)
-        }
-        Angle { a, b, .. } => {
-            let (a0, a1) = line_mid(sk, a)?;
-            let (b0, b1) = line_mid(sk, b)?;
-            Some((a0 + a1 + b0 + b1) * 0.25)
-        }
         _ => None,
     }
 }
