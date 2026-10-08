@@ -36,6 +36,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("finish")
         .enabled(in_sketch)
         .params("like AutoConstrain, then Finish Sketch"),
+    CommandSpec::new("SketchConstrainer", "SketchConstrainer", smart_constrain)
+        .at("SKETCH", "CREATE")
+        .icon("constrainer")
+        .enabled(in_sketch)
+        .params("entities: [one or two sketch entity ids]: applies the constraint the geometry nearly has (horizontal/vertical, parallel, perpendicular, collinear, coincident, concentric, equal, tangent)"),
+    CommandSpec::new("sketch.toggle_driven", "Toggle Driven Dimension", toggle_driven)
+        .enabled(in_sketch)
+        .params("constraint: dimension id, driven?: bool (default toggles); a driving dimension gets a parameter with its current value"),
     CommandSpec::new("sketch.glyphs", "Constraint Glyphs", glyphs)
         .enabled(in_sketch)
         .noundo()
@@ -260,6 +268,135 @@ fn auto_constrain_finish(s: &mut Session, p: &Value) -> Result<Value> {
     s.active_sketch = None;
     s.revision += 1;
     Ok(r)
+}
+
+/// The constraint two entities (or one line) are closest to satisfying.
+fn guess(sk: &Sketch, ents: &[String], cmd: &str) -> Result<ConstraintKind> {
+    use ConstraintKind::*;
+    let ent = |r: &str| -> Result<(Option<usize>, Option<usize>)> {
+        if let Some(c) = sk.curve_index(r) {
+            return Ok((None, Some(c)));
+        }
+        sk.resolve_point(r).map(|p| (Some(p), None)).ok_or_else(|| bad(cmd, format!("unknown sketch entity `{r}`")))
+    };
+    let line_dir = |c: usize| match sk.shape(c) {
+        Some(solvecraft_sketch::Shape::Line { a, b }) => (b - a).normalized(),
+        _ => None,
+    };
+    let round = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+    match ents {
+        [a] => {
+            let (_, Some(c)) = ent(a)? else { return Err(bad(cmd, "pick a line, or two entities")) };
+            let d = line_dir(c).ok_or_else(|| bad(cmd, "a single entity must be a line"))?;
+            Ok(if d.x.abs() >= d.y.abs() { Horizontal { l: c } } else { Vertical { l: c } })
+        }
+        [a, b] => match (ent(a)?, ent(b)?) {
+            ((Some(p), _), (Some(q), _)) => Ok(Coincident { p, q }),
+            ((Some(p), _), (_, Some(c))) | ((_, Some(c)), (Some(p), _)) => {
+                // A point at a curve's centre is concentric-like: coincident with the centre.
+                if let Some(cp) = sk.curves.get(c).and_then(|cu| match cu.kind {
+                    CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
+                    _ => None,
+                }) && sk.point(cp).zip(sk.point(p)).is_some_and(|(x, y)| x.dist(y) < sk.radius(c).unwrap_or(1.0) * 0.25)
+                {
+                    return Ok(Coincident { p, q: cp });
+                }
+                Ok(PointOnCurve { p, c })
+            }
+            ((_, Some(x)), (_, Some(y))) => {
+                if let (Some(u), Some(v)) = (line_dir(x), line_dir(y)) {
+                    let cross = u.cross(v).abs();
+                    if cross < 0.2 {
+                        // Parallel; on one line → collinear.
+                        let off = match (sk.shape(x), sk.shape(y)) {
+                            (Some(solvecraft_sketch::Shape::Line { a, .. }), Some(solvecraft_sketch::Shape::Line { a: b0, .. })) => {
+                                u.cross(b0 - a).abs()
+                            }
+                            _ => f64::INFINITY,
+                        };
+                        let len = sk.polyline(x).windows(2).map(|w| w[0].dist(w[1])).sum::<f64>();
+                        return Ok(if off < len * 0.05 { Collinear { a: x, b: y } } else { Parallel { a: x, b: y } });
+                    }
+                    if u.dot(v).abs() < 0.2 {
+                        return Ok(Perpendicular { a: x, b: y });
+                    }
+                    return Ok(Equal { a: x, b: y });
+                }
+                if round(x) && round(y) {
+                    let (cx, cy) = (sk.center(x).unwrap_or_default(), sk.center(y).unwrap_or_default());
+                    let (rx, ry) = (sk.radius(x).unwrap_or(1.0), sk.radius(y).unwrap_or(1.0));
+                    if cx.dist(cy) < 0.25 * rx.min(ry) {
+                        return Ok(Concentric { a: x, b: y });
+                    }
+                    let d = cx.dist(cy);
+                    if (d - (rx + ry)).abs() < 0.15 * rx.min(ry) || (d - (rx - ry).abs()).abs() < 0.15 * rx.min(ry) {
+                        return Ok(Tangent { a: x, b: y });
+                    }
+                    return Ok(Equal { a: x, b: y });
+                }
+                Ok(Tangent { a: x, b: y })
+            }
+            _ => Err(bad(cmd, "cannot constrain that combination")),
+        },
+        _ => Err(bad(cmd, "`entities` must list one or two entities")),
+    }
+}
+
+fn smart_constrain(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "SketchConstrainer";
+    let ents = string_list(p, "entities");
+    let mut before = None;
+    let mut name = "";
+    let (id, info) = edit(s, p, cmd, true, |sk, _| {
+        let k = guess(sk, &ents, cmd)?;
+        name = k.name();
+        before = Some(dof_now(sk));
+        add_c(sk, k)
+    })?;
+    reject_redundant(before, &info, cmd)?;
+    Ok(json!({"constraint": id, "type": name, "sketch": info}))
+}
+
+fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.toggle_driven";
+    let cid = str_(p, "constraint").ok_or_else(|| bad(cmd, "`constraint` must be a dimension id"))?.to_string();
+    let want = crate::params::bool_(p, "driven");
+    let mut before = None;
+    let (driven, info) = edit(s, p, cmd, true, |sk, doc| {
+        let c = sk.constraints.iter().find(|c| c.id == cid).cloned().ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
+        let v = c.kind.value().ok_or_else(|| bad(cmd, format!("`{cid}` is not a dimension")))?;
+        let driven = want.unwrap_or(!c.driven);
+        if driven == c.driven {
+            return Ok(driven);
+        }
+        let slot = sk.constraints.iter_mut().find(|c| c.id == cid).ok_or_else(|| bad(cmd, "constraint"))?;
+        if driven {
+            slot.driven = true;
+            slot.param = None;
+        } else {
+            let (unit, e) = if c.kind.is_angle() {
+                ("deg", format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6))
+            } else {
+                ("mm", format!("{} mm", (v * 1e6).round() / 1e6))
+            };
+            slot.driven = false;
+            slot.param = Some(doc.new_model_param(&e, unit));
+            before = None;
+        }
+        Ok(driven)
+    })?;
+    if !driven {
+        // Making it driving must not over-constrain: compare with the sketch without it.
+        let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch"))?;
+        let mut sk = s.doc.sketch(id)?.clone();
+        if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == cid) {
+            c.driven = true;
+        }
+        before = Some(dof_now(&sk));
+        reject_redundant(before, &info, cmd)?;
+    }
+    s.doc_mut().prune_model_params();
+    Ok(json!({"constraint": cid, "driven": driven, "sketch": info}))
 }
 
 /// Where a constraint's glyph goes (sketch coordinates): beside the middle of its first curve,

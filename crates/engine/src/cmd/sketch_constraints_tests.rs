@@ -146,3 +146,27 @@ fn drawing_infers_tangent_and_perpendicular() {
     let names: Vec<&str> = si["constraints"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
     assert!(names.contains(&"Perpendicular") && names.contains(&"Tangent"), "{names:?} {r}");
 }
+
+#[test]
+fn smart_constrain_and_driven_toggle() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [10, 0.5]]}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "DrawPolyline", json!({"points": [[0, 5], [10, 6]]}))["curves"])[0].clone();
+    let r = run(&mut s, "SketchConstrainer", json!({"entities": [a]}));
+    assert_eq!(r["type"], "Horizontal");
+    let r = run(&mut s, "SketchConstrainer", json!({"entities": [a, b]}));
+    assert_eq!(r["type"], "Parallel");
+    let c1 = ids(&run(&mut s, "CircleCenterRadius", json!({"center": [50, 0], "radius": 5}))["curves"])[0].clone();
+    let c2 = ids(&run(&mut s, "CircleCenterRadius", json!({"center": [50.3, 0.2], "radius": 3}))["curves"])[0].clone();
+    let r = run(&mut s, "SketchConstrainer", json!({"entities": [c1, c2]}));
+    assert_eq!(r["type"], "Concentric");
+    // Driven toggle.
+    let d = run(&mut s, "SketchDimension", json!({"entities": [c1], "value": 10}));
+    let g = run(&mut s, "sketch.glyphs", json!({}));
+    let did = g["glyphs"].as_array().unwrap().iter().find(|x| x["param"] == d["param"]).unwrap()["id"].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.toggle_driven", json!({"constraint": did}));
+    assert_eq!(r["driven"], true);
+    assert!(s.doc.param(d["param"].as_str().unwrap()).is_none(), "the parameter goes");
+    let r = run(&mut s, "sketch.toggle_driven", json!({"constraint": did}));
+    assert_eq!(r["driven"], false);
+}
