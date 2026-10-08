@@ -40,6 +40,12 @@ impl FeatureKind {
             FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } | FeatureKind::Split { plane, .. } => {
                 plane_names(plane, names)
             }
+            FeatureKind::SplitFace { plane, sketch, .. } => {
+                plane_names(plane, names);
+                if let Some(s) = sketch {
+                    sk(s);
+                }
+            }
             FeatureKind::Extrude { sketch, .. }
             | FeatureKind::Revolve { sketch, .. }
             | FeatureKind::Emboss { sketch, .. }

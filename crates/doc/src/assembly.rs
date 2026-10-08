@@ -162,6 +162,13 @@ impl FeatureKind {
                     pt(&mut t.point);
                 }
             }
+            FeatureKind::SplitFace { faces, plane, tool, .. } => {
+                faces.iter_mut().for_each(pt);
+                map_plane_ref(m, plane);
+                if let Some(t) = tool {
+                    pt(&mut t.point);
+                }
+            }
             FeatureKind::Revolve { axis: AxisRef::Line { origin, dir: d }, .. } => {
                 pt(origin);
                 dir(d);

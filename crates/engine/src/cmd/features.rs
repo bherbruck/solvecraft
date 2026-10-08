@@ -33,8 +33,6 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("F")
         .params("edges: [[x,y,z] point on edge | {body, index}]; radius: expr; body?; type?: constant|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other); radius2?; start?: [x,y,z]"),
     CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
-    CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool"),
-    CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; body?"),
     CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
@@ -94,6 +92,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CONSTRUCT")
         .icon("plane")
         .params("base: XY|XZ|YZ|plane name; axis: X|Y|Z|{origin, dir}; angle: expr; name?"),
+    CommandSpec::new("solid.split_face", "Split Face", split_face)
+        .at("SOLID", "MODIFY")
+        .icon("split")
+        .params(
+            "faces: [[x,y,z] points on the faces to split]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal)",
+        ),
     CommandSpec::new("solid.split_body", "Split Body", split_body)
         .at("SOLID", "MODIFY")
         .icon("split")
@@ -833,6 +837,25 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::ConstructionPlane { plane: solvecraft_doc::PlaneRef::AtAngle { base: Box::new(base), axis_origin, axis_dir, angle } },
     )
+}
+
+fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.split_face";
+    let faces = face_points(p, cmd)?;
+    let body = str_(p, "body").map(str::to_string);
+    let xy = || solvecraft_doc::PlaneRef::Origin { name: "XY".into() };
+    let kind = if let Some(t) = p.get("tool").filter(|t| !t.is_null()) {
+        let tb = t.get("body").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`tool.body` must name a body"))?.to_string();
+        let point = t.get("point").and_then(crate::params::vec3).ok_or_else(|| bad(cmd, "`tool.point` must be [x, y, z] on the tool face"))?;
+        FeatureKind::SplitFace { faces, body, plane: xy(), tool: Some(solvecraft_doc::FaceAt { body: tb, point }), sketch: None }
+    } else if p.get("sketch").is_some_and(|v| !v.is_null()) {
+        let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
+        FeatureKind::SplitFace { faces, body, plane: xy(), tool: None, sketch: Some(sketch) }
+    } else {
+        let plane = plane_param(s, p.get("plane"), cmd)?;
+        FeatureKind::SplitFace { faces, body, plane, tool: None, sketch: None }
+    };
+    add_feature(s, p, kind)
 }
 
 fn split_body(s: &mut Session, p: &Value) -> Result<Value> {

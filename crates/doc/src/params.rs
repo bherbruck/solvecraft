@@ -34,6 +34,7 @@ impl FeatureKind {
             FeatureKind::Sketch { plane, .. }
             | FeatureKind::ConstructionPlane { plane }
             | FeatureKind::Split { plane, .. }
+            | FeatureKind::SplitFace { plane, .. }
             | FeatureKind::Mirror { plane, .. } => plane_inputs_mut(plane, &mut v),
             FeatureKind::Extrude { extent, .. } => {
                 v.push(("Distance", &mut extent.distance, L));

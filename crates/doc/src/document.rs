@@ -355,6 +355,19 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
     },
+    /// Split faces (at the given points) where a tool meets them, the solid unchanged: a plane,
+    /// a face of a body (`tool`, its surface extended) or a sketch's curves (`sketch`, swept
+    /// along its normal). The pieces are named after the face (`#k`).
+    SplitFace {
+        faces: Vec<Vec3>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+        plane: PlaneRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool: Option<FaceAt>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<u64>,
+    },
     /// Scale bodies about a point (uniform, or per axis).
     Scale {
         bodies: Vec<String>,
@@ -936,6 +949,7 @@ impl FeatureKind {
             FeatureKind::Shell { .. } => "ShellFeature",
             FeatureKind::Draft { .. } => "DraftFeature",
             FeatureKind::Split { .. } => "SplitBodyFeature",
+            FeatureKind::SplitFace { .. } => "SplitFaceFeature",
             FeatureKind::Move { .. } => "MoveFeature",
             FeatureKind::Scale { .. } => "ScaleFeature",
             FeatureKind::OffsetFace { .. } => "OffsetFacesFeature",
@@ -997,6 +1011,7 @@ impl FeatureKind {
             FeatureKind::Shell { .. } => "Shell",
             FeatureKind::Draft { .. } => "Draft",
             FeatureKind::Split { .. } => "Split",
+            FeatureKind::SplitFace { .. } => "SplitFace",
             FeatureKind::Move { .. } => "Move",
             FeatureKind::Scale { .. } => "Scale",
             FeatureKind::OffsetFace { .. } => "OffsetFace",
@@ -1042,6 +1057,7 @@ impl FeatureKind {
             | FeatureKind::Draft { faces, .. }
             | FeatureKind::OffsetFace { faces, .. }
             | FeatureKind::DeleteFace { faces, .. }
+            | FeatureKind::SplitFace { faces, .. }
             | FeatureKind::ReplaceFace { faces, .. } => faces.iter_mut().collect(),
             FeatureKind::Hole { position, points: None, to, .. } => std::iter::once(position).chain(to.iter_mut()).collect(),
             FeatureKind::Hole { to: Some(t), .. } => vec![t],
@@ -1060,9 +1076,10 @@ impl FeatureKind {
     pub fn expressions(&self) -> Vec<&str> {
         let mut v: Vec<&str> = Vec::new();
         match self {
-            FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } | FeatureKind::Split { plane, .. } => {
-                plane_exprs(plane, &mut v)
-            }
+            FeatureKind::Sketch { plane, .. }
+            | FeatureKind::ConstructionPlane { plane }
+            | FeatureKind::Split { plane, .. }
+            | FeatureKind::SplitFace { plane, .. } => plane_exprs(plane, &mut v),
             FeatureKind::Extrude { extent, .. } => {
                 v.push(&extent.distance);
                 if let Some(d) = &extent.distance2 {
@@ -1551,7 +1568,7 @@ impl Document {
                 FeatureKind::Pattern { pattern: PatternKind::Path { path_sketch, .. }, .. } if *path_sketch == id => gone.push(f.id),
                 FeatureKind::Emboss { sketch, .. } | FeatureKind::Rib { sketch, .. } if *sketch == id => gone.push(f.id),
                 FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } if *sketch == id => gone.push(f.id),
-                FeatureKind::SheetFold { sketch: Some(s), .. } if *s == id => gone.push(f.id),
+                FeatureKind::SheetFold { sketch: Some(s), .. } | FeatureKind::SplitFace { sketch: Some(s), .. } if *s == id => gone.push(f.id),
                 _ => {}
             }
         }

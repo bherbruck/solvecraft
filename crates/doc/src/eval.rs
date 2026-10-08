@@ -2414,6 +2414,46 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             apply_op(st, f, made, *operation, &[])
         }
+        FeatureKind::SplitFace { faces, body, plane, tool, sketch } => {
+            let i = body_at(st, body, faces)?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let mut picked: Vec<usize> = Vec::new();
+            for p in faces {
+                let fi = crate::appearance::face_index_at(&mb, *p)
+                    .ok_or_else(|| DocError::Invalid(format!("Split Face: no face of {} at {p:?}", mb.name)))?;
+                if !picked.contains(&fi) {
+                    picked.push(fi);
+                }
+            }
+            let nb = match (tool, sketch) {
+                (Some(t), _) => {
+                    let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
+                    let face = crate::appearance::face_index_at(tb, t.point)
+                        .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at the tool point", t.body)))?;
+                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Face { body: &tb.body, face })?
+                }
+                (None, Some(sid)) => {
+                    let ss = st.sketch(*sid).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
+                    let curves: Vec<Vec<Vec2>> = (0..ss.sketch.curves.len())
+                        .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
+                        .map(|ci| ss.sketch.polyline(ci))
+                        .filter(|pl| pl.len() >= 2)
+                        .collect();
+                    if curves.is_empty() {
+                        return Err(DocError::Invalid(format!("sketch `{}` has no curves to split with", ss.name)));
+                    }
+                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Curves { plane: ss.plane, curves })?
+                }
+                (None, None) => {
+                    let pl = doc.resolve_plane(vals, plane, 0)?;
+                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Plane(pl))?
+                }
+            };
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody::new(mb.name, nb, mb.feature);
+            }
+            Ok(())
+        }
         FeatureKind::Split { body, plane, tool } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Unknown(format!("body `{body}`"))) };
