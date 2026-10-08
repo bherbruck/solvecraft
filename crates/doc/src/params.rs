@@ -326,6 +326,18 @@ impl Document {
     }
 
     /// Change a parameter: a stored one, or a feature input by its name.
+    /// A typed length that is a bare number means the design's units: it gets that unit written
+    /// in (feature inputs are stored in mm otherwise). Anything else is returned unchanged.
+    pub fn with_design_unit(&self, e: &str, kind: Kind) -> String {
+        let u = self.units.trim();
+        let bare = expr::is_literal(e) && e.trim().trim_start_matches(['-', '+']).trim().parse::<f64>().is_ok();
+        if kind == Kind::Length && bare && !u.is_empty() && u != "mm" && expr::unit_info(u).is_some_and(|(k, _)| k == Kind::Length) {
+            format!("{} {u}", e.trim())
+        } else {
+            e.to_string()
+        }
+    }
+
     pub fn change_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {
         let hit = self.features.iter().enumerate().find_map(|(i, f)| f.param_names.iter().position(|n| n == name).map(|k| (i, k)));
         let Some((i, k)) = hit else { return self.set_param(name, expr_s, unit, comment) };
@@ -333,10 +345,12 @@ impl Document {
             return Err(DocError::Expr("expression too long".into()));
         }
         let mut next = self.clone();
+        let kind = self.features.get(i).and_then(|f| f.kind.inputs().get(k).map(|x| x.2)).unwrap_or(Kind::Unitless);
+        let expr_s = self.with_design_unit(expr_s, kind);
         if let Some(f) = next.features.get_mut(i)
             && let Some((_, e, _)) = f.kind.inputs_mut().into_iter().nth(k)
         {
-            *e = expr_s.to_string();
+            *e = expr_s.clone();
         }
         if let Some(c) = comment {
             next.param_comments.insert(name.to_string(), c.to_string());

@@ -1387,6 +1387,21 @@ fn tapped_and_clearance_holes() {
     assert!(rel(v2 - volume(&mut s), PI * 2.15 * 2.15 * 10.0) < 1e-3);
     assert!(s.execute("FusionHoleCommand", &json!({"position": [20, 25, 10], "clearance": "M7"})).is_err());
     assert!(s.execute("FusionHoleCommand", &json!({"position": [20, 25, 10]})).is_err());
+/// In an inch design, a bare length typed into a feature means inches (stored with the unit);
+/// lengths with units and angles are left alone.
+#[test]
+fn bare_lengths_take_the_design_units() {
+    let mut s = Session::default();
+    s.doc_mut().units = "in".into();
+    run(&mut s, "PrimitiveBox", json!({"length": 2, "width": "10 mm", "height": 1}));
+    let m = run(&mut s, "MeasureCommand", json!({}));
+    let max = |i: usize| m["bodies"][0]["bbox"]["max"][i].as_f64().unwrap_or(0.0);
+    assert!((max(0) - 50.8).abs() < 1e-9 && (max(1) - 10.0).abs() < 1e-9 && (max(2) - 25.4).abs() < 1e-9, "{m}");
+    let d = s.doc.features[0].param_names[2].clone();
+    run(&mut s, "ChangeParameterCommand", json!({"name": d, "expression": "2"}));
+    let m = run(&mut s, "MeasureCommand", json!({}));
+    assert!((m["bodies"][0]["bbox"]["max"][2].as_f64().unwrap_or(0.0) - 50.8).abs() < 1e-9);
+    assert_eq!(s.doc.features[0].kind.inputs()[2].1, "2 in");
 }
 
 /// Press Pull on a fillet's face changes its radius; on another curved face it offsets it.

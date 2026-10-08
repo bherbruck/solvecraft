@@ -243,6 +243,13 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
     // Commands speak world coordinates; the feature is authored in the active component.
     let mut kind = kind;
     super::component::to_active_frame(s, &mut kind);
+    // Bare lengths typed in an inch (or cm…) design mean that unit.
+    if s.doc.units.trim() != "mm" {
+        let doc = s.doc.clone();
+        for (_, e, k) in kind.inputs_mut() {
+            *e = doc.with_design_unit(e, k);
+        }
+    }
     // Blends remember where their edges sat, to find them again after upstream edits.
     let (refs, names) = match &kind {
         FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => {
