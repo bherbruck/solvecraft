@@ -411,3 +411,31 @@ fn fillet_a_line_and_an_arc() {
     let d = c.dist(Vec2::new(30.0, 0.0));
     assert!((d - 12.0).abs() < 1e-6, "{d} {c:?}");
 }
+
+#[test]
+fn offset_free_form_curves() {
+    let mut s = new_sketch();
+    let sp = ids(&run(&mut s, "DrawSpline", json!({"points": [[0, 0], [10, 8], [20, 0], [30, 6]]}))["curves"])[0].clone();
+    let r = run(&mut s, "Offset", json!({"curves": [sp], "distance": 2, "side": [10, 20]}));
+    let made = ids(&r["curves"]);
+    assert_eq!(made.len(), 1, "{r}");
+    let sk = sketch(&s);
+    let orig = sk.polyline(sk.curve_index(&sp).unwrap());
+    let off = sk.polyline(sk.curve_index(&made[0]).unwrap());
+    let dist = |q: Vec2| {
+        orig.windows(2)
+            .map(|w| {
+                let (a, b) = (w[0], w[1]);
+                let t = ((q - a).dot(b - a) / (b - a).len2()).clamp(0.0, 1.0);
+                q.dist(a + (b - a) * t)
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    for q in off.iter().step_by(4) {
+        assert!((dist(*q) - 2.0).abs() < 0.08, "{q:?} {}", dist(*q));
+    }
+    // An ellipse grows by the offset all round.
+    let e = ids(&run(&mut s, "CircleElipse", json!({"center": [100, 0], "major": [110, 0], "minor_radius": 5}))["curves"])[0].clone();
+    let r = run(&mut s, "Offset", json!({"curves": [e], "distance": 1, "side": [100, 20]}));
+    assert_eq!(ids(&r["curves"]).len(), 1, "{r}");
+}

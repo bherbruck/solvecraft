@@ -642,10 +642,7 @@ fn chamfer_dist_angle(s: &mut Session, p: &Value) -> Result<Value> {
 /// Curves of the connected chain through `start` (joined where exactly two curves meet), in
 /// order, with whether each is walked from its stored start (`a`) to its end (`b`).
 fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool) {
-    let ends = |c: usize| match sk.curves.get(c).map(|c| &c.kind) {
-        Some(CurveKind::Line { a, b }) | Some(CurveKind::Arc { a, b, .. }) => Some((*a, *b)),
-        _ => None,
-    };
+    let ends = |c: usize| sk.curves.get(c).and_then(|c| c.kind.ends());
     let Some((s0, s1)) = ends(start) else { return (vec![(start, true)], true) };
     let next = |from: usize, at: usize, used: &[usize]| -> Option<usize> {
         let users: Vec<usize> = pool.iter().copied().filter(|c| ends(*c).is_some_and(|(a, b)| a == at || b == at)).collect();
@@ -694,11 +691,13 @@ fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool
 }
 
 /// An offset piece: shape walked in chain direction, offset by `d` to the left.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Piece {
     Line(Vec2, Vec2),
     /// Centre point index, centre, radius, start point, end point (walk direction), ccw walk.
     Arc(usize, Vec2, f64, Vec2, Vec2, bool),
+    /// A free-form curve's offset, sampled in walk direction (made into a fit spline).
+    Free(Vec<Vec2>),
 }
 
 fn offset_piece(sk: &Sketch, c: usize, forward: bool, d: f64) -> Option<Piece> {
@@ -723,14 +722,46 @@ fn offset_piece(sk: &Sketch, c: usize, forward: bool, d: f64) -> Option<Piece> {
             let (s, e) = if forward { (at(pa), at(pb)) } else { (at(pb), at(pa)) };
             Some(Piece::Arc(ci, cc, nr, s, e, forward))
         }
-        _ => None,
+        CurveKind::Circle { .. } => None,
+        // Free-form: offset the curve's samples along their normals.
+        _ => {
+            let mut poly = sk.polyline(c);
+            if !forward {
+                poly.reverse();
+            }
+            let n = poly.len();
+            let pts: Vec<Vec2> = (0..n)
+                .filter_map(|i| {
+                    let (a, b) = (poly.get(i.saturating_sub(1))?, poly.get((i + 1).min(n - 1))?);
+                    let t = (*b - *a).normalized()?;
+                    Some(*poly.get(i)? + t.perp() * d)
+                })
+                .collect();
+            (pts.len() >= 2).then_some(Piece::Free(pts))
+        }
     }
 }
 
 fn piece_shape(p: &Piece) -> Shape {
-    match *p {
-        Piece::Line(a, b) => Shape::Line { a, b },
-        Piece::Arc(_, c, r, ..) => Shape::Round { c, r, start: 0.0, sweep: TAU },
+    match p {
+        Piece::Line(a, b) => Shape::Line { a: *a, b: *b },
+        Piece::Arc(_, c, r, ..) => Shape::Round { c: *c, r: *r, start: 0.0, sweep: TAU },
+        Piece::Free(v) => Shape::Line { a: v.first().copied().unwrap_or_default(), b: v.last().copied().unwrap_or_default() },
+    }
+}
+
+/// Distance from `q` to an offset piece.
+fn piece_dist(p: &Piece, q: Vec2) -> f64 {
+    match p {
+        Piece::Free(v) => v
+            .windows(2)
+            .map(|w| {
+                let (a, b) = (w[0], w[1]);
+                let t = if (b - a).len2() > 0.0 { ((q - a).dot(b - a) / (b - a).len2()).clamp(0.0, 1.0) } else { 0.0 };
+                q.dist(a + (b - a) * t)
+            })
+            .fold(f64::INFINITY, f64::min),
+        _ => piece_shape(p).dist(q),
     }
 }
 
@@ -776,7 +807,7 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
             Some(q) => {
                 let dist = |dd: f64| {
                     offset_piece(sk, first, order.iter().find(|x| x.0 == first).is_none_or(|x| x.1), dd)
-                        .map(|pc| piece_shape(&pc).dist(q))
+                        .map(|pc| piece_dist(&pc, q))
                         .unwrap_or(f64::MAX)
                 };
                 if dist(d0.abs()) <= dist(-d0.abs()) { d0.abs() } else { -d0.abs() }
@@ -786,13 +817,15 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         let pieces: Vec<Piece> =
             order.iter().map(|(c, f)| offset_piece(sk, *c, *f, d)).collect::<Option<_>>().ok_or_else(|| bad(cmd, "the offset collapses an arc"))?;
         let n = pieces.len();
-        let start_of = |p: &Piece| match *p {
-            Piece::Line(a, _) => a,
-            Piece::Arc(_, _, _, s, _, _) => s,
+        let start_of = |p: &Piece| match p {
+            Piece::Line(a, _) => *a,
+            Piece::Arc(_, _, _, s, _, _) => *s,
+            Piece::Free(v) => v.first().copied().unwrap_or_default(),
         };
-        let end_of = |p: &Piece| match *p {
-            Piece::Line(_, b) => b,
-            Piece::Arc(_, _, _, _, e, _) => e,
+        let end_of = |p: &Piece| match p {
+            Piece::Line(_, b) => *b,
+            Piece::Arc(_, _, _, _, e, _) => *e,
+            Piece::Free(v) => v.last().copied().unwrap_or_default(),
         };
         // Junction points between consecutive pieces.
         let joint = |x: &Piece, y: &Piece| -> Vec2 {
@@ -801,6 +834,9 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
                 return e;
             }
             let guess = (e + s0) * 0.5;
+            if matches!(x, Piece::Free(_)) || matches!(y, Piece::Free(_)) {
+                return guess;
+            }
             intersections(&piece_shape(x), &piece_shape(y)).into_iter().min_by(|a, b| a.dist(guess).total_cmp(&b.dist(guess))).unwrap_or(guess)
         };
         let mut joints: Vec<Vec2> = Vec::new();
@@ -815,7 +851,22 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         for (k, pc) in pieces.iter().enumerate() {
             let (pa, pb) = (pts[k], if closed { pts[(k + 1) % n] } else { pts[k + 1] });
             let (orig, _) = order[k];
-            match *pc {
+            match pc.clone() {
+                Piece::Free(v) => {
+                    // A fit spline through a few of the samples, ending at the joints.
+                    let step = (v.len() / 24).max(1);
+                    let mut idx = vec![pa];
+                    for q in v.iter().skip(step).step_by(step) {
+                        if q.dist(*v.last().unwrap_or(q)) > 1e-6 {
+                            idx.push(sk.add_point(*q, None)?);
+                        }
+                    }
+                    idx.push(pb);
+                    idx.dedup();
+                    if idx.len() >= 2 {
+                        made.push(sk.add_curve(CurveKind::Spline { pts: idx, control: false, degree: 3 }, None)?);
+                    }
+                }
                 Piece::Line(..) => {
                     let l = sk.add_line_pts(pa, pb, None)?;
                     cons.push(add_c(sk, ConstraintKind::Parallel { a: orig, b: l })?);
