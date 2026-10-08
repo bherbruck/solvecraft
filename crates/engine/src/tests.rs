@@ -1041,6 +1041,23 @@ fn iges_export_and_open() {
     assert_eq!(st.bodies[1].body.color(), Some([1.0, 0.0, 0.0]));
 }
 
+/// Split Body by a face of another body (its surface extended): a box cut by a cylinder's
+/// side into the core and the rest; volumes add up exactly.
+#[test]
+fn split_body_by_a_face() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"}));
+    run(&mut s, "PrimitiveCylinder", json!({"radius": 4, "height": 40, "base": [5, 10, -5], "body_name": "Tool"}));
+    run(&mut s, "FusionSplitBodyCommand", json!({"body": "Block", "tool": {"body": "Tool", "point": [9, 10, 10]}}));
+    let st = s.world_state();
+    let mut v: Vec<f64> =
+        st.bodies.iter().filter(|b| b.name.starts_with("Block")).map(|b| solvecraft_kernel::measure(&b.body).unwrap().volume).collect();
+    v.sort_by(f64::total_cmp);
+    let core = PI * 16.0 * 30.0;
+    assert!(v.len() == 2 && rel(v[0], core) < 1e-3 && rel(v[1], 6000.0 - core) < 1e-3, "{v:?}");
+    assert!(s.execute("FusionSplitBodyCommand", &json!({"body": "Block", "tool": {"body": "Tool", "point": [100, 0, 0]}})).is_err());
+}
+
 /// Components export as a STEP assembly: products, occurrences, placements.
 #[test]
 fn components_export_as_step_assembly() {

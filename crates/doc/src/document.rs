@@ -312,10 +312,13 @@ pub enum FeatureKind {
     ConstructionPlane {
         plane: PlaneRef,
     },
-    /// Split a body with a plane into two bodies.
+    /// Split a body into the parts on either side of a plane, or of a face of a body (the face
+    /// through `point`, its surface extended) when `tool` is set.
     Split {
         body: String,
         plane: PlaneRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool: Option<FaceAt>,
     },
     /// Scale bodies about a point (uniform, or per axis).
     Scale {
@@ -628,6 +631,13 @@ pub enum FeatureKind {
         file: String,
         meshes: Vec<MeshData>,
     },
+}
+
+/// A face picked by a point on it, on a named body.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FaceAt {
+    pub body: String,
+    pub point: Vec3,
 }
 
 /// Triangles of one imported mesh body (millimetres).

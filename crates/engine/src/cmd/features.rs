@@ -88,7 +88,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CONSTRUCT")
         .icon("plane")
         .params("base: XY|XZ|YZ|plane name; axis: X|Y|Z|{origin, dir}; angle: expr; name?"),
-    CommandSpec::new("FusionSplitBodyCommand", "Split Body", split_body).at("SOLID", "MODIFY").icon("split").params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal}"),
+    CommandSpec::new("FusionSplitBodyCommand", "Split Body", split_body)
+        .at("SOLID", "MODIFY")
+        .icon("split")
+        .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended)"),
     CommandSpec::new("FusionPressPullCommand", "Press Pull", press_pull)
         .at("SOLID", "MODIFY")
         .icon("presspull")
@@ -771,8 +774,27 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
+    // A face as the tool: `tool: {body, point}` (its surface extended); else a plane.
+    if let Some(t) = p.get("tool").filter(|t| !t.is_null()) {
+        let tb = t.get("body").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`tool.body` must name a body"))?.to_string();
+        let point = t.get("point").and_then(crate::params::vec3).ok_or_else(|| bad(cmd, "`tool.point` must be [x, y, z] on the tool face"))?;
+        let st = s.model.state();
+        let tbody = st.body(&tb).ok_or_else(|| bad(cmd, format!("no body `{tb}`")))?;
+        if solvecraft_doc::appearance::face_index_at(tbody, point).is_none() {
+            return Err(bad(cmd, "`tool.point` is not on a face of the tool body"));
+        }
+        return add_feature(
+            s,
+            p,
+            FeatureKind::Split {
+                body,
+                plane: solvecraft_doc::PlaneRef::Origin { name: "XY".into() },
+                tool: Some(solvecraft_doc::FaceAt { body: tb, point }),
+            },
+        );
+    }
     let plane = plane_param(s, p.get("plane"), cmd)?;
-    add_feature(s, p, FeatureKind::Split { body, plane })
+    add_feature(s, p, FeatureKind::Split { body, plane, tool: None })
 }
 
 /// ISO 273 clearance hole diameters (close, normal, loose fit) for metric bolts.

@@ -2625,7 +2625,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Split { body, plane } => {
+        FeatureKind::Split { body, plane, .. } => {
             let mut d = start("FusionSplitBodyCommand")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.clone() }];

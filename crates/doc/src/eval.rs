@@ -2016,13 +2016,24 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             doc.resolve_plane(vals, plane, 0)?;
             Ok(())
         }
-        FeatureKind::Split { body, plane } => {
-            let pl = doc.resolve_plane(vals, plane, 0)?;
+        FeatureKind::Split { body, plane, tool } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Unknown(format!("body `{body}`"))) };
-            let parts = kernel::split_by_plane(&mb.body, &pl)?;
+            let parts = match tool {
+                // A face of a body (its surface extended).
+                Some(t) => {
+                    let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
+                    let face = crate::appearance::face_index_at(tb, t.point)
+                        .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at the tool point", t.body)))?;
+                    kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?
+                }
+                None => {
+                    let pl = doc.resolve_plane(vals, plane, 0)?;
+                    kernel::split_by_plane(&mb.body, &pl)?
+                }
+            };
             if parts.len() < 2 {
-                return Err(DocError::Invalid("the plane does not split the body".into()));
+                return Err(DocError::Invalid("the tool does not split the body".into()));
             }
             let mut it = parts.into_iter();
             if let (Some(first), Some(slot)) = (it.next(), st.bodies.get_mut(i)) {
