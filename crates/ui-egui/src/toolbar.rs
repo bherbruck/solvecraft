@@ -2,7 +2,6 @@
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
-use solvecraft_engine::command_specs;
 
 use crate::theme::Tokens;
 use crate::{SolveApp, icons};
@@ -10,7 +9,7 @@ use crate::{SolveApp, icons};
 pub const TABS: &[&str] = &["SOLID", "SURFACE", "MESH", "SHEET METAL", "PLASTIC", "UTILITIES"];
 
 /// Panels shown on each tab (in order). Commands come from the registry by (tab, panel).
-fn panels(tab: &str) -> &'static [&'static str] {
+pub fn panels(tab: &str) -> &'static [&'static str] {
     if let Some(p) = crate::workspace::panels(tab) {
         return p;
     }
@@ -26,7 +25,7 @@ fn panels(tab: &str) -> &'static [&'static str] {
 }
 
 /// How many commands of a panel get a big button.
-fn promoted(tab: &str, panel: &str) -> usize {
+pub fn promoted(tab: &str, panel: &str) -> usize {
     match (tab, panel) {
         ("SOLID", "CREATE") => 4,
         ("SOLID", "MODIFY") => 4,
@@ -253,13 +252,25 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let painter = ui.painter().clone();
         // Workspace selector and tabs.
         let tabs_y = r.top() + 2.0;
-        let ws = Rect::from_min_size(pos2(r.left() + 8.0, tabs_y + 26.0), vec2(96.0, 56.0));
-        painter.rect(ws, 4.0, t.field, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        // The workspace switcher spans the toolbar's height (the tab row and the panel row).
+        let ws = Rect::from_min_max(pos2(r.left() + 6.0, r.top() + 4.0), pos2(r.left() + 104.0, r.bottom() - 5.0));
+        let wresp = ui.interact(ws, ui.id().with("workspace_switcher"), Sense::click());
+        painter.rect(ws, 4.0, if wresp.hovered() { t.hover } else { t.field }, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        icons::paint(&painter, Rect::from_center_size(pos2(ws.center().x, ws.top() + 24.0), vec2(26.0, 26.0)), "box", t.icon, t.icon_fill, t.accent);
+        painter.text(
+            pos2(ws.center().x - 5.0, ws.top() + 52.0),
+            Align2::CENTER_CENTER,
+            crate::toolbar_custom::WORKSPACE,
+            FontId::proportional(12.0),
+            t.text,
+        );
+        caret(&painter, pos2(ws.center().x + 27.0, ws.top() + 52.0), t.text);
+        painter.text(pos2(ws.center().x, ws.top() + 69.0), Align2::CENTER_CENTER, "workspace", FontId::proportional(10.0), t.text_dim);
+        if wresp.on_hover_text("Change workspace").clicked() {
+            crate::context_menu::open_for(app, ws.left_bottom(), crate::context_menu::Target::Workspace);
+        }
         crate::scenario::publish_rect("toolbar", r);
         crate::scenario::publish_rect("workspace_switcher", ws);
-        painter.text(pos2(ws.center().x - 5.0, ws.top() + 14.0), Align2::CENTER_CENTER, "DESIGN", FontId::proportional(12.0), t.text);
-        caret(&painter, pos2(ws.center().x + 26.0, ws.top() + 14.0), t.text);
-        painter.text(pos2(ws.center().x, ws.top() + 34.0), Align2::CENTER_CENTER, "workspace", FontId::proportional(10.0), t.text_dim);
         let mut x = r.left() + 112.0;
         let mut tabs: Vec<&str> = Vec::new();
         if sketching {
@@ -293,23 +304,50 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // Panels.
         let tab = app.ui.tab.clone();
-        let specs = command_specs();
         let mut px = r.left() + 112.0;
         let top = r.top() + 26.0;
-        for panel in panels(&tab) {
-            let (cmds, promote) = match crate::workspace::layout(&tab, panel, &specs) {
-                Some(l) => l,
-                None => (specs.iter().filter(|c| c.tab == tab && c.panel == *panel).copied().collect(), promoted(&tab, panel)),
-            };
-            let cmds = crate::sketch_tools::also_in(&tab, panel, cmds, &specs);
-            let n = promote.min(cmds.len()).max(if cmds.is_empty() { 1 } else { 0 });
+        let mut drop: Option<(&'static str, &'static str, Option<&'static str>)> = None;
+        let mut menu: Option<(egui::Pos2, &'static str)> = None;
+        for (panel, cmds, promote) in crate::toolbar_custom::panel_lists(&tab) {
+            let panel: &&str = &panel;
+            let shown = crate::toolbar_custom::buttons(app, &tab, panel, &cmds, promote);
+            let n = shown.len().max(1);
             let width = (n as f32 * 40.0).max(64.0) + 8.0;
             let enabled_panel = !cmds.is_empty() || *panel == "SELECT";
-            for (i, c) in cmds.iter().take(n).enumerate() {
+            // Dropped on the panel's free space: the button goes to its end.
+            let free = Rect::from_min_size(
+                pos2(px + 4.0 + shown.len() as f32 * 40.0, top + 2.0),
+                vec2((width - 8.0 - shown.len() as f32 * 40.0).max(8.0), 38.0),
+            );
+            let fresp = ui.interact(free, ui.id().with(("panel_free", panel)), Sense::hover());
+            if fresp.dnd_hover_payload::<ToolbarDrag>().is_some() {
+                painter.line_segment([pos2(free.left(), free.top() + 2.0), pos2(free.left(), free.bottom() - 2.0)], Stroke::new(2.0, t.accent));
+            }
+            if let Some(d) = fresp.dnd_release_payload::<ToolbarDrag>() {
+                drop = Some((d.0, *panel, None));
+            }
+            for (i, c) in shown.iter().enumerate() {
                 let br = Rect::from_min_size(pos2(px + 4.0 + i as f32 * 40.0, top + 2.0), vec2(38.0, 38.0));
                 let info = c.info(&app.session);
-                let resp = ui.interact(br, ui.id().with(("cmd", c.id)), Sense::click());
+                let resp = ui.interact(br, ui.id().with(("cmd", c.id)), Sense::click_and_drag());
                 crate::scenario::publish_handle(&format!("toolbar:{}", c.id), br.center());
+                if resp.drag_started() {
+                    resp.dnd_set_drag_payload(ToolbarDrag(c.id));
+                }
+                if let Some(d) = resp.dnd_hover_payload::<ToolbarDrag>()
+                    && d.0 != c.id
+                {
+                    painter
+                        .line_segment([pos2(br.left() - 1.0, br.top() + 2.0), pos2(br.left() - 1.0, br.bottom() - 2.0)], Stroke::new(2.0, t.accent));
+                }
+                if let Some(d) = resp.dnd_release_payload::<ToolbarDrag>()
+                    && d.0 != c.id
+                {
+                    drop = Some((d.0, *panel, Some(c.id)));
+                }
+                if resp.secondary_clicked() {
+                    menu = Some((resp.interact_pointer_pos().unwrap_or(br.left_bottom()), c.id));
+                }
                 if resp.hovered() && info.enabled {
                     painter.rect_filled(br, 4.0, t.hover);
                 }
@@ -329,7 +367,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.start(id);
                 }
             }
-            if cmds.is_empty() {
+            if shown.is_empty() {
                 let br = Rect::from_min_size(pos2(px + 4.0, top + 2.0), vec2(width - 8.0, 38.0));
                 painter.text(br.center(), Align2::CENTER_CENTER, "—", FontId::proportional(14.0), t.border);
             }
@@ -375,6 +413,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 icons::paint(ui.painter(), ir, c.icon, t.icon, t.icon_fill, t.accent);
                                 let b = ui.add_enabled(info.enabled, egui::Button::new(c.label).frame(false).shortcut_text(c.shortcut.unwrap_or("")));
                                 crate::scenario::publish_handle(&format!("toolbar:{}", c.id), b.rect.center());
+                                if b.secondary_clicked() {
+                                    menu = Some((b.interact_pointer_pos().unwrap_or(b.rect.left_bottom()), c.id));
+                                }
                                 if b.clicked() {
                                     let id = c.id;
                                     app.start(id);
@@ -393,8 +434,19 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             px += 2.0;
         }
         painter.line_segment([pos2(r.left(), r.bottom() - 0.5), pos2(r.right(), r.bottom() - 0.5)], Stroke::new(1.0, t.border));
+        if let Some((id, panel, before)) = drop {
+            crate::toolbar_custom::reorder(app, &tab, id, panel, before);
+        }
+        if let Some((at, id)) = menu {
+            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
+            crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
+        }
     });
 }
+
+/// A toolbar button being dragged (its command id).
+#[derive(Clone, Copy, Debug)]
+struct ToolbarDrag(&'static str);
 
 /// The SELECT panel: what a click in the view picks.
 fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {

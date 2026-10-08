@@ -59,6 +59,7 @@ pub mod theme;
 pub mod timeline;
 pub mod titlebar;
 pub mod toolbar;
+pub mod toolbar_custom;
 pub mod tools;
 pub mod viewport;
 pub mod workspace;
@@ -181,6 +182,8 @@ pub struct SolveApp {
     pub keymap: keymap::Keymap,
     /// The Help menu and the About window.
     pub help: help::HelpState,
+    /// Toolbar buttons the user pinned, removed or reordered.
+    pub toolbar_custom: toolbar_custom::ToolbarCustom,
     /// Preferences kept between runs, and their window.
     pub preferences: prefs::Prefs,
     pub prefs_window: prefs::PrefsWindow,
@@ -244,6 +247,7 @@ impl SolveApp {
             sbox: shortcut_box::ShortcutBox::default(),
             keymap: keymap::Keymap::default(),
             help: help::HelpState::default(),
+            toolbar_custom: toolbar_custom::ToolbarCustom::default(),
             preferences: prefs::Prefs::default(),
             prefs_window: prefs::PrefsWindow::default(),
             preview: preview::PreviewState::default(),
@@ -295,6 +299,7 @@ impl SolveApp {
             "recent": self.home.recent,
             "shortcut_box": self.sbox.prefs(),
             "shortcuts": self.keymap.prefs(),
+            "toolbar": self.toolbar_custom.prefs(),
             "autosave_minutes": self.autosave_minutes,
             "ground_shadow": self.ui.ground_shadow,
             "agent_cursor": self.ui.agent_cursor,
@@ -347,6 +352,9 @@ impl SolveApp {
         }
         if let Some(s) = v.get("shortcuts") {
             self.keymap.load(s);
+        }
+        if let Some(t) = v.get("toolbar") {
+            self.toolbar_custom.load(t);
         }
         if let Some(p) = v.get("preferences").and_then(|p| serde_json::from_value::<prefs::Prefs>(p.clone()).ok()) {
             self.preferences = p;

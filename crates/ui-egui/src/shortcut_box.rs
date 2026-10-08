@@ -152,6 +152,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let mut picked: Option<&'static str> = None;
     let mut pin: Option<&'static str> = None;
+    let mut menu: Option<(Pos2, &'static str)> = None;
     let h = 380.0;
     let pos = pos2(
         at.x.clamp(screen.left() + 4.0, (screen.right() - W - 4.0).max(screen.left())),
@@ -237,12 +238,20 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     } else if resp.clicked() && enabled {
                         picked = Some(id);
                     }
+                    if resp.secondary_clicked() {
+                        menu = Some((resp.interact_pointer_pos().unwrap_or(r.left_bottom()), id));
+                    }
                 }
             });
         });
     });
     if let Some(id) = pin {
         app.sbox.toggle_pin(id);
+    }
+    // A row's menu: pin to the toolbar or the shortcuts.
+    if let Some((at, id)) = menu {
+        crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
+        return;
     }
     if enter
         && picked.is_none()

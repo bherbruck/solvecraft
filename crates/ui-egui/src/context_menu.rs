@@ -46,6 +46,12 @@ pub enum Target {
     Joint {
         id: u64,
     },
+    /// A command (toolbar button, panel drop-down row, S box row).
+    ToolbarCommand {
+        id: String,
+    },
+    /// The workspace switcher.
+    Workspace,
     /// The Named Views folder, and one view (saved or standard) in it.
     NamedViews,
     NamedView {
@@ -228,6 +234,8 @@ pub fn target_bodies(app: &SolveApp, target: &Target) -> Vec<String> {
         | Target::Origin
         | Target::Units
         | Target::Joint { .. }
+        | Target::ToolbarCommand { .. }
+        | Target::Workspace
         | Target::NamedViews
         | Target::NamedView { .. } => Vec::new(),
     }
@@ -290,11 +298,19 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::Joint { id } => joint_items(app, *id),
+        Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
+        Target::Workspace => {
+            let mut v = vec![act("ui.workspace", "Design", "box").key("current")];
+            for w in ["Generative Design", "Render", "Animation", "Simulation", "Manufacture", "Drawing"] {
+                v.push(act("ui.workspace", w, "").key("coming later").on(false));
+            }
+            v
+        }
         Target::Units => crate::prefs::UNITS
             .iter()
             .map(|u| {
-                let label = if app.session.doc.units == *u { format!("{u}  ✓") } else { (*u).to_string() };
-                cmd(app, "document.units", &label).with(json!({ "units": u }))
+                let item = cmd(app, "document.units", u).with(json!({ "units": u }));
+                if app.session.doc.units == *u { item.key("current") } else { item }
             })
             .collect(),
         Target::NamedView { name } => crate::browser::view_items(app, name),
@@ -773,6 +789,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
+        "ui.toolbarPin" | "ui.toolbarRemove" | "ui.toolbarReset" | "ui.shortcutPin" => crate::toolbar_custom::run(app, &item.id, &p),
+        "ui.workspace" => {}
         "ui.editJoint" | "ui.driveJoint" => {
             if let Some(id) = id_of(&p, "joint") {
                 let d = if item.id == "ui.editJoint" {

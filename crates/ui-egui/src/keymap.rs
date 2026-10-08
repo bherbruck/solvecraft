@@ -150,6 +150,12 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if !app.keymap.read_only && ui.button("Reset All").clicked() {
                     action = Some((String::new(), "reset_all"));
                 }
+                if ui.button("Export…").on_hover_text("Keys, S box favourites and the toolbar, as a file").clicked() {
+                    action = Some((String::new(), "export"));
+                }
+                if !app.keymap.read_only && ui.button("Import…").clicked() {
+                    action = Some((String::new(), "import"));
+                }
             });
             if let Some(m) = &app.keymap.message {
                 ui.label(RichText::new(m).color(t.warning));
@@ -216,6 +222,21 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         Some((id, "clear")) => drop(bind(app, &id, "", false)),
         Some((id, "reset")) => reset(app, Some(&id)),
         Some((_, "reset_all")) => reset(app, None),
+        Some((_, "export")) => {
+            let text = crate::toolbar_custom::export(app).to_string();
+            if let Some(path) = app.services.pick_save.as_ref().and_then(|f| f("SolveCraft shortcuts.json", &["json"])) {
+                app.keymap.message = std::fs::write(&path, text).err().map(|e| format!("export: {e}"));
+            }
+        }
+        Some((_, "import")) => {
+            if let Some(path) = app.services.pick_open.as_ref().and_then(|f| f()) {
+                let r = std::fs::read_to_string(&path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|t| serde_json::from_str::<Value>(&t).map_err(|e| e.to_string()))
+                    .and_then(|v| crate::toolbar_custom::import(app, &v));
+                app.keymap.message = r.err().map(|e| format!("import: {e}"));
+            }
+        }
         Some((pair, "replace")) => {
             if let Some((id, key)) = pair.split_once('\n') {
                 let _ = bind(app, id, key, true);

@@ -479,3 +479,52 @@ fn occurrence_moves_turn_about_their_origin_then_move() {
     crate::browser::apply_occurrence_move(&mut app, &m);
     assert_eq!(*app.session.pending_moves.get(&occ).unwrap(), solvecraft_engine::doc::IDENTITY);
 }
+
+#[test]
+fn toolbar_pins_removes_reorders_and_keeps_its_layout() {
+    use crate::toolbar_custom as tc;
+    let mut app = sample_app();
+    app.ui.tab = "SOLID".into();
+    let ids = |app: &SolveApp, panel: &str| -> Vec<&'static str> {
+        let lists = tc::panel_lists("SOLID");
+        let (_, cmds, n) = lists.iter().find(|(p, ..)| *p == panel).unwrap();
+        tc::buttons(app, "SOLID", panel, cmds, *n).iter().map(|c| c.id).collect()
+    };
+    let create = ids(&app, "CREATE");
+    // Pin a command that isn't a button yet: it lands at the end of its panel.
+    let extra =
+        tc::panel_lists("SOLID").iter().find(|(p, ..)| *p == "CREATE").unwrap().1.iter().map(|c| c.id).find(|id| !create.contains(id)).unwrap();
+    act(&mut app, &Target::ToolbarCommand { id: extra.into() }, "Pin to Toolbar");
+    assert_eq!(ids(&app, "CREATE").last(), Some(&extra));
+    // Remove a default button.
+    act(&mut app, &Target::ToolbarCommand { id: create[0].into() }, "Remove from Toolbar");
+    assert!(!ids(&app, "CREATE").contains(&create[0]));
+    // Reorder: the pinned one before the second default; then into another panel.
+    tc::reorder(&mut app, "SOLID", extra, "CREATE", Some(create[1]));
+    assert_eq!(ids(&app, "CREATE")[0], extra);
+    tc::reorder(&mut app, "SOLID", extra, "MODIFY", None);
+    assert!(!ids(&app, "CREATE").contains(&extra) && ids(&app, "MODIFY").last() == Some(&extra));
+    // Pin to Shortcuts goes to the S box's favourites.
+    act(&mut app, &Target::ToolbarCommand { id: "Extrude".into() }, "Pin to Shortcuts");
+    assert!(app.sbox.pinned.iter().any(|p| p == "Extrude"));
+    // Kept between runs, and exported and imported with the shortcuts.
+    let mut other = sample_app();
+    other.load_prefs(&app.prefs());
+    assert_eq!(other.toolbar_custom, app.toolbar_custom);
+    let file = tc::export(&app);
+    let mut third = sample_app();
+    tc::import(&mut third, &file).unwrap();
+    assert_eq!(third.toolbar_custom, app.toolbar_custom);
+    assert!(tc::import(&mut third, &json!({"format": "nope"})).is_err());
+    // Reset Toolbar puts the tab back.
+    act(&mut app, &Target::ToolbarCommand { id: extra.into() }, "Reset Toolbar");
+    assert_eq!(ids(&app, "CREATE"), create);
+}
+
+#[test]
+fn the_workspace_menu_lists_design_and_greys_the_rest() {
+    let app = sample_app();
+    let items = context_menu::items(&app, &Target::Workspace);
+    assert!(find(&items, "Design").enabled);
+    assert!(!find(&items, "Render").enabled && find(&items, "Render").shortcut == "coming later");
+}
