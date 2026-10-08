@@ -132,6 +132,63 @@ impl Seg2 {
             Seg2::Cubic { .. } | Seg2::Conic { .. } => self.integrate(|s, t| s.derivative(t).len()),
         }
     }
+    /// The segment split at parameter `t` in (0, 1) (same kind, exact; conic halves are
+    /// re-normalised so their end weights stay 1).
+    pub fn split_at(&self, t: f64) -> (Seg2, Seg2) {
+        let t = t.clamp(1e-9, 1.0 - 1e-9);
+        match *self {
+            Seg2::Line { a, b } => {
+                let m = a.lerp(b, t);
+                (Seg2::Line { a, b: m }, Seg2::Line { a: m, b })
+            }
+            Seg2::Arc { center, radius, start, sweep } => (
+                Seg2::Arc { center, radius, start, sweep: sweep * t },
+                Seg2::Arc { center, radius, start: start + sweep * t, sweep: sweep * (1.0 - t) },
+            ),
+            Seg2::Cubic { p0, p1, p2, p3 } => {
+                let (a, b, c) = (p0.lerp(p1, t), p1.lerp(p2, t), p2.lerp(p3, t));
+                let (d, e) = (a.lerp(b, t), b.lerp(c, t));
+                let m = d.lerp(e, t);
+                (Seg2::Cubic { p0, p1: a, p2: d, p3: m }, Seg2::Cubic { p0: m, p1: e, p2: c, p3 })
+            }
+            Seg2::Conic { a, apex, b, w } => {
+                // Homogeneous de Casteljau: (a, 1), (w·apex, w), (b, 1).
+                let h = |p: Vec2, wt: f64| (p * wt, wt);
+                let lerp = |x: (Vec2, f64), y: (Vec2, f64)| (x.0 * (1.0 - t) + y.0 * t, x.1 * (1.0 - t) + y.1 * t);
+                let (p0, p1, p2) = (h(a, 1.0), h(apex, w), h(b, 1.0));
+                let (q0, q1) = (lerp(p0, p1), lerp(p1, p2));
+                let r = lerp(q0, q1);
+                let pt = |x: (Vec2, f64)| x.0 / x.1.max(1e-300);
+                let m = pt(r);
+                (
+                    Seg2::Conic { a, apex: pt(q0), b: m, w: q0.1 / r.1.max(1e-300).sqrt() },
+                    Seg2::Conic { a: m, apex: pt(q1), b, w: q1.1 / r.1.max(1e-300).sqrt() },
+                )
+            }
+        }
+    }
+    /// Parameter of the point of the segment closest to `p` (sampling, then Newton).
+    pub fn closest_param(&self, p: Vec2) -> f64 {
+        let n = 64;
+        let mut t =
+            (0..=n).map(|i| i as f64 / n as f64).min_by(|x, y| self.point_at(*x).dist(p).total_cmp(&self.point_at(*y).dist(p))).unwrap_or(0.0);
+        for _ in 0..30 {
+            let (q, d) = (self.point_at(t), self.derivative(t));
+            let (d2, h) = ((self.derivative((t + 1e-6).min(1.0)) - self.derivative((t - 1e-6).max(0.0))) / 2e-6, q - p);
+            let f = h.dot(d);
+            let df = d.dot(d) + h.dot(d2);
+            if df.abs() < 1e-300 {
+                break;
+            }
+            let nt = (t - f / df).clamp(0.0, 1.0);
+            if (nt - t).abs() < 1e-14 {
+                t = nt;
+                break;
+            }
+            t = nt;
+        }
+        t
+    }
     /// The two halves of the segment (same kind, exact).
     pub fn split_half(&self) -> (Seg2, Seg2) {
         match *self {

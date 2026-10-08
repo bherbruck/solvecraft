@@ -20,6 +20,7 @@ mod parameters;
 mod sketch;
 mod sketch_constraints;
 mod sketch_create;
+mod sketch_freeform;
 mod sketch_import;
 mod sketch_modify;
 mod sketch_project;

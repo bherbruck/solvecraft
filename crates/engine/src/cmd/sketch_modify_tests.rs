@@ -342,3 +342,43 @@ fn free_form_profiles_extrude_exactly() {
     let m = run(&mut s, "MeasureCommand", json!({}));
     assert!(m["bodies"][0]["faces"].as_u64().unwrap() <= 5, "{m}");
 }
+
+#[test]
+fn trim_and_break_free_form_curves_exactly() {
+    let pi = std::f64::consts::PI;
+    let mut s = new_sketch();
+    // An ellipse cut by a line through its centre: trimming the lower half leaves the upper
+    // half, which closes with the line into half the ellipse.
+    let e = ids(&run(&mut s, "CircleElipse", json!({"center": [0, 0], "major": [10, 0], "minor_radius": 4}))["curves"])[0].clone();
+    let l = ids(&run(&mut s, "DrawPolyline", json!({"points": [[-15, 0], [15, 0]]}))["curves"])[0].clone();
+    let r = run(&mut s, "TrimSketchCmd", json!({"curve": e, "at": [0, -4]}));
+    assert!(!r["result"]["pieces"].as_array().unwrap().is_empty(), "{r}");
+    let a = profiles(&s);
+    assert_eq!(a.len(), 1, "{a:?}");
+    assert!((a[0] - pi * 20.0).abs() < 1e-6, "{a:?}");
+    let _ = l;
+    // A fit spline broken where a line crosses it: two pieces that still trace the curve.
+    let mut s = new_sketch();
+    let sp = ids(&run(&mut s, "DrawSpline", json!({"points": [[0, 0], [10, 10], [20, 0], [30, 5]]}))["curves"])[0].clone();
+    let before = sketch(&s).polyline(sketch(&s).curve_index(&sp).unwrap());
+    run(&mut s, "DrawPolyline", json!({"points": [[15, -10], [15, 20]]}));
+    let r = run(&mut s, "BreakSketchCmd", json!({"curve": sp, "at": [15, 5]}));
+    let pieces = ids(&r["curves"]);
+    assert_eq!(pieces.len(), 4, "three Béziers, the middle one split: {r}");
+    let sk = sketch(&s);
+    // Every original sample lies on one of the pieces.
+    let polys: Vec<Vec<Vec2>> = pieces.iter().map(|id| sk.polyline(sk.curve_index(id).unwrap())).collect();
+    for q in before.iter().step_by(5) {
+        let d = polys
+            .iter()
+            .flat_map(|p| {
+                p.windows(2).map(|w| {
+                    let (a, b) = (w[0], w[1]);
+                    let t = ((*q - a).dot(b - a) / (b - a).len2()).clamp(0.0, 1.0);
+                    q.dist(a + (b - a) * t)
+                })
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(d < 0.05, "{q:?} {d}");
+    }
+}

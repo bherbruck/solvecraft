@@ -258,6 +258,11 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
         let id = sk.curves.get(ci).map(|c| c.id.clone()).unwrap_or_default();
+        if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
+            let r = super::sketch_freeform::trim_or_break(sk, ci, at, true, cmd)?;
+            doc.prune_model_params();
+            return Ok(json!({"trimmed": id, "pieces": r["curves"]}));
+        }
         let sh = sk.shape(ci).ok_or_else(|| bad(cmd, "curve"))?;
         let tq = sh.param(sh.project(at));
         let (cuts, full) = bracket(sk, ci, tq);
@@ -311,6 +316,11 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "BreakSketchCmd";
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let ci = curve_arg(sk, p, cmd)?;
+        if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
+            let at = req_vec2(cmd, p, "at")?;
+            let r = super::sketch_freeform::trim_or_break(sk, ci, at, false, cmd)?;
+            return Ok(r["curves"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default());
+        }
         let sh = sk.shape(ci).ok_or_else(|| bad(cmd, "curve"))?;
         let (ts, cutters): (Vec<f64>, Vec<Option<usize>>) = if let Some(list) = p.get("points").and_then(Value::as_array) {
             let mut v: Vec<f64> = list.iter().take(1000).filter_map(vec2).map(|q| sh.param(sh.project(q))).collect();

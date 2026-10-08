@@ -138,3 +138,24 @@ fn cubic_and_conic_segments_measure_exactly() {
         assert!((l.area_term() + r.area_term() - seg.area_term()).abs() < 1e-12);
     }
 }
+
+#[test]
+fn split_at_and_closest_param() {
+    use crate::{Seg2, Vec2};
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let quarter = Seg2::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(10.0, 10.0), b: Vec2::new(0.0, 10.0), w };
+    for t in [0.2, 0.5, 0.8] {
+        let (l, r) = quarter.split_at(t);
+        assert!(l.end().dist(quarter.point_at(t)) < 1e-12 && r.start().dist(l.end()) < 1e-12);
+        for s in [0.3, 0.7] {
+            assert!((l.point_at(s).len() - 10.0).abs() < 1e-12 && (r.point_at(s).len() - 10.0).abs() < 1e-12);
+        }
+        assert!((l.area_term() + r.area_term() - quarter.area_term()).abs() < 1e-12);
+    }
+    let c = Seg2::Cubic { p0: Vec2::new(0.0, 0.0), p1: Vec2::new(1.0, 2.0), p2: Vec2::new(3.0, 2.0), p3: Vec2::new(4.0, 0.0) };
+    let q = c.point_at(0.37);
+    assert!((c.closest_param(q + Vec2::new(0.0, 0.0)) - 0.37).abs() < 1e-9);
+    let (l, r) = c.split_at(0.37);
+    assert!(l.end().dist(q) < 1e-12 && r.start().dist(q) < 1e-12);
+    assert!((quarter.closest_param(Vec2::new(20.0, 20.0)) - 0.5).abs() < 1e-9);
+}
