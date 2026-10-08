@@ -62,7 +62,10 @@ impl Surf {
         let s = match f["type"].as_str().unwrap_or_default() {
             "plane" => g("centroid").zip(g("plane_normal_outward").and_then(unit)).map(|(p, n)| Surf::Plane { p, n }),
             "cylinder" => (|| Some(Surf::Cylinder { o: g("axis_origin")?, a: unit(g("axis")?)?, r: n("radius_mm")? }))(),
-            "cone" => (|| Some(Surf::Cone { o: g("axis_origin")?, a: unit(g("axis")?)?, r: n("radius_mm")?, tan: n("half_angle_deg")?.to_radians().tan() }))(),
+            "cone" => {
+                (|| Some(Surf::Cone { o: g("axis_origin")?, a: unit(g("axis")?)?, r: n("radius_mm")?, tan: n("half_angle_deg")?.to_radians().tan() }))(
+                )
+            }
             "sphere" => (|| Some(Surf::Sphere { c: g("center")?, r: n("radius_mm")? }))(),
             "torus" => (|| Some(Surf::Torus { c: g("center")?, a: unit(g("axis")?)?, big: n("major_radius_mm")?, small: n("minor_radius_mm")? }))(),
             _ => None,
@@ -261,9 +264,7 @@ mod tests {
     fn split_cylinder_counts_once() {
         let cyl = json!({"type": "cylinder", "axis_origin": [0, 0, 0], "axis": [0, 0, 1], "radius_mm": 5.0});
         let plane = |z: f64, n: f64| json!({"type": "plane", "centroid": [0, 0, z], "plane_normal_outward": [0, 0, n]});
-        let arc = |z: f64, s: [f64; 3], t: [f64; 3]| {
-            json!({"type": "arc", "start": s, "end": t, "center": [0, 0, z], "radius_mm": 5.0, "axis": [0, 0, 1], "length_mm": 15.707963})
-        };
+        let arc = |z: f64, s: [f64; 3], t: [f64; 3]| json!({"type": "arc", "start": s, "end": t, "center": [0, 0, z], "radius_mm": 5.0, "axis": [0, 0, 1], "length_mm": 15.707963});
         let line = |x: f64| json!({"type": "line", "start": [x, 0, 0], "end": [x, 0, 10]});
         let body = json!({
             "face_list": [cyl.clone(), cyl, plane(0.0, -1.0), plane(10.0, 1.0)],

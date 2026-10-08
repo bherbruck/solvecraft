@@ -59,9 +59,9 @@ fn check_case(dir: &str) -> Value {
     let mut seam_note = None;
     if approx.is_none() {
         let exact = ["faces", "edges", "vertices"].iter().all(|k| got["total"][k].as_f64().is_some() && got["total"][k] == want["total"][k]);
-        let fusion_seams = want["bodies"].as_array().and_then(|bs| {
-            bs.iter().map(seams::normalised).try_fold((0, 0, 0), |a, n| n.map(|n| (a.0 + n.0, a.1 + n.1, a.2 + n.2)))
-        });
+        let fusion_seams = want["bodies"]
+            .as_array()
+            .and_then(|bs| bs.iter().map(seams::normalised).try_fold((0, 0, 0), |a, n| n.map(|n| (a.0 + n.0, a.1 + n.1, a.2 + n.2))));
         match fusion_seams {
             // Size matches and only the topology differs: compare with Fusion's seam splits merged.
             Some((f, e, v)) if size_ok && !exact => {
