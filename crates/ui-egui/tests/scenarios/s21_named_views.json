@@ -1,0 +1,102 @@
+[
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    40,
+    20
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "text": "10"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "call": "ui.menu",
+  "params": {
+   "x": 100,
+   "y": 300,
+   "target": {
+    "type": "named_views"
+   }
+  }
+ },
+ {
+  "call": "ui.menuPick",
+  "params": {
+   "item": "New Named View"
+  }
+ },
+ {
+  "expect": {
+   "named_views": 1
+  }
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "top"
+  }
+ },
+ {
+  "call": "ui.menu",
+  "params": {
+   "x": 100,
+   "y": 300,
+   "target": {
+    "type": "named_view",
+    "name": "Named View1"
+   }
+  }
+ },
+ {
+  "call": "ui.menuPick",
+  "params": {
+   "item": "Restore"
+  }
+ },
+ {
+  "expect": {
+   "camera_matches": "Named View1"
+  }
+ },
+ {
+  "shot": "s21_restored"
+ }
+]

@@ -18,6 +18,7 @@
 //!   into `$SOLVECRAFT_SCENARIO_SHOTS` when that is set; `{"debug": 1}`
 //!   prints the UI state
 //! - AT may also be `{"plane": "XY"}`: the middle of an origin plane's square
+//! - `{"note": "…"}`: a comment
 //! - `{"expect": {…}}`: checks, see [`check`]; `{"until": {…}}` waits (frames) until they pass
 //!
 //! The same files drive the live app over the control channel for screenshots.
@@ -226,6 +227,8 @@ impl Harness {
                 self.call("ui.drag", json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift")}))
             } else if let Some(m) = s.get("call").and_then(Value::as_str) {
                 self.call(m, s.get("params").cloned().unwrap_or(json!({})))
+            } else if s.get("note").is_some() {
+                return Ok(());
             } else if let Some(name) = s.get("shot").and_then(Value::as_str) {
                 // With SOLVECRAFT_SCENARIO_SHOTS set: a render of the model as the camera sees it.
                 if let Ok(dir) = std::env::var("SOLVECRAFT_SCENARIO_SHOTS") {
@@ -426,6 +429,21 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
             "section" => {
                 if h.app.session.section.is_some() != v.as_bool().unwrap_or(false) {
                     return Err(format!("section view: want {v}"));
+                }
+            }
+            "camera_matches" => {
+                // The camera is at the saved named view (yaw, pitch, target).
+                let n = v.as_str().unwrap_or_default();
+                let nv = h.app.session.doc.named_views.iter().find(|x| x.name == n).ok_or_else(|| format!("no named view {n}"))?;
+                let c = &h.app.cam;
+                if (c.yaw - nv.yaw).abs() > 1e-6 || (c.pitch - nv.pitch).abs() > 1e-6 || c.target.dist(nv.target) > 1e-6 {
+                    return Err(format!("camera is not at view {n}: yaw {} pitch {}, view yaw {} pitch {}", c.yaw, c.pitch, nv.yaw, nv.pitch));
+                }
+            }
+            "named_views" => {
+                let n = h.app.session.doc.named_views.len();
+                if v.as_u64() != Some(n as u64) {
+                    return Err(format!("named views: got {n}, want {v}"));
                 }
             }
             "home" => {

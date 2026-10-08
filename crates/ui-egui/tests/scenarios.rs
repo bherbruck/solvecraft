@@ -42,5 +42,25 @@ scenarios!(
     s17_toolbox_and_visibility,
     s18_3d_sketch_pipe,
     s19_canvas_calibrate,
-    s20_section_with_joint_drive
+    s20_section_with_joint_drive,
+    s21_named_views
+);
+
+/// Scenarios written ahead of their features (the commands are in solvecraft-params' unpushed
+/// work, their dialogs follow): run with `--ignored`, enabled once the features land.
+macro_rules! pending {
+    ($($name:ident: $why:literal),* $(,)?) => {
+        $(#[test]
+        #[ignore = $why]
+        fn $name() {
+            run(stringify!($name));
+        })*
+    };
+}
+
+pending!(
+    s22_sheet_metal_fold: "waits for SheetMetalFoldCmd and its dialog",
+    s23_configurations: "waits for configurations (FusionStartDesignConfigModeCmd, config.activate) and their panel",
+    s24_motion_study: "waits for FusionMotionStudyCommand and its dialog",
+    s25_autosave_recovery: "waits for autosave and Recover unsaved design",
 );
