@@ -100,6 +100,7 @@ const ROW_H: f32 = 22.0;
 const INDENT: f32 = 14.0;
 
 /// One row's look.
+#[derive(Default)]
 struct Row<'a> {
     depth: usize,
     /// Some(open) for rows that fold.
@@ -115,12 +116,6 @@ struct Row<'a> {
     radio: Option<bool>,
     /// Trailing badges: "lock", "pin".
     badges: &'a [&'a str],
-}
-
-impl Default for Row<'_> {
-    fn default() -> Self {
-        Row { depth: 0, fold: None, eye: None, icon: "", label: "", selected: false, dim: false, color: None, radio: None, badges: &[] }
-    }
 }
 
 /// What happened on a row.
