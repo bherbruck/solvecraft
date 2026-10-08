@@ -71,6 +71,18 @@ pub fn refine_snap(
         }
         None => PREV.with(Cell::get),
     };
+    // On a curve (coincident with it).
+    if best.is_none() {
+        for (i, c) in sk.curves.iter().enumerate() {
+            let Some(sh) = sk.shape(i) else { continue };
+            let d = sh.dist(lp);
+            if d < tol * 0.8 && best.is_none_or(|x| d < x.0) {
+                let q = sh.project(lp);
+                best = Some((d, "On", q));
+                mid_of = Some(format!("{}:{},{}", c.id, q.x, q.y));
+            }
+        }
+    }
     if best.is_none()
         && let Some(prev) = prev
     {
@@ -86,7 +98,14 @@ pub fn refine_snap(
     }
     SNAP.with(|s| *s.borrow_mut() = best.map(|(_, l, p)| (l, p)));
     // A midpoint snap is a point argument the commands understand ("mid:<line>").
-    best.map(|(_, l, p)| (p, if l == "Mid" { mid_of.map(|m| format!("mid:{m}")) } else { None }))
+    best.map(|(_, l, p)| {
+        let arg = match l {
+            "Mid" => mid_of.map(|m| format!("mid:{m}")),
+            "On" => mid_of.map(|m| format!("on:{m}")),
+            _ => None,
+        };
+        (p, arg)
+    })
 }
 
 /// A click on a constraint glyph selects it (true: the click was used).

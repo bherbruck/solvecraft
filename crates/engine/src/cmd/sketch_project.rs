@@ -347,7 +347,16 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
             }
         });
         let mid = v.as_str().and_then(|x| x.strip_prefix("mid:")).map(str::to_string);
-        if vertex.is_none() && edge.is_none() && mid.is_none() {
+        // "on:<curve>:x,y": a point on a curve of the sketch near x,y.
+        let on = v.as_str().and_then(|x| x.strip_prefix("on:")).and_then(|t| {
+            let (c, xy) = t.rsplit_once(':')?;
+            let n: Vec<f64> = xy.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            match n[..] {
+                [x, y] if x.is_finite() && y.is_finite() => Some((c.to_string(), solvecraft_geom::Vec2::new(x, y))),
+                _ => None,
+            }
+        });
+        if vertex.is_none() && edge.is_none() && mid.is_none() && on.is_none() {
             return Ok(());
         }
         if doc.is_none() {
@@ -358,7 +367,16 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         }
         let Some((d, sk)) = doc.as_mut() else { return Ok(()) };
         let body = str_(v, "body").unwrap_or("").to_string();
-        let pid = if let Some(line) = mid {
+        let pid = if let Some((curve, near)) = on {
+            let c = sk.curve_index(&curve).ok_or_else(|| bad(cmd, format!("unknown curve `{curve}`")))?;
+            let at = match sk.shape(c) {
+                Some(sh) => sh.project(near),
+                None => near,
+            };
+            let pi = sk.add_point(at, None)?;
+            sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c }, None)?;
+            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
+        } else if let Some(line) = mid {
             // "mid:<line>": a new point at the line's midpoint, kept there.
             let l = sk.curve_index(&line).ok_or_else(|| bad(cmd, format!("unknown curve `{line}`")))?;
             let Some(solvecraft_sketch::Shape::Line { a, b }) = sk.shape(l) else { return Err(bad(cmd, format!("`{line}` is not a line"))) };

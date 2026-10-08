@@ -187,3 +187,16 @@ fn drawing_from_a_line_midpoint_keeps_it_there() {
     let b = sk.resolve_point(&format!("{l}.end")).and_then(|i| sk.point(i)).unwrap();
     assert!(st.dist((a + b) * 0.5) < 1e-7, "{st:?}");
 }
+
+#[test]
+fn drawing_onto_a_curve_keeps_the_point_on_it() {
+    let mut s = new_sketch();
+    let c = ids(&run(&mut s, "CircleCenterRadius", json!({"center": [0, 0], "radius": 10}))["curves"])[0].clone();
+    let r = run(&mut s, "DrawPolyline", json!({"points": [format!("on:{c}:7.2,7.1"), [30, 30]]}));
+    let n = ids(&r["curves"])[0].clone();
+    run(&mut s, "SketchDimension", json!({"entities": [c], "value": 16}));
+    let sk = sketch(&s);
+    let st = sk.resolve_point(&format!("{n}.start")).and_then(|i| sk.point(i)).unwrap();
+    let cc = sk.center(sk.curve_index(&c).unwrap()).unwrap();
+    assert!((st.dist(cc) - 8.0).abs() < 1e-7, "{st:?} {cc:?}");
+}
