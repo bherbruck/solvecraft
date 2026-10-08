@@ -2241,6 +2241,36 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             doc.resolve_plane(vals, plane, 0)?;
             Ok(())
         }
+        FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {
+            if tools.is_empty() || tools.len() > 64 || cells.is_empty() || cells.len() > 1000 {
+                return Err(DocError::Invalid("Boundary Fill needs 1…64 tool bodies and 1…1000 cells".into()));
+            }
+            let tb: Vec<ModelBody> =
+                tools.iter().map(|t| st.body(t).cloned().ok_or_else(|| DocError::Unknown(format!("body `{t}`")))).collect::<Result<_>>()?;
+            let mut made = Vec::new();
+            for p in cells {
+                // The cell: inside the tools that hold the point, outside the others.
+                let inside: Vec<bool> = tb.iter().map(|b| b.mesh().contains(*p)).collect();
+                let mut acc: Option<Body> = None;
+                for (b, _) in tb.iter().zip(&inside).filter(|(_, i)| **i) {
+                    acc = match acc {
+                        None => Some(b.body.clone()),
+                        Some(a) => kernel::boolean(&a, &b.body, BoolOp::Intersect)?,
+                    };
+                }
+                let Some(mut cell) = acc else {
+                    return Err(DocError::Invalid(format!("the point {p:?} is outside every tool: no enclosed cell there")));
+                };
+                for (b, _) in tb.iter().zip(&inside).filter(|(_, i)| !**i) {
+                    cell = kernel::boolean(&cell, &b.body, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
+                }
+                made.push(cell);
+            }
+            if *remove_tools {
+                st.bodies.retain(|b| !tools.contains(&b.name));
+            }
+            apply_op(st, f, made, *operation, &[])
+        }
         FeatureKind::Split { body, plane, tool } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Unknown(format!("body `{body}`"))) };

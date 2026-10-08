@@ -216,6 +216,7 @@ impl FeatureKind {
                 dir(direction);
             }
             FeatureKind::Lip { face, .. } => pt(face),
+            FeatureKind::BoundaryFill { cells, .. } => cells.iter_mut().for_each(pt),
             FeatureKind::Rest { position, direction, along, .. } => {
                 pt(position);
                 dir(direction);

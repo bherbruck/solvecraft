@@ -11,6 +11,9 @@ use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("SurfaceSculpt", "Boundary Fill", boundary_fill).at("SOLID", "CREATE").icon("boundary_fill").params(
+        "tools: [bodies]; cells: [[x,y,z] a point inside each cell to fill (a cell: inside some tools, outside the rest)]; operation?: new|join|cut|intersect; remove_tools?: bool",
+    ),
     CommandSpec::new("solid.coil", "Coil", coil).at("SOLID", "CREATE").icon("coil").params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
          base?: [x,y,z]; axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; operation?, targets?, name?, body_name?",
@@ -270,4 +273,19 @@ pub(super) fn snap_point(s: &Session, kind: &str, at: Vec3) -> Option<Vec3> {
         }),
         _ => None,
     }
+}
+
+fn boundary_fill(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "SurfaceSculpt";
+    let tools = string_list(p, "tools");
+    let st = s.model.state();
+    if tools.is_empty() || tools.len() > 64 || tools.iter().any(|t| st.body(t).is_none()) {
+        return Err(bad(cmd, "`tools` must list 1…64 bodies"));
+    }
+    let cells: Vec<Vec3> = p.get("cells").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    if cells.is_empty() || cells.len() > 1000 {
+        return Err(bad(cmd, "`cells` must list 1…1000 points [x, y, z], one inside each cell"));
+    }
+    let operation = super::features::operation(p, cmd)?;
+    add_feature(s, p, FeatureKind::BoundaryFill { tools, cells, operation, remove_tools: bool_(p, "remove_tools").unwrap_or(false) })
 }

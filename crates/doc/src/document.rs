@@ -633,6 +633,17 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<String>,
     },
+    /// Boundary Fill: solids from the cells the tool bodies enclose (a cell: inside some
+    /// tools and outside the rest), each picked by a point inside it.
+    BoundaryFill {
+        tools: Vec<String>,
+        cells: Vec<Vec3>,
+        #[serde(default)]
+        operation: Operation,
+        /// Remove the tool bodies afterwards.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        remove_tools: bool,
+    },
     /// Remove bodies from the model (from here on in the timeline).
     Remove {
         bodies: Vec<String>,
@@ -925,6 +936,7 @@ impl FeatureKind {
             FeatureKind::Lip { .. } => "GrooveFeature",
             FeatureKind::SnapFit { .. } => "SnapFitFeature",
             FeatureKind::Rest { .. } => "RestFeature",
+            FeatureKind::BoundaryFill { .. } => "BoundaryFillFeature",
             FeatureKind::SheetBase { .. } => "BaseFlangeFeature",
             FeatureKind::SheetContour { .. } => "ContourFlangeFeature",
             FeatureKind::SheetFlange { .. } => "EdgeFlangeFeature",
@@ -984,6 +996,7 @@ impl FeatureKind {
             FeatureKind::Lip { .. } => "Groove",
             FeatureKind::SnapFit { .. } => "SnapFit",
             FeatureKind::Rest { .. } => "Rest",
+            FeatureKind::BoundaryFill { .. } => "BoundaryFill",
             FeatureKind::SheetBase { .. } => "BaseFlange",
             FeatureKind::SheetContour { .. } => "ContourFlange",
             FeatureKind::SheetFlange { .. } => "EdgeFlange",
@@ -1151,7 +1164,7 @@ impl FeatureKind {
                 v.extend(depth.iter().map(String::as_str));
             }
             FeatureKind::ReplaceFace { target, .. } => plane_exprs(target, &mut v),
-            FeatureKind::Align { .. } | FeatureKind::Remove { .. } => {}
+            FeatureKind::Align { .. } | FeatureKind::Remove { .. } | FeatureKind::BoundaryFill { .. } => {}
             FeatureKind::Stitch { tolerance, .. } => v.push(tolerance),
             FeatureKind::Thicken { thickness, .. } => v.push(thickness),
             FeatureKind::SurfaceTrim { plane, .. } => plane_exprs(plane, &mut v),

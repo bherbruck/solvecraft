@@ -246,6 +246,7 @@ impl FeatureKind {
             | FeatureKind::SheetConvert { .. }
             | FeatureKind::Align { .. }
             | FeatureKind::Remove { .. }
+            | FeatureKind::BoundaryFill { .. }
             | FeatureKind::Loft { .. }
             | FeatureKind::Sweep { .. }
             | FeatureKind::Import { .. }
