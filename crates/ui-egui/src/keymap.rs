@@ -13,7 +13,7 @@ use crate::SolveApp;
 use crate::theme::Tokens;
 
 /// Keys the application handles before any command shortcut.
-pub const RESERVED: &[&str] = &["Escape", "S", "V", "F6", "Delete", "Backspace", "Ctrl+Z", "Ctrl+Y", "Ctrl+S", "Ctrl+N", "Ctrl+O"];
+pub const RESERVED: &[&str] = &["Escape", "S", "V", "F2", "F6", "Delete", "Backspace", "Ctrl+Z", "Ctrl+Y", "Ctrl+S", "Ctrl+N", "Ctrl+O"];
 
 #[derive(Default)]
 pub struct Keymap {

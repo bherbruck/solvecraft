@@ -463,6 +463,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 crate::shortcut_box::open(app, at);
             }
             Key::V => crate::context_menu::toggle_visibility(app),
+            Key::F2 => {
+                let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
+                crate::context_menu::rename_selection(app, at);
+            }
             Key::F6 => app.animate_view("fit"),
             Key::Delete | Key::Backspace => crate::viewport::delete_selection(app),
             _ => {

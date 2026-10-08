@@ -443,3 +443,15 @@ fn an_uncaptured_move_asks_before_the_next_command() {
     assert_eq!(app.session.doc.occurrences[0].transform[3][0], 10.0);
     assert!(crate::browser::answer_capture(&mut app, "capture").is_err(), "nothing waits now");
 }
+
+#[test]
+fn f2_renames_the_selected_item() {
+    let mut app = sample_app();
+    let b = body(&app);
+    app.run("select.set", json!({"items": [{"type": "body", "name": b}]})).unwrap();
+    assert!(context_menu::rename_selection(&mut app, pos2(0.0, 0.0)));
+    assert!(context_menu::finish_rename(&mut app, Some("Base"), true));
+    assert!(app.session.model.state().body("Base").is_some());
+    app.run("select.clear", json!({})).unwrap();
+    assert!(!context_menu::rename_selection(&mut app, pos2(0.0, 0.0)), "nothing selected");
+}

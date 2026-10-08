@@ -136,6 +136,8 @@ fn act(id: &str, label: &str, icon: &str) -> Item {
 #[derive(Default)]
 pub struct MenuState {
     pub target: Target,
+    /// The list row chosen with the arrow keys (Enter runs it).
+    pub key_row: Option<usize>,
     /// The radial ring is shown (viewport menus).
     pub radial: bool,
     /// The right button is held through the menu: releasing over a direction picks it.
@@ -927,6 +929,24 @@ pub fn toggle_visibility(app: &mut SolveApp) {
     }
 }
 
+/// Rename what is selected (F2): one body, sketch or feature, construction plane, component
+/// picked in the browser, or canvas.
+pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
+    let what = match (app.session.selection.as_slice(), app.tree.picked_components.as_slice(), app.tree.picked_canvases.as_slice()) {
+        ([Sel::Body { name }], [], []) => RenameWhat::Body(name.clone()),
+        ([Sel::Feature { id }], [], []) => RenameWhat::Feature(*id),
+        ([Sel::Plane { name }], [], []) => match app.session.doc.find_feature(name) {
+            Some(f) => RenameWhat::Feature(f.id),
+            None => return false,
+        },
+        ([], [c], []) => RenameWhat::Component(*c),
+        ([], [], [c]) => RenameWhat::Canvas(*c),
+        _ => return false,
+    };
+    start_rename(app, what, at);
+    true
+}
+
 /// Add the edges that continue the selected edges smoothly to the selection.
 fn tangent_chain(app: &mut SolveApp) {
     let st = app.session.model.state();
@@ -1015,6 +1035,7 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
 
 /// Open a menu for a target (the radial ring only for the viewport).
 pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
+    app.menu.key_row = None;
     app.menu.radial = target == Target::Viewport;
     app.menu.target = target;
     app.menu.flick = false;
@@ -1260,10 +1281,27 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         at
     };
 
+    // Up/Down choose a row of the list, Enter runs it.
+    let (up, down, enter) = ctx.input(|i| (i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::Enter)));
+    let usable: Vec<usize> = list.iter().enumerate().filter(|(_, i)| i.enabled && !i.is_sep() && !i.is_heading()).map(|(k, _)| k).collect();
+    if up || down {
+        let at = app.menu.key_row.and_then(|r| usable.iter().position(|u| *u == r));
+        let next = match (at, down) {
+            (None, true) => Some(0),
+            (None, false) => usable.len().checked_sub(1),
+            (Some(k), true) => Some((k + 1) % usable.len().max(1)),
+            (Some(k), false) => Some((k + usable.len().max(1) - 1) % usable.len().max(1)),
+        };
+        app.menu.key_row = next.and_then(|k| usable.get(k).copied());
+    }
+    if enter && let Some(item) = app.menu.key_row.and_then(|r| list.get(r)) {
+        picked = Some(item.clone());
+    }
+    let key_row = app.menu.key_row;
     let resp = egui::Area::new(egui::Id::new("sc_context_menu")).fixed_pos(list_at).constrain(true).order(egui::Order::Foreground).show(ctx, |ui| {
         menu_frame(ui, |ui| {
-            for item in &list {
-                if let Some(p) = list_row(ui, item) {
+            for (k, item) in list.iter().enumerate() {
+                if let Some(p) = list_row_lit(ui, item, key_row == Some(k)) {
                     picked = Some(p);
                 }
             }
@@ -1314,6 +1352,11 @@ pub fn menu_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) ->
 
 /// One list row; the item when it was clicked.
 pub fn list_row(ui: &mut egui::Ui, item: &Item) -> Option<Item> {
+    list_row_lit(ui, item, false)
+}
+
+/// A list row, drawn highlighted when `lit` (the keyboard's choice).
+pub fn list_row_lit(ui: &mut egui::Ui, item: &Item, lit: bool) -> Option<Item> {
     let t = Tokens::get();
     let w = LIST_W - 10.0;
     if item.is_sep() {
@@ -1333,7 +1376,7 @@ pub fn list_row(ui: &mut egui::Ui, item: &Item) -> Option<Item> {
         return None;
     }
     let (r, resp) = ui.allocate_exact_size(vec2(w, 24.0), if item.enabled { Sense::click() } else { Sense::hover() });
-    if item.enabled && resp.hovered() {
+    if item.enabled && (resp.hovered() || lit) {
         ui.painter().rect_filled(r.shrink2(vec2(2.0, 1.0)), 4.0, t.hover);
     }
     let ink = if item.enabled { t.icon } else { t.border };
