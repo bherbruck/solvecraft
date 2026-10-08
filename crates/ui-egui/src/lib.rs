@@ -88,8 +88,10 @@ pub struct UiState {
     pub pick_off: Vec<String>,
     /// A click on a face picks its whole body.
     pub pick_bodies: bool,
-    /// 0: shaded with edges, 1: shaded, 2: wireframe.
+    /// 0: shaded with edges, 1: shaded, 2: wireframe, 3: shaded with hidden edges.
     pub visual_style: u8,
+    /// A soft shadow on the ground under the model (seen from above).
+    pub ground_shadow: bool,
     /// Sketches hidden one by one, and finished sketches shown although a feature uses them.
     pub hidden_sketches: Vec<u64>,
     pub shown_sketches: Vec<u64>,
@@ -118,6 +120,7 @@ impl Default for UiState {
             pick_off: Vec::new(),
             pick_bodies: false,
             visual_style: 0,
+            ground_shadow: true,
             hidden_sketches: Vec::new(),
             shown_sketches: Vec::new(),
             hidden_profiles: Vec::new(),

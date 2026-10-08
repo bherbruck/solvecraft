@@ -162,6 +162,8 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.session.revision.hash(&mut h);
     app.ui.show_grid.hash(&mut h);
     app.ui.visual_style.hash(&mut h);
+    app.ui.ground_shadow.hash(&mut h);
+    (app.cam.pitch > 0.0).hash(&mut h);
     app.ui.show_sketches.hash(&mut h);
     app.ui.hidden_bodies.hash(&mut h);
     app.ui.hidden_sketches.hash(&mut h);
@@ -270,6 +272,9 @@ fn build_scene(app: &SolveApp) -> GpuScene {
             }
         }
     }
+    if app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0 {
+        ground_shadow(&mut sc, app, &st);
+    }
     for sid in visible_sketches(app) {
         let Some(ss) = st.sketch(sid) else { continue };
         let active = s.active_sketch == Some(sid);
@@ -299,6 +304,47 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         }
     }
     sc
+}
+
+/// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
+fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, st: &solvecraft_engine::doc::ModelState) {
+    let mut b = solvecraft_engine::geom::Aabb3::EMPTY;
+    for x in st.bodies.iter().filter(|x| !app.ui.hidden_bodies.contains(&x.name)) {
+        b = b.union(&x.mesh().bounds());
+    }
+    if b.is_empty() {
+        return;
+    }
+    let size = b.size();
+    let c = b.center();
+    let z = b.min.z - 1e-3 * (1.0 + b.diagonal());
+    let (rx, ry) = (size.x * 0.62 + size.z * 0.15, size.y * 0.62 + size.z * 0.15);
+    if !(rx > 0.0 && ry > 0.0) {
+        return;
+    }
+    let dark = if crate::theme::is_dark() { 150 } else { 80 };
+    // Rings from the middle out, fading to nothing.
+    let rings = [(0.0, dark), (0.55, dark * 3 / 4), (0.85, dark / 3), (1.0, 0)];
+    let n = 48;
+    let at = |r: f64, k: usize| {
+        let a = k as f64 / n as f64 * std::f64::consts::TAU;
+        Vec3::new(c.x + rx * r * a.cos(), c.y + ry * r * a.sin(), z).to_f32()
+    };
+    for w in rings.windows(2) {
+        let ((r0, a0), (r1, a1)) = (w[0], w[1]);
+        let (c0, c1) = ([0, 0, 0, a0 as u8], [0, 0, 0, a1 as u8]);
+        for k in 0..n {
+            let (p00, p01, p10, p11) = (at(r0, k), at(r0, k + 1), at(r1, k), at(r1, k + 1));
+            sc.trans_tri(p00, [0.0; 3], c0);
+            sc.trans_tri(p10, [0.0; 3], c1);
+            sc.trans_tri(p11, [0.0; 3], c1);
+            if r0 > 0.0 {
+                sc.trans_tri(p00, [0.0; 3], c0);
+                sc.trans_tri(p11, [0.0; 3], c1);
+                sc.trans_tri(p01, [0.0; 3], c0);
+            }
+        }
+    }
 }
 
 /// The drawn pieces of a polyline in a dash pattern (on, off, on, off… lengths).
