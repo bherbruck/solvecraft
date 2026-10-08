@@ -11,6 +11,9 @@ Changes:
   earlier booleans have boundaries that lie on their surface only within tolerance).
 - `transversal/divide_face/mod.rs`: when projecting a loop onto a face's surface, fall back to
   the nearest parameter when the exact search fails (intersection curves are approximations).
+- `transversal/integrate/mod.rs`: the result's shells and faces keep the order of the shell
+  they come from (truck's connected components followed hash order of face addresses, so a
+  boolean's faces came out in a different order on every run).
 - `lib.rs`: `tr!` reports where an operation gives up when `SHAPEOPS_TRACE` is set; compiler
   warnings no longer fail the build.
 

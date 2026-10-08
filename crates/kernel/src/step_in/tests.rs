@@ -484,3 +484,21 @@ fn horn_torus_written_as_one_spline_face() {
     let v = std::f64::consts::PI * 25.0 * std::f64::consts::TAU * 5.0 / 4.0;
     assert!(rel(measure(&imp.bodies[0].body).unwrap().volume, v) < 1e-3);
 }
+
+/// Booleans and blends build the same body every time, so an export is byte-identical from
+/// run to run (truck used to emit a boolean's faces in hash order of their addresses). The
+/// tee of oracle 35 with its rolling-ball fillet round the junction.
+#[test]
+fn tee_fillet_exports_byte_identical() {
+    let main = cylinder(Vec3::new(-40.0, 0.0, 0.0), Vec3::X, 15.0, 80.0).unwrap();
+    let branch = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 35.0).unwrap();
+    let export = || {
+        let tee = boolean(&main, &branch, BoolOp::Union).unwrap().unwrap();
+        let f = fillet(&tee, &[Vec3::new(0.0, 10.0, 125f64.sqrt())], 3.0).unwrap();
+        step_export(&[&f], "tee").unwrap()
+    };
+    let first = export();
+    for _ in 0..2 {
+        assert!(export() == first, "export differs between runs");
+    }
+}

@@ -120,7 +120,7 @@ pub fn and<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
         let [res, _] = process_one_pair_of_shells(&and_shell, shell, tol)?;
         and_shell = res;
     }
-    let boundaries = and_shell.connected_components();
+    let boundaries = components_in_order(&and_shell);
     Some(Solid::new(boundaries))
 }
 
@@ -143,8 +143,26 @@ pub fn or<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
         let [_, res] = process_one_pair_of_shells(&or_shell, shell, tol)?;
         or_shell = res;
     }
-    let boundaries = or_shell.connected_components();
+    let boundaries = components_in_order(&or_shell);
     Some(Solid::new(boundaries))
+}
+
+// SolveCraft: truck's connected components come out in hash order of face addresses, so the
+// result's face order changed from run to run. Keep the shell's own order instead.
+fn components_in_order<C, S>(shell: &Shell<Point3, C, S>) -> Vec<Shell<Point3, C, S>> {
+    let pos: rustc_hash::FxHashMap<_, usize> = shell.face_iter().enumerate().map(|(i, f)| (f.id(), i)).collect();
+    let key = |f: &Face<Point3, C, S>| pos.get(&f.id()).copied().unwrap_or(usize::MAX);
+    let mut comps: Vec<Vec<Face<Point3, C, S>>> = shell
+        .connected_components()
+        .into_iter()
+        .map(|c| {
+            let mut faces: Vec<_> = c.into_iter().collect();
+            faces.sort_by_key(|f| key(f));
+            faces
+        })
+        .collect();
+    comps.sort_by_key(|c| c.first().map(|f| key(f)).unwrap_or(usize::MAX));
+    comps.into_iter().map(Shell::from).collect()
 }
 
 #[cfg(test)]
