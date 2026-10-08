@@ -34,11 +34,11 @@ fn source_text(p: &Value, cmd: &str) -> Result<String> {
         return Ok(t.to_string());
     }
     let path = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "give `path` or `text`"))?;
-    let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    if meta.len() as usize > MAX_DRAWING_BYTES {
+    let meta = solvecraft_io::vfs::len(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if meta as usize > MAX_DRAWING_BYTES {
         return Err(EngineError::Other(format!("{path}: file too large")));
     }
-    let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let bytes = solvecraft_io::vfs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
@@ -186,7 +186,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let text = solvecraft_io::write_dxf(&geom);
     if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
-        std::fs::write(path, &text).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        solvecraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
         return Ok(json!({"path": path, "entities": geom.len()}));
     }
     Ok(json!({"dxf": text, "entities": geom.len()}))

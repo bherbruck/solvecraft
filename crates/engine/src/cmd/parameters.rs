@@ -219,7 +219,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         other => return Err(bad(cmd, format!("unknown format `{other}` (csv or json)"))),
     };
     if let Some(path) = path {
-        std::fs::write(path, &text).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        solvecraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     }
     Ok(json!({"format": format, "path": path, "text": text}))
 }
@@ -229,11 +229,11 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
     let text = match (str_(p, "text"), str_(p, "path")) {
         (Some(t), _) => t.to_string(),
         (None, Some(path)) => {
-            let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-            if meta.len() > 16 << 20 {
+            let meta = solvecraft_io::vfs::len(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+            if meta > 16 << 20 {
                 return Err(bad(cmd, "file too large"));
             }
-            std::fs::read_to_string(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
+            solvecraft_io::vfs::read_to_string(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
         }
         _ => return Err(bad(cmd, "give `text` or `path`")),
     };

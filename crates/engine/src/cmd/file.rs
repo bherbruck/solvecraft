@@ -51,11 +51,11 @@ fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
 
 /// Read a STEP file as an Import feature.
 fn read_step(path: &str) -> Result<solvecraft_io::StepFeature> {
-    let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    if meta.len() > solvecraft_io::MAX_STEP_BYTES as u64 {
+    let meta = solvecraft_io::vfs::len(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if meta > solvecraft_io::MAX_STEP_BYTES as u64 {
         return Err(EngineError::Other(format!("{path}: file too large")));
     }
-    let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let bytes = solvecraft_io::vfs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     solvecraft_io::step_import_feature(&bytes, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))
 }
 
@@ -80,11 +80,11 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>) -> Result<Value> {
 
 /// Add a MeshImport feature for a 3MF or STL file.
 fn add_mesh(s: &mut Session, path: &str, name: Option<&str>) -> Result<Value> {
-    let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    if meta.len() > solvecraft_io::MAX_3MF_BYTES as u64 {
+    let meta = solvecraft_io::vfs::len(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if meta > solvecraft_io::MAX_3MF_BYTES as u64 {
         return Err(EngineError::Other(format!("{path}: file too large")));
     }
-    let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let bytes = solvecraft_io::vfs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let mf = solvecraft_io::mesh_import_feature(&bytes, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&mf.name).to_string();
     let id = s.doc_mut().add_feature(mf.kind, Some(&fname))?;
@@ -132,11 +132,11 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
         return Ok(json!({"path": path, "features": s.doc.features.len(), "errors": errors, "bodies": r["bodies"], "warnings": r["warnings"]}));
     }
-    let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    if meta.len() as usize > solvecraft_io::MAX_DESIGN_BYTES {
+    let meta = solvecraft_io::vfs::len(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if meta as usize > solvecraft_io::MAX_DESIGN_BYTES {
         return Err(EngineError::Other(format!("{path}: file too large")));
     }
-    let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let bytes = solvecraft_io::vfs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let doc = solvecraft_io::read_design(&bytes)?;
     *s = Session::new(doc);
     s.path = Some(path.to_string());
@@ -175,7 +175,7 @@ fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Resu
         // Bodies carry the colour they are shown in (appearance, material or imported).
         solvecraft_io::export(&s.doc.painted(&s.world_state()), bodies, format, &name)?
     };
-    std::fs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    solvecraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
 }
 

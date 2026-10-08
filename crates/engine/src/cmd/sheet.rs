@@ -369,7 +369,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     let sh = sheet_of(s, p, cmd)?;
     let text = flat_dxf(&sh)?;
     if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
-        std::fs::write(path, &text).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        solvecraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
         return Ok(json!({"path": path, "bends": sh.bends().len()}));
     }
     Ok(json!({"dxf": text, "bends": sh.bends().len()}))

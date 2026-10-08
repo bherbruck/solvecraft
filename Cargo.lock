@@ -3260,7 +3260,9 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "js-sys",
  "log",
+ "serde_json",
  "solvecraft-engine",
  "solvecraft-ui-egui",
  "wasm-bindgen",

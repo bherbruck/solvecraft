@@ -180,7 +180,7 @@ pub fn open_sample(app: &mut SolveApp, i: usize) {
 }
 
 fn open_recent(app: &mut SolveApp, path: &str) {
-    if !std::path::Path::new(path).exists() {
+    if !solvecraft_engine::io::vfs::exists(path) {
         app.home.recent.retain(|p| p != path);
         app.set_status(format!("{path} is no longer there"), true);
         return;
@@ -198,11 +198,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     poll(app, ui.ctx());
     let t = Tokens::get();
     let samples = solvecraft_engine::sample::samples();
-    for i in 0..samples.len() {
-        want(&mut app.home, &format!("sample:{i}"));
+    // In the browser a picture blocks the page while it builds (no threads) and a kernel
+    // failure there can't be caught: samples are built when they are opened.
+    if !cfg!(target_arch = "wasm32") {
+        for i in 0..samples.len() {
+            want(&mut app.home, &format!("sample:{i}"));
+        }
     }
     let recent = app.home.recent.clone();
-    for p in recent.iter().filter(|p| std::path::Path::new(p.as_str()).exists()) {
+    for p in recent.iter().filter(|p| solvecraft_engine::io::vfs::exists(p)) {
         want(&mut app.home, p);
     }
     let mut action: Option<Box<dyn FnOnce(&mut SolveApp)>> = None;
@@ -266,9 +270,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let path = std::path::Path::new(p);
                     let name = path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
                     let folder = path.parent().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
-                    let missing = !path.exists();
-                    let sub = if missing { "missing".to_string() } else { folder };
-                    if card(ui, app.home.thumbs.get(p.as_str()).and_then(Option::as_ref), &name, &sub, missing).on_hover_text(p.as_str()).clicked() {
+                    let missing = !solvecraft_engine::io::vfs::exists(p);
+                    let sub = if missing {
+                        "missing".to_string()
+                    } else if p.starts_with("/opfs/") {
+                        // The web build keeps designs in the browser's own storage.
+                        "in this browser".to_string()
+                    } else {
+                        folder
+                    };
+                    if card(ui, Pic::Ready(app.home.thumbs.get(p.as_str()).and_then(Option::as_ref)), &name, &sub, missing)
+                        .on_hover_text(p.as_str())
+                        .clicked()
+                    {
                         let p = p.clone();
                         action = Some(Box::new(move |app: &mut SolveApp| open_recent(app, &p)));
                     }
@@ -281,7 +295,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let key = format!("sample:{i}");
                 let busy = app.home.wanted == Some(i);
                 let sub = if busy { "opening…" } else { s.about };
-                if card(ui, app.home.thumbs.get(&key).and_then(Option::as_ref), s.name, sub, false).on_hover_text(s.about).clicked() {
+                let tex = match app.home.thumbs.get(&key) {
+                    Some(t) => Pic::Ready(t.as_ref()),
+                    None => Pic::Icon("box"),
+                };
+                if card(ui, tex, s.name, sub, false).on_hover_text(s.about).clicked() {
                     action = Some(Box::new(move |app: &mut SolveApp| open_sample(app, i)));
                 }
             });
@@ -313,8 +331,14 @@ fn grid(ui: &mut egui::Ui, n: usize, mut each: impl FnMut(&mut egui::Ui, usize))
     }
 }
 
+/// A card's picture: rendered (`None` while it renders), or an icon until it is asked for.
+enum Pic<'a> {
+    Ready(Option<&'a egui::TextureHandle>),
+    Icon(&'static str),
+}
+
 /// A design card: its picture (a spinner while it renders), name and a line under it.
-fn card(ui: &mut egui::Ui, tex: Option<&egui::TextureHandle>, name: &str, sub: &str, dim: bool) -> egui::Response {
+fn card(ui: &mut egui::Ui, pic: Pic, name: &str, sub: &str, dim: bool) -> egui::Response {
     let t = Tokens::get();
     let size = vec2(THUMB[0] as f32 + 16.0, THUMB[1] as f32 + 62.0);
     let (r, resp) = ui.allocate_exact_size(size, Sense::click());
@@ -327,12 +351,16 @@ fn card(ui: &mut egui::Ui, tex: Option<&egui::TextureHandle>, name: &str, sub: &
         egui::StrokeKind::Inside,
     );
     let img = egui::Rect::from_min_size(r.min + vec2(8.0, 8.0), vec2(THUMB[0] as f32, THUMB[1] as f32));
-    match tex {
-        Some(tx) => {
+    match pic {
+        Pic::Icon(icon) => {
+            ui.painter().rect_filled(img, CornerRadius::same(4), t.panel_header);
+            crate::icons::paint(ui.painter(), egui::Rect::from_center_size(img.center(), vec2(56.0, 56.0)), icon, t.icon, t.icon_fill, t.icon);
+        }
+        Pic::Ready(Some(tx)) => {
             let tint = if dim { Color32::from_white_alpha(90) } else { Color32::WHITE };
             ui.painter().image(tx.id(), img, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), tint);
         }
-        None => {
+        Pic::Ready(None) => {
             ui.painter().rect_filled(img, CornerRadius::same(4), t.panel_header);
             if !dim {
                 egui::Spinner::new().size(18.0).paint_at(ui, egui::Rect::from_center_size(img.center(), vec2(18.0, 18.0)));

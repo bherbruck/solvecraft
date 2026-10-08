@@ -87,6 +87,11 @@ fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> s
 /// Write `bytes` to `path` atomically; with `backup`, the file being replaced is kept as
 /// `<path>.bak` first.
 pub fn write_atomic(path: &Path, bytes: &[u8], backup: bool) -> std::io::Result<()> {
+    // In the browser the host stores files (one write is already atomic there).
+    if cfg!(target_arch = "wasm32") {
+        let _ = backup;
+        return crate::vfs::write(&path.to_string_lossy(), bytes);
+    }
     write_steps(path, bytes, backup, None)
 }
 

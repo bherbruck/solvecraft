@@ -31,11 +31,11 @@ fn image_bytes(p: &Value, cmd: &str) -> Result<Vec<u8>> {
         base64_decode(d).ok_or_else(|| bad(cmd, "`data` is not base64"))?
     } else {
         let path = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "give `path` or `data`"))?;
-        let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        if meta.len() as usize > MAX_CANVAS_BYTES {
+        let meta = solvecraft_io::vfs::len(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        if meta as usize > MAX_CANVAS_BYTES {
             return Err(bad(cmd, "the image is too large"));
         }
-        std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
+        solvecraft_io::vfs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
     };
     if b.len() > MAX_CANVAS_BYTES {
         return Err(bad(cmd, "the image is too large"));

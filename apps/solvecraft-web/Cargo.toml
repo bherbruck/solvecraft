@@ -23,4 +23,10 @@ log = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "Location"] }
+js-sys = "0.3"
+serde_json = { workspace = true }
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "Location", "Navigator", "StorageManager",
+    "FileSystemHandle", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetFileOptions", "FileSystemWritableFileStream",
+    "WritableStream", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "HtmlInputElement", "Storage",
+] }

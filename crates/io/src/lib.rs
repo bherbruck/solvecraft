@@ -10,6 +10,7 @@ pub mod safe_write;
 mod sketch2d;
 mod svg;
 mod threemf;
+pub mod vfs;
 
 pub use dxf::{read_dxf, write_dxf};
 pub use safe_write::{backup_path, write_atomic};
