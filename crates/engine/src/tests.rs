@@ -1325,4 +1325,19 @@ mod naming {
         let sk = s.model.state().sketch(s.doc.find_feature("Top").map(|f| f.id).unwrap_or(0)).map(|x| x.plane.origin.z);
         assert_eq!(sk.map(|z| (z * 1e6).round() / 1e6), Some(10.0));
     }
+
+    #[test]
+    fn shell_and_hole_faces_follow_by_name() {
+        let mut s = Session::default();
+        run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20, "name": "Base"}));
+        run(&mut s, "FusionShellBodyCommand", json!({"faces": [[20, 15, 20]], "thickness": 2, "name": "Hollow"}));
+        let shell = |h: f64| 40.0 * 30.0 * h - 36.0 * 26.0 * (h - 2.0);
+        assert!((volume(&mut s) - shell(20.0)).abs() < 0.5, "{}", volume(&mut s));
+        // Taller: the picked point is 5 mm under the open face now; its name still finds it.
+        run(&mut s, "timeline.edit", json!({"feature": "Base", "set": {"height": "25"}}));
+        assert!((volume(&mut s) - shell(25.0)).abs() < 0.5, "{}", volume(&mut s));
+        assert_eq!(warning(&s, "Hollow"), None);
+        let h = s.doc.find_feature("Hollow").map(|f| f.face_names.clone()).unwrap_or_default();
+        assert_eq!(h, vec!["F1:+z".to_string()]);
+    }
 }

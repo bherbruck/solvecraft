@@ -193,6 +193,10 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         nf.edge_refs = solvecraft_doc::edge_refs(&before, body, a);
         nf.edge_names = solvecraft_doc::edge_names_for(&before, body, a);
     }
+    // New face points: their faces' names now.
+    if nf.kind.face_points() != f.kind.face_points() {
+        nf.face_names = solvecraft_doc::naming::face_names_at(&s.model.state_before(id), &nf.kind.face_points());
+    }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
     }

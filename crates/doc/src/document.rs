@@ -885,6 +885,24 @@ impl FeatureKind {
         }
     }
     /// Every expression the feature uses.
+    /// Points on faces the feature refers to (shell, draft, offset and replace faces, a hole's
+    /// placement), for persistent face names.
+    pub fn face_points_mut(&mut self) -> Vec<&mut Vec3> {
+        match self {
+            FeatureKind::Shell { faces, .. }
+            | FeatureKind::Draft { faces, .. }
+            | FeatureKind::OffsetFace { faces, .. }
+            | FeatureKind::ReplaceFace { faces, .. } => faces.iter_mut().collect(),
+            FeatureKind::Hole { position, points: None, .. } => vec![position],
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn face_points(&self) -> Vec<Vec3> {
+        let mut k = self.clone();
+        k.face_points_mut().into_iter().map(|p| *p).collect()
+    }
+
     pub fn expressions(&self) -> Vec<&str> {
         let mut v: Vec<&str> = Vec::new();
         match self {
@@ -1024,6 +1042,9 @@ pub struct Feature {
     /// Persistent names of the picked edges (resolved first; see `naming`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub edge_names: Vec<String>,
+    /// Persistent names of the faces at the feature's face points (`FeatureKind::face_points`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub face_names: Vec<String>,
     #[serde(flatten)]
     pub kind: FeatureKind,
 }
@@ -1293,6 +1314,7 @@ impl Document {
             component: 0,
             edge_refs: Vec::new(),
             edge_names: Vec::new(),
+            face_names: Vec::new(),
             kind,
         };
         match self.marker {

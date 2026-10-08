@@ -533,3 +533,44 @@ pub fn edge_names_at(b: &ModelBody, pts: &[Vec3]) -> Vec<String> {
         })
         .collect()
 }
+
+/// Names of the faces holding each point (any body; empty when none does).
+pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
+    pts.iter()
+        .map(|p| {
+            for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+                let tol = (b.body.size() * 1e-3).max(1e-3);
+                let idx = FaceIndex::new(&b.mesh(), face_count(b));
+                if let Some(f) = idx.face_at(*p, tol) {
+                    return face_names(b).get(f).cloned().unwrap_or_default();
+                }
+            }
+            String::new()
+        })
+        .collect()
+}
+
+/// The point on the face with this name nearest `p` (a split face: its nearest piece, with
+/// `true` for "it was split"); `None` when no face has the name.
+pub fn point_on_face(st: &ModelState, name: &str, p: Vec3) -> Option<(Vec3, bool)> {
+    let stem = strip_piece(name);
+    let mut best: Option<(f64, Vec3, bool)> = None;
+    for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+        let names = face_names(b);
+        let m = b.mesh();
+        for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+            let Some(n) = names.get(*f as usize) else { continue };
+            let exact = n == name;
+            if !exact && strip_piece(n) != stem {
+                continue;
+            }
+            let Some([a, bb, c]) = m.tri(t) else { continue };
+            let q = closest(p, a, bb, c);
+            let d = q.dist(p) - if exact { 1e-9 } else { 0.0 };
+            if best.is_none_or(|(bd, _, _)| d < bd) {
+                best = Some((d, q, !exact));
+            }
+        }
+    }
+    best.map(|(_, q, split)| (q, split))
+}

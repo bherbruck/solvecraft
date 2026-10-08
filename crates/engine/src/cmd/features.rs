@@ -251,10 +251,15 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
         }
         _ => (Vec::new(), Vec::new()),
     };
+    let face_names = {
+        let pts = kind.face_points();
+        if pts.is_empty() { Vec::new() } else { solvecraft_doc::naming::face_names_at(&s.model.state(), &pts) }
+    };
     let id = s.doc_mut().add_feature(kind, name)?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.edge_refs = refs;
         f.edge_names = names;
+        f.face_names = face_names;
     }
     s.doc_mut().name_feature_inputs(id);
     let comp = s.active_component;

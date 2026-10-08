@@ -517,6 +517,33 @@ impl Model {
             let t0 = now();
             let mut next = (*state).clone();
             let mut warning = None;
+            // Face references by name: move each face point onto its named face.
+            let renamed;
+            let f = if f.face_names.iter().any(|n| !n.is_empty()) {
+                let mut g = f.clone();
+                let mut notes = Vec::new();
+                for (p, n) in g.kind.face_points_mut().into_iter().zip(&f.face_names) {
+                    if n.is_empty() {
+                        continue;
+                    }
+                    match crate::naming::point_on_face(&state, n, *p) {
+                        Some((q, split)) => {
+                            if split {
+                                notes.push(format!("face `{n}` was split; using the piece nearest the picked point"));
+                            }
+                            *p = q;
+                        }
+                        None => notes.push(format!("face `{n}` no longer exists; using the face at the picked point")),
+                    }
+                }
+                if !notes.is_empty() {
+                    warning = Some(notes.join("; "));
+                }
+                renamed = g;
+                &renamed
+            } else {
+                f
+            };
             // A parameter with an error fails the features using it, with that error.
             let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
             let r = match bad_param {
