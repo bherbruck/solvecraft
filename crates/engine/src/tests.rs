@@ -1387,6 +1387,8 @@ fn tapped_and_clearance_holes() {
     assert!(rel(v2 - volume(&mut s), PI * 2.15 * 2.15 * 10.0) < 1e-3);
     assert!(s.execute("FusionHoleCommand", &json!({"position": [20, 25, 10], "clearance": "M7"})).is_err());
     assert!(s.execute("FusionHoleCommand", &json!({"position": [20, 25, 10]})).is_err());
+}
+
 /// In an inch design, a bare length typed into a feature means inches (stored with the unit);
 /// lengths with units and angles are left alone.
 #[test]
@@ -1426,4 +1428,31 @@ fn press_pull_on_curved_faces() {
     run(&mut s, "FusionPressPullCommand", json!({"face": [25, 15, 10], "distance": 1}));
     let v1 = volume(&mut s);
     assert!(rel(v1 - v0, PI * (25.0 - 16.0) * 20.0) < 1e-3, "{v0} {v1}");
+}
+
+/// A cut in one component leaves other components' bodies alone unless they are named as
+/// participants; auto join/cut looks at the active component only.
+#[test]
+fn booleans_stay_in_their_component() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "FusionCreateNewComponentCommand", json!({"name": name}));
+        run(&mut s, "PrimitiveBox", json!({"length": 20, "width": 10, "height": 10, "corner": [x, 0, 0], "body_name": format!("{name}Box")}));
+    }
+    // A's box spans x 0…20, B's x 20…40 (in their own frames, both occurrences in place).
+    run(&mut s, "component.activate", json!({"component": "A"}));
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "Slot"}));
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [8, 2], "p1": [28, 8]}));
+    run(&mut s, "SketchStop", json!({}));
+    let vol = |s: &mut Session, b: &str| run(s, "MeasureCommand", json!({"bodies": [b]}))["total"]["volume_mm3"].as_f64().unwrap_or(0.0);
+    assert_eq!(auto_operation(&s, &json!({"sketch": "Slot", "distance": 10})), Some("cut"));
+    run(&mut s, "Extrude", json!({"sketch": "Slot", "distance": 10, "operation": "cut", "name": "Cut"}));
+    assert!((vol(&mut s, "ABox") - (2000.0 - 12.0 * 6.0 * 10.0)).abs() < 1e-6, "{}", vol(&mut s, "ABox"));
+    assert!((vol(&mut s, "BBox") - 2000.0).abs() < 1e-6, "B untouched: {}", vol(&mut s, "BBox"));
+    // Named as a participant, B is cut too.
+    run(&mut s, "UndoCommand", json!({}));
+    run(&mut s, "Extrude", json!({"sketch": "Slot", "distance": 10, "operation": "cut", "participants": ["ABox", "BBox"]}));
+    assert!((vol(&mut s, "BBox") - (2000.0 - 8.0 * 6.0 * 10.0)).abs() < 1e-6, "{}", vol(&mut s, "BBox"));
+    assert!(s.execute("Extrude", &json!({"sketch": "Slot", "distance": 1, "operation": "cut", "participants": ["Nope"]})).is_err());
 }

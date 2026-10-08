@@ -1045,6 +1045,10 @@ pub struct Feature {
     /// Persistent names of the faces at the feature's face points (`FeatureKind::face_points`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub face_names: Vec<String>,
+    /// Bodies a join/cut/intersect may change (any component); empty = the feature's own
+    /// component's bodies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub participants: Vec<String>,
     #[serde(flatten)]
     pub kind: FeatureKind,
 }
@@ -1324,6 +1328,7 @@ impl Document {
             edge_refs: Vec::new(),
             edge_names: Vec::new(),
             face_names: Vec::new(),
+            participants: Vec::new(),
             kind,
         };
         match self.marker {

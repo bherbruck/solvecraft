@@ -139,7 +139,14 @@ pub fn auto_operation(s: &Session, p: &Value) -> Option<&'static str> {
     if st.bodies.is_empty() || !d.is_finite() {
         return Some("new");
     }
-    let inside = |q: Vec3| st.bodies.iter().any(|b| b.mesh().contains(q));
+    // Only the active component's bodies take part (or the ones named as participants).
+    let parts = string_list(p, "participants");
+    let inside = |q: Vec3| {
+        st.bodies
+            .iter()
+            .filter(|b| if parts.is_empty() { s.doc.body_component(&b.name, b.feature) == s.active_component } else { parts.contains(&b.name) })
+            .any(|b| b.mesh().contains(q))
+    };
     let eps = (d.abs() * 1e-3).max(1e-3);
     let sign = if d < 0.0 { -1.0 } else { 1.0 };
     if symmetric {
@@ -262,8 +269,13 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
         let pts = kind.face_points();
         if pts.is_empty() { Vec::new() } else { solvecraft_doc::naming::face_names_at(&s.model.state(), &pts) }
     };
+    let participants = string_list(p, "participants");
+    if participants.len() > 10_000 || participants.iter().any(|b| b != "*" && s.model.state().body(b).is_none()) {
+        return Err(EngineError::Other("`participants` must list existing bodies".into()));
+    }
     let id = s.doc_mut().add_feature(kind, name)?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
+        f.participants = participants;
         f.edge_refs = refs;
         f.edge_names = names;
         f.face_names = face_names;

@@ -13,6 +13,9 @@
 //! - 3: appearances per body, face and component with names and opacity
 //!   (`"appearances": {"bodies": {name: {name, color, opacity}}, "faces": […], "components": {…}}`);
 //!   before, `"appearances"` mapped body names to bare `[r, g, b]` colours.
+//! - 5: joins, cuts and intersects change only their own component's bodies unless bodies are
+//!   named as `participants`; older features in designs with components get `participants:
+//!   ["*"]` (every body), which is what they did, so those designs keep their shape.
 //! - 4: joint origins mate by default (B's z against A's, as Fusion does); `flip` now means
 //!   "don't mate". Older joints keep their placement: their `flip` is inverted.
 
@@ -21,7 +24,7 @@ use serde_json::Value;
 use crate::{DocError, Document, Result};
 
 /// The format this build writes.
-pub const FORMAT: u32 = 4;
+pub const FORMAT: u32 = 5;
 
 pub fn format_string(n: u32) -> String {
     format!("solvecraft/{n}")
@@ -34,7 +37,26 @@ pub fn version_of(s: &str) -> Option<u32> {
 
 /// JSON-level upgrades: entry `i` turns format `i + 1` into `i + 2`.
 type JsonStep = fn(&mut Value) -> Result<()>;
-const JSON_STEPS: [JsonStep; 3] = [|_| Ok(()), v2_to_v3, v3_to_v4];
+const JSON_STEPS: [JsonStep; 4] = [|_| Ok(()), v2_to_v3, v3_to_v4, v4_to_v5];
+
+/// Features in designs with components keep reaching every body.
+fn v4_to_v5(v: &mut Value) -> Result<()> {
+    let has_components = v.get("components").and_then(Value::as_array).is_some_and(|c| !c.is_empty());
+    if !has_components {
+        return Ok(());
+    }
+    if let Some(Value::Array(fs)) = v.get_mut("features") {
+        for f in fs.iter_mut() {
+            if let Some(o) = f.as_object_mut()
+                && o.get("type").and_then(Value::as_str) != Some("sketch")
+                && o.get("participants").is_none()
+            {
+                o.insert("participants".into(), serde_json::json!(["*"]));
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Joints placed with the old convention (aligned unless flipped) keep their placement.
 fn v3_to_v4(v: &mut Value) -> Result<()> {

@@ -25,11 +25,13 @@ pub struct ModelBody {
     key: u64,
     /// Persistent face names (worked out on first use).
     pub(crate) names: crate::naming::NameCell,
+    /// The component the body belongs to (set after each feature).
+    pub component: u64,
 }
 
 impl ModelBody {
     pub fn new(name: String, body: Body, feature: u64) -> Self {
-        ModelBody { name, body, feature, mesh: OnceLock::new(), key: 0, names: Default::default() }
+        ModelBody { name, body, feature, mesh: OnceLock::new(), key: 0, names: Default::default(), component: 0 }
     }
     /// Display mesh (chord tolerance 1/1000 of the body size), computed once.
     pub fn mesh(&self) -> Arc<Mesh> {
@@ -564,6 +566,9 @@ impl Model {
                         _ => Vec::new(),
                     };
                     next.stamp(&state, f, key, mats);
+                    for b in &mut next.bodies {
+                        b.component = doc.body_component(&b.name, b.feature);
+                    }
                     state = Arc::new(next);
                     None
                 }
@@ -652,8 +657,14 @@ fn new_name(state: &mut ModelState, f: &Feature, k: usize) -> String {
 
 /// Add tool bodies to the model according to the operation.
 fn apply_op(state: &mut ModelState, f: &Feature, tools: Vec<Body>, op: Operation, targets: &[String]) -> Result<()> {
-    let target_idx: Vec<usize> = if targets.is_empty() {
+    // Participants: the feature's own targets, else its explicit participants, else the bodies
+    // of its component (and what it made itself): other components are left alone.
+    let targets: &[String] = if targets.is_empty() { &f.participants } else { targets };
+    let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
+    let target_idx: Vec<usize> = if all {
         (0..state.bodies.len()).collect()
+    } else if targets.is_empty() {
+        (0..state.bodies.len()).filter(|i| state.bodies.get(*i).is_some_and(|b| b.component == f.component || b.feature == f.id)).collect()
     } else {
         let mut v = Vec::new();
         for t in targets {
