@@ -332,7 +332,7 @@ fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
                 .or_else(|| v.get("point").and_then(crate::params::vec3))
                 .ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
             let on = |b: &solvecraft_doc::ModelBody| solvecraft_doc::appearance::face_index_at(b, pt).is_some();
-            let body = match str_(p, "body") {
+            let body = match v.get("body").and_then(Value::as_str).or_else(|| str_(p, "body")) {
                 Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),
                 None => st.bodies.iter().filter(|b| on(b)).min_by(|a, b| dist_to(a, pt).total_cmp(&dist_to(b, pt))).map(|b| b.name.clone()),
             };
@@ -407,14 +407,51 @@ fn look_json(l: &solvecraft_doc::appearance::Look) -> Value {
 fn appearance_library(_s: &mut Session, _p: &Value) -> Result<Value> {
     let list: Vec<Value> = solvecraft_doc::appearance::LIBRARY
         .iter()
-        .map(|(n, c, o)| json!({"name": n, "color": format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]), "opacity": o}))
+        .map(|(n, c, o)| {
+            let category = n.split(" - ").next().unwrap_or(n);
+            json!({"name": n, "category": category, "color": format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]), "opacity": o})
+        })
         .collect();
     Ok(json!({"appearances": list}))
 }
 
 fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
     let a = &s.doc.appearances;
+    // "In this design": each look used, with where.
+    let mut used: Vec<(solvecraft_doc::appearance::Look, Vec<Value>, Vec<Value>, Vec<Value>)> = Vec::new();
+    fn slot(used: &mut Vec<(solvecraft_doc::appearance::Look, Vec<Value>, Vec<Value>, Vec<Value>)>, l: &solvecraft_doc::appearance::Look) -> usize {
+        match used.iter().position(|(u, ..)| u == l) {
+            Some(i) => i,
+            None => {
+                used.push((l.clone(), Vec::new(), Vec::new(), Vec::new()));
+                used.len() - 1
+            }
+        }
+    }
+    for (b, l) in &a.bodies {
+        let i = slot(&mut used, l);
+        if let Some(u) = used.get_mut(i) {
+            u.1.push(json!(b));
+        }
+    }
+    for f in &a.faces {
+        let i = slot(&mut used, &f.look);
+        if let Some(u) = used.get_mut(i) {
+            u.2.push(json!({"body": f.body, "point": f.point}));
+        }
+    }
+    for (c, l) in &a.components {
+        let i = slot(&mut used, l);
+        if let Some(u) = used.get_mut(i) {
+            u.3.push(json!(c));
+        }
+    }
+    let in_design: Vec<Value> = used
+        .iter()
+        .map(|(l, b, f, c)| json!({"name": l.name, "color": l.hex(), "opacity": l.opacity, "bodies": b, "faces": f, "components": c}))
+        .collect();
     let mut out = json!({
+        "in_design": in_design,
         "bodies": a.bodies.iter().map(|(b, l)| (b.clone(), look_json(l))).collect::<serde_json::Map<_, _>>(),
         "faces": a.faces.iter().map(|f| json!({"body": f.body, "point": f.point, "appearance": look_json(&f.look)})).collect::<Vec<_>>(),
         "components": a.components.iter().map(|(c, l)| json!({"component": c, "appearance": look_json(l)})).collect::<Vec<_>>(),
