@@ -81,7 +81,7 @@ pub(crate) fn occurrence_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result
 }
 
 /// The occurrence whose bodies are nearest a world point (0 = root bodies).
-fn occurrence_at(s: &Session, p: Vec3) -> Option<u64> {
+pub(crate) fn occurrence_at(s: &Session, p: Vec3) -> Option<u64> {
     let st = s.model.state();
     let mut best: Option<(f64, u64)> = None;
     for b in &st.bodies {
@@ -133,7 +133,13 @@ fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointOrigin
     let snap = match what {
         "face" | "circle" => {
             let pick = local(world);
-            let face = solvecraft_doc::naming::face_names_at(&s.model.state(), &[pick]).into_iter().next().filter(|n| !n.is_empty());
+            // A circle's name is its cylindrical wall's (a rim pick also touches the end face).
+            let named_at = if what == "circle" {
+                s.model.state().bodies.iter().filter_map(|b| cylinder_wall_point(&b.body, pick)).next().unwrap_or(pick)
+            } else {
+                pick
+            };
+            let face = solvecraft_doc::naming::face_names_at(&s.model.state(), &[named_at]).into_iter().next().filter(|n| !n.is_empty());
             if what == "face" { Snap::FaceCenter { pick, face } } else { Snap::CircleCenter { pick, face } }
         }
         "point" => Snap::Point { point: local(world), z: v.get("z").and_then(vec3).map(local_dir) },
@@ -551,3 +557,12 @@ fn interference(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 #[path = "joints_tests.rs"]
 mod tests;
+
+/// A point in the middle of the cylindrical face at `pick` (on its wall, halfway along).
+fn cylinder_wall_point(b: &solvecraft_doc::kernel::Body, pick: Vec3) -> Option<Vec3> {
+    let c = solvecraft_doc::kernel::cylinder_face_at(b, pick)?;
+    let v = pick - c.axis_point;
+    let along = v.dot(c.axis);
+    let radial = (v - c.axis * along).normalized()?;
+    Some(c.axis_point + c.axis * ((c.start + c.end) / 2.0) + radial * c.radius)
+}

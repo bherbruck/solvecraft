@@ -1065,6 +1065,15 @@ fn is_root(c: &u64) -> bool {
     *c == 0
 }
 
+/// A standard part (fastener, pin, bearing) inserted as a component.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StandardPart {
+    pub family: String,
+    pub size: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+}
+
 /// The document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
@@ -1095,6 +1104,9 @@ pub struct Document {
     /// Plastic rules.
     #[serde(default, skip_serializing_if = "crate::plastic::PlasticSettings::is_empty")]
     pub plastic: crate::plastic::PlasticSettings,
+    /// Components that are standard parts (by component id): what to rebuild them from.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub parts: std::collections::BTreeMap<u64, StandardPart>,
     /// Configurations (rows of parameter values and suppressions).
     #[serde(default, skip_serializing_if = "crate::config::ConfigTable::is_empty")]
     pub configs: crate::config::ConfigTable,
@@ -1182,6 +1194,7 @@ impl Document {
             sheet: Default::default(),
             plastic: Default::default(),
             configs: Default::default(),
+            parts: Default::default(),
             body_components: Default::default(),
             materials: Default::default(),
             appearances: Default::default(),
