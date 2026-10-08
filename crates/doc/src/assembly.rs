@@ -189,6 +189,16 @@ impl FeatureKind {
             FeatureKind::Thread { face, .. } => pt(face),
             FeatureKind::SheetFlange { edges, .. } | FeatureKind::SheetHem { edges, .. } => edges.iter_mut().for_each(pt),
             FeatureKind::SheetConvert { face, .. } => pt(face),
+            FeatureKind::Boss { position, direction, .. } => {
+                pt(position);
+                dir(direction);
+            }
+            FeatureKind::Lip { face, .. } => pt(face),
+            FeatureKind::SnapFit { position, direction, hook, .. } => {
+                pt(position);
+                dir(direction);
+                dir(hook);
+            }
             FeatureKind::SheetBase { .. } | FeatureKind::SheetContour { .. } | FeatureKind::SheetUnfold { .. } => {}
             FeatureKind::Coil { base, axis, .. } => {
                 pt(base);

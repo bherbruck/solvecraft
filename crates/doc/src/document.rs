@@ -470,6 +470,69 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rule: Option<String>,
     },
+    /// Plastic boss: a round post on a face (draft, root fillet, hole, ribs).
+    Boss {
+        position: Vec3,
+        /// Out of the face (the boss grows along it).
+        #[serde(default = "z_axis")]
+        direction: Vec3,
+        diameter: String,
+        height: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hole_diameter: Option<String>,
+        /// Hole depth from the top (default: down to the face).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hole_depth: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        draft: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fillet: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ribs: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rib_thickness: Option<String>,
+        /// Rib reach out from the boss wall.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rib_length: Option<String>,
+        /// Rib top below the boss top.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rib_offset: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
+    /// Plastic lip (raised band) or groove (recess) along the rim face picked at `face`.
+    Lip {
+        face: Vec3,
+        width: String,
+        height: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        groove: bool,
+        /// Clearance added to a groove's width (and depth).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gap: Option<String>,
+        /// Along the rim's outer edge instead of its inner one.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        outside: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
+    /// Plastic snap fit: a cantilever arm on a face with a hook (catch) at its tip.
+    SnapFit {
+        position: Vec3,
+        /// The arm grows along this (out of the face).
+        #[serde(default = "z_axis")]
+        direction: Vec3,
+        /// The catch sticks out this way.
+        hook: Vec3,
+        length: String,
+        thickness: String,
+        width: String,
+        catch_depth: String,
+        /// The catch's height along the arm.
+        catch_length: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
     /// Remove bodies from the model (from here on in the timeline).
     Remove {
         bodies: Vec<String>,
@@ -683,6 +746,10 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
+            FeatureKind::Boss { .. } => "BossFeature",
+            FeatureKind::Lip { groove: false, .. } => "LipFeature",
+            FeatureKind::Lip { .. } => "GrooveFeature",
+            FeatureKind::SnapFit { .. } => "SnapFitFeature",
             FeatureKind::SheetBase { .. } => "BaseFlangeFeature",
             FeatureKind::SheetContour { .. } => "ContourFlangeFeature",
             FeatureKind::SheetFlange { .. } => "EdgeFlangeFeature",
@@ -731,6 +798,10 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::Emboss { .. } => "Emboss",
+            FeatureKind::Boss { .. } => "Boss",
+            FeatureKind::Lip { groove: false, .. } => "Lip",
+            FeatureKind::Lip { .. } => "Groove",
+            FeatureKind::SnapFit { .. } => "SnapFit",
             FeatureKind::SheetBase { .. } => "BaseFlange",
             FeatureKind::SheetContour { .. } => "ContourFlange",
             FeatureKind::SheetFlange { .. } => "EdgeFlange",
@@ -819,6 +890,19 @@ impl FeatureKind {
                 }
             }
             FeatureKind::Emboss { depth, .. } => v.push(depth),
+            FeatureKind::Boss { diameter, height, hole_diameter, hole_depth, draft, fillet, ribs, rib_thickness, rib_length, rib_offset, .. } => {
+                v.extend([diameter.as_str(), height]);
+                for o in [hole_diameter, hole_depth, draft, fillet, ribs, rib_thickness, rib_length, rib_offset].into_iter().flatten() {
+                    v.push(o);
+                }
+            }
+            FeatureKind::Lip { width, height, gap, .. } => {
+                v.extend([width.as_str(), height]);
+                v.extend(gap.iter().map(String::as_str));
+            }
+            FeatureKind::SnapFit { length, thickness, width, catch_depth, catch_length, .. } => {
+                v.extend([length.as_str(), thickness, width, catch_depth, catch_length]);
+            }
             FeatureKind::SheetContour { distance, .. } => v.push(distance),
             FeatureKind::SheetFlange { height, angle, radius, .. } => {
                 v.extend([height.as_str(), angle]);

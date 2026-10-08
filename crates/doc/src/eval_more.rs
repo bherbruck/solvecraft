@@ -391,56 +391,7 @@ pub(super) fn sheet_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Fea
             let t = hi - lo;
             // The face outline: boundary edges of the triangles on that face's plane.
             let plane = Plane::from_normal(*face + n * lo, n * -1.0).ok_or_else(|| DocError::Invalid("face".into()))?;
-            let on: Vec<[u32; 3]> = mesh
-                .triangles
-                .iter()
-                .copied()
-                .filter(|t| t.iter().all(|k| mesh.positions.get(*k as usize).is_some_and(|p| ((*p - *face).dot(n) - lo).abs() < tol)))
-                .collect();
-            // Boundary edges by position (meshes may repeat vertices per triangle).
-            let pos = |k: u32| mesh.positions.get(k as usize).copied().unwrap_or_default();
-            let q = |p: Vec3| ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64, (p.z * 1e6).round() as i64);
-            let mut count: std::collections::HashMap<((i64, i64, i64), (i64, i64, i64)), i32> = Default::default();
-            let edges: Vec<(Vec3, Vec3)> = on.iter().flat_map(|t| [(pos(t[0]), pos(t[1])), (pos(t[1]), pos(t[2])), (pos(t[2]), pos(t[0]))]).collect();
-            for (a, b) in &edges {
-                let (ka, kb) = (q(*a), q(*b));
-                *count.entry((ka.min(kb), ka.max(kb))).or_insert(0) += 1;
-            }
-            let mut boundary: Vec<(Vec3, Vec3)> = edges
-                .into_iter()
-                .filter(|(a, b)| {
-                    let (ka, kb) = (q(*a), q(*b));
-                    count.get(&(ka.min(kb), ka.max(kb))) == Some(&1)
-                })
-                .collect();
-            // Chain into loops (plane coordinates).
-            let mut loops: Vec<Vec<Vec2>> = Vec::new();
-            for _ in 0..10_000 {
-                let Some((s0, mut cur)) = boundary.pop() else { break };
-                let mut lp = vec![s0];
-                for _ in 0..boundary.len() + 1 {
-                    if q(cur) == q(s0) {
-                        break;
-                    }
-                    lp.push(cur);
-                    match boundary.iter().position(|(a, _)| q(*a) == q(cur)) {
-                        Some(k) => cur = boundary.remove(k).1,
-                        None => break,
-                    }
-                }
-                let raw: Vec<Vec2> = lp.iter().map(|p| plane.to_local(*p)).collect();
-                // Drop points in the middle of straight runs.
-                let m = raw.len();
-                let pts: Vec<Vec2> = (0..m)
-                    .filter_map(|i| {
-                        let (p, c, n) = (*raw.get((i + m - 1) % m)?, *raw.get(i)?, *raw.get((i + 1) % m)?);
-                        ((c - p).cross(n - c).abs() > 1e-9 * (c - p).len().max(1e-9) * (n - c).len().max(1e-9)).then_some(c)
-                    })
-                    .collect();
-                if pts.len() >= 3 {
-                    loops.push(pts);
-                }
-            }
+            let mut loops = face_loops(&mesh, &plane, *face, n, lo, tol);
             loops.sort_by(|a, b| poly_area(b).abs().total_cmp(&poly_area(a).abs()));
             let mut it = loops.into_iter();
             let outer = Loop2::polygon(&it.next().ok_or_else(|| DocError::Invalid("no outline on that face".into()))?).ccw();
@@ -543,4 +494,269 @@ fn point_in_poly(poly: &[Vec2], p: Vec2) -> bool {
         }
     }
     inside
+}
+
+/// Outline loops (in `plane` coordinates) of the mesh triangles lying in the plane at distance
+/// `level` from `at` along `n`: the edges used by one of them only, chained.
+fn face_loops(mesh: &solvecraft_geom::Mesh, plane: &Plane, at: Vec3, n: Vec3, level: f64, tol: f64) -> Vec<Vec<Vec2>> {
+    let on: Vec<[u32; 3]> = mesh
+        .triangles
+        .iter()
+        .copied()
+        .filter(|t| t.iter().all(|k| mesh.positions.get(*k as usize).is_some_and(|p| ((*p - at).dot(n) - level).abs() < tol)))
+        .collect();
+    // Boundary edges by position (meshes may repeat vertices per triangle).
+    let pos = |k: u32| mesh.positions.get(k as usize).copied().unwrap_or_default();
+    let q = |p: Vec3| ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64, (p.z * 1e6).round() as i64);
+    let mut count: std::collections::HashMap<((i64, i64, i64), (i64, i64, i64)), i32> = Default::default();
+    let edges: Vec<(Vec3, Vec3)> = on.iter().flat_map(|t| [(pos(t[0]), pos(t[1])), (pos(t[1]), pos(t[2])), (pos(t[2]), pos(t[0]))]).collect();
+    for (a, b) in &edges {
+        let (ka, kb) = (q(*a), q(*b));
+        *count.entry((ka.min(kb), ka.max(kb))).or_insert(0) += 1;
+    }
+    let mut boundary: Vec<(Vec3, Vec3)> = edges
+        .into_iter()
+        .filter(|(a, b)| {
+            let (ka, kb) = (q(*a), q(*b));
+            count.get(&(ka.min(kb), ka.max(kb))) == Some(&1)
+        })
+        .collect();
+    // Chain into loops (plane coordinates).
+    let mut loops: Vec<Vec<Vec2>> = Vec::new();
+    for _ in 0..10_000 {
+        let Some((s0, mut cur)) = boundary.pop() else { break };
+        let mut lp = vec![s0];
+        for _ in 0..boundary.len() + 1 {
+            if q(cur) == q(s0) {
+                break;
+            }
+            lp.push(cur);
+            match boundary.iter().position(|(a, _)| q(*a) == q(cur)) {
+                Some(k) => cur = boundary.remove(k).1,
+                None => break,
+            }
+        }
+        let raw: Vec<Vec2> = lp.iter().map(|p| plane.to_local(*p)).collect();
+        // Drop points in the middle of straight runs.
+        let m = raw.len();
+        let pts: Vec<Vec2> = (0..m)
+            .filter_map(|i| {
+                let (p, c, n) = (*raw.get((i + m - 1) % m)?, *raw.get(i)?, *raw.get((i + 1) % m)?);
+                ((c - p).cross(n - c).abs() > 1e-9 * (c - p).len().max(1e-9) * (n - c).len().max(1e-9)).then_some(c)
+            })
+            .collect();
+        if pts.len() >= 3 {
+            loops.push(pts);
+        }
+    }
+    loops
+}
+
+/// The body a placed plastic feature joins: by name, else the one under the point.
+fn body_under(st: &ModelState, body: &Option<String>, p: Vec3) -> Result<String> {
+    let i = body_at(st, body, &[p])?;
+    st.bodies.get(i).map(|b| b.name.clone()).ok_or_else(|| DocError::Invalid("there is no body".into()))
+}
+
+/// Axes with z along `z` (and x along `x` when given).
+fn local_frame(z: Vec3, x: Option<Vec3>) -> Result<(Vec3, Vec3, Vec3)> {
+    let z = z.normalized().ok_or_else(|| DocError::Invalid("direction".into()))?;
+    let x = x.and_then(|x| (x - z * x.dot(z)).normalized()).unwrap_or_else(|| z.any_perp());
+    let y = z.cross(x);
+    Ok((x, y, z))
+}
+
+/// Offset a closed polygon to its left by `d` (mitred corners).
+fn offset_left(p: &[Vec2], d: f64) -> Vec<Vec2> {
+    let m = p.len();
+    let line = |i: usize| -> Option<(Vec2, Vec2)> {
+        let (a, b) = (*p.get(i)?, *p.get((i + 1) % m)?);
+        let t = (b - a).normalized()?;
+        Some((a + Vec2::new(-t.y, t.x) * d, t))
+    };
+    (0..m)
+        .filter_map(|i| {
+            let (p0, d0) = line((i + m - 1) % m)?;
+            let (p1, d1) = line(i)?;
+            let den = d0.cross(d1);
+            if den.abs() < 1e-12 {
+                return Some(p1);
+            }
+            Some(p0 + d0 * ((p1 - p0).cross(d1) / den))
+        })
+        .collect()
+}
+
+pub(super) fn plastic_eval(vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    let len = |e: &str| val(vals, e, Kind::Length);
+    // Tools start a little inside the material so they overlap it instead of touching a face.
+    match &f.kind {
+        FeatureKind::Boss {
+            position,
+            direction,
+            diameter,
+            height,
+            hole_diameter,
+            hole_depth,
+            draft,
+            fillet,
+            ribs,
+            rib_thickness,
+            rib_length,
+            rib_offset,
+            body,
+        } => {
+            let target = body_under(st, body, *position)?;
+            let (r0, h) = (len(diameter)? / 2.0, len(height)?);
+            if !(r0 > 0.0 && h > 0.0) {
+                return Err(DocError::Invalid("the boss diameter and height must be positive".into()));
+            }
+            let dr = match draft {
+                Some(e) => val(vals, e, Kind::Angle)?,
+                None => 0.0,
+            };
+            let rf = match fillet {
+                Some(e) => len(e)?.max(0.0),
+                None => 0.0,
+            };
+            let r_top = r0 - h * dr.tan();
+            if r_top <= 0.0 {
+                return Err(DocError::Invalid("the draft closes the boss before its top".into()));
+            }
+            let delta = (h * 0.05).clamp(1e-3, 0.5);
+            let (x, _, z) = local_frame(*direction, None)?;
+            // The post: a (tapered) cylinder from a little inside the face.
+            let base = Plane::new(*position - z * delta, x, z.cross(x)).ok_or_else(|| DocError::Invalid("boss frame".into()))?;
+            let r_in = r0 + delta * dr.tan();
+            let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, r_in), holes: Vec::new() };
+            let mut tools = if dr.abs() > 1e-12 {
+                vec![kernel::extrude_tapered(&base, &disc, h + delta, 1.0, -dr)?]
+            } else {
+                kernel::extrude(&base, &[disc], 0.0, h + delta)?
+            };
+            if let Some(n) = ribs {
+                let n = val(vals, n, Kind::Unitless)?.round();
+                if !(0.0..=64.0).contains(&n) {
+                    return Err(DocError::Invalid("0…64 ribs".into()));
+                }
+                let t = match rib_thickness {
+                    Some(e) => len(e)?,
+                    None => r0 * 0.3,
+                };
+                let l = match rib_length {
+                    Some(e) => len(e)?,
+                    None => r0,
+                };
+                let off = match rib_offset {
+                    Some(e) => len(e)?,
+                    None => 0.0,
+                };
+                let hr = h - off;
+                if n > 0.0 && !(t > 0.0 && l > 0.0 && hr > 0.0) {
+                    return Err(DocError::Invalid("ribs need a positive thickness, length and height".into()));
+                }
+                for k in 0..n as usize {
+                    let a = std::f64::consts::TAU * k as f64 / n;
+                    let (u, v) = (x * a.cos() + z.cross(x) * a.sin(), z.cross(x) * a.cos() - x * a.sin());
+                    let rp = Plane::new(*position, u, v).ok_or_else(|| DocError::Invalid("rib frame".into()))?;
+                    let rect = Region2 {
+                        outer: Loop2::polygon(&[
+                            Vec2::new(r0 * 0.5, -t / 2.0),
+                            Vec2::new(r0 + l, -t / 2.0),
+                            Vec2::new(r0 + l, t / 2.0),
+                            Vec2::new(r0 * 0.5, t / 2.0),
+                        ]),
+                        holes: Vec::new(),
+                    };
+                    tools.extend(kernel::extrude(&rp, &[rect], -delta, hr)?);
+                }
+            }
+            apply_op(st, f, tools, Operation::Join, std::slice::from_ref(&target))?;
+            // The root fillet: rounds the circle where the post meets the face.
+            if rf > 1e-9 {
+                let i = st.bodies.iter().position(|b| b.name == target).ok_or_else(|| DocError::Invalid("boss body".into()))?;
+                let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("boss body".into())) };
+                let mut warn = None;
+                let edges = resolve_edges(&mb.body, &[*position + x * r0], &mut warn)?;
+                let nb = kernel::fillet(&mb.body, &edges, rf)?;
+                if let Some(slot) = st.bodies.get_mut(i) {
+                    *slot = ModelBody::new(mb.name, nb, mb.feature);
+                }
+            }
+            if let Some(hd) = hole_diameter {
+                let rh = len(hd)? / 2.0;
+                let depth = match hole_depth {
+                    Some(e) => len(e)?,
+                    None => h,
+                };
+                if !(rh > 0.0 && rh < r_top && depth > 0.0) {
+                    return Err(DocError::Invalid("the boss hole must fit inside the boss".into()));
+                }
+                let hp = Plane::new(*position, x, z.cross(x)).ok_or_else(|| DocError::Invalid("hole frame".into()))?;
+                let tool = kernel::extrude(&hp, &[Region2 { outer: Loop2::circle(Vec2::ZERO, rh), holes: Vec::new() }], h - depth, h + delta)?;
+                apply_op(st, f, tool, Operation::Cut, std::slice::from_ref(&target))?;
+            }
+            Ok(())
+        }
+        FeatureKind::Lip { face, width, height, groove, gap, outside, body } => {
+            let target = body_under(st, body, *face)?;
+            let mb = st.body(&target).cloned().ok_or_else(|| DocError::Invalid("body".into()))?;
+            let n = planar_normal_at(&mb.body, *face).ok_or_else(|| DocError::Invalid("pick the planar rim face".into()))?;
+            let (w, h) = (len(width)?, len(height)?);
+            let g = match gap {
+                Some(e) => len(e)?,
+                None => 0.0,
+            };
+            if !(w > 0.0 && h > 0.0 && g >= 0.0) {
+                return Err(DocError::Invalid("the lip width and height must be positive".into()));
+            }
+            let plane = Plane::from_normal(*face, n).ok_or_else(|| DocError::Invalid("rim plane".into()))?;
+            let tol = (mb.body.size() * 1e-3).max(1e-3);
+            let mesh = mb.body.tessellate(tol)?;
+            let mut loops = face_loops(&mesh, &plane, *face, n, 0.0, tol);
+            loops.sort_by(|a, b| poly_area(b).abs().total_cmp(&poly_area(a).abs()));
+            let ccw = |l: &[Vec2]| if poly_area(l) < 0.0 { l.iter().rev().copied().collect::<Vec<_>>() } else { l.to_vec() };
+            let (Some(outer), Some(inner)) = (loops.first().map(|l| ccw(l)), loops.get(1).map(|l| ccw(l))) else {
+                return Err(DocError::Invalid("pick the rim face of a shelled body (a face with an inner and an outer edge)".into()));
+            };
+            let bw = if *groove { w + g } else { w };
+            // The band along the chosen edge, inside the rim face.
+            let band = if *outside {
+                Region2 { outer: Loop2::polygon(&outer).ccw(), holes: vec![Loop2::polygon(&offset_left(&outer, bw)).ccw().reversed()] }
+            } else {
+                Region2 { outer: Loop2::polygon(&offset_left(&inner, -bw)).ccw(), holes: vec![Loop2::polygon(&inner).ccw().reversed()] }
+            };
+            let delta = (h * 0.05).clamp(1e-3, 0.5);
+            if *groove {
+                let tool = kernel::extrude(&plane, &[band], -(h + g), delta)?;
+                apply_op(st, f, tool, Operation::Cut, std::slice::from_ref(&target))
+            } else {
+                let tool = kernel::extrude(&plane, &[band], -delta, h)?;
+                apply_op(st, f, tool, Operation::Join, std::slice::from_ref(&target))
+            }
+        }
+        FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, body } => {
+            let target = body_under(st, body, *position)?;
+            let (l, t, w, cd, cl) = (len(length)?, len(thickness)?, len(width)?, len(catch_depth)?, len(catch_length)?);
+            if !(l > 0.0 && t > 0.0 && w > 0.0 && cd > 0.0 && cl > 0.0 && cl < l) {
+                return Err(DocError::Invalid("the snap fit's sizes must be positive and the catch shorter than the arm".into()));
+            }
+            let (x, y, z) = local_frame(*direction, Some(*hook))?;
+            let delta = (l * 0.05).clamp(1e-3, 0.5);
+            // Side profile (x = toward the catch, y = up the arm), extruded across the width.
+            let pts =
+                [Vec2::new(-t, -delta), Vec2::new(0.0, -delta), Vec2::new(0.0, l - cl), Vec2::new(cd, l - cl), Vec2::new(0.0, l), Vec2::new(-t, l)];
+            let o = *position - y * (w / 2.0);
+            let pl = Plane::new(o, x, z).ok_or_else(|| DocError::Invalid("snap fit frame".into()))?;
+            let mut lp = Loop2::polygon(&pts);
+            if lp.signed_area() < 0.0 {
+                lp = lp.reversed();
+            }
+            let sgn = if pl.normal().dot(y) >= 0.0 { 1.0 } else { -1.0 };
+            let (lo, hi) = if sgn > 0.0 { (0.0, w) } else { (-w, 0.0) };
+            let tool = kernel::extrude(&pl, &[Region2 { outer: lp, holes: Vec::new() }], lo, hi)?;
+            apply_op(st, f, tool, Operation::Join, std::slice::from_ref(&target))
+        }
+        _ => Err(DocError::Invalid(format!("{} is not a plastic feature", f.name))),
+    }
 }

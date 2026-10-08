@@ -1393,6 +1393,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::SheetHem { .. }
         | FeatureKind::SheetUnfold { .. }
         | FeatureKind::SheetConvert { .. } => more::sheet_eval(doc, vals, f, st),
+        FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } => more::plastic_eval(vals, f, st),
         FeatureKind::Emboss { .. }
         | FeatureKind::Rib { .. }
         | FeatureKind::ReplaceFace { .. }

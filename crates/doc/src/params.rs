@@ -138,6 +138,38 @@ impl FeatureKind {
                 }
             }
             FeatureKind::Emboss { depth, .. } => v.push(("Depth", depth, L)),
+            FeatureKind::Boss { diameter, height, hole_diameter, hole_depth, draft, fillet, ribs, rib_thickness, rib_length, rib_offset, .. } => {
+                v.push(("Diameter", diameter, L));
+                v.push(("Height", height, L));
+                for (l, o, k) in [
+                    ("Hole diameter", hole_diameter, L),
+                    ("Hole depth", hole_depth, L),
+                    ("Draft angle", draft, A),
+                    ("Root fillet", fillet, L),
+                    ("Ribs", ribs, U),
+                    ("Rib thickness", rib_thickness, L),
+                    ("Rib length", rib_length, L),
+                    ("Rib offset", rib_offset, L),
+                ] {
+                    if let Some(e) = o {
+                        v.push((l, e, k));
+                    }
+                }
+            }
+            FeatureKind::Lip { width, height, gap, .. } => {
+                v.push(("Width", width, L));
+                v.push(("Height", height, L));
+                if let Some(g) = gap {
+                    v.push(("Gap", g, L));
+                }
+            }
+            FeatureKind::SnapFit { length, thickness, width, catch_depth, catch_length, .. } => {
+                v.push(("Length", length, L));
+                v.push(("Thickness", thickness, L));
+                v.push(("Width", width, L));
+                v.push(("Catch depth", catch_depth, L));
+                v.push(("Catch length", catch_length, L));
+            }
             FeatureKind::SheetContour { distance, .. } => v.push(("Distance", distance, L)),
             FeatureKind::SheetFlange { height, angle, radius, .. } => {
                 v.push(("Height", height, L));

@@ -17,6 +17,7 @@ mod measure_sel;
 mod section;
 pub(crate) use measure_sel::measure_items;
 mod parameters;
+mod plastic;
 mod sheet;
 mod sketch;
 mod sketch_constraints;
@@ -131,6 +132,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(features::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
+    v.extend(plastic::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
