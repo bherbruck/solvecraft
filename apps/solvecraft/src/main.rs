@@ -35,6 +35,9 @@ impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(PREFS_KEY, self.0.prefs());
     }
+    fn on_exit(&mut self) {
+        solvecraft_ui_egui::recovery_ui::close(&mut self.0);
+    }
 }
 
 /// Where the preferences (theme) are kept in eframe's storage.
@@ -133,6 +136,11 @@ fn main() -> eframe::Result {
             if files.is_empty() && !sample && control_port.is_none() {
                 let rev = app.session.revision;
                 app.home.show(rev);
+            }
+            // Autosave, and offer what crashed sessions left behind.
+            if let Some(dir) = solvecraft_engine::recovery::default_dir() {
+                let every = if app.autosave_minutes > 0.0 { app.autosave_minutes * 60.0 } else { f64::MAX / 4.0 };
+                solvecraft_ui_egui::recovery_ui::start(&mut app, &dir, std::time::Duration::from_secs_f64(every.min(1e9)));
             }
             Ok(Box::new(App(app)))
         }),

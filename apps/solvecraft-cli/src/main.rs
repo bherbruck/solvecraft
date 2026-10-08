@@ -55,6 +55,8 @@ fn main() -> ExitCode {
         Some("oracle") => oracle::run(&args[1..]),
         Some("step-corpus") => oracle::step_corpus(&args[1..]),
         Some("mcp") => cmd_mcp(&args[1..]),
+        // Hidden, for the kill-mid-save test: save a large design over and over.
+        Some("save-stress") => cmd_save_stress(&args[1..]),
         Some("--version" | "-V") => {
             println!("solvecraft-cli {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -216,4 +218,26 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     solvecraft_mcp::Server::new(backend).serve(stdin.lock(), stdout.lock()).map_err(|e| e.to_string())
+}
+
+/// `save-stress <path> <rounds>`: save a design of a few hundred kilobytes `rounds` times, its
+/// parameter `save_round` set to the round number each time.
+fn cmd_save_stress(args: &[String]) -> Result<(), String> {
+    let (Some(path), Some(rounds)) = (args.first(), args.get(1).and_then(|n| n.parse::<u64>().ok())) else {
+        return Err("usage: solvecraft-cli save-stress <path> <rounds>".into());
+    };
+    let mut s = Session::default();
+    let filler = (0..3000).map(|i| solvecraft_engine::doc::Param {
+        name: format!("p{i}"),
+        expr: format!("{i} mm + 0.5 mm"),
+        unit: "mm".into(),
+        comment: "filler to make the file large".into(),
+        model: false,
+    });
+    s.doc_mut().params.extend(filler);
+    for r in 0..rounds {
+        s.doc_mut().set_param("save_round", &r.to_string(), None, None).map_err(|e| e.to_string())?;
+        s.execute("SaveDocumentCommand", &json!({ "path": path })).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }

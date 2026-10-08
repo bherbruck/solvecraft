@@ -33,6 +33,7 @@ pub mod params_dialog;
 #[cfg(test)]
 mod preselect_tests;
 pub mod preview;
+pub mod recovery_ui;
 pub mod ref_images;
 pub mod scenario;
 pub mod selection;
@@ -163,6 +164,14 @@ pub struct SolveApp {
     pub esc_handled: bool,
     pub status: Option<(String, f64, bool)>,
     pub quit_requested: bool,
+    /// Autosave into the recovery folder (the desktop app turns it on).
+    pub autosave: Option<solvecraft_engine::recovery::Autosaver>,
+    /// Designs left by crashed apps, offered for recovery.
+    pub recoverable: Vec<solvecraft_engine::recovery::Entry>,
+    /// The last command was a big operation: autosave after it.
+    pub big_operation: bool,
+    /// Autosave interval (minutes; 0 = only after big operations). A preference.
+    pub autosave_minutes: f64,
     /// The application bar is the window's title bar (Windows, Linux: no OS decorations).
     pub custom_titlebar: bool,
     /// macOS: the traffic lights sit over the application bar's left end.
@@ -206,6 +215,10 @@ impl SolveApp {
             esc_handled: false,
             status: None,
             quit_requested: false,
+            autosave: None,
+            recoverable: Vec::new(),
+            big_operation: false,
+            autosave_minutes: 5.0,
             custom_titlebar: false,
             integrated_titlebar: false,
             frame_ms: 0.0,
@@ -241,6 +254,7 @@ impl SolveApp {
             "recent": self.home.recent,
             "shortcut_box": self.sbox.prefs(),
             "shortcuts": self.keymap.prefs(),
+            "autosave_minutes": self.autosave_minutes,
         })
         .to_string()
     }
@@ -263,6 +277,9 @@ impl SolveApp {
         }
         if let Some(a) = flag("auto_project") {
             self.session.auto_project = a;
+        }
+        if let Some(m) = v.get("autosave_minutes").and_then(Value::as_f64).filter(|m| m.is_finite()) {
+            self.autosave_minutes = m.clamp(0.0, 600.0);
         }
         if let Some(s) = v.get("visual_style").and_then(Value::as_u64) {
             self.ui.visual_style = u8::try_from(s.min(2)).unwrap_or(0);
@@ -296,7 +313,9 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        let t0 = now_ms();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
+        self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
         match &r {
             Ok(_) => {
                 self.session.echo(format!("{id}: done"));
@@ -604,6 +623,7 @@ impl SolveApp {
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
         toolbar::shortcuts(self, ctx);
+        recovery_ui::tick(self);
         for f in ctx.input(|i| i.raw.dropped_files.clone()) {
             let p = f.path().to_string_lossy().to_string();
             if !p.is_empty() {
@@ -663,6 +683,7 @@ impl SolveApp {
         dialogs::show(self, ui.ctx());
         sketch_palette::show(self, ui.ctx());
         params_dialog::show(self, ui.ctx());
+        recovery_ui::show(self, ui.ctx());
         context_menu::show(self, ui.ctx());
         delete::show(self, ui.ctx());
         if self.custom_titlebar {

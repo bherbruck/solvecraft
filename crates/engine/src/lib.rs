@@ -10,6 +10,7 @@
 
 pub mod cmd;
 pub mod params;
+pub mod recovery;
 pub mod sample;
 pub mod view;
 
@@ -223,6 +224,10 @@ impl Session {
     }
     pub fn mark_saved(&mut self) {
         self.saved = self.doc.clone();
+    }
+    /// The design has changes not in its file (a recovered design).
+    pub fn mark_unsaved(&mut self) {
+        self.saved = Arc::new(Document::new(""));
     }
 
     pub fn echo(&mut self, s: impl Into<String>) {

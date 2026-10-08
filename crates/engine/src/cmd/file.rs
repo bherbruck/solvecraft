@@ -25,6 +25,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("path: .3mf or .stl file (its meshes join the design as mesh bodies); name?"),
     CommandSpec::new("SaveDocumentCommand", "Save", save).icon("save").key("Ctrl+S").noundo().params("path? (default: current file)"),
     CommandSpec::new("SaveDocumentAsCommand", "Save As", save_as).icon("save").noundo().params("path"),
+    CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list)
+        .noundo()
+        .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
+    CommandSpec::new("doc.recover", "Recover Design", recover)
+        .noundo()
+        .params("id (from doc.recovery_list); dir?; discard?: bool (delete the entry once open) — opens it with its file path, unsaved"),
+    CommandSpec::new("doc.recovery_discard", "Discard Recovered Design", recovery_discard).noundo().params("id, or all: true; dir?"),
     CommandSpec::new("ExportCommand", "Export", export)
         .icon("export")
         .noundo()
@@ -139,7 +146,8 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn write(s: &mut Session, path: &str) -> Result<Value> {
     let bytes = solvecraft_io::write_design(&s.doc);
-    std::fs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // Atomic, keeping the version being replaced as `<file>.bak`.
+    solvecraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     s.path = Some(path.to_string());
     s.mark_saved();
     Ok(json!({"path": path, "bytes": bytes.len()}))
@@ -181,4 +189,45 @@ fn save_stl(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, "FusionSaveAsSTLCommand")?;
     let f = if bool_(p, "ascii").unwrap_or(false) { Format::StlAscii } else { Format::StlBinary };
     export_to(s, path, f, &string_list(p, "bodies"))
+}
+
+fn recovery_dir(p: &Value, cmd: &str) -> Result<std::path::PathBuf> {
+    match str_(p, "dir").filter(|d| !d.trim().is_empty() && d.len() < 4096) {
+        Some(d) => Ok(d.into()),
+        None => crate::recovery::default_dir().ok_or_else(|| bad(cmd, "no recovery folder on this system (give `dir`)")),
+    }
+}
+
+fn recovery_list(_s: &mut Session, p: &Value) -> Result<Value> {
+    let dir = recovery_dir(p, "doc.recovery_list")?;
+    Ok(json!({"dir": dir, "designs": crate::recovery::orphans(&dir)}))
+}
+
+fn recover(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "doc.recover";
+    let dir = recovery_dir(p, cmd)?;
+    let id = str_(p, "id").ok_or_else(|| bad(cmd, "`id` is required (see doc.recovery_list)"))?;
+    let (doc, entry) = crate::recovery::load(&dir, id)?;
+    *s = Session::new(doc);
+    s.path = entry.path.clone();
+    s.mark_unsaved();
+    if bool_(p, "discard").unwrap_or(false) {
+        crate::recovery::remove(&dir, id);
+    }
+    let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
+    Ok(json!({"id": id, "path": entry.path, "name": entry.name, "features": s.doc.features.len(), "errors": errors}))
+}
+
+fn recovery_discard(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "doc.recovery_discard";
+    let dir = recovery_dir(p, cmd)?;
+    let ids: Vec<String> = if bool_(p, "all").unwrap_or(false) {
+        crate::recovery::orphans(&dir).into_iter().map(|e| e.id).collect()
+    } else {
+        vec![str_(p, "id").ok_or_else(|| bad(cmd, "`id` or `all` is required"))?.to_string()]
+    };
+    for id in &ids {
+        crate::recovery::remove(&dir, id);
+    }
+    Ok(json!({"discarded": ids}))
 }

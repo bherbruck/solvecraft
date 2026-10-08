@@ -52,6 +52,7 @@ headline counts in-scope tabs only and lists the deferred ones separately.
 | M10 | Sheet metal: flange (base, edge, contour), hem, unfold/refold, convert, flat pattern + DXF, rules: done (oracle 67-76). PLASTIC enclosure subset: Boss, Rib, Web, Lip/Groove, Snap Fit, Rest, Plastic Rules (library, edit, assign; rule draft and clearance as feature defaults): done, no Fusion oracle (licence), tested against hand-computed geometry. UI: SHEET METAL and PLASTIC tabs in Fusion's layout with dialogs (live preview, Edit Feature, pre-selection) for Flange, Hem, Unfold/Refold, Convert, Sheet Metal Rules, Create Flat Pattern (flat view with bend lines, bend table, DXF export), Boss, Lip/Groove, Snap Fit, Rest, Manage and Assign Plastic Rules; Bend (Fold) has no engine command yet | in progress | 36 |
 | M11 | 2D drawings | deferred | — |
 | M12 | Release: installers, signing, docs, performance | planned | 16 |
+| M13 | Never lose work: atomic saves (temporary file, flush, rename; a crash at any moment leaves the old file or the new one) with the replaced version kept as `<file>.bak`; autosave of unsaved changes to the recovery folder every 5 minutes (preference) and after big operations, only when something changed; "Recover unsaved design?" on the next launch (`doc.recovery_list`, `doc.recover`, `doc.recovery_discard`); a kill-mid-save test (process killed while saving a 0.5 MB design 25 times). Next: file format version and migrations, old-design corpus, fuzzed design files | in progress | 6 |
 
 ## Known limitations
 
