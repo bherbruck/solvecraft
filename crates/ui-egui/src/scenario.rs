@@ -24,7 +24,8 @@
 //!   `{"dimension": "d1"}` or `{"handle": "arrow"}` (a manipulator handle: see [`publish_handle`])
 //! - `{"autosave": true}`: autosave into the scenario's recovery folder; `{"restart": "crash" |
 //!   "close"}`: the app dies (or closes) and a new one starts on the same folders
-//! - `{"note": "…"}`: a comment
+//! - `{"note": "…"}`: a comment; `{"pending": "why"}`: the scenario waits for a fix (its test
+//!   is ignored)
 //! - `{"expect": {…}}`: checks, see [`check`]; `{"until": {…}}` waits (frames) until they pass
 //!
 //! The same files drive the live app over the control channel for screenshots.
@@ -324,7 +325,7 @@ impl Harness {
                 self.call("ui.drag", json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl")}))
             } else if let Some(m) = s.get("call").and_then(Value::as_str) {
                 self.call(m, s.get("params").cloned().unwrap_or(json!({})))
-            } else if s.get("note").is_some() {
+            } else if s.get("note").is_some() || s.get("pending").is_some() {
                 return Ok(());
             } else if let Some(name) = s.get("shot").and_then(Value::as_str) {
                 // With SOLVECRAFT_SCENARIO_SHOTS set: a render of the model as the camera sees it.

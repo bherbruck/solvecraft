@@ -1,5 +1,6 @@
 //! Build information for Help › About: the git commit and the build date (UTC). Both fall back to
-//! "unknown" when git is missing (a source tarball).
+//! "unknown" when git is missing (a source tarball). Also one test per UI scenario file
+//! (`tests/scenarios/*.json`), so adding a scenario needs no Rust edit.
 
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -34,4 +35,35 @@ fn main() {
         println!("cargo:rerun-if-changed={dir}/logs/HEAD");
     }
     println!("cargo:rerun-if-changed=build.rs");
+    scenario_tests();
+}
+
+/// `$OUT_DIR/scenario_tests.rs`: a `#[test]` per scenario file, named after it; a scenario with
+/// a `{"pending": "why"}` step is `#[ignore]`d with that reason (it waits for a fix).
+fn scenario_tests() {
+    let dir = std::path::Path::new("tests/scenarios");
+    println!("cargo:rerun-if-changed=tests/scenarios");
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "json")).collect())
+        .unwrap_or_default();
+    files.sort();
+    let mut out = String::new();
+    for f in files {
+        let Some(stem) = f.file_stem().and_then(|s| s.to_str()) else { continue };
+        let mut name: String = stem.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
+        if !name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            name.insert_str(0, "s_");
+        }
+        let text = std::fs::read_to_string(&f).unwrap_or_default();
+        let pending = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.as_array().and_then(|a| a.iter().find_map(|s| s.get("pending").map(|p| p.as_str().unwrap_or("pending").to_string()))));
+        if let Some(why) = pending {
+            out += &format!("#[test]\n#[ignore = {why:?}]\nfn {name}() {{\n    run({stem:?});\n}}\n\n");
+        } else {
+            out += &format!("#[test]\nfn {name}() {{\n    run({stem:?});\n}}\n\n");
+        }
+    }
+    let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap_or_else(|_| ".".into())).join("scenario_tests.rs");
+    let _ = std::fs::write(path, out);
 }
