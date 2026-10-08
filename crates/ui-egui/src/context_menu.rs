@@ -42,6 +42,10 @@ pub enum Target {
     Origin,
     /// Document Settings › Units.
     Units,
+    /// An assembly joint.
+    Joint {
+        id: u64,
+    },
     /// The Named Views folder, and one view (saved or standard) in it.
     NamedViews,
     NamedView {
@@ -156,6 +160,7 @@ pub enum RenameWhat {
     Group(u64),
     Canvas(u64),
     View(String),
+    Joint(u64),
 }
 
 #[derive(Clone, Debug)]
@@ -220,6 +225,7 @@ pub fn target_bodies(app: &SolveApp, target: &Target) -> Vec<String> {
         | Target::Canvas { .. }
         | Target::Origin
         | Target::Units
+        | Target::Joint { .. }
         | Target::NamedViews
         | Target::NamedView { .. } => Vec::new(),
     }
@@ -281,6 +287,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
+        Target::Joint { id } => joint_items(app, *id),
         Target::Units => crate::prefs::UNITS
             .iter()
             .map(|u| {
@@ -459,6 +466,20 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").key("V").with(json!({ "sketch": id })),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "").with(json!({ "feature": id })),
+    ]
+}
+
+/// An assembly joint: edit, drive, suppress, delete.
+fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
+    let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == id) else { return Vec::new() };
+    let rigid = j.kind == solvecraft_engine::doc::joints::JointKind::Rigid;
+    vec![
+        act("ui.editJoint", "Edit Joint", "joint").with(json!({ "joint": id })),
+        act("ui.driveJoint", "Drive Joint", "").with(json!({ "joint": id })).on(!rigid),
+        cmd(app, "joint.edit", if j.suppressed { "Unsuppress" } else { "Suppress" }).with(json!({ "joint": id, "suppressed": !j.suppressed })),
+        Item::sep(),
+        cmd(app, "joint.delete", "Delete").key("Del").with(json!({ "joint": id })),
+        act("ui.rename", "Rename", "").with(json!({ "joint": id })),
     ]
 }
 
@@ -670,6 +691,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 RenameWhat::Canvas(c)
             } else if let Some(v) = p.get("view").and_then(Value::as_str) {
                 RenameWhat::View(v.to_string())
+            } else if let Some(j) = id_of(&p, "joint") {
+                RenameWhat::Joint(j)
             } else {
                 return;
             };
@@ -751,6 +774,19 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
+        "ui.editJoint" | "ui.driveJoint" => {
+            if let Some(id) = id_of(&p, "joint") {
+                let d = if item.id == "ui.editJoint" {
+                    crate::dialogs_assembly::edit_joint(app, id)
+                } else {
+                    crate::dialogs_assembly::drive_joint(app, id)
+                };
+                if let Some(d) = d {
+                    app.tool = None;
+                    app.dialog = Some(d);
+                }
+            }
+        }
         "ui.newView" => drop(crate::browser::save_view(app, None)),
         "ui.restoreView" => {
             if let Some(v) = p.get("view").and_then(Value::as_str) {
@@ -923,6 +959,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::Group(g) => crate::browser::group_name(app, *g).unwrap_or_default(),
         RenameWhat::Canvas(c) => doc.canvases.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
         RenameWhat::View(v) => v.clone(),
+        RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
     };
     app.menu.rename = Some(Rename { what, text, at, focused: false });
 }
@@ -947,6 +984,7 @@ fn commit_rename(app: &mut SolveApp, r: &Rename) {
         RenameWhat::Group(g) => crate::browser::group_action(app, "ui.renameGroup", &json!({ "group": g, "name": name })),
         RenameWhat::Canvas(c) => drop(app.run("canvas.edit", json!({ "canvas": c, "name": name }))),
         RenameWhat::View(v) => drop(app.run("view.rename", json!({ "view": v, "name": name }))),
+        RenameWhat::Joint(j) => drop(app.run("joint.edit", json!({ "joint": j, "name": name }))),
     }
 }
 

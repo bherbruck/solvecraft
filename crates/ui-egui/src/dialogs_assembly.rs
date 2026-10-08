@@ -1005,16 +1005,17 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         return;
     }
     let mut dialog: Option<Dialog> = None;
-    let mut run: Option<(&'static str, Value)> = None;
     for (id, name, kind, suppressed) in joints {
         let resp = row(ui, depth + 1.0, "joint", &name, suppressed, None).on_hover_text(format!("{kind:?} joint"));
         if resp.double_clicked() {
             dialog = edit_joint(app, id);
         }
-        resp.context_menu(|ui| joint_menu(app, ui, (id, kind, suppressed), &mut dialog, &mut run));
-    }
-    if let Some((c, p)) = run {
-        let _ = app.run(c, p);
+        // The same menus as the rest of the browser.
+        if resp.secondary_clicked() {
+            let at = resp.interact_pointer_pos().unwrap_or(resp.rect.left_bottom());
+            crate::context_menu::open_for(app, at, crate::context_menu::Target::Joint { id });
+        }
+        let _ = (kind, suppressed);
     }
     if let Some(d) = dialog {
         app.tool = None;
