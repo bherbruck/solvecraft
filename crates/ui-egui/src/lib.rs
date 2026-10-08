@@ -159,15 +159,34 @@ impl SolveApp {
 
     /// Preferences kept between runs (JSON), for the host to store.
     pub fn prefs(&self) -> String {
-        json!({ "dark": self.ui.dark }).to_string()
+        json!({
+            "dark": self.ui.dark,
+            "grid": self.ui.show_grid,
+            "perspective": self.ui.perspective,
+            "pick_bodies": self.ui.pick_bodies,
+            "auto_project": self.session.auto_project,
+        })
+        .to_string()
     }
 
     /// Restore preferences saved with [`SolveApp::prefs`].
     pub fn load_prefs(&mut self, prefs: &str) {
-        if let Ok(v) = serde_json::from_str::<Value>(prefs)
-            && let Some(d) = v.get("dark").and_then(Value::as_bool)
-        {
+        let Ok(v) = serde_json::from_str::<Value>(prefs) else { return };
+        let flag = |k: &str| v.get(k).and_then(Value::as_bool);
+        if let Some(d) = flag("dark") {
             self.ui.dark = d;
+        }
+        if let Some(g) = flag("grid") {
+            self.ui.show_grid = g;
+        }
+        if let Some(p) = flag("perspective") {
+            self.ui.perspective = p;
+        }
+        if let Some(b) = flag("pick_bodies") {
+            self.ui.pick_bodies = b;
+        }
+        if let Some(a) = flag("auto_project") {
+            self.session.auto_project = a;
         }
     }
 

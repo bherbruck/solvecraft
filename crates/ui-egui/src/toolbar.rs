@@ -159,6 +159,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 close = true;
             }
             ui.separator();
+            if item(ui, "Preferences…", "") {
+                app.dialog = Some(crate::dialogs::Dialog::preferences());
+                close = true;
+            }
             if item(ui, "Quit", "") {
                 app.quit_requested = true;
                 close = true;
