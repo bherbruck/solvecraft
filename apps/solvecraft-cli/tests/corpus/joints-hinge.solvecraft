@@ -1,0 +1,225 @@
+{
+  "format": "solvecraft/1",
+  "name": "Untitled",
+  "units": "mm",
+  "params": [
+    {
+      "name": "open_angle",
+      "expr": "90 deg",
+      "unit": "deg",
+      "model": false
+    }
+  ],
+  "features": [
+    {
+      "id": 3,
+      "name": "Box1",
+      "suppressed": false,
+      "param_names": [
+        "d1",
+        "d2",
+        "d3"
+      ],
+      "component": 1,
+      "type": "box",
+      "corner": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "length": "40",
+      "width": "30",
+      "height": "3",
+      "operation": "new_body"
+    },
+    {
+      "id": 4,
+      "name": "Cylinder1",
+      "suppressed": false,
+      "param_names": [
+        "d4",
+        "d5"
+      ],
+      "component": 1,
+      "type": "cylinder",
+      "base": [
+        0.0,
+        33.0,
+        4.0
+      ],
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "radius": "4",
+      "height": "40",
+      "operation": "new_body"
+    },
+    {
+      "id": 7,
+      "name": "Box2",
+      "suppressed": false,
+      "param_names": [
+        "d6",
+        "d7",
+        "d8"
+      ],
+      "component": 5,
+      "type": "box",
+      "corner": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "length": "40",
+      "width": "30",
+      "height": "3",
+      "operation": "new_body"
+    },
+    {
+      "id": 8,
+      "name": "Cylinder2",
+      "suppressed": false,
+      "param_names": [
+        "d9",
+        "d10"
+      ],
+      "component": 5,
+      "type": "cylinder",
+      "base": [
+        0.0,
+        33.0,
+        4.0
+      ],
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "radius": "4",
+      "height": "40",
+      "operation": "new_body"
+    }
+  ],
+  "next_id": 9,
+  "components": [
+    {
+      "id": 1,
+      "name": "LeafA",
+      "parent": 0
+    },
+    {
+      "id": 5,
+      "name": "LeafB",
+      "parent": 0
+    }
+  ],
+  "occurrences": [
+    {
+      "id": 2,
+      "component": 1,
+      "parent": 0,
+      "name": "LeafA:1",
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grounded": true
+    },
+    {
+      "id": 6,
+      "component": 5,
+      "parent": 0,
+      "name": "LeafB:1",
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          6.123233995736766e-17,
+          -1.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          6.123233995736766e-17,
+          0.0
+        ],
+        [
+          0.0,
+          29.000000000000075,
+          37.000000000000064,
+          1.0
+        ]
+      ],
+      "grounded": false
+    }
+  ],
+  "assembly": {
+    "joints": [
+      {
+        "id": 1,
+        "name": "Hinge",
+        "kind": "revolute",
+        "a": {
+          "occurrence": 2,
+          "snap": {
+            "type": "circle_center",
+            "pick": [
+              1.0,
+              37.0,
+              4.0
+            ]
+          }
+        },
+        "b": {
+          "occurrence": 6,
+          "snap": {
+            "type": "circle_center",
+            "pick": [
+              1.0,
+              37.0,
+              4.0
+            ]
+          }
+        },
+        "values": [
+          1.5707963267948966
+        ],
+        "limits": [
+          null
+        ],
+        "offset": 0.0,
+        "angle": 0.0
+      }
+    ]
+  }
+}

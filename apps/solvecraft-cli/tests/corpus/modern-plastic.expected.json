@@ -1,0 +1,126 @@
+{
+  "bodies": [
+    {
+      "area_mm2": 24280.380636378435,
+      "bbox": {
+        "max": [
+          80.0,
+          50.0,
+          32.0
+        ],
+        "min": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "center_of_mass": [
+        39.89510389356416,
+        24.906013036240918,
+        10.936558895792075
+      ],
+      "density_g_cm3": 1.29,
+      "edges": 82,
+      "face_types": {
+        "cone": 1,
+        "cylinder": 1,
+        "plane": 35
+      },
+      "faces": 37,
+      "kernel": {
+        "edges": 90,
+        "faces": 39,
+        "shells": 1,
+        "vertices": 60
+      },
+      "mass_g": 29.716687268283682,
+      "material": "Default",
+      "name": "Body1",
+      "vertices": 56,
+      "volume_mm3": 23036.19168084006
+    }
+  ],
+  "body_count": 1,
+  "params": [
+    {
+      "comment": "",
+      "error": null,
+      "expression": "2 mm",
+      "model": false,
+      "name": "wall",
+      "unit": "mm",
+      "value": 2.0
+    }
+  ],
+  "sketches": [],
+  "timeline": [
+    {
+      "error": null,
+      "id": 1,
+      "ms": 13.671479,
+      "name": "Box1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 2,
+      "ms": 15.729548999999999,
+      "name": "Shell1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ShellFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 3,
+      "ms": 136.407014,
+      "name": "Lip1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "LipFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 4,
+      "ms": 530.869306,
+      "name": "Boss1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BossFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 5,
+      "ms": 176.568115,
+      "name": "Rest1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "RestFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 6,
+      "ms": 260.395779,
+      "name": "SnapFit1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "SnapFitFeature",
+      "warning": null
+    }
+  ],
+  "total": {
+    "area_mm2": 24280.380636378435,
+    "edges": 82,
+    "faces": 37,
+    "mass_g": 29.716687268283682,
+    "vertices": 56,
+    "volume_mm3": 23036.19168084006
+  }
+}

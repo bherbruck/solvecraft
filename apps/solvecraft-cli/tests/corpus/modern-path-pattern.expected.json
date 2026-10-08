@@ -1,0 +1,122 @@
+{
+  "bodies": [
+    {
+      "area_mm2": 16463.932136252846,
+      "bbox": {
+        "max": [
+          120.0,
+          60.0,
+          5.0000000000000036
+        ],
+        "min": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "center_of_mass": [
+        60.000000010005735,
+        29.965234604788655,
+        2.4999999999999867
+      ],
+      "density_g_cm3": 1.29,
+      "edges": 26,
+      "face_types": {
+        "cylinder": 7,
+        "plane": 6
+      },
+      "faces": 13,
+      "kernel": {
+        "edges": 54,
+        "faces": 20,
+        "shells": 1,
+        "vertices": 36
+      },
+      "mass_g": 45.163625870882676,
+      "material": "Default",
+      "name": "Plate",
+      "vertices": 22,
+      "volume_mm3": 35010.56269060673
+    }
+  ],
+  "body_count": 1,
+  "params": [],
+  "sketches": [
+    {
+      "curves": 4,
+      "dof": 8,
+      "id": 1,
+      "name": "Plate_sketch",
+      "profiles": 1,
+      "status": "solved"
+    },
+    {
+      "curves": 2,
+      "dof": 6,
+      "id": 3,
+      "name": "PathSketch",
+      "profiles": 1,
+      "status": "solved"
+    }
+  ],
+  "timeline": [
+    {
+      "error": null,
+      "id": 1,
+      "ms": 0.093199,
+      "name": "Plate_sketch",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 2,
+      "ms": 9.166392,
+      "name": "Plate",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ExtrudeFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 3,
+      "ms": 0.057569999999999996,
+      "name": "PathSketch",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 4,
+      "ms": 84.237259,
+      "name": "Hole1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ExtrudeFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 5,
+      "ms": 1093.817516,
+      "name": "PathPattern1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "PathPatternFeature",
+      "warning": null
+    }
+  ],
+  "total": {
+    "area_mm2": 16463.932136252846,
+    "edges": 26,
+    "faces": 13,
+    "mass_g": 45.163625870882676,
+    "vertices": 22,
+    "volume_mm3": 35010.56269060673
+  }
+}

@@ -1,0 +1,263 @@
+{
+  "format": "solvecraft/1",
+  "name": "Untitled",
+  "units": "mm",
+  "params": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "Box1",
+      "suppressed": false,
+      "body_names": [
+        "Base"
+      ],
+      "type": "box",
+      "corner": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "length": "10",
+      "width": "10",
+      "height": "10",
+      "operation": "new_body"
+    },
+    {
+      "id": 4,
+      "name": "Box2",
+      "suppressed": false,
+      "body_names": [
+        "ArmBody"
+      ],
+      "component": 2,
+      "type": "box",
+      "corner": [
+        20.0,
+        0.0,
+        0.0
+      ],
+      "length": "10",
+      "width": "4",
+      "height": "4",
+      "operation": "new_body"
+    },
+    {
+      "id": 5,
+      "name": "Fillet1",
+      "suppressed": false,
+      "component": 2,
+      "type": "fillet",
+      "edges": [
+        [
+          25.0,
+          4.0,
+          4.0
+        ]
+      ],
+      "radius": "1"
+    },
+    {
+      "id": 9,
+      "name": "Box2 (copy)",
+      "suppressed": false,
+      "component": 7,
+      "type": "box",
+      "corner": [
+        20.0,
+        0.0,
+        0.0
+      ],
+      "length": "10",
+      "width": "4",
+      "height": "4",
+      "operation": "new_body"
+    },
+    {
+      "id": 10,
+      "name": "Fillet1 (copy)",
+      "suppressed": false,
+      "component": 7,
+      "type": "fillet",
+      "edges": [
+        [
+          25.0,
+          4.0,
+          4.0
+        ]
+      ],
+      "radius": "1"
+    },
+    {
+      "id": 11,
+      "name": "S1",
+      "suppressed": false,
+      "type": "sketch",
+      "plane": {
+        "type": "origin",
+        "name": "XY"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              5.0,
+              5.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 2.0,
+            "construction": false
+          }
+        ],
+        "constraints": [],
+        "counters": {
+          "c": 1
+        }
+      }
+    },
+    {
+      "id": 12,
+      "name": "Extrude1",
+      "suppressed": false,
+      "type": "extrude",
+      "sketch": 11,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "10",
+        "direction": "positive"
+      },
+      "operation": "cut"
+    }
+  ],
+  "next_id": 13,
+  "components": [
+    {
+      "id": 2,
+      "name": "Arm",
+      "parent": 0
+    },
+    {
+      "id": 7,
+      "name": "Arm (copy)",
+      "parent": 0
+    }
+  ],
+  "occurrences": [
+    {
+      "id": 3,
+      "component": 2,
+      "parent": 0,
+      "name": "Arm:1",
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          50.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grounded": true
+    },
+    {
+      "id": 6,
+      "component": 2,
+      "parent": 0,
+      "name": "Arm:2",
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          70.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grounded": false
+    },
+    {
+      "id": 8,
+      "component": 7,
+      "parent": 0,
+      "name": "Arm (copy):1",
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          20.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grounded": false
+    }
+  ]
+}

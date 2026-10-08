@@ -1,0 +1,85 @@
+{
+  "bodies": [
+    {
+      "area_mm2": 10411.967792188118,
+      "bbox": {
+        "max": [
+          70.0,
+          50.00000000000002,
+          32.500000000000014
+        ],
+        "min": [
+          0.0,
+          -4.440892098500626e-14,
+          -5.329070518200751e-15
+        ]
+      },
+      "center_of_mass": [
+        36.03765771659564,
+        24.999999999999982,
+        15.08756759282672
+      ],
+      "density_g_cm3": 1.29,
+      "edges": 44,
+      "face_types": {
+        "cylinder": 4,
+        "plane": 10
+      },
+      "faces": 22,
+      "kernel": {
+        "edges": 44,
+        "faces": 22,
+        "shells": 1,
+        "vertices": 24
+      },
+      "mass_g": 15.605746095907175,
+      "material": "Default",
+      "name": "Body1",
+      "sheet_metal": true,
+      "vertices": 24,
+      "volume_mm3": 12097.477593726493
+    }
+  ],
+  "body_count": 1,
+  "params": [],
+  "sketches": [
+    {
+      "curves": 3,
+      "dof": 8,
+      "id": 1,
+      "name": "Contour",
+      "profiles": 0,
+      "status": "solved"
+    }
+  ],
+  "timeline": [
+    {
+      "error": null,
+      "id": 1,
+      "ms": 0.074984,
+      "name": "Contour",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 2,
+      "ms": 37.187197,
+      "name": "ContourFlange",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ContourFlangeFeature",
+      "warning": null
+    }
+  ],
+  "total": {
+    "area_mm2": 10411.967792188118,
+    "edges": 44,
+    "faces": 22,
+    "mass_g": 15.605746095907175,
+    "vertices": 24,
+    "volume_mm3": 12097.477593726493
+  }
+}

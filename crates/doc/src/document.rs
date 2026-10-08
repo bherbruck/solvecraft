@@ -1113,7 +1113,7 @@ pub struct BrowserGroup {
 }
 
 fn default_format() -> String {
-    "solvecraft/1".into()
+    crate::format::format_string(crate::format::FORMAT)
 }
 fn default_units() -> String {
     "mm".into()
@@ -1214,22 +1214,9 @@ impl Document {
         self.components.iter().find(|c| c.id.to_string() == key || c.name == key).map(|c| c.id)
     }
 
+    /// Read a design file's JSON (any format this build knows; older ones are upgraded).
     pub fn from_json(s: &str) -> Result<Document> {
-        let mut d: Document = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("document: {e}")))?;
-        if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
-            return Err(DocError::Invalid("document too large".into()));
-        }
-        // Feature inputs get parameter names (designs from before they had them).
-        let ids: Vec<u64> = d.features.iter().map(|f| f.id).collect();
-        for id in ids {
-            d.name_feature_inputs(id);
-        }
-        // Designs from before occurrences: every component gets one, in place.
-        let missing: Vec<(u64, u64)> =
-            d.components.iter().filter(|c| !d.occurrences.iter().any(|o| o.component == c.id)).map(|c| (c.id, c.parent)).collect();
-        for (c, p) in missing {
-            d.add_occurrence(c, p, crate::IDENTITY)?;
-        }
+        let d = crate::format::read(s)?;
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
         }

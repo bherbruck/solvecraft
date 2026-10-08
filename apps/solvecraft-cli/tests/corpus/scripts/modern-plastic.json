@@ -1,0 +1,10 @@
+{"commands": [
+ {"command": "ChangeParameterCommand", "params": {"name": "wall", "expression": "2 mm"}},
+ {"command": "PrimitiveBox", "params": {"length": 80, "width": 50, "height": 30}},
+ {"command": "FusionShellBodyCommand", "params": {"faces": [[40, 25, 30]], "thickness": "wall"}},
+ {"command": "FusionLipCommand", "params": {"face": [1, 25, 30], "width": 1, "height": 2}},
+ {"command": "FusionBossCommand", "params": {"position": [20, 20, 2], "diameter": 6, "height": 10, "hole_diameter": 2.5, "draft": "1 deg"}},
+ {"command": "FusionRestCommand", "params": {"position": [60, 30, 2], "width": 8, "length": 12, "height": 3, "thickness": 1}},
+ {"command": "FusionSnapFitCommand", "params": {"position": [40, 12, 2], "direction": [0, 0, 1], "hook": [0, 1, 0], "length": 12, "thickness": 1.5, "width": 6, "catch_depth": 1, "catch_length": 2}},
+ {"command": "FusionManagePlasticRuleCommand", "params": {"name": "ABS (1.5mm)", "active": true}}
+]}

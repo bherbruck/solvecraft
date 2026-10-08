@@ -1,0 +1,238 @@
+{
+  "format": "solvecraft/1",
+  "name": "Untitled",
+  "units": "mm",
+  "params": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "Plate_sketch",
+      "suppressed": false,
+      "type": "sketch",
+      "plane": {
+        "type": "origin",
+        "name": "XY"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "l1.start",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l1.end",
+            "pos": [
+              120.0,
+              0.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l2.end",
+            "pos": [
+              120.0,
+              60.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l3.end",
+            "pos": [
+              0.0,
+              60.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [],
+        "counters": {}
+      }
+    },
+    {
+      "id": 2,
+      "name": "Plate",
+      "suppressed": false,
+      "body_names": [
+        "Plate"
+      ],
+      "param_names": [
+        "d1"
+      ],
+      "type": "extrude",
+      "sketch": 1,
+      "profiles": {
+        "type": "curves",
+        "loops": [
+          [
+            "l1",
+            "l2",
+            "l3",
+            "l4"
+          ]
+        ]
+      },
+      "extent": {
+        "distance": "5",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 3,
+      "name": "PathSketch",
+      "suppressed": false,
+      "type": "sketch",
+      "plane": {
+        "type": "origin",
+        "name": "XY"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "a1.center",
+            "pos": [
+              60.0,
+              3.3333333333333335
+            ],
+            "fixed": false
+          },
+          {
+            "id": "a1.start",
+            "pos": [
+              100.0,
+              15.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "a1.end",
+            "pos": [
+              20.0,
+              15.000000000000002
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "a1",
+            "type": "arc",
+            "c": 1,
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 2,
+            "r": 3.0,
+            "construction": false
+          }
+        ],
+        "constraints": [],
+        "counters": {}
+      }
+    },
+    {
+      "id": 4,
+      "name": "Hole1",
+      "suppressed": false,
+      "body_names": [
+        "Plate"
+      ],
+      "param_names": [
+        "d2"
+      ],
+      "type": "extrude",
+      "sketch": 3,
+      "profiles": {
+        "type": "curves",
+        "loops": [
+          [
+            "c1"
+          ]
+        ]
+      },
+      "extent": {
+        "distance": "0",
+        "direction": "positive",
+        "through_all": true
+      },
+      "operation": "cut"
+    },
+    {
+      "id": 5,
+      "name": "PathPattern1",
+      "suppressed": false,
+      "param_names": [
+        "d3",
+        "d4"
+      ],
+      "type": "pattern",
+      "features": [
+        "Hole1"
+      ],
+      "pattern": {
+        "type": "path",
+        "path_sketch": 3,
+        "path": [
+          "a1"
+        ],
+        "count": "7",
+        "spacing": "17.875031"
+      }
+    }
+  ],
+  "next_id": 6
+}

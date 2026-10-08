@@ -1,0 +1,208 @@
+{
+  "format": "solvecraft/1",
+  "name": "Untitled",
+  "units": "mm",
+  "params": [
+    {
+      "name": "width",
+      "expr": "40 mm",
+      "unit": "mm",
+      "model": false
+    }
+  ],
+  "features": [
+    {
+      "id": 1,
+      "name": "Sketch1",
+      "suppressed": false,
+      "type": "sketch",
+      "plane": {
+        "type": "origin",
+        "name": "XY"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p1",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p2",
+            "pos": [
+              40.0,
+              0.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p3",
+            "pos": [
+              40.0,
+              30.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p4",
+            "pos": [
+              0.0,
+              30.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l5",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l6",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l7",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l8",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k9",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k10",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k11",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k12",
+            "type": "vertical",
+            "l": 3
+          }
+        ],
+        "next_id": 13
+      }
+    },
+    {
+      "id": 2,
+      "name": "Extrude1",
+      "suppressed": false,
+      "type": "extrude",
+      "sketch": 1,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "width / 2",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 3,
+      "name": "Fillet1",
+      "suppressed": false,
+      "type": "fillet",
+      "edges": [
+        [
+          0.0,
+          0.0,
+          10.0
+        ]
+      ],
+      "radius": "3"
+    },
+    {
+      "id": 4,
+      "name": "Sketch2",
+      "suppressed": false,
+      "type": "sketch",
+      "plane": {
+        "type": "origin",
+        "name": "XY"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              20.0,
+              15.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 5.0,
+            "construction": false
+          }
+        ],
+        "constraints": [],
+        "next_id": 2
+      }
+    },
+    {
+      "id": 5,
+      "name": "Extrude2",
+      "suppressed": false,
+      "type": "extrude",
+      "sketch": 4,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "20",
+        "direction": "positive"
+      },
+      "operation": "cut"
+    }
+  ],
+  "next_id": 6
+}

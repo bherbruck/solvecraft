@@ -1,0 +1,158 @@
+{
+  "format": "solvecraft/1",
+  "name": "Untitled",
+  "units": "mm",
+  "params": [
+    {
+      "name": "wall",
+      "expr": "2 mm",
+      "unit": "mm",
+      "model": false
+    }
+  ],
+  "features": [
+    {
+      "id": 1,
+      "name": "Box1",
+      "suppressed": false,
+      "param_names": [
+        "d1",
+        "d2",
+        "d3"
+      ],
+      "type": "box",
+      "corner": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "length": "80",
+      "width": "50",
+      "height": "30",
+      "operation": "new_body"
+    },
+    {
+      "id": 2,
+      "name": "Shell1",
+      "suppressed": false,
+      "param_names": [
+        "d4"
+      ],
+      "type": "shell",
+      "faces": [
+        [
+          40.0,
+          25.0,
+          30.0
+        ]
+      ],
+      "thickness": "wall"
+    },
+    {
+      "id": 3,
+      "name": "Lip1",
+      "suppressed": false,
+      "param_names": [
+        "d5",
+        "d6"
+      ],
+      "type": "lip",
+      "face": [
+        1.0,
+        25.0,
+        30.0
+      ],
+      "width": "1",
+      "height": "2"
+    },
+    {
+      "id": 4,
+      "name": "Boss1",
+      "suppressed": false,
+      "param_names": [
+        "d7",
+        "d8",
+        "d9",
+        "d10"
+      ],
+      "type": "boss",
+      "position": [
+        20.0,
+        20.0,
+        2.0
+      ],
+      "direction": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "diameter": "6",
+      "height": "10",
+      "hole_diameter": "2.5",
+      "draft": "1 deg"
+    },
+    {
+      "id": 5,
+      "name": "Rest1",
+      "suppressed": false,
+      "param_names": [
+        "d11",
+        "d12",
+        "d13",
+        "d14"
+      ],
+      "type": "rest",
+      "position": [
+        60.0,
+        30.0,
+        2.0
+      ],
+      "direction": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "width": "8",
+      "length": "12",
+      "height": "3",
+      "thickness": "1"
+    },
+    {
+      "id": 6,
+      "name": "SnapFit1",
+      "suppressed": false,
+      "param_names": [
+        "d15",
+        "d16",
+        "d17",
+        "d18",
+        "d19"
+      ],
+      "type": "snap_fit",
+      "position": [
+        40.0,
+        12.0,
+        2.0
+      ],
+      "direction": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "hook": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "length": "12",
+      "thickness": "1.5",
+      "width": "6",
+      "catch_depth": "1",
+      "catch_length": "2"
+    }
+  ],
+  "next_id": 7,
+  "plastic": {
+    "active": "ABS (1.5mm)"
+  }
+}

@@ -1,0 +1,197 @@
+{
+  "commands": [
+    {
+      "command": "SketchCreate",
+      "params": {
+        "name": "Plate_sketch",
+        "plane": "XY"
+      }
+    },
+    {
+      "command": "DrawPolyline",
+      "params": {
+        "construction": false,
+        "ids": [
+          "l1"
+        ],
+        "points": [
+          [
+            0,
+            0
+          ],
+          [
+            120,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "command": "DrawPolyline",
+      "params": {
+        "construction": false,
+        "ids": [
+          "l2"
+        ],
+        "points": [
+          "l1.end",
+          [
+            120,
+            60
+          ]
+        ]
+      }
+    },
+    {
+      "command": "DrawPolyline",
+      "params": {
+        "construction": false,
+        "ids": [
+          "l3"
+        ],
+        "points": [
+          "l2.end",
+          [
+            0,
+            60
+          ]
+        ]
+      }
+    },
+    {
+      "command": "DrawPolyline",
+      "params": {
+        "construction": false,
+        "ids": [
+          "l4"
+        ],
+        "points": [
+          "l3.end",
+          "l1.start"
+        ]
+      }
+    },
+    {
+      "command": "SketchStop",
+      "params": {}
+    },
+    {
+      "command": "Extrude",
+      "params": {
+        "body_names": [
+          "Plate"
+        ],
+        "direction": "positive",
+        "distance": 5,
+        "name": "Plate",
+        "operation": "new",
+        "profiles": [
+          {
+            "area_mm2": 7200.0,
+            "centroid_sketch": [
+              60.0,
+              30.0
+            ],
+            "loops": [
+              {
+                "curves": [
+                  "l1",
+                  "l2",
+                  "l3",
+                  "l4"
+                ],
+                "outer": true
+              }
+            ],
+            "sketch": "Plate_sketch"
+          }
+        ],
+        "sketch": "Plate_sketch"
+      }
+    },
+    {
+      "command": "SketchCreate",
+      "params": {
+        "name": "PathSketch",
+        "plane": "XY"
+      }
+    },
+    {
+      "command": "ArcThreePoint",
+      "params": {
+        "end": [
+          20,
+          15
+        ],
+        "id": "a1",
+        "start": [
+          100,
+          15
+        ],
+        "through": [
+          60,
+          45
+        ]
+      }
+    },
+    {
+      "command": "CircleCenterRadius",
+      "params": {
+        "center": "a1.start",
+        "construction": false,
+        "id": "c1",
+        "radius": 3
+      }
+    },
+    {
+      "command": "SketchStop",
+      "params": {}
+    },
+    {
+      "command": "Extrude",
+      "params": {
+        "body_names": [
+          "Plate"
+        ],
+        "direction": "positive",
+        "name": "Hole1",
+        "operation": "cut",
+        "profiles": [
+          {
+            "area_mm2": 28.274334,
+            "centroid_sketch": [
+              100.0,
+              15.0
+            ],
+            "loops": [
+              {
+                "curves": [
+                  "c1"
+                ],
+                "outer": true
+              }
+            ],
+            "sketch": "PathSketch"
+          }
+        ],
+        "sketch": "PathSketch",
+        "through_all": true
+      }
+    },
+    {
+      "command": "PatternOnPath",
+      "params": {
+        "count": 7,
+        "features": [
+          "Hole1"
+        ],
+        "name": "PathPattern1",
+        "path": [
+          "a1"
+        ],
+        "path_sketch": "PathSketch",
+        "spacing": 17.875031
+      }
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "bodies": [
+    {
+      "area_mm2": 700.5299915783324,
+      "bbox": {
+        "max": [
+          10.0,
+          10.0,
+          10.000000000000007
+        ],
+        "min": [
+          0.0,
+          0.0,
+          -6.080836915950756e-16
+        ]
+      },
+      "center_of_mass": [
+        4.999999998722992,
+        4.999999999366269,
+        4.999999996470206
+      ],
+      "density_g_cm3": 1.29,
+      "edges": 14,
+      "face_types": {
+        "cylinder": 1,
+        "plane": 6
+      },
+      "faces": 7,
+      "kernel": {
+        "edges": 18,
+        "faces": 8,
+        "shells": 1,
+        "vertices": 12
+      },
+      "mass_g": 1.1279207478827844,
+      "material": "Default",
+      "name": "Base",
+      "vertices": 10,
+      "volume_mm3": 874.3571689013833
+    }
+  ],
+  "body_count": 1,
+  "params": [],
+  "sketches": [
+    {
+      "curves": 1,
+      "dof": 3,
+      "id": 11,
+      "name": "S1",
+      "profiles": 1,
+      "status": "solved"
+    }
+  ],
+  "timeline": [
+    {
+      "error": null,
+      "id": 1,
+      "ms": 13.568090999999999,
+      "name": "Box1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 4,
+      "ms": 1.004123,
+      "name": "Box2",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 5,
+      "ms": 6.818065,
+      "name": "Fillet1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "FilletFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 9,
+      "ms": 0.223829,
+      "name": "Box2 (copy)",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "BoxFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 10,
+      "ms": 6.139636,
+      "name": "Fillet1 (copy)",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "FilletFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 11,
+      "ms": 0.045728,
+      "name": "S1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 12,
+      "ms": 1537.323948,
+      "name": "Extrude1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ExtrudeFeature",
+      "warning": null
+    }
+  ],
+  "total": {
+    "area_mm2": 700.5299915783324,
+    "edges": 14,
+    "faces": 7,
+    "mass_g": 1.1279207478827844,
+    "vertices": 10,
+    "volume_mm3": 874.3571689013833
+  }
+}

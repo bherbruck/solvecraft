@@ -1,0 +1,171 @@
+{
+  "format": "solvecraft/1",
+  "name": "Untitled",
+  "units": "mm",
+  "params": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "Sketch1",
+      "suppressed": false,
+      "type": "sketch",
+      "plane": {
+        "type": "origin",
+        "name": "XZ"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "l1.start",
+            "pos": [
+              10.0,
+              0.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l1.end",
+            "pos": [
+              15.0,
+              0.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l2.end",
+            "pos": [
+              15.0,
+              5.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l3.end",
+            "pos": [
+              10.0,
+              5.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [],
+        "next_id": 5
+      }
+    },
+    {
+      "id": 2,
+      "name": "Revolve1",
+      "suppressed": false,
+      "type": "revolve",
+      "sketch": 1,
+      "profiles": {
+        "type": "all"
+      },
+      "axis": {
+        "type": "sketch_axis",
+        "axis": "y"
+      },
+      "angle": "180 deg",
+      "operation": "new_body"
+    },
+    {
+      "id": 3,
+      "name": "Box1",
+      "suppressed": false,
+      "type": "box",
+      "corner": [
+        30.0,
+        0.0,
+        0.0
+      ],
+      "length": "10",
+      "width": "10",
+      "height": "10",
+      "operation": "new_body"
+    },
+    {
+      "id": 4,
+      "name": "Cylinder1",
+      "suppressed": false,
+      "type": "cylinder",
+      "base": [
+        35.0,
+        5.0,
+        -5.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "radius": "(4) / 2",
+      "height": "20",
+      "operation": "new_body"
+    },
+    {
+      "id": 5,
+      "name": "Combine1",
+      "suppressed": false,
+      "type": "combine",
+      "target": "Body2",
+      "tools": [
+        "Body3"
+      ],
+      "operation": "cut",
+      "keep_tools": false
+    },
+    {
+      "id": 6,
+      "name": "Chamfer1",
+      "suppressed": false,
+      "type": "chamfer",
+      "edges": [
+        [
+          30.0,
+          5.0,
+          10.0
+        ]
+      ],
+      "distance": "1"
+    }
+  ],
+  "next_id": 7
+}

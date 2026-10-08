@@ -1,0 +1,128 @@
+{
+  "bodies": [
+    {
+      "area_mm2": 5641.5699696719,
+      "bbox": {
+        "max": [
+          40.0,
+          30.0,
+          20.00000000000001
+        ],
+        "min": [
+          0.0,
+          0.0,
+          -2.331468351865795e-15
+        ]
+      },
+      "center_of_mass": [
+        20.0333953680467,
+        15.02475683626249,
+        9.999999936169297
+      ],
+      "edges": 17,
+      "face_types": {
+        "cylinder": 2,
+        "plane": 6
+      },
+      "faces": 8,
+      "kernel": {
+        "edges": 21,
+        "faces": 9,
+        "shells": 1,
+        "vertices": 14
+      },
+      "name": "Body1",
+      "vertices": 12,
+      "volume_mm3": 22391.21832759239
+    }
+  ],
+  "body_count": 1,
+  "params": [
+    {
+      "comment": "",
+      "error": null,
+      "expression": "40 mm",
+      "model": false,
+      "name": "width",
+      "unit": "mm",
+      "value": 40.0
+    }
+  ],
+  "sketches": [
+    {
+      "curves": 4,
+      "dof": 4,
+      "id": 1,
+      "name": "Sketch1",
+      "profiles": 1,
+      "status": "solved"
+    },
+    {
+      "curves": 1,
+      "dof": 3,
+      "id": 4,
+      "name": "Sketch2",
+      "profiles": 1,
+      "status": "solved"
+    }
+  ],
+  "timeline": [
+    {
+      "error": null,
+      "id": 1,
+      "ms": 0.043782999999999996,
+      "name": "Sketch1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 2,
+      "ms": 1.609402,
+      "name": "Extrude1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ExtrudeFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 3,
+      "ms": 11.196359,
+      "name": "Fillet1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "FilletFeature",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 4,
+      "ms": 0.031249,
+      "name": "Sketch2",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "error": null,
+      "id": 5,
+      "ms": 1378.231746,
+      "name": "Extrude2",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ExtrudeFeature",
+      "warning": null
+    }
+  ],
+  "total": {
+    "area_mm2": 5641.5699696719,
+    "edges": 17,
+    "faces": 8,
+    "vertices": 12,
+    "volume_mm3": 22391.21832759239
+  }
+}
