@@ -606,6 +606,13 @@ pub fn step_orientation_errors(text: &str) -> std::result::Result<Vec<String>, S
                 // Patches only: a face with several loops (a band between two rings, a face with
                 // holes) has no single loop direction to compare.
                 let [w] = bounds.as_slice() else { continue };
+                // Only revolutions (cylinders, cones, spheres, tori: closed surfaces, where a loop
+                // read the wrong way round silently gives the rest of the surface). On free-form
+                // strips the loop's normals vary too much for this test; the round trips' volume
+                // checks cover those.
+                if !matches!(f.surface(), mt::Surface::RevolutedCurve(_)) {
+                    continue;
+                }
                 // A loop through a vertex twice (a figure eight round a pole) has no single direction.
                 let fronts: std::collections::HashSet<_> = w.edge_iter().map(|e| e.front().id()).collect();
                 if fronts.len() != w.len() {
@@ -642,10 +649,8 @@ pub fn step_orientation_errors(text: &str) -> std::result::Result<Vec<String>, S
                 let s = f.oriented_surface();
                 let mut normal = mt::Vector3::new(0.0, 0.0, 0.0);
                 let mut count = 0usize;
-                let mut prev = None;
                 for p in &pts {
-                    if let Some(uv) = s.search_nearest_parameter(*p, prev, 100) {
-                        prev = Some(uv);
+                    if let Some(uv) = s.search_nearest_parameter(*p, None, 100) {
                         let n = s.normal(uv.0, uv.1);
                         if n.x.is_finite() && n.y.is_finite() && n.z.is_finite() {
                             normal += n;
