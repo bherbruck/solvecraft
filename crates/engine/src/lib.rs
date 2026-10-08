@@ -154,6 +154,8 @@ pub struct Session {
     /// Occurrence moves not captured yet (Capture Position keeps them, a recompute drops them).
     pub pending_moves: std::collections::BTreeMap<u64, solvecraft_doc::Mat>,
     world_cache: std::sync::Mutex<Option<(u64, Arc<solvecraft_doc::ModelState>)>>,
+    /// Features copied with `timeline.copy` (pasted by `timeline.paste`).
+    pub clipboard: Vec<solvecraft_doc::Feature>,
 }
 
 const MAX_UNDO: usize = 200;
@@ -185,6 +187,7 @@ impl Session {
             active_component: 0,
             pending_moves: Default::default(),
             world_cache: Default::default(),
+            clipboard: Vec::new(),
         }
     }
 
@@ -310,6 +313,7 @@ impl Session {
             active_component: self.active_component,
             pending_moves: self.pending_moves.clone(),
             world_cache: Default::default(),
+            clipboard: self.clipboard.clone(),
         }
     }
 

@@ -333,6 +333,56 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<String>,
     },
+    /// Raise (emboss) or sink (deboss) sketch profiles on the planar face they lie on.
+    Emboss {
+        sketch: u64,
+        profiles: ProfileSel,
+        depth: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        deboss: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<String>,
+    },
+    /// A thin wall from open sketch curves: `thickness` across the sketch plane, filling from
+    /// the curves toward the body (to the next face, or `depth`). A web makes one per curve.
+    Rib {
+        sketch: u64,
+        curves: Vec<String>,
+        thickness: String,
+        /// Depth from the curves; `None` = to the next face of the body.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        depth: Option<String>,
+        /// Fill toward the other side of the curves.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// Web: each curve is its own wall.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        web: bool,
+    },
+    /// Move planar faces (at the given points) onto a target plane parallel to them.
+    ReplaceFace {
+        faces: Vec<Vec3>,
+        target: PlaneRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
+    /// Move bodies so that `from` lands on `to` (and, with normals, the faces meet face to face).
+    Align {
+        bodies: Vec<String>,
+        from: Vec3,
+        to: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_normal: Option<Vec3>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to_normal: Option<Vec3>,
+        /// Normals the same way instead of facing each other.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+    },
+    /// Remove bodies from the model (from here on in the timeline).
+    Remove {
+        bodies: Vec<String>,
+    },
     Move {
         bodies: Vec<String>,
         translate: [String; 3],
@@ -512,6 +562,12 @@ impl FeatureKind {
             FeatureKind::OffsetFace { .. } => "OffsetFacesFeature",
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
+            FeatureKind::Emboss { .. } => "EmbossFeature",
+            FeatureKind::Rib { web: false, .. } => "RibFeature",
+            FeatureKind::Rib { .. } => "WebFeature",
+            FeatureKind::ReplaceFace { .. } => "ReplaceFaceFeature",
+            FeatureKind::Align { .. } => "AlignFeature",
+            FeatureKind::Remove { .. } => "RemoveFeature",
             FeatureKind::Import { .. } => "BaseFeature",
             FeatureKind::MeshImport { .. } => "MeshFeature",
         }
@@ -546,6 +602,12 @@ impl FeatureKind {
             FeatureKind::OffsetFace { .. } => "OffsetFace",
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
+            FeatureKind::Emboss { .. } => "Emboss",
+            FeatureKind::Rib { web: false, .. } => "Rib",
+            FeatureKind::Rib { .. } => "Web",
+            FeatureKind::ReplaceFace { .. } => "ReplaceFace",
+            FeatureKind::Align { .. } => "Align",
+            FeatureKind::Remove { .. } => "Remove",
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
         }
@@ -620,6 +682,13 @@ impl FeatureKind {
                     v.push(a);
                 }
             }
+            FeatureKind::Emboss { depth, .. } => v.push(depth),
+            FeatureKind::Rib { thickness, depth, .. } => {
+                v.push(thickness);
+                v.extend(depth.iter().map(String::as_str));
+            }
+            FeatureKind::ReplaceFace { target, .. } => plane_exprs(target, &mut v),
+            FeatureKind::Align { .. } | FeatureKind::Remove { .. } => {}
             FeatureKind::Import { .. } | FeatureKind::MeshImport { .. } => {}
         }
         v
@@ -851,6 +920,7 @@ impl Document {
                 FeatureKind::Sweep { sketch, path_sketch, .. } if *sketch == id || *path_sketch == id => gone.push(f.id),
                 FeatureKind::Loft { sections, .. } if sections.iter().any(|s| s.sketch == id) => gone.push(f.id),
                 FeatureKind::Pattern { pattern: PatternKind::Path { path_sketch, .. }, .. } if *path_sketch == id => gone.push(f.id),
+                FeatureKind::Emboss { sketch, .. } | FeatureKind::Rib { sketch, .. } if *sketch == id => gone.push(f.id),
                 _ => {}
             }
         }

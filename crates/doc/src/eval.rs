@@ -1305,8 +1305,16 @@ fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut 
     Ok(())
 }
 
+#[path = "eval_more.rs"]
+mod more;
+
 fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
+        FeatureKind::Emboss { .. }
+        | FeatureKind::Rib { .. }
+        | FeatureKind::ReplaceFace { .. }
+        | FeatureKind::Align { .. }
+        | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st),
         FeatureKind::Sketch { plane, sketch } => {
             let plane = doc.resolve_plane(vals, plane, 0)?;
             let mut sk = sketch.clone();

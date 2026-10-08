@@ -137,7 +137,17 @@ impl FeatureKind {
                     v.push(("Angle", a, A));
                 }
             }
+            FeatureKind::Emboss { depth, .. } => v.push(("Depth", depth, L)),
+            FeatureKind::Rib { thickness, depth, .. } => {
+                v.push(("Thickness", thickness, L));
+                if let Some(d) = depth {
+                    v.push(("Depth", d, L));
+                }
+            }
+            FeatureKind::ReplaceFace { target, .. } => plane_inputs_mut(target, &mut v),
             FeatureKind::Combine { .. }
+            | FeatureKind::Align { .. }
+            | FeatureKind::Remove { .. }
             | FeatureKind::Loft { .. }
             | FeatureKind::Sweep { .. }
             | FeatureKind::Import { .. }

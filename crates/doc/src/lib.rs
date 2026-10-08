@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 mod assembly;
+mod clipboard;
 mod document;
 mod eval;
 pub mod expr;

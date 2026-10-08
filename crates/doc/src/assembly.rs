@@ -187,6 +187,20 @@ impl FeatureKind {
                 dir(direction);
             }
             FeatureKind::Thread { face, .. } => pt(face),
+            FeatureKind::ReplaceFace { faces, target, .. } => {
+                faces.iter_mut().for_each(pt);
+                map_plane_ref(m, target);
+            }
+            FeatureKind::Align { from, to, from_normal, to_normal, .. } => {
+                pt(from);
+                pt(to);
+                if let Some(n) = from_normal {
+                    dir(n);
+                }
+                if let Some(n) = to_normal {
+                    dir(n);
+                }
+            }
             FeatureKind::Scale { origin, .. } => pt(origin),
             FeatureKind::Move { rotate_axis, .. } => {
                 if let Some(a) = rotate_axis {
@@ -200,6 +214,9 @@ impl FeatureKind {
             | FeatureKind::Sweep { .. }
             | FeatureKind::BoundingSolid { .. }
             | FeatureKind::Pipe { .. }
+            | FeatureKind::Emboss { .. }
+            | FeatureKind::Rib { .. }
+            | FeatureKind::Remove { .. }
             | FeatureKind::Import { .. }
             | FeatureKind::MeshImport { .. } => {}
         }

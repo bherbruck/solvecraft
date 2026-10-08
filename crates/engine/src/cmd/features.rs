@@ -154,7 +154,7 @@ pub fn auto_operation(s: &Session, p: &Value) -> Option<&'static str> {
     }
 }
 
-fn operation(p: &Value, cmd: &str) -> Result<Operation> {
+pub(super) fn operation(p: &Value, cmd: &str) -> Result<Operation> {
     match str_(p, "operation") {
         None => Ok(Operation::NewBody),
         Some(o) => Operation::parse(o).ok_or_else(|| bad(cmd, format!("unknown operation `{o}` (new, join, cut, intersect)"))),
@@ -162,7 +162,7 @@ fn operation(p: &Value, cmd: &str) -> Result<Operation> {
 }
 
 /// The sketch a feature uses: `sketch` param, the active sketch, or the last sketch.
-fn feature_sketch(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
+pub(super) fn feature_sketch(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     if let Some(v) = p.get("sketch") {
         let key = match v {
             Value::Number(n) => n.to_string(),
@@ -189,7 +189,7 @@ fn feature_sketch(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
         .ok_or_else(|| bad(cmd, "there is no sketch to use (create one first)"))
 }
 
-fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
+pub(super) fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
     let Some(v) = p.get("profiles") else { return Ok(ProfileSel::All) };
     match v {
         Value::String(s) if s.eq_ignore_ascii_case("all") => Ok(ProfileSel::All),
@@ -233,12 +233,12 @@ fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
     }
 }
 
-fn check_expr(s: &Session, e: &str, kind: Kind, cmd: &str, what: &str) -> Result<()> {
+pub(super) fn check_expr(s: &Session, e: &str, kind: Kind, cmd: &str, what: &str) -> Result<()> {
     s.doc.eval(e, kind).map(|_| ()).map_err(|err| bad(cmd, format!("{what}: {err}")))
 }
 
 /// Add a feature, evaluate, and report its result (an evaluation error fails the command).
-fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
+pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
     let name = str_(p, "name");
     // Commands speak world coordinates; the feature is authored in the active component.
     let mut kind = kind;
@@ -779,7 +779,7 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, FeatureKind::Draft { faces, angle, neutral, pull, body: str_(p, "body").map(str::to_string) })
 }
 
-fn sketch_id(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<u64> {
+pub(super) fn sketch_id(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<u64> {
     let key = match v {
         Some(Value::Number(n)) => n.to_string(),
         Some(Value::String(x)) => x.clone(),
