@@ -1,0 +1,282 @@
+[
+ {
+  "note": "Dragging sketch geometry snaps like Fusion: onto a point (coincident on release), level with a point (a dashed guide, no constraint), not at all with Ctrl held; a line dragged by its body snaps by its ends."
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "DrawPolyline",
+   "params": {
+    "points": [
+     [
+      10,
+      10
+     ],
+     [
+      30,
+      10
+     ]
+    ]
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "DrawPolyline",
+   "params": {
+    "points": [
+     [
+      10,
+      30
+     ],
+     [
+      30,
+      40
+     ]
+    ]
+   }
+  }
+ },
+ {
+  "expect": {
+   "dof": 8
+  }
+ },
+ {
+  "note": "An end dropped near another end snaps onto it and becomes coincident."
+ },
+ {
+  "drag": [
+   {
+    "sketch": [
+     10,
+     30
+    ]
+   },
+   {
+    "sketch": [
+     30.4,
+     10.3
+    ]
+   }
+  ],
+  "steps": 12
+ },
+ {
+  "expect": {
+   "dof": 6,
+   "query": {
+    "command": "sketch.inspect",
+    "path": [
+     "curves",
+     1,
+     "start_at"
+    ],
+    "value": [
+     30.0,
+     10.0
+    ]
+   }
+  }
+ },
+ {
+  "expect": {
+   "query": {
+    "command": "sketch.inspect",
+    "path": [
+     "constraints",
+     0,
+     "type"
+    ],
+    "value": "coincident"
+   }
+  }
+ },
+ {
+  "note": "Level with l1's start: y snaps to 10 exactly, nothing is added."
+ },
+ {
+  "drag": [
+   {
+    "sketch": [
+     30,
+     40
+    ]
+   },
+   {
+    "sketch": [
+     55,
+     10.4
+    ]
+   }
+  ],
+  "steps": 12
+ },
+ {
+  "expect": {
+   "dof": 6,
+   "query": {
+    "command": "sketch.inspect",
+    "path": [
+     "curves",
+     1,
+     "end_at",
+     1
+    ],
+    "value": 10.0
+   }
+  }
+ },
+ {
+  "expect": {
+   "query": {
+    "command": "sketch.inspect",
+    "path": [
+     "constraints",
+     1
+    ],
+    "value": null
+   }
+  }
+ },
+ {
+  "note": "Ctrl held: no snap (the end stays where it is let go)."
+ },
+ {
+  "drag": [
+   {
+    "sketch": [
+     55,
+     10
+    ]
+   },
+   {
+    "sketch": [
+     10.3,
+     10.3
+    ]
+   }
+  ],
+  "steps": 12,
+  "ctrl": true
+ },
+ {
+  "expect": {
+   "dof": 6,
+   "query": {
+    "command": "sketch.inspect",
+    "path": [
+     "constraints",
+     1
+    ],
+    "value": null
+   }
+  }
+ },
+ {
+  "key": "Z",
+  "cmd": true
+ },
+ {
+  "expect": {
+   "query": {
+    "command": "sketch.inspect",
+    "path": [
+     "curves",
+     1,
+     "end_at",
+     1
+    ],
+    "value": 10.0
+   }
+  }
+ },
+ {
+  "note": "Undo takes the snap's constraint with the drag that made it."
+ },
+ {
+  "key": "Z",
+  "cmd": true
+ },
+ {
+  "key": "Z",
+  "cmd": true
+ },
+ {
+  "expect": {
+   "dof": 8,
+   "query": {
+    "command": "sketch.inspect",
+    "path": [
+     "constraints",
+     0
+    ],
+    "value": null
+   }
+  }
+ },
+ {
+  "note": "A line dragged by its body: its start, brought near l1's start, snaps onto it (coincident)."
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "DrawPolyline",
+   "params": {
+    "points": [
+     [
+      40,
+      30
+     ],
+     [
+      50,
+      30
+     ]
+    ]
+   }
+  }
+ },
+ {
+  "drag": [
+   {
+    "sketch": [
+     45,
+     30
+    ]
+   },
+   {
+    "sketch": [
+     15.3,
+     10.3
+    ]
+   }
+  ],
+  "steps": 16
+ },
+ {
+  "expect": {
+   "dof": 10,
+   "query": {
+    "command": "sketch.inspect",
+    "path": [
+     "curves",
+     2,
+     "start_at"
+    ],
+    "value": [
+     10.0,
+     10.0
+    ]
+   }
+  }
+ }
+]

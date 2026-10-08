@@ -23,6 +23,7 @@ pub mod dialogs_plastic;
 pub mod dialogs_sheet;
 pub mod dim_view;
 pub mod documents;
+pub mod drag_snap;
 pub mod gizmo;
 pub mod gpu;
 pub mod help;
@@ -193,6 +194,8 @@ pub struct SolveApp {
     pub integrated_titlebar: bool,
     pub frame_ms: f64,
     pub synthetic: Vec<egui::Event>,
+    /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
+    pub synthetic_mods: egui::Modifiers,
     control_rx: Option<Receiver<ControlRequest>>,
     pending_shots: Vec<(u64, Option<String>, std::sync::mpsc::Sender<Value>, f64)>,
     queued_shots: Vec<(u64, f64, u32)>,
@@ -241,6 +244,7 @@ impl SolveApp {
             integrated_titlebar: false,
             frame_ms: 0.0,
             synthetic: Vec::new(),
+            synthetic_mods: egui::Modifiers::default(),
             control_rx: None,
             pending_shots: Vec::new(),
             queued_shots: Vec::new(),
@@ -676,10 +680,13 @@ impl SolveApp {
         }
         // egui keeps the modifier keys as input state, changed by their own event.
         match self.synthetic.first() {
-            Some(egui::Event::PointerButton { modifiers, .. } | egui::Event::Key { modifiers, .. }) => {
+            Some(egui::Event::PointerButton { modifiers, pressed, .. }) => {
+                // A drag keeps its press's modifiers until the release.
+                self.synthetic_mods = if *pressed { *modifiers } else { egui::Modifiers::default() };
                 raw.events.push(egui::Event::ModifiersChanged(*modifiers))
             }
-            Some(egui::Event::PointerMoved(_)) => raw.events.push(egui::Event::ModifiersChanged(egui::Modifiers::default())),
+            Some(egui::Event::Key { modifiers, .. }) => raw.events.push(egui::Event::ModifiersChanged(*modifiers)),
+            Some(egui::Event::PointerMoved(_)) => raw.events.push(egui::Event::ModifiersChanged(self.synthetic_mods)),
             _ => {}
         }
         let n = n.min(self.synthetic.len());

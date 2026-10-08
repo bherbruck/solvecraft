@@ -208,6 +208,10 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             for k in 1..=steps {
                 app.synthetic.push(egui::Event::PointerMoved(a + (z - a) * (k as f32 / steps as f32)));
             }
+            // `hold_end`: frames to keep the button down at the end (to look at a drag's snap).
+            for _ in 0..f("hold_end").unwrap_or(0.0).clamp(0.0, 600.0) as usize {
+                app.synthetic.push(egui::Event::PointerMoved(z));
+            }
             app.synthetic.push(egui::Event::PointerButton { pos: z, button, pressed: false, modifiers });
             ok(Value::Null)
         }

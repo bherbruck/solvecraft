@@ -7,7 +7,7 @@
 //! - `{"widget": "Revolute", "near"?: "Type"}`: click a dialog field, choice or button by its
 //!   text (with `near`: the one in that label's row)
 //! - `{"click": AT, "double"?, "shift"?, "ctrl"?, "button"?}`, `{"move": AT}`,
-//!   `{"drag": [AT, AT], "shift"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
+//!   `{"drag": [AT, AT], "shift"?, "ctrl"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
 //!   or `{"sketch": [x,y]}` (the sketch being edited)
 //! - `{"call": "ui.view", "params": {…}}`: any other control request (`fail: true` expects an
 //!   error)
@@ -321,7 +321,7 @@ impl Harness {
                 let [x0, y0] = self.at(d.get(0).unwrap_or(&Value::Null))?;
                 let [x1, y1] = self.at(d.get(1).unwrap_or(&Value::Null))?;
                 let steps = s.get("steps").cloned().unwrap_or(json!(8));
-                self.call("ui.drag", json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift")}))
+                self.call("ui.drag", json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl")}))
             } else if let Some(m) = s.get("call").and_then(Value::as_str) {
                 self.call(m, s.get("params").cloned().unwrap_or(json!({})))
             } else if s.get("note").is_some() {

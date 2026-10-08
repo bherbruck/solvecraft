@@ -1140,6 +1140,9 @@ pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, 
     let (o, d) = proj.ray(pos);
     let w = ss.plane.intersect_ray(o, d)?;
     let lp = ss.plane.to_local(w);
+    if crate::drag_snap::suppressed() {
+        return Some((lp, None));
+    }
     let (minor, _) = grid_step(app.cam.half_height());
     let step = minor / 10.0;
     if let Some(p) = crate::sketch_tools::refine_snap(app, proj, &ss.sketch, &ss.plane, lp) {
@@ -1178,6 +1181,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let cube = Rect::from_center_size(pos2(rect.right() - 80.0, rect.top() + 80.0), vec2(150.0, 150.0));
     let inside = hover.is_some_and(|p| rect.contains(p) && !cube.contains(p));
     app.viewport.mouse = hover.filter(|_| inside);
+    // Ctrl or Alt held: drawing and dragging don't snap.
+    crate::drag_snap::set_suppressed(mods.ctrl || mods.alt || mods.command);
 
     // ---- navigation ----
     let h = rect.height().max(1.0) as f64;
@@ -1424,9 +1429,30 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if let Some((id, depth, grab)) = app.viewport.point_drag.clone()
             && resp.dragged_by(egui::PointerButton::Primary)
-            && let Some(q) = hover.and_then(|p| on_plane(app, p))
+            && let Some(mut q) = hover.and_then(|p| on_plane(app, p))
         {
             let from = grab.unwrap_or(q);
+            // Snap the dragged point (or the line's ends) to other geometry, like drawing.
+            let snap = {
+                let st = app.session.world_state();
+                app.session.active_sketch.and_then(|s| st.sketch(s)).and_then(|ss| {
+                    let sk = &ss.sketch;
+                    let (own, exclude) = crate::drag_snap::moving_points(sk, &id);
+                    if own.iter().any(|&p| sk.point_locked(p)) {
+                        return crate::drag_snap::find(sk, &[], &[], 0.0);
+                    }
+                    let a = proj.to_screen(ss.plane.to_world(q))?;
+                    let b = proj.to_screen(ss.plane.to_world(q + Vec2::X))?;
+                    let mm_px = 1.0 / (a.distance(b) as f64).max(1e-9);
+                    let d = q - from;
+                    let moving: Vec<(usize, Vec2)> =
+                        own.iter().filter_map(|&p| if grab.is_some() { sk.point(p).map(|x| (p, x + d)) } else { Some((p, q)) }).collect();
+                    crate::drag_snap::find(sk, &moving, &exclude, mm_px)
+                })
+            };
+            if let Some(s) = snap {
+                q += s.offset;
+            }
             if app.session.execute("sketch.drag", &json!({"entity": id, "from": [from.x, from.y], "to": [q.x, q.y]})).is_ok() {
                 app.session.undo.truncate(depth + 1);
             }
@@ -1435,6 +1461,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         if resp.drag_stopped() {
+            if let Some((_, depth, _)) = app.viewport.point_drag.clone() {
+                // Let go on a point, midpoint or curve: the matching constraint, in the drag's undo step.
+                crate::drag_snap::release(app);
+                app.session.undo.truncate(depth + 1);
+            }
+            crate::drag_snap::clear();
             app.viewport.point_drag = None;
             crate::dim_view::drag_end();
             crate::sketch3d::drag_end();
@@ -1468,6 +1500,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch3d::show(app, &painter, &proj);
     crate::inference::show(app, &painter, &proj);
+    crate::drag_snap::show(app, &painter, &proj);
     hover_highlight(app, &painter, &proj);
     points_2d(app, &painter, &proj);
     if let Some(bx) = app.viewport.boxsel {
