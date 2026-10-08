@@ -1079,3 +1079,26 @@ fn fillet_where_a_branch_pipe_meets_a_main_pipe() {
     // Main cylinder, branch cylinder, the blend, the branch's top and the main's two ends.
     assert_eq!(m.merged.faces, 6, "{:?}", m.merged);
 }
+
+#[test]
+fn fillet_an_open_curved_edge() {
+    use solvecraft_geom::Seg2;
+    // A D-shaped block: the round top edge only, ending at the flat wall's sharp corners.
+    let d = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: 0.0, sweep: PI },
+            Seg2::Line { a: Vec2::new(-10.0, 0.0), b: Vec2::new(10.0, 0.0) },
+        ],
+    };
+    let b = extrude(&Plane::XY, &[Region2 { outer: d, holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+    let v0 = measure(&b).unwrap().volume;
+    let f = fillet(&b, &[Vec3::new(0.0, 10.0, 15.0)], 2.0).unwrap();
+    // (A fine tessellation: the difference of two measured volumes magnifies their error.)
+    let _ = v0;
+    let fine = |x: &Body| x.tessellate_with(0.002, true).unwrap().measure().volume;
+    let removed = fine(&b) - fine(&f);
+    // Pappus: the corner's cross-section r²(1 − π/4), its centroid 0.2234 r in from the wall.
+    let r = 2.0;
+    let want = r * r * (1.0 - PI / 4.0) * (10.0 - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI))) * PI;
+    assert!(rel(removed, want) < 1e-3, "{removed} vs {want}");
+}

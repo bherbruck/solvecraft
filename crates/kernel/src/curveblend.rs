@@ -116,20 +116,37 @@ pub(crate) fn curve_blend(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, 
         let mut seen = std::collections::HashSet::new();
         shell.edge_iter().filter(|e| ids.contains(&e.id()) && seen.insert(e.id())).map(|e| e.absolute_clone()).collect()
     };
-    let first = all.first().cloned().ok_or_else(|| KernelError::Failed("no edges".into()))?;
+    // An open chain starts at a vertex only one of its edges touches.
+    let uses = |v: &mt::Vertex| all.iter().filter(|e| e.front() == v || e.back() == v).count();
+    let first = match all.iter().find_map(|e| {
+        if uses(e.front()) == 1 {
+            Some(e.clone())
+        } else if uses(e.back()) == 1 {
+            Some(e.inverse())
+        } else {
+            None
+        }
+    }) {
+        Some(e) => e,
+        None => all.first().cloned().ok_or_else(|| KernelError::Failed("no edges".into()))?,
+    };
     chain.push(first.clone());
     while chain.len() < all.len() {
         let end = chain.last().map(|e| e.back().clone()).ok_or_else(|| KernelError::Failed("chain".into()))?;
         let next = all
             .iter()
             .find(|e| !chain.iter().any(|c| c.id() == e.id()) && (*e.front() == end || *e.back() == end))
-            .ok_or_else(|| unsupported("the edges don't form one closed chain"))?;
+            .ok_or_else(|| unsupported("the edges don't form one chain"))?;
         chain.push(if *next.front() == end { next.clone() } else { next.inverse() });
     }
-    if chain.first().map(|e| e.front().clone()) != chain.last().map(|e| e.back().clone()) {
-        return Err(unsupported("blending an open chain of curved edges"));
-    }
+    let closed = chain.first().map(|e| e.front().clone()) == chain.last().map(|e| e.back().clone());
     let n = chain.len();
+    // The chain's vertices (n for a closed chain, n + 1 for an open one).
+    let mut verts: Vec<mt::Vertex> = chain.iter().map(|e| e.front().clone()).collect();
+    if !closed && let Some(e) = chain.last() {
+        verts.push(e.back().clone());
+    }
+    let nv = verts.len();
     // Faces of each edge, split into the two sides.
     let faces_of = |e: &mt::Edge| -> Vec<usize> {
         (0..faces.len()).filter(|i| faces.get(*i).is_some_and(|f| f.edge_iter().any(|x| x.id() == e.id()))).collect()
@@ -186,24 +203,38 @@ pub(crate) fn curve_blend(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, 
     }
     // Seams at the chain's vertices: edges there that aren't in the chain, and their side.
     let chain_ids: Vec<mt::EdgeID> = chain.iter().map(|e| e.id()).collect();
-    let mut seams: Vec<Vec<(usize, mt::Edge)>> = Vec::with_capacity(n);
-    for e in &chain {
-        let v = e.front().clone();
+    let mut seams: Vec<Vec<(usize, mt::Edge)>> = Vec::with_capacity(nv);
+    // At an open chain's ends: the end face (planar, square to the edge there).
+    let mut end_faces: Vec<(usize, usize)> = Vec::new(); // (vertex index, face index)
+    for (k, v) in verts.iter().enumerate() {
+        let at_end = !closed && (k == 0 || k == nv - 1);
+        let (k1, k2) = {
+            let ei = if k == nv - 1 && !closed { n - 1 } else { k.min(n - 1) };
+            (side1.get(ei).copied().unwrap_or(usize::MAX), side2.get(ei).copied().unwrap_or(usize::MAX))
+        };
         let mut found: Vec<(usize, mt::Edge)> = Vec::new();
         for (fi, f) in faces.iter().enumerate() {
+            if !f.vertex_iter().any(|x| x == *v) {
+                continue;
+            }
+            let on_side = side1.contains(&fi) || side2.contains(&fi);
+            if !on_side {
+                if !at_end || end_faces.iter().any(|(kk, _)| *kk == k) {
+                    return Err(unsupported("a vertex of the edge chain where other faces meet"));
+                }
+                end_faces.push((k, fi));
+                continue;
+            }
             for x in f.edge_iter() {
-                if chain_ids.contains(&x.id()) || !(*x.front() == v || *x.back() == v) || found.iter().any(|(_, y)| y.id() == x.id()) {
+                if chain_ids.contains(&x.id()) || !(*x.front() == *v || *x.back() == *v) || found.iter().any(|(_, y)| y.id() == x.id()) {
                     continue;
                 }
-                let side = if side1.contains(&fi) {
-                    1
-                } else if side2.contains(&fi) {
-                    2
-                } else {
-                    return Err(unsupported("a vertex of the edge chain where other faces meet"));
-                };
+                let side = if fi == k1 || (side1.contains(&fi) && fi != k2) { 1 } else { 2 };
                 found.push((side, x.absolute_clone()));
             }
+        }
+        if at_end && !end_faces.iter().any(|(kk, _)| *kk == k) {
+            return Err(unsupported("an open chain of curved edges must end at a face"));
         }
         // At most one seam per side.
         if found.iter().filter(|x| x.0 == 1).count() > 1 || found.iter().filter(|x| x.0 == 2).count() > 1 {
@@ -220,11 +251,33 @@ pub(crate) fn curve_blend(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, 
         let d = c.der(t);
         Some((from_p3(c.subs(t)), Vec3::new(d.x, d.y, d.z).normalized()?))
     };
-    let mut vsec: Vec<Section> = Vec::with_capacity(n);
-    for (k, e) in chain.iter().enumerate() {
-        let (p, t) = tangent_at(e, 0.0).ok_or_else(|| KernelError::Failed("tangent".into()))?;
+    let mut vsec: Vec<Section> = Vec::with_capacity(nv);
+    for k in 0..nv {
+        let (p, t) = if k < n {
+            tangent_at(chain.get(k).ok_or_else(|| KernelError::Failed("edge".into()))?, 0.0)
+        } else {
+            tangent_at(chain.get(n - 1).ok_or_else(|| KernelError::Failed("edge".into()))?, 1.0)
+        }
+        .ok_or_else(|| KernelError::Failed("tangent".into()))?;
         let here = seams.get(k).cloned().unwrap_or_default();
-        let extra = match here.first().cloned() {
+        let at_end = end_faces.iter().any(|(kk, _)| *kk == k);
+        if at_end {
+            // The end face must be square to the edge: the blend's end then lies in it.
+            let (_, fi) = end_faces.iter().find(|(kk, _)| *kk == k).copied().unwrap_or_default();
+            let g = faces.get(fi).ok_or_else(|| KernelError::Failed("end face".into()))?;
+            let ng = match g.oriented_surface() {
+                mt::Surface::Plane(pl) => {
+                    let m = pl.normal();
+                    Vec3::new(m.x, m.y, m.z).normalized()
+                }
+                _ => None,
+            }
+            .ok_or_else(|| unsupported("the faces at the ends of the edges must be planar"))?;
+            if ng.dot(t).abs() < 1.0 - 1e-6 {
+                return Err(unsupported("the faces at the ends of the edges must be square to them"));
+            }
+        }
+        let extra = match here.first().cloned().filter(|_| !at_end) {
             None => None,
             Some((side, seam)) => {
                 // The plane through the seam square to that side's surface.
@@ -241,7 +294,7 @@ pub(crate) fn curve_blend(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, 
         };
         let s = solve(&s1, &s2, p, t, r, sigma, extra, tol * 100.0).ok_or_else(|| unsupported("the ball doesn't fit along the edge"))?;
         // A seam on the other side too must pass through that side's contact.
-        if let Some((side, seam)) = here.get(1) {
+        if let Some((side, seam)) = here.get(1).filter(|_| !at_end) {
             let q = if *side == 1 { s.q1 } else { s.q2 };
             let (a, b) = (from_p3(seam.front().point()), from_p3(seam.back().point()));
             if !matches!(seam.curve(), mt::Curve::Line(_)) || q.dist_to_segment(a, b) > tol * 1e3 {
@@ -257,7 +310,7 @@ pub(crate) fn curve_blend(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, 
             let (p, t) = tangent_at(e, j as f64 / (SAMPLES - 1) as f64).ok_or_else(|| KernelError::Failed("tangent".into()))?;
             list.push(solve(&s1, &s2, p, t, r, sigma, None, tol * 100.0).ok_or_else(|| unsupported("the ball doesn't fit along the edge"))?);
         }
-        list.push(*vsec.get((k + 1) % n).ok_or_else(|| KernelError::Failed("section".into()))?);
+        list.push(*vsec.get((k + 1) % nv).ok_or_else(|| KernelError::Failed("section".into()))?);
         esec.push(list);
     }
     crate::guard("curve blend", || {
@@ -265,7 +318,7 @@ pub(crate) fn curve_blend(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, 
         // Vertices and arcs at the chain's vertices.
         let v1: Vec<mt::Vertex> = vsec.iter().map(|s| builder::vertex(p3(s.q1))).collect();
         let v2: Vec<mt::Vertex> = vsec.iter().map(|s| builder::vertex(p3(s.q2))).collect();
-        let mut arcs = Vec::with_capacity(n);
+        let mut arcs = Vec::with_capacity(nv);
         for (k, s) in vsec.iter().enumerate() {
             let (a, b) = (v1.get(k).ok_or_else(|| fail("vertex"))?, v2.get(k).ok_or_else(|| fail("vertex"))?);
             let e = if round {
@@ -283,7 +336,7 @@ pub(crate) fn curve_blend(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, 
         for (k, list) in esec.iter().enumerate() {
             let q1: Vec<Vec3> = list.iter().map(|s| s.q1).collect();
             let q2: Vec<Vec3> = list.iter().map(|s| s.q2).collect();
-            let k1 = (k + 1) % n;
+            let k1 = (k + 1) % nv;
             let (a1, b1, a2, b2) = (v1.get(k), v1.get(k1), v2.get(k), v2.get(k1));
             let (Some(a1), Some(b1), Some(a2), Some(b2)) = (a1, b1, a2, b2) else { return Err(fail("vertex")) };
             let cv1 = crate::build::interpolate_cubic(&q1).ok_or_else(|| fail("contact curve"))?;
@@ -293,14 +346,14 @@ pub(crate) fn curve_blend(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, 
             // The blend surface: each control row interpolated along the edge (homogeneous),
             // through two sections of each neighbouring edge too, so that neighbouring blend
             // faces meet smoothly.
-            let prev = esec.get((k + n - 1) % n).ok_or_else(|| fail("section"))?;
-            let next = esec.get(k1).ok_or_else(|| fail("section"))?;
             let mut ext: Vec<Section> = Vec::with_capacity(list.len() + 4);
-            if n > 1 || prev.len() > 3 {
+            if closed || k > 0 {
+                let prev = esec.get((k + n - 1) % n).ok_or_else(|| fail("section"))?;
                 ext.extend(prev.iter().rev().skip(1).take(2).rev().copied());
             }
             ext.extend(list.iter().copied());
-            if n > 1 || next.len() > 3 {
+            if closed || k + 1 < n {
+                let next = esec.get((k + 1) % n).ok_or_else(|| fail("section"))?;
                 ext.extend(next.iter().skip(1).take(2).copied());
             }
             let ctrl: Vec<[mt::Vector4; 3]> = ext.iter().map(|s| section_controls(s, round)).collect::<Option<_>>().ok_or_else(|| fail("section"))?;
@@ -341,16 +394,82 @@ pub(crate) fn curve_blend(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, 
             let (Some(x), Some(y)) = (c1.get(k), c2.get(k)) else { return Err(fail("contact")) };
             subst.insert(e.id(), (x.clone(), y.clone()));
         }
-        let mut seam_subst: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
+        // Seams get new ends at the contacts (an edge between two chain vertices at both).
+        let mut ends: HashMap<mt::EdgeID, (mt::Edge, Option<mt::Vertex>, Option<mt::Vertex>)> = HashMap::new();
         for (k, sm) in seams.iter().enumerate().flat_map(|(k, l)| l.iter().map(move |x| (k, x))) {
             let (side, seam) = sm;
-            let v = chain.get(k).map(|e| e.front().clone()).ok_or_else(|| fail("vertex"))?;
-            let nv = if *side == 1 { v1.get(k) } else { v2.get(k) }.ok_or_else(|| fail("vertex"))?;
-            let ne = if *seam.front() == v { builder::line(nv, seam.back()) } else { builder::line(seam.front(), nv) };
-            seam_subst.insert(seam.id(), ne);
+            let v = verts.get(k).cloned().ok_or_else(|| fail("vertex"))?;
+            let nv = if *side == 1 { v1.get(k) } else { v2.get(k) }.ok_or_else(|| fail("vertex"))?.clone();
+            let slot = ends.entry(seam.id()).or_insert_with(|| (seam.clone(), None, None));
+            if *seam.front() == v {
+                slot.1 = Some(nv);
+            } else {
+                slot.2 = Some(nv);
+            }
+        }
+        let mut seam_subst: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
+        for (id, (seam, a, b)) in ends {
+            if !matches!(seam.curve(), mt::Curve::Line(_)) {
+                return Err(unsupported("a curved edge where the blend ends"));
+            }
+            // The new ends must stay on the seam, in order, short of each other.
+            let (p0, p1) = (from_p3(seam.front().point()), from_p3(seam.back().point()));
+            let at = |v: &mt::Vertex| {
+                let q = from_p3(v.point());
+                let d = p1 - p0;
+                ((q - p0).dot(d) / d.len2().max(1e-300), (q - p0 - d * ((q - p0).dot(d) / d.len2().max(1e-300))).len())
+            };
+            let (ta, oa) = a.as_ref().map(at).unwrap_or((0.0, 0.0));
+            let (tb, ob) = b.as_ref().map(at).unwrap_or((1.0, 0.0));
+            if oa > size * 1e-5 || ob > size * 1e-5 || ta < -1e-9 || tb > 1.0 + 1e-9 || tb - ta < 1e-6 {
+                return Err(unsupported("the blend is larger than the neighbouring faces"));
+            }
+            let a = a.unwrap_or_else(|| seam.front().clone());
+            let b = b.unwrap_or_else(|| seam.back().clone());
+            seam_subst.insert(id, builder::line(&a, &b));
         }
         let mut out: Vec<mt::Face> = Vec::new();
         for (fi, f) in faces.iter().enumerate() {
+            let corners: Vec<usize> = end_faces.iter().filter(|(_, g)| *g == fi).map(|(k, _)| *k).collect();
+            if !corners.is_empty() {
+                // The end face (one or both ends of the chain): its two edges at a chain end now
+                // stop at the contacts, with the blend's end arc between them.
+                let mut wires = Vec::new();
+                for w in f.absolute_boundaries() {
+                    let mut es: Vec<mt::Edge> = Vec::new();
+                    for e in w.edge_iter() {
+                        let ne = match seam_subst.get(&e.id()) {
+                            Some(s) => {
+                                if e.front() == e.absolute_front() {
+                                    s.clone()
+                                } else {
+                                    s.inverse()
+                                }
+                            }
+                            None => e.clone(),
+                        };
+                        // Arriving at an old corner: continue along that end's arc.
+                        let arrives = corners.iter().copied().find(|k| verts.get(*k).is_some_and(|v| *e.back() == *v));
+                        es.push(ne.clone());
+                        if let Some(k) = arrives {
+                            let arc = arcs.get(k).ok_or_else(|| fail("arc"))?;
+                            let (a1, a2) = (v1.get(k).ok_or_else(|| fail("vertex"))?, v2.get(k).ok_or_else(|| fail("vertex"))?);
+                            let to = ne.back();
+                            let corner = if to == a1 {
+                                arc.clone()
+                            } else if to == a2 {
+                                arc.inverse()
+                            } else {
+                                return Err(fail("end face corner"));
+                            };
+                            es.push(corner);
+                        }
+                    }
+                    wires.push(mt::Wire::from(es));
+                }
+                out.push(crate::heal::absolute_face(f, wires).ok_or_else(|| fail("an end face could not be rebuilt"))?);
+                continue;
+            }
             let on1 = side1.contains(&fi);
             let on2 = side2.contains(&fi);
             if !on1 && !on2 && !f.edge_iter().any(|e| seam_subst.contains_key(&e.id())) {
@@ -379,7 +498,7 @@ pub(crate) fn curve_blend(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, 
         }
         // Blend faces: each runs its side-1 contact the other way from side 1's face.
         for (k, bf) in blends.iter().enumerate() {
-            let (Some(e1), Some(e2), Some(ak), Some(ak1)) = (c1.get(k), c2.get(k), arcs.get(k), arcs.get((k + 1) % n)) else {
+            let (Some(e1), Some(e2), Some(ak), Some(ak1)) = (c1.get(k), c2.get(k), arcs.get(k), arcs.get((k + 1) % nv)) else {
                 return Err(fail("blend"));
             };
             let f1i = side1.get(k).ok_or_else(|| fail("side"))?;

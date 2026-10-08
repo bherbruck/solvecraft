@@ -62,8 +62,8 @@ headline counts in-scope tabs only and lists the deferred ones separately.
   rounded corners rounded again (sphere octants, tori at concave corners); every edge of a
   convex planar body or of an extruded part; fillets inside patterns; closed chains of curved
   edges between any two smooth sides (a branch pipe on a main pipe), by a rolling ball (the
-  blend a rational B-spline through exact arcs). Open chains of curved edges are not supported
-  yet.
+  blend a rational B-spline through exact arcs), closed or ending at planar faces square to the
+  edges.
 - Booleans: prisms along one direction (plates with holes, slots, patterns of them, equal
   sections stacked end to end) are combined exactly in 2D; bodies touching along one whole face
   (a part and its mirror image) are stitched; coincident planar faces are pushed apart when

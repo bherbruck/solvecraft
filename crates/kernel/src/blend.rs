@@ -341,7 +341,8 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
         let edge = Body::unique_edges(&solid).into_iter().nth(idx).ok_or_else(|| KernelError::Invalid("edge index".into()))?;
         let out = match guard(what, || blend_one(&solid, &edge, size, r, shape)) {
             Ok(o) => o,
-            // A curved edge: roll a ball along its smooth closed chain.
+            // A curved edge, or one between curved faces: roll a ball along its smooth chain.
+            Err(e) if !curved_case(&solid, &edge) => return Err(e),
             Err(e) => match smooth_chain(&solid, &edge) {
                 Some(ids) => guard(what, || crate::curveblend::curve_blend(&solid, &ids, size, r, shape == Shape::Round))
                     .map_err(|e2| KernelError::Failed(format!("{e2} ({e})")))?,
@@ -353,7 +354,16 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
     Ok(cur)
 }
 
-/// The closed chain of edges continuing `edge` smoothly at both ends (its ids), if any.
+/// Is the edge curved, or does it lie between faces that aren't both planar?
+fn curved_case(solid: &Solid, edge: &mt::Edge) -> bool {
+    if !matches!(edge.curve(), mt::Curve::Line(_)) {
+        return true;
+    }
+    solid.face_iter().filter(|f| f.edge_iter().any(|e| e.id() == edge.id())).any(|f| !matches!(f.oriented_surface(), mt::Surface::Plane(_)))
+}
+
+/// The chain of edges continuing `edge` smoothly at its ends (its ids): closed, or open where
+/// the next edge turns sharply.
 fn smooth_chain(solid: &Solid, edge: &mt::Edge) -> Option<Vec<mt::EdgeID>> {
     use mt::{BoundedCurve, ParametricCurve};
     let all = Body::unique_edges(solid);
@@ -364,28 +374,34 @@ fn smooth_chain(solid: &Solid, edge: &mt::Edge) -> Option<Vec<mt::EdgeID>> {
         Vec3::new(d.x, d.y, d.z).normalized()
     };
     let mut ids = vec![edge.id()];
-    let start = edge.front().clone();
-    let (mut v, mut d) = (edge.back().clone(), dir(edge, true)?);
-    for _ in 0..200 {
-        if v == start {
-            return Some(ids);
+    // Walk on from one end of the edge (leaving vertex `v` in direction `d`).
+    let walk = |mut v: mt::Vertex, mut d: Vec3, ids: &mut Vec<mt::EdgeID>, stop: &mt::Vertex| -> Option<bool> {
+        for _ in 0..200 {
+            if v == *stop {
+                return Some(true);
+            }
+            let next = all.iter().filter(|e| !ids.contains(&e.id()) && (*e.front() == v || *e.back() == v)).find_map(|e| {
+                let fwd = *e.front() == v;
+                let t = if fwd { dir(e, false)? } else { -dir(e, true)? };
+                (t.dot(d) > 1.0 - 1e-4).then(|| (e.clone(), fwd))
+            });
+            let Some((e, fwd)) = next else { return Some(false) };
+            ids.push(e.id());
+            if fwd {
+                v = e.back().clone();
+                d = dir(&e, true)?;
+            } else {
+                v = e.front().clone();
+                d = -dir(&e, false)?;
+            }
         }
-        let next = all.iter().filter(|e| !ids.contains(&e.id()) && (*e.front() == v || *e.back() == v)).find_map(|e| {
-            let fwd = *e.front() == v;
-            let t = if fwd { dir(e, false)? } else { -dir(e, true)? };
-            (t.dot(d) > 1.0 - 1e-4).then(|| (e.clone(), fwd))
-        });
-        let (e, fwd) = next?;
-        ids.push(e.id());
-        if fwd {
-            v = e.back().clone();
-            d = dir(&e, true)?;
-        } else {
-            v = e.front().clone();
-            d = -dir(&e, false)?;
-        }
+        None
+    };
+    let closed = walk(edge.back().clone(), dir(edge, true)?, &mut ids, edge.front())?;
+    if !closed {
+        walk(edge.front().clone(), -dir(edge, false)?, &mut ids, edge.back())?;
     }
-    None
+    Some(ids)
 }
 
 fn edge_mid(e: &mt::Edge) -> Option<Vec3> {
