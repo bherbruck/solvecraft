@@ -22,6 +22,9 @@ pub struct GpuScene {
     /// Translucent triangles (alpha from the colour), drawn after the opaque ones without
     /// writing depth.
     pub trans: Vec<u8>,
+    /// See-through bodies and faces (appearance opacity below 1), closed and outward-wound:
+    /// their far sides are drawn first, then their near sides, so they read like glass.
+    pub glass: Vec<u8>,
     /// Depth-tested lines.
     pub lines: Vec<u8>,
     /// Lines drawn over everything (active sketch, highlights).
@@ -48,6 +51,12 @@ impl GpuScene {
             self.trans.extend_from_slice(&v.to_le_bytes());
         }
         self.trans.extend_from_slice(&c);
+    }
+    pub fn glass_tri(&mut self, p: [f32; 3], n: [f32; 3], c: [u8; 4]) {
+        for v in p.iter().chain(&n) {
+            self.glass.extend_from_slice(&v.to_le_bytes());
+        }
+        self.glass.extend_from_slice(&c);
     }
     pub fn ghost_tri(&mut self, p: [f32; 3], n: [f32; 3], c: [u8; 4]) {
         for v in p.iter().chain(&n) {
@@ -151,6 +160,7 @@ struct Batches {
     key: Option<u64>,
     tris: Option<Batch>,
     trans: Option<Batch>,
+    glass: Option<Batch>,
     lines: Option<Batch>,
     overlays: Option<Batch>,
     ghost: Option<Batch>,
@@ -166,6 +176,7 @@ impl Batches {
         if let Some(sc) = slot.lock().ok().and_then(|mut s| s.take()) {
             self.tris = upload(device, "sc_tris", &sc.tris, TRI_SIZE);
             self.trans = upload(device, "sc_trans", &sc.trans, TRI_SIZE);
+            self.glass = upload(device, "sc_glass", &sc.glass, TRI_SIZE);
             self.lines = upload(device, "sc_lines", &sc.lines, LINE_SIZE);
             self.overlays = upload(device, "sc_overlay", &sc.overlay, LINE_SIZE);
             self.ghost = upload(device, "sc_ghost", &sc.ghost, TRI_SIZE);
@@ -181,6 +192,9 @@ struct Resources {
     /// Highlight triangles over the model (depth test ≤, no depth write).
     tri_hl: wgpu::RenderPipeline,
     trans: wgpu::RenderPipeline,
+    /// Glass: far sides (front faces culled), then near sides (back faces culled).
+    glass_far: wgpu::RenderPipeline,
+    glass_near: wgpu::RenderPipeline,
     ghost: wgpu::RenderPipeline,
     xray: wgpu::RenderPipeline,
     line: wgpu::RenderPipeline,
@@ -549,6 +563,29 @@ impl Resources {
             })
         };
         let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
+        let glass = |label: &str, cull: wgpu::Face| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_tri"),
+                    buffers: &[Some(tri_layout())],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: Some(cull), ..Default::default() },
+                depth_stencil: depth(wgpu::CompareFunction::LessEqual, false),
+                multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_tri"),
+                    targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         let image_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sc_image"),
             entries: &[
@@ -659,6 +696,8 @@ impl Resources {
             access_version: 0,
             tri_hl: pipeline("sc_tris_hl", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             trans: pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+            glass_far: glass("sc_glass_far", wgpu::Face::Front),
+            glass_near: glass("sc_glass_near", wgpu::Face::Back),
             ghost: pipeline("sc_ghost", "vs_ghost", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             xray: pipeline("sc_xray", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             line: pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
@@ -807,6 +846,8 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
             }
         }
         tris(pass, &res.ghost, &pv.ghost);
+        tris(pass, &res.glass_far, &m.glass);
+        tris(pass, &res.glass_near, &m.glass);
         tris(pass, &res.trans, &m.trans);
         tris(pass, &res.trans, &h.trans);
         tris(pass, &res.xray, &pv.xray);

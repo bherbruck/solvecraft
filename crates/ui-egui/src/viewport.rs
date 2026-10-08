@@ -226,12 +226,29 @@ fn build_scene(app: &SolveApp) -> GpuScene {
             _ => (true, true),
         };
         let edge_col = if shaded { c4(tk.body_edge) } else { c4(tk.text) };
-        for t in m.triangles.iter().filter(|_| shaded) {
+        // Appearances: the body's opacity, and faces with looks of their own.
+        let opacity = s.doc.body_look(&b.name, b.feature).map_or(1.0, |l| l.opacity);
+        let face_looks: std::collections::HashMap<usize, solvecraft_engine::doc::appearance::Look> =
+            if shaded { s.doc.face_colors(b).into_iter().collect() } else { Default::default() };
+        for (ti, t) in m.triangles.iter().enumerate().filter(|_| shaded) {
+            let (mut col, a) = match m.tri_face.get(ti).and_then(|f| face_looks.get(&(*f as usize))) {
+                Some(l) => {
+                    let c = Color32::from_rgb(l.color[0], l.color[1], l.color[2]);
+                    (if faded { c4(c.gamma_multiply(0.35)) } else { c4(c) }, l.opacity)
+                }
+                None => (col, opacity),
+            };
+            let glass = !faded && a < 0.999;
+            if glass {
+                col[3] = (a.clamp(0.05, 1.0) * 255.0).round() as u8;
+            }
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
                     if faded {
                         sc.trans_tri(p.to_f32(), n.to_f32(), col);
+                    } else if glass {
+                        sc.glass_tri(p.to_f32(), n.to_f32(), col);
                     } else {
                         sc.tri(p.to_f32(), n.to_f32(), col);
                     }
