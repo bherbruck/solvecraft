@@ -1558,3 +1558,30 @@ fn lip_after_boss() {
         }
     }
 }
+
+/// A drilled hole as deep as the plate: the drill point breaks through the bottom.
+#[test]
+fn hole_as_deep_as_the_plate() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 50, "width": 25, "height": 10}));
+    let v0 = volume(&mut s);
+    run(&mut s, "FusionHoleCommand", json!({"position": [25, 12.5, 10], "diameter": 6, "depth": 10, "type": "drilled"}));
+    let v = volume(&mut s);
+    assert!(v < v0 - PI * 9.0 * 9.0 && v > v0 - PI * 9.0 * 10.0 - 1.0, "{v0} {v}");
+    // Other sizes and places, the defaults, and a tapped hole.
+    for (i, p) in [
+        json!({"position": [10, 10, 10], "diameter": 5, "depth": 10, "type": "drilled"}),
+        json!({"position": [40, 15, 10], "diameter": 5, "depth": 10}),
+        json!({"position": [12, 6, 10], "diameter": 8.5, "depth": 10}),
+        json!({"position": [30, 7, 10], "thread": "M6", "depth": 10}),
+        json!({"position": [20, 18, 10], "diameter": 4, "depth": 10, "tip_angle": 90}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let before = volume(&mut s);
+        let r = s.execute("FusionHoleCommand", &p);
+        assert!(r.is_ok(), "{i} {p}: {r:?}");
+        assert!(volume(&mut s) < before - 1.0, "{i} {p}");
+    }
+}

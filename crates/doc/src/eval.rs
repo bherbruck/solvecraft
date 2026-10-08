@@ -1189,7 +1189,13 @@ fn hole_tools(
         HoleKind::Simple => tools.push(cyl(r, bottom, top)?),
         HoleKind::Drilled { tip_angle } => {
             let half = val(vals, tip_angle, Kind::Angle)? / 2.0;
-            if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 {
+            // A hole exactly as deep as the material: the point is in the air past the exit
+            // face, which would lie on the drill point's shoulder (a through hole, as drilled).
+            let at = |h: f64| *position + dir * (-h);
+            let eps = size * 1e-6;
+            let solid_at = |h: f64| st.bodies.iter().any(|b| b.body.contains(at(h)));
+            let exits_at_shoulder = solid_at(bottom + eps) && !solid_at(bottom - eps);
+            if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 && !exits_at_shoulder {
                 // One revolved tool (cylinder with a drill point).
                 let tip = r / half.tan();
                 let up = -dir;
