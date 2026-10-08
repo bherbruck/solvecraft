@@ -138,7 +138,9 @@ fn classify(pts: &[Vec3], nrm: &[Vec3], tol: f64, id: usize) -> Surf {
     // Sphere: algebraic least-squares fit |p|² = 2c·p + k, then every point at the same distance.
     if let Some((c, r)) = fit_sphere(pts) {
         let spread = pts.iter().map(|p| p.dist(p0)).fold(0.0, f64::max);
-        if spread > tol && pts.iter().all(|p| (p.dist(c) - r).abs() < tol.max(r * 2e-3)) && r < spread * 1e4 {
+        // Normals radial too (a torus strip can fit a sphere's points closely).
+        let radial = pts.iter().zip(nrm).all(|(p, n)| (*p - c).normalized().is_some_and(|d| d.dot(*n).abs() > 1.0 - 2e-3));
+        if spread > tol && radial && pts.iter().all(|p| (p.dist(c) - r).abs() < tol.max(r * 2e-3)) && r < spread * 1e4 {
             return Surf::Sphere { c, r };
         }
     }
