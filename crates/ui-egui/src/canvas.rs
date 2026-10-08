@@ -205,6 +205,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(label).color(t.text_dim).size(11.5));
                 let r = ui.add(egui::TextEdit::singleline(value).id(id).desired_width(72.0));
+                crate::params_dialog::complete(ui, &r, value);
                 if focus {
                     r.request_focus();
                     let n = value.chars().count();

@@ -226,6 +226,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             let fill = if b.locked { tk.accent_soft } else { tk.panel };
             egui::Frame::popup(ui.style()).fill(fill).inner_margin(egui::Margin::symmetric(3, 1)).show(ui, |ui| {
                 let r = ui.add(egui::TextEdit::singleline(&mut b.value).id(id).desired_width(66.0)).on_hover_text(b.label);
+                crate::params_dialog::complete(ui, &r, &mut b.value);
                 if r.changed() {
                     b.locked = true;
                 }

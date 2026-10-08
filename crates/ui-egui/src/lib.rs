@@ -18,6 +18,7 @@ pub mod icons;
 #[cfg(test)]
 mod menu_tests;
 pub mod palette;
+pub mod params_dialog;
 pub mod preview;
 pub mod selection;
 pub mod sketch_dims;
@@ -121,6 +122,8 @@ pub struct SolveApp {
     pub viewport: viewport::ViewportState,
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
+    /// The Change Parameters window, when open.
+    pub params: Option<params_dialog::ParamsDialog>,
     pub palette: palette::Palette,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -155,6 +158,7 @@ impl SolveApp {
             viewport: viewport::ViewportState::default(),
             tool: None,
             dialog: None,
+            params: None,
             palette: palette::Palette::default(),
             menu: context_menu::MenuState::default(),
             tree: browser::TreeState::default(),
@@ -254,6 +258,10 @@ impl SolveApp {
             if let Some(p) = self.services.pick_open.as_ref().and_then(|f| f()) {
                 self.insert_path(&p);
             }
+            return;
+        }
+        if id == "ChangeParameterCommand" {
+            params_dialog::open(self);
             return;
         }
         if id == "SketchStop" {
@@ -548,6 +556,7 @@ impl SolveApp {
             viewport::show(self, ui);
         });
         dialogs::show(self, ui.ctx());
+        params_dialog::show(self, ui.ctx());
         context_menu::show(self, ui.ctx());
         palette::popup(self, ui.ctx());
         self.frame_ms = now_ms() - t0;

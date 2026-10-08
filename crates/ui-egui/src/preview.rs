@@ -110,6 +110,10 @@ impl PreviewState {
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     let cmds = match app.dialog.as_ref().filter(|d| d.previews()).map(|d| crate::dialogs::apply_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
+        // A parameter being edited in Change Parameters.
+        _ if app.params.as_ref().and_then(|p| p.preview_commands()).is_some() => {
+            app.params.as_ref().and_then(|p| p.preview_commands()).unwrap_or_default()
+        }
         // No dialog, or inputs still missing: nothing to preview.
         _ => {
             app.preview.clear();

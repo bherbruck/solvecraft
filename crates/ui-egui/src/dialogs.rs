@@ -605,6 +605,7 @@ fn plane_value(s: &Session, sel: Option<&Sel>) -> Option<Value> {
 /// A value field; true when Enter was pressed in it.
 fn field(ui: &mut egui::Ui, s: &mut String) -> bool {
     let r = ui.text_edit_singleline(s);
+    crate::params_dialog::complete(ui, &r, s);
     r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
 }
 
@@ -889,6 +890,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         } else if *direction < 2 {
                             ui.label("Taper angle");
                             let r = ui.add(egui::TextEdit::singleline(taper).hint_text("0 deg"));
+                            crate::params_dialog::complete(ui, &r, taper);
                             enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                             ui.end_row();
                         }
@@ -947,6 +949,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                         ui.label("Depth");
                         let r = ui.add(egui::TextEdit::singleline(depth).hint_text("to the next face"));
+                        crate::params_dialog::complete(ui, &r, depth);
                         enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.end_row();
                         ui.label("Flip");
@@ -981,6 +984,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                         ui.label("Wall");
                         let r = ui.add(egui::TextEdit::singleline(wall).hint_text("solid"));
+                        crate::params_dialog::complete(ui, &r, wall);
                         enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.end_row();
                     }
@@ -1006,6 +1010,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                         ui.label("Length");
                         let r = ui.add(egui::TextEdit::singleline(length).hint_text("whole face"));
+                        crate::params_dialog::complete(ui, &r, length);
                         enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.end_row();
                     }
@@ -1063,6 +1068,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                         ui.label("Depth");
                         let r = ui.add(egui::TextEdit::singleline(depth).hint_text("through all"));
+                        crate::params_dialog::complete(ui, &r, depth);
                         enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.end_row();
                         if *kind == 1 {
@@ -1106,6 +1112,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     Kind::EditParam { name, expr } => {
                         ui.label(name.as_str());
                         let r = ui.text_edit_singleline(expr);
+                        crate::params_dialog::complete(ui, &r, expr);
                         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                             ok = true;
                         }
