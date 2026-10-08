@@ -232,6 +232,45 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 crate::sketch3d::handle_points(app, &proj).into_iter().map(|(n, p)| json!({"handle": n, "x": p.x, "y": p.y})).collect::<Vec<_>>()
             ))
         }
+        "ui.dialogInput" => {
+            // What clicking a selection input's chip does: make it the one picks go to.
+            let i = p.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+            match app.dialog.as_mut() {
+                Some(d) if i < d.inputs.len() => {
+                    d.active = i;
+                    ok(json!({"label": d.inputs.get(i).map(|x| x.label)}))
+                }
+                _ => err("no dialog input with that index"),
+            }
+        }
+        "ui.at" => {
+            // A scenario point: {world: [x,y,z]} | {sketch: [x,y]} | {plane: "XY"} (the middle of an
+            // origin plane's square) → screen point.
+            let Some(rect) = app.viewport.rect else { return err("no viewport") };
+            let proj = crate::viewport::projection(app, rect);
+            let num = |v: &Value, i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
+            let world = if let Some(w) = p.get("world") {
+                Some(solvecraft_engine::geom::Vec3::new(num(w, 0), num(w, 1), num(w, 2)))
+            } else if let Some(s) = p.get("sketch") {
+                let st = app.session.model.state();
+                app.session
+                    .active_sketch
+                    .and_then(|id| st.sketch(id))
+                    .map(|ss| ss.plane.to_world(solvecraft_engine::geom::Vec2::new(num(s, 0), num(s, 1))))
+            } else if let Some(n) = p.get("plane").and_then(Value::as_str) {
+                crate::viewport::origin_planes(app).into_iter().find(|(name, _, _)| *name == n).map(|(_, _, q)| (q[0] + q[1] + q[2] + q[3]) / 4.0)
+            } else if let Some(n) = p.get("axis").and_then(Value::as_str) {
+                // Along an origin axis, on its solid part.
+                let size = crate::selection::origin_size(app.cam.half_height());
+                crate::viewport::origin_axes(app).into_iter().find(|(name, _)| *name == n).map(|(_, d)| d * (size * 0.8))
+            } else {
+                None
+            };
+            match world.and_then(|w| proj.to_screen(w)) {
+                Some(q) => ok(json!([q.x, q.y])),
+                None => err(format!("not on screen: {}", p)),
+            }
+        }
         "ui.worldToScreen" => {
             let Some(rect) = app.viewport.rect else { return err("no viewport") };
             let proj = crate::viewport::projection(app, rect);

@@ -37,10 +37,13 @@ struct Drawn {
 struct Edit {
     param: String,
     expr: String,
-    at: Pos2,
+    /// Where it sits (None until the dimension has been drawn).
+    at: Option<Pos2>,
     /// Frames left in which the box (re)takes the keyboard: the rest of the double-click
     /// that opened it must not close it.
     fresh: u8,
+    /// Frames left to wait for the dimension to be drawn.
+    wait: u8,
 }
 
 thread_local! {
@@ -103,7 +106,7 @@ pub fn double_click(app: &mut SolveApp, pos: Pos2) -> bool {
         return true;
     };
     let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
-    EDIT.with(|e| *e.borrow_mut() = Some(Edit { param, expr, at: d.text.center(), fresh: FRESH }));
+    EDIT.with(|e| *e.borrow_mut() = Some(Edit { param, expr, at: Some(d.text.center()), fresh: FRESH, wait: 0 }));
     true
 }
 
@@ -256,11 +259,29 @@ fn pos2_mid_top(r: Rect) -> Pos2 {
 }
 
 /// The inline value editor: Enter applies, Esc (or a click elsewhere) cancels.
+/// Edit a dimension's value in place by its parameter (a new dimension from the Dimension tool:
+/// its value is selected, so typing replaces it).
+pub fn edit_param(app: &SolveApp, param: &str) {
+    let expr = app.session.doc.param(param).map(|p| p.expr.clone()).unwrap_or_default();
+    EDIT.with(|e| *e.borrow_mut() = Some(Edit { param: param.to_string(), expr, at: None, fresh: FRESH, wait: 10 }));
+}
+
 fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut e) = EDIT.with(|x| x.borrow_mut().take()) else { return };
+    if e.at.is_none() {
+        e.at = DRAWN.with(|d| d.borrow().iter().find(|x| x.param.as_deref() == Some(e.param.as_str())).map(|x| x.text.center()));
+    }
+    let Some(at) = e.at else {
+        // Not drawn yet (this frame's solve): try again next frame, for a few frames.
+        if e.wait > 0 {
+            e.wait -= 1;
+            EDIT.with(|x| *x.borrow_mut() = Some(e));
+        }
+        return;
+    };
     let id = egui::Id::new("sc_dim_edit");
     let mut done: Option<bool> = None;
-    egui::Area::new(egui::Id::new("sc_dim_edit_area")).fixed_pos(e.at - vec2(45.0, 11.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+    egui::Area::new(egui::Id::new("sc_dim_edit_area")).fixed_pos(at - vec2(45.0, 11.0)).order(egui::Order::Foreground).show(ctx, |ui| {
         egui::Frame::popup(ui.style()).inner_margin(egui::Margin::symmetric(3, 1)).show(ui, |ui| {
             let r = ui.add(egui::TextEdit::singleline(&mut e.expr).id(id).desired_width(90.0));
             crate::params_dialog::complete(ui, &r, &mut e.expr);

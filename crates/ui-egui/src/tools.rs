@@ -163,7 +163,8 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
                     if let Ok(v) = app.run("SketchDimension", json!({"entities": tool.picks}))
                         && let Some(p) = v["param"].as_str()
                     {
-                        app.dialog = Some(crate::dialogs::Dialog::edit_param(&app.session, p));
+                        // The value is edited in place, selected so typing replaces it.
+                        crate::dim_view::edit_param(app, p);
                     }
                     tool.picks.clear();
                 }
@@ -237,10 +238,41 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Vec<String> {
         "DrawPoint" => json!({"point": xy(&p[0])}),
         _ => return Vec::new(),
     };
-    app.run(t.cmd, params)
+    let curves: Vec<String> = app
+        .run(t.cmd, params)
         .ok()
         .map(|v| v["curves"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(str::to_string)).collect())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    tie_snaps(app, t, &curves);
+    curves
+}
+
+/// A click that snapped to an existing point (the origin, a corner) but went in as plain
+/// coordinates: tie the new shape's point there to it, as Fusion does.
+fn tie_snaps(app: &mut SolveApp, t: &Tool, curves: &[String]) {
+    let mut ties = Vec::new();
+    {
+        let st = app.session.model.state();
+        let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
+        let sk = &ss.sketch;
+        let new_pts: Vec<usize> =
+            curves.iter().filter_map(|c| sk.curve_index(c)).flat_map(|i| sk.curves.get(i).map(|c| c.kind.point_ids()).unwrap_or_default()).collect();
+        for (at, r) in &t.pts {
+            let Some(r) = r else { continue };
+            let Some(target) = sk.resolve_point(r) else { continue };
+            if new_pts.contains(&target) {
+                continue;
+            }
+            if let Some(q) = new_pts.iter().copied().find(|q| sk.point(*q).is_some_and(|p| p.dist(*at) < 1e-6))
+                && let Some(qid) = sk.points.get(q).map(|p| p.id.clone())
+            {
+                ties.push((r.clone(), qid));
+            }
+        }
+    }
+    for (a, b) in ties {
+        let _ = app.run("ConstraintCoincident", json!({"a": a, "b": b}));
+    }
 }
 
 fn run_pick(app: &mut SolveApp, t: &Tool) {

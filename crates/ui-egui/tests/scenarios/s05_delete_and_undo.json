@@ -1,0 +1,131 @@
+[
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    30,
+    20
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "text": "10"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "volume": 6000
+  }
+ },
+ {
+  "click": {
+   "world": [
+    15,
+    10,
+    10
+   ]
+  }
+ },
+ {
+  "expect": {
+   "selection": 1
+  }
+ },
+ {
+  "expect": {
+   "selection": 1
+  }
+ },
+ {
+  "call": "ui.menu",
+  "params": {
+   "x": 100,
+   "y": 260,
+   "target": {
+    "type": "body",
+    "name": "Body1"
+   }
+  }
+ },
+ {
+  "call": "ui.menuPick",
+  "params": {
+   "item": "Delete"
+  }
+ },
+ {
+  "debug": 1
+ },
+ {
+  "expect": {
+   "bodies": 0
+  }
+ },
+ {
+  "key": "Z",
+  "cmd": true
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "volume": 6000
+  }
+ },
+ {
+  "key": "Y",
+  "cmd": true
+ },
+ {
+  "expect": {
+   "bodies": 0
+  }
+ },
+ {
+  "key": "Z",
+  "cmd": true
+ },
+ {
+  "expect": {
+   "bodies": 1
+  }
+ },
+ {
+  "shot": "s05_undone"
+ }
+]

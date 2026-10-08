@@ -1,0 +1,206 @@
+[
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "expect": {
+   "sketching": true
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    40,
+    30
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "expect": {
+   "dof": 2
+  }
+ },
+ {
+  "start": "SketchDimension"
+ },
+ {
+  "click": {
+   "sketch": [
+    20,
+    0
+   ]
+  }
+ },
+ {
+  "text": "50"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "expect": {
+   "dialog": null,
+   "param": {
+    "d1": 50
+   }
+  }
+ },
+ {
+  "shot": "s01_sketch"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "expect": {
+   "sketching": false
+  }
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "text": "20"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "volume": 30000,
+   "dialog": null
+  }
+ },
+ {
+  "shot": "s01_extrude"
+ },
+ {
+  "start": "FusionFilletEdgesCommand"
+ },
+ {
+  "click": {
+   "world": [
+    50,
+    15,
+    20
+   ]
+  }
+ },
+ {
+  "click": {
+   "world": [
+    0,
+    15,
+    20
+   ]
+  }
+ },
+ {
+  "text": "3"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "errors": 0,
+   "dialog": null,
+   "volume": [
+    29884.1,
+    1e-05
+   ]
+  }
+ },
+ {
+  "shot": "s01_fillet"
+ },
+ {
+  "start": "FusionShellBodyCommand"
+ },
+ {
+  "click": {
+   "world": [
+    25,
+    0,
+    10
+   ]
+  }
+ },
+ {
+  "text": "2"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "errors": 0,
+   "dialog": null
+  }
+ },
+ {
+  "shot": "s01_shell"
+ },
+ {
+  "start": "FusionHoleCommand"
+ },
+ {
+  "click": {
+   "world": [
+    25,
+    15,
+    20
+   ]
+  }
+ },
+ {
+  "text": "8"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "errors": 0,
+   "dialog": null
+  }
+ },
+ {
+  "debug": 1
+ },
+ {
+  "shot": "s01_hole"
+ }
+]

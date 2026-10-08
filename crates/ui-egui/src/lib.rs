@@ -31,6 +31,7 @@ pub mod params_dialog;
 mod preselect_tests;
 pub mod preview;
 pub mod ref_images;
+pub mod scenario;
 pub mod selection;
 pub mod sketch3d;
 pub mod sketch_dims;

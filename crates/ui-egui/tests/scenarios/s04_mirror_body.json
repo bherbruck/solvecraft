@@ -1,0 +1,22 @@
+[
+  {"start": "SketchCreate"},
+  {"click": {"plane": "XY"}},
+  {"start": "CircleCenterRadius"},
+  {"click": {"sketch": [20, 10]}},
+  {"click": {"sketch": [25, 10]}},
+  {"key": "Escape"},
+  {"start": "SketchStop"},
+  {"call": "ui.view", "params": {"view": "iso"}},
+  {"start": "Extrude"},
+  {"text": "10"},
+  {"key": "Enter"},
+  {"expect": {"bodies": 1}},
+  {"start": "MirrorCommand"},
+  {"click": {"world": [20, 10, 10]}},
+  {"call": "ui.dialogInput", "params": {"index": 1}},
+  {"click": {"plane": "YZ"}},
+  {"debug": 1},
+  {"key": "Enter"},
+  {"expect": {"bodies": 2, "errors": 0, "dialog": null, "volume": [1570.8, 1e-3]}},
+  {"shot": "s04_mirror"}
+]
