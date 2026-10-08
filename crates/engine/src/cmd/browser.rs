@@ -442,6 +442,24 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "waits for unit-less parameters used as lengths to read in the design's units (solvecraft-params)"]
+    fn a_bare_width_keeps_its_inches_when_the_design_goes_metric() {
+        let mut s = Session::default();
+        run(&mut s, "document.units", json!({"units": "in"}));
+        run(&mut s, "parameters.add", json!({"name": "w", "expression": "2", "unit": ""}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": "w", "height": 5}));
+        let width = |s: &mut Session| {
+            let b = &run(s, "inspect.measure", json!({}))["bodies"][0]["bbox"];
+            b["max"][1].as_f64().unwrap() - b["min"][1].as_f64().unwrap()
+        };
+        assert!((width(&mut s) - 50.8).abs() < 1e-6, "2 in an inch design");
+        let r = run(&mut s, "document.units", json!({"units": "mm"}));
+        assert!((width(&mut s) - 50.8).abs() < 1e-6, "still 50.8 mm: {r}");
+        assert_eq!(r["kept"], json!(["w"]));
+        assert_eq!(s.doc.param("w").map(|p| p.expr.as_str()), Some("2 in"));
+    }
+
+    #[test]
     fn named_views_are_saved_renamed_and_deleted() {
         let mut s = Session::default();
         let cam = json!({"target": [1, 2, 3], "yaw": 0.5, "pitch": 0.3, "distance": 100});
