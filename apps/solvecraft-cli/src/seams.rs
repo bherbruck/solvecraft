@@ -154,7 +154,7 @@ fn edge_points(e: &Value) -> Vec<V3> {
 }
 
 fn key(p: V3) -> [i64; 3] {
-    p.map(|x| (x * 1e4).round() as i64)
+    p.map(|x| (x * 1e6).round() as i64)
 }
 
 fn find(p: &mut [usize], mut i: usize) -> usize {
@@ -224,6 +224,19 @@ pub fn normalised(body: &Value) -> Option<(usize, usize, usize)> {
         let t = if t == s { None } else { t };
         ends.push((ends.len(), s, t));
     }
+    // A seam between two closed curves (a closed face's seam whose surface we can't evaluate):
+    // an open edge whose ends each meet only a closed edge. At a real vertex three edges meet.
+    let closed_at = |v: &[i64; 3], ends: &[(usize, Option<[i64; 3]>, Option<[i64; 3]>)]| {
+        let closed = ends.iter().filter(|(_, s, t)| t.is_none() && s.as_ref() == Some(v)).count();
+        let open = ends.iter().filter(|(_, s, t)| t.is_some() && (s.as_ref() == Some(v) || t.as_ref() == Some(v))).count();
+        closed == 1 && open == 1
+    };
+    let loop_seams: Vec<usize> =
+        ends.iter().filter(|(_, s, t)| matches!((s, t), (Some(s), Some(t)) if closed_at(s, &ends) && closed_at(t, &ends))).map(|e| e.0).collect();
+    ends.retain(|e| !loop_seams.contains(&e.0));
+    for (k, e) in ends.iter_mut().enumerate() {
+        e.0 = k;
+    }
     let mut deg: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
     for (i, s, t) in &ends {
         for v in [s, t].into_iter().flatten() {
@@ -233,8 +246,11 @@ pub fn normalised(body: &Value) -> Option<(usize, usize, usize)> {
     let mut ep: Vec<usize> = (0..ends.len()).collect();
     let mut merged: Vec<[i64; 3]> = Vec::new();
     for (v, es) in &deg {
+        // Two open edges meeting: one curve split at a seam.
         if let [i, j] = es[..]
             && i != j
+            && ends.get(i).is_some_and(|e| e.2.is_some())
+            && ends.get(j).is_some_and(|e| e.2.is_some())
         {
             let (ri, rj) = (find(&mut ep, i), find(&mut ep, j));
             if let Some(x) = ep.get_mut(ri) {
@@ -271,6 +287,28 @@ mod tests {
             "edge_list": [line(5.0), line(-5.0), arc(0.0, [5.0, 0.0, 0.0], [-5.0, 0.0, 0.0]), arc(0.0, [-5.0, 0.0, 0.0], [5.0, 0.0, 0.0]), arc(10.0, [5.0, 0.0, 10.0], [-5.0, 0.0, 10.0]), arc(10.0, [-5.0, 0.0, 10.0], [5.0, 0.0, 10.0])],
         });
         assert_eq!(normalised(&body), Some((3, 2, 2)));
+    }
+
+    /// Oracle 35: a fillet (free-form face, surface unknown) between two cylinders is bounded by
+    /// two closed contact curves joined by its seam arc. The arc goes; the curves and circles stay.
+    #[test]
+    fn seam_between_closed_curves_on_an_unknown_surface() {
+        let circle =
+            |s: [f64; 3], c: [f64; 3], a: [f64; 3]| json!({"type": "circle", "start": s, "end": s, "center": c, "radius_mm": 1.0, "axis": a});
+        let lp = |p: [f64; 3]| json!({"type": "nurbs", "start": p, "end": p});
+        let (p, q) = ([0.0, -10.833333333, 10.374916332], [0.0, -10.0, 12.449899598]);
+        let body = json!({
+            "face_list": [{"type": "nurbs"}],
+            "edge_list": [
+                {"type": "arc", "start": p, "end": q, "center": [0.0, -13.0, 12.449899598], "radius_mm": 3.0, "axis": [1, 0, 0]},
+                circle([-40.0, 0.0, 15.0], [-40.0, 0.0, 0.0], [-1.0, 0.0, 0.0]),
+                circle([-10.0, 0.0, 35.0], [0.0, 0.0, 35.0], [0.0, 0.0, 1.0]),
+                circle([40.0, 0.0, 15.0], [40.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                lp(p),
+                lp(q),
+            ],
+        });
+        assert_eq!(normalised(&body), Some((1, 5, 5)));
     }
 
     /// A closed curve split into two edges at a seam vertex joins again (Fusion part 61's keyway).

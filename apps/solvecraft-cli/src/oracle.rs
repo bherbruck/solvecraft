@@ -52,10 +52,14 @@ fn check_case(dir: &str) -> Value {
         (Some(g), Some(w)) => (g - w).abs() <= rel * w.abs().max(1.0),
         _ => false,
     };
-    let size_ok = got["body_count"] == want["body_count"] && within("volume_mm3", tol) && within("area_mm2", tol);
+    let size_ok =
+        got["body_count"] == want["body_count"] && within("volume_mm3", tol) && (FUSION_AREA_OFF.contains(&name.as_str()) || within("area_mm2", tol));
     num("body_count", got["body_count"].as_f64(), want["body_count"].as_f64(), 0.0);
     num("volume_mm3", got["total"]["volume_mm3"].as_f64(), want["total"]["volume_mm3"].as_f64(), tol);
-    num("area_mm2", got["total"]["area_mm2"].as_f64(), want["total"]["area_mm2"].as_f64(), tol);
+    let area_off = FUSION_AREA_OFF.contains(&name.as_str());
+    if !area_off {
+        num("area_mm2", got["total"]["area_mm2"].as_f64(), want["total"]["area_mm2"].as_f64(), tol);
+    }
     let mut seam_note = None;
     if approx.is_none() {
         let exact = ["faces", "edges", "vertices"].iter().all(|k| got["total"][k].as_f64().is_some() && got["total"][k] == want["total"][k]);
@@ -101,6 +105,11 @@ fn check_case(dir: &str) -> Value {
     }
     if let Some(n) = seam_note {
         out["note"] = json!(n);
+    }
+    if area_off {
+        out["note"] = json!(
+            "area not compared: Fusion reports this tight sweep's horn torus face at three times its area (π²·R·r quarter-turn value; 740 mm² against 246.7 by Pappus); volume and topology are compared"
+        );
     }
     let effective: Vec<String> = recipe["features"]
         .as_array()
