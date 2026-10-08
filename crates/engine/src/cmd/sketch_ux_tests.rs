@@ -433,3 +433,96 @@ fn palette_options_are_kept_with_each_sketch() {
     run(&mut s, "UndoCommand", json!({}));
     assert!(!sketch(&s).view.hide_points);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Dragging
+
+fn drag(s: &mut Session, e: &str, from: [f64; 2], to: [f64; 2]) {
+    run(s, "sketch.drag", json!({"entity": e, "from": from, "to": to}));
+}
+
+fn v(x: f64, y: f64) -> solvecraft_geom::Vec2 {
+    solvecraft_geom::Vec2::new(x, y)
+}
+
+#[test]
+fn dragging_a_line_slides_it_and_an_end_keeps_the_other_end() {
+    let mut s = new_sketch();
+    run(&mut s, "DrawPolyline", json!({"points": [[10, 10], [40, 20]]}));
+    drag(&mut s, "l1", [25.0, 15.0], [30.0, 25.0]);
+    assert!(pt(&s, "l1.start").dist(v(15.0, 20.0)) < 1e-9 && pt(&s, "l1.end").dist(v(45.0, 30.0)) < 1e-9);
+    drag(&mut s, "l1.end", [45.0, 30.0], [50.0, 0.0]);
+    assert!(pt(&s, "l1.end").dist(v(50.0, 0.0)) < 1e-9);
+    assert!(pt(&s, "l1.start").dist(v(15.0, 20.0)) < 1e-9);
+}
+
+#[test]
+fn dragging_a_rectangle_side_moves_that_side_only() {
+    let mut s = new_sketch();
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [10, 10], "p1": [40, 30]}));
+    // l2 is the right side (x = 40): dragged right, it stays vertical, the left side stays.
+    let left = snap(&s, "l4");
+    drag(&mut s, "l2", [40.0, 20.0], [50.0, 20.0]);
+    assert!(same(&snap(&s, "l4"), &left), "left side moved");
+    let (a, b) = (pt(&s, "l2.start"), pt(&s, "l2.end"));
+    assert!((a.x - 50.0).abs() < 1e-6 && (b.x - 50.0).abs() < 1e-6, "{a:?} {b:?}");
+}
+
+#[test]
+fn dragging_circles_and_arcs() {
+    let mut s = new_sketch();
+    run(&mut s, "CircleCenterRadius", json!({"center": [0, 0], "radius": 5}));
+    // The edge changes the radius about a fixed centre; the centre moves the circle.
+    drag(&mut s, "c1", [5.0, 0.0], [0.0, 8.0]);
+    assert!((snap(&s, "c1").1.unwrap_or(0.0) - 8.0).abs() < 1e-9);
+    assert!(pt(&s, "c1.center").dist(v(0.0, 0.0)) < 1e-9);
+    drag(&mut s, "c1.center", [0.0, 0.0], [20.0, 5.0]);
+    assert!(pt(&s, "c1.center").dist(v(20.0, 5.0)) < 1e-9);
+    assert!((snap(&s, "c1").1.unwrap_or(0.0) - 8.0).abs() < 1e-9);
+    run(&mut s, "ArcCenterTwoPoint", json!({"center": [50, 0], "start": [60, 0], "end": [50, 10]}));
+    drag(&mut s, "a1", [57.07, 7.07], [50.0 + 200f64.sqrt(), 200f64.sqrt()]);
+    assert!(pt(&s, "a1.center").dist(v(50.0, 0.0)) < 1e-9);
+    assert!((snap(&s, "a1").1.unwrap_or(0.0) - 20.0).abs() < 1e-9, "{:?}", snap(&s, "a1"));
+    assert!(pt(&s, "a1.start").dist(v(70.0, 0.0)) < 1e-9, "{:?}", pt(&s, "a1.start"));
+}
+
+#[test]
+fn constrained_geometry_resists_drags() {
+    let mut s = new_sketch();
+    run(&mut s, "DrawPolyline", json!({"points": [[10, 10], [40, 10]]}));
+    run(&mut s, "ConstraintFix", json!({"entities": ["l1.start", "l1.end"]}));
+    let l0 = snap(&s, "l1");
+    drag(&mut s, "l1", [25.0, 10.0], [25.0, 30.0]);
+    assert!(same(&snap(&s, "l1"), &l0));
+    // A horizontal line dragged at its end stays horizontal; its length dimension holds.
+    let mut s = new_sketch();
+    run(&mut s, "DrawPolyline", json!({"points": [[10, 10], [40, 10]]}));
+    run(&mut s, "ConstraintHorizontalVertical", json!({"line": "l1"}));
+    run(&mut s, "SketchDimension", json!({"entities": ["l1"], "value": 30}));
+    drag(&mut s, "l1.end", [40.0, 10.0], [45.0, 20.0]);
+    let (a, b) = (pt(&s, "l1.start"), pt(&s, "l1.end"));
+    assert!((a.y - b.y).abs() < 1e-6 && (a.dist(b) - 30.0).abs() < 1e-6, "{a:?} {b:?}");
+}
+
+#[test]
+fn fully_constrained_feedback_is_per_entity() {
+    let mut s = new_sketch();
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [10, 10], "p1": [50, 35]}));
+    run(&mut s, "CircleCenterRadius", json!({"center": [80, 20], "radius": 8}));
+    run(&mut s, "SketchDimension", json!({"entities": ["l1"], "value": 40}));
+    run(&mut s, "SketchDimension", json!({"entities": ["l2"], "value": 25}));
+    run(&mut s, "SketchDimension", json!({"entities": ["origin", "l1.start"], "type": "horizontal", "value": 10}));
+    run(&mut s, "SketchDimension", json!({"entities": ["origin", "l1.start"], "type": "vertical", "value": 10}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert_eq!(si["dof"], 3);
+    for c in si["curves"].as_array().expect("curves") {
+        assert_eq!(c["fully_constrained"], c["type"] == "line", "{c}");
+    }
+    // Colours follow: fully constrained lines in the fixed colour, the free circle in blue.
+    let sk = sketch(&s);
+    let st = s.model.state();
+    let ss = st.sketch(s.active_sketch.expect("sketch")).expect("solved");
+    let lines = crate::view::sketch_lines(&sk, &ss.plane, true, &ss.report.curve_determined);
+    assert!(lines.iter().filter(|l| l.1 == crate::view::colors::SKETCH_FIXED).count() >= 4);
+    assert!(lines.iter().any(|l| l.1 == crate::view::colors::SKETCH));
+}

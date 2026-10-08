@@ -48,9 +48,9 @@ pub struct ViewportState {
     pub build_ms: f64,
     /// The right-click menu, open at this screen position.
     pub context_menu: Option<Pos2>,
-    /// A sketch point being dragged (its id, and the undo depth when the drag began: the whole
-    /// drag is one undo step).
-    pub point_drag: Option<(String, usize)>,
+    /// A sketch point or curve being dragged (its id, the undo depth when the drag began: the
+    /// whole drag is one undo step, and for a curve where it was last under the cursor).
+    pub point_drag: Option<(String, usize, Option<Vec2>)>,
 }
 
 /// Something under the cursor.
@@ -1176,25 +1176,30 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             crate::dim_view::drag_to(app, q);
         }
+        // A point or a curve of the sketch being edited follows a drag that starts on it.
         if resp.drag_started_by(egui::PointerButton::Primary)
             && !crate::dim_view::dragging()
             && let Some(a) = ui.input(|i| i.pointer.press_origin())
-            && let Some(Hit::SketchPoint { id, .. }) = pick(app, &proj, a).into_iter().next()
         {
-            app.viewport.point_drag = Some((id, app.session.undo.len()));
-        }
-        if let Some((id, depth)) = app.viewport.point_drag.clone()
-            && resp.dragged_by(egui::PointerButton::Primary)
-            && let Some(p) = hover
-            && let Some(ss) = app.session.active_sketch.and_then(|sid| app.session.model.state().sketch(sid).cloned())
-            && let Some(w) = {
-                let (o, d) = proj.ray(p);
-                ss.plane.intersect_ray(o, d)
+            let active = app.session.active_sketch;
+            match pick(app, &proj, a).into_iter().next() {
+                Some(Hit::SketchPoint { id, .. }) => app.viewport.point_drag = Some((id, app.session.undo.len(), None)),
+                Some(Hit::SketchCurve { sketch, id, .. }) if Some(sketch) == active => {
+                    app.viewport.point_drag = on_plane(app, a).map(|q| (id, app.session.undo.len(), Some(q)));
+                }
+                _ => {}
             }
+        }
+        if let Some((id, depth, grab)) = app.viewport.point_drag.clone()
+            && resp.dragged_by(egui::PointerButton::Primary)
+            && let Some(q) = hover.and_then(|p| on_plane(app, p))
         {
-            let q = ss.plane.to_local(w);
-            if app.session.execute("sketch.move_point", &json!({"point": id, "to": [q.x, q.y]})).is_ok() {
+            let from = grab.unwrap_or(q);
+            if app.session.execute("sketch.drag", &json!({"entity": id, "from": [from.x, from.y], "to": [q.x, q.y]})).is_ok() {
                 app.session.undo.truncate(depth + 1);
+            }
+            if grab.is_some() {
+                app.viewport.point_drag = Some((id, depth, Some(q)));
             }
         }
         if resp.drag_stopped() {

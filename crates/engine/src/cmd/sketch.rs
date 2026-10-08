@@ -154,6 +154,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params("entities: [curve, point or constraint ids]"),
     CommandSpec::new("sketch.move_point", "Drag Sketch Point", move_point).enabled(in_sketch).params("point: ref, to: [x,y]"),
+    CommandSpec::new("sketch.drag", "Drag Sketch Geometry", drag).enabled(in_sketch).params(
+        "entity: point or curve, from: [x,y] where it was grabbed, to: [x,y]: a point goes to `to`, a line (spline, conic) slides by to - from, a circle or arc grabbed on its edge takes the radius to `to`; the rest moves as little as it can",
+    ),
     CommandSpec::new("sketch.dimension_text", "Move Dimension Text", dimension_text)
         .enabled(in_sketch)
         .params("dimension: constraint id or parameter name; at: [x,y] text centre (sketch coordinates) | reset: true (default place)"),
@@ -1505,16 +1508,107 @@ fn move_point(s: &mut Session, p: &Value) -> Result<Value> {
     let to = req_vec2(cmd, p, "to")?;
     let (_, info) = edit(s, p, cmd, false, |sk, _| {
         let q = point_ref(sk, p.get("point"), cmd, "point")?;
-        let locked = sk.point_locked(q);
-        if let Some(pt) = sk.points.get_mut(q)
-            && !locked
-        {
-            pt.pos = to;
-        }
-        // Move whole circles when their centre moves (keeps the radius).
+        drag_entity(sk, Ent::Point(q), to, to);
         Ok(())
     })?;
     Ok(json!({"sketch": info}))
+}
+
+fn drag(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.drag";
+    let to = req_vec2(cmd, p, "to")?;
+    let from = p.get("from").and_then(vec2).unwrap_or(to);
+    let (_, info) = edit(s, p, cmd, false, |sk, _| {
+        let r = p.get("entity").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`entity` must be a sketch point or curve"))?;
+        let e = ent(sk, r).ok_or_else(|| bad(cmd, format!("unknown sketch entity `{r}`")))?;
+        drag_entity(sk, e, from, to);
+        Ok(())
+    })?;
+    Ok(json!({"sketch": info}))
+}
+
+/// Drag like Fusion: the grabbed entity follows the cursor exactly (a point goes to it; a line,
+/// spline or conic slides by the cursor's move; a circle or arc grabbed on its edge changes
+/// radius about its centre) and the rest of the sketch moves as little as it can. Fixed and
+/// fully constrained geometry stays (the solve that follows pulls it back).
+fn drag_entity(sk: &mut Sketch, e: Ent, from: Vec2, to: Vec2) {
+    let d = to - from;
+    let mut hold = Hold::default();
+    match e {
+        Ent::Point(q) => {
+            if sk.point_locked(q) {
+                return;
+            }
+            if let Some(pt) = sk.points.get_mut(q) {
+                pt.pos = to;
+            }
+            hold.points.push(q);
+        }
+        Ent::Curve(c) => {
+            if sk.curve_locked(c) {
+                return;
+            }
+            let Some(kind) = sk.curves.get(c).map(|c| c.kind.clone()) else { return };
+            let locked = sk.locked_points();
+            let set = |sk: &mut Sketch, q: usize, at: Vec2| {
+                if !locked.get(q).copied().unwrap_or(true)
+                    && let Some(pt) = sk.points.get_mut(q)
+                {
+                    pt.pos = at;
+                }
+            };
+            match kind {
+                CurveKind::Circle { c: cc, .. } => {
+                    let r = sk.point(cc).map(|o| o.dist(to)).unwrap_or(0.0);
+                    if let Some(CurveKind::Circle { r: slot, .. }) = sk.curves.get_mut(c).map(|x| &mut x.kind)
+                        && r > 1e-9
+                    {
+                        *slot = r;
+                    }
+                    hold.points.push(cc);
+                    hold.radii.push(c);
+                }
+                CurveKind::Arc { c: cc, a, b } => {
+                    let Some(o) = sk.point(cc) else { return };
+                    let r = o.dist(to);
+                    if r > 1e-9 {
+                        for q in [a, b] {
+                            if let Some(u) = sk.point(q).and_then(|pq| (pq - o).normalized()) {
+                                set(sk, q, o + u * r);
+                            }
+                        }
+                    }
+                    hold.points.extend([cc, a, b]);
+                }
+                CurveKind::Ellipse { c: cc, m, .. } => {
+                    // Grabbed on the outline: the minor radius follows (the major stays).
+                    let (Some(o), Some(pm)) = (sk.point(cc), sk.point(m)) else { return };
+                    let u = (pm - o).normalized().unwrap_or(Vec2::X);
+                    let minor = u.cross(to - o).abs();
+                    if minor > 1e-9
+                        && let Some(CurveKind::Ellipse { r: slot, .. }) = sk.curves.get_mut(c).map(|x| &mut x.kind)
+                    {
+                        *slot = minor;
+                    }
+                    hold.points.extend([cc, m]);
+                    hold.radii.push(c);
+                }
+                k => {
+                    // Lines, splines and conics slide with the cursor.
+                    for q in k.point_ids() {
+                        if let Some(at) = sk.point(q) {
+                            set(sk, q, at + d);
+                        }
+                    }
+                    hold.points.extend(k.point_ids());
+                }
+            }
+        }
+    }
+    let mut trial = sk.clone();
+    if solve_holding(&mut trial, &hold).ok() {
+        *sk = trial;
+    }
 }
 
 /// The Sketch Palette options of a sketch, by their palette names (true = shown / on).
