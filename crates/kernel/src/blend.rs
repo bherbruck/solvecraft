@@ -307,6 +307,17 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
         }
     }
     // Whole smooth loops of planar faces are blended in one go, loop by loop.
+    // Loops and other edges together (every edge of an extruded part): the other edges
+    // first, which leaves the loops smooth, then the loops.
+    if let Some((groups, rest)) = loop_split(&cur, edges)?
+        && !rest.is_empty()
+        && rest.len() < edges.len()
+    {
+        let _ = groups;
+        let loop_pts: Vec<Vec3> = edges.iter().filter(|p| !rest.iter().any(|q| q.dist(**p) < 1e-12)).copied().collect();
+        cur = blend(&cur, &rest, r, shape, what)?;
+        return blend(&cur, &loop_pts, r, shape, what);
+    }
     if let Some(groups) = loop_groups(&cur, edges)? {
         for g in groups {
             let size = cur.size();
@@ -382,6 +393,11 @@ fn edge_ids(cur: &Body, solid: &Solid, pts: &[Vec3]) -> Result<Vec<mt::EdgeID>> 
 
 /// When the edges make up whole boundary loops of planar faces: the edge points per loop.
 fn loop_groups(cur: &Body, pts: &[Vec3]) -> Result<Option<Vec<Vec<Vec3>>>> {
+    Ok(loop_split(cur, pts)?.and_then(|(g, rest)| rest.is_empty().then_some(g)))
+}
+
+/// Edges in whole loops of planar faces (points per loop), and the other edges' points.
+fn loop_split(cur: &Body, pts: &[Vec3]) -> Result<Option<(Vec<Vec<Vec3>>, Vec<Vec3>)>> {
     let solid = cur.deep_copy();
     let size = cur.size();
     let tol = (size * 2e-3).max(1e-3);
@@ -430,8 +446,8 @@ fn loop_groups(cur: &Body, pts: &[Vec3]) -> Result<Option<Vec<Vec<Vec3>>>> {
             }
         }
     }
-    let all_in = ids.iter().all(|x| covered.contains(x));
-    Ok((all_in && !groups.is_empty()).then_some(groups))
+    let rest: Vec<Vec3> = per.iter().filter(|(_, id)| !covered.contains(id)).map(|(p, _)| *p).collect();
+    Ok((!groups.is_empty()).then_some((groups, rest)))
 }
 
 /// Constant-radius fillet of the edges nearest to the given points.

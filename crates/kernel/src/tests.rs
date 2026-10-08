@@ -958,3 +958,46 @@ fn draft_of_a_round_ended_pocket() {
     let v = measure(&d).unwrap().volume;
     assert!(rel(v, 80.0 * 60.0 * 25.0 - pocket) < 1e-4, "{v} vs {}", 80.0 * 60.0 * 25.0 - pocket);
 }
+
+#[test]
+fn rounded_corners_rounded_again_make_spheres() {
+    // Vertical edges first, then the top and bottom loops with the same radius: the corners
+    // become sphere octants, as if every edge were rounded at once.
+    let (a, b, c, r) = (40.0, 30.0, 20.0, 2.0);
+    let bx = box_solid(Vec3::ZERO, Vec3::new(a, b, c)).unwrap();
+    let vert: Vec<Vec3> = [(0.0, 0.0), (a, 0.0), (a, b), (0.0, b)].iter().map(|(x, y)| Vec3::new(*x, *y, c / 2.0)).collect();
+    let f = fillet(&bx, &vert, r).unwrap();
+    let f = fillet(&f, &[Vec3::new(a / 2.0, 0.0, c)], r).unwrap();
+    let f = fillet(&f, &[Vec3::new(a / 2.0, 0.0, 0.0)], r).unwrap();
+    let (ai, bi, ci) = (a - 2.0 * r, b - 2.0 * r, c - 2.0 * r);
+    let area = 2.0 * (ai * bi + bi * ci + ai * ci) + PI * r * (ai + bi + ci) * 2.0 + 4.0 * PI * r * r;
+    let vol = ai * bi * ci + 2.0 * r * (ai * bi + bi * ci + ai * ci) + PI * r * r * (ai + bi + ci) + 4.0 / 3.0 * PI * r * r * r;
+    let m = measure(&f).unwrap();
+    println!("area {} want {area}; volume {} want {vol}; faces {:?}", m.area, m.volume, m.merged);
+    assert!(rel(m.volume, vol) < 1e-4, "volume {} vs {vol}", m.volume);
+    assert!(rel(m.area, area) < 1e-4, "area {} vs {area}", m.area);
+}
+
+#[test]
+fn every_edge_of_an_l_block() {
+    // An L (60 × 40, legs 8 wide) 20 thick with all 18 edges rounded by 2: the inner vertical
+    // edge is concave (its corners become tori), the others convex (sphere corners).
+    let pts = [(0.0, 0.0), (60.0, 0.0), (60.0, 8.0), (8.0, 8.0), (8.0, 40.0), (0.0, 40.0)];
+    let outer = Loop2::polygon(&pts.iter().map(|(x, y)| Vec2::new(*x, *y)).collect::<Vec<_>>());
+    let l = extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0.0, 20.0).unwrap().pop().unwrap();
+    let edges: Vec<Vec3> = l.edges(0.1).unwrap().iter().map(|e| e.mid).collect();
+    let f = fillet(&l, &edges, 2.0).unwrap();
+    let m = measure(&f).unwrap();
+    // Area by pieces: walls (lengths less the roundings, 16 high), top and bottom (the L shrunk
+    // by 2 with a radius-4 inner corner), quarter cylinders along every straight edge, ten
+    // sphere octants, and two torus quarters (Pappus: arc π, centroid radius 4 − 4/π, angle π/2).
+    let walls = 16.0 * (56.0 + 4.0 + 48.0 + 28.0 + 4.0 + 36.0);
+    let caps = 2.0 * (56.0 * 4.0 + 4.0 * 32.0 + 16.0 - 4.0 * PI);
+    let vertical = 6.0 * PI * 16.0;
+    let horizontal = 2.0 * PI * (56.0 + 4.0 + 48.0 + 28.0 + 4.0 + 36.0);
+    let spheres = 10.0 * 2.0 * PI;
+    let tori = 2.0 * PI * (4.0 - 4.0 / PI) * PI / 2.0;
+    let area = walls + caps + vertical + horizontal + spheres + tori;
+    assert!(rel(m.area, area) < 1e-4, "area {} vs {area}", m.area);
+    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (38, 74, 38));
+}
