@@ -457,6 +457,261 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
                 pen.line(&[(12.0 + 6.5 * t.cos(), 12.0 + 6.5 * t.sin()), (12.0 + 9.0 * t.cos(), 12.0 + 9.0 * t.sin())], ink);
             }
         }
+        // Sketch tools (sketch-style: thin outlines, accent for what the tool makes).
+        "canvas" | "decal" => {
+            if name == "canvas" {
+                pen.poly(&[(3.0, 5.0), (21.0, 5.0), (21.0, 19.0), (3.0, 19.0)], pen.fill, ink);
+            } else {
+                pen.poly(&[(3.0, 5.0), (21.0, 5.0), (21.0, 13.0), (15.0, 19.0), (3.0, 19.0)], pen.fill, ink);
+                pen.line(&[(21.0, 13.0), (15.0, 13.0), (15.0, 19.0)], ink);
+            }
+            pen.line(&[(5.0, 17.0), (9.5, 10.5), (12.5, 14.5), (14.5, 12.0), (18.0, 16.5)], a);
+            pen.circle(16.5, 8.5, 1.6, a, a);
+        }
+        "dxf" | "svg" => {
+            pen.poly(&[(5.0, 2.5), (15.0, 2.5), (19.5, 7.0), (19.5, 21.5), (5.0, 21.5)], pen.fill, ink);
+            pen.line(&[(15.0, 2.5), (15.0, 7.0), (19.5, 7.0)], ink);
+            let label = if name == "dxf" { "DXF" } else { "SVG" };
+            p.text(pen.at(12.2, 15.0), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(6.4 * pen.s()), a);
+        }
+        "c_smooth" => {
+            let pts: Vec<(f32, f32)> =
+                (0..=24).map(|i| i as f32 / 24.0).map(|t| (3.0 + 18.0 * t, 12.0 - 7.0 * (t * std::f32::consts::TAU).sin())).collect();
+            let (l, r) = pts.split_at(13);
+            pen.line(l, ink);
+            let mut r2 = vec![pts[12]];
+            r2.extend_from_slice(r);
+            pen.line(&r2, a);
+            pen.dot(12.0, 12.0, ink);
+        }
+        "c_polygon" => {
+            let pts: Vec<(f32, f32)> =
+                (0..6).map(|i| i as f32 / 6.0 * std::f32::consts::TAU).map(|t| (12.0 + 8.5 * t.cos(), 12.0 + 8.5 * t.sin())).collect();
+            pen.closed(&pts, a);
+            pen.line(&[(12.0, 12.0), (20.5, 12.0)], ink);
+            pen.dot(12.0, 12.0, ink);
+        }
+        "auto_constrain" | "constrainer" => {
+            pen.closed(&[(3.0, 8.0), (15.0, 8.0), (15.0, 20.0), (3.0, 20.0)], ink);
+            if name == "auto_constrain" {
+                for (dx, dy) in [(0.0, -1.0), (0.0, 1.0), (-1.0, 0.0), (1.0, 0.0), (0.7, 0.7), (-0.7, -0.7), (0.7, -0.7), (-0.7, 0.7)] {
+                    let k = if dx * dy == 0.0 { 4.0 } else { 2.5 };
+                    pen.line(&[(18.0, 6.0), (18.0 + k * dx, 6.0 + k * dy)], a);
+                }
+            } else {
+                pen.line(&[(13.0, 6.0), (16.0, 9.0), (21.5, 2.5)], a);
+            }
+            pen.line(&[(6.0, 17.0), (12.0, 17.0)], a);
+            pen.line(&[(6.0, 11.0), (6.0, 14.0)], a);
+        }
+        "project" | "project_surface" => {
+            if name == "project" {
+                pen.poly(&[(2.0, 18.0), (12.0, 14.0), (22.0, 18.0), (12.0, 22.0)], pen.fill, ink);
+                pen.closed(&[(6.0, 18.0), (12.0, 15.6), (18.0, 18.0), (12.0, 20.4)], a);
+            } else {
+                pen.line(&[(2.0, 19.0), (7.0, 16.0), (12.0, 17.5), (17.0, 15.5), (22.0, 18.0)], ink);
+                pen.line(&[(6.0, 19.5), (12.0, 20.5), (18.0, 18.5)], a);
+            }
+            pen.iso_box(7.0, 5.0, 5.0, 5.0, 4.0);
+            pen.arrow((12.0, 10.5), (12.0, 15.0), a);
+        }
+        "intersect" | "intersection_curve" => {
+            pen.iso_box(6.0, 6.0, 7.0, 5.0, 11.0);
+            if name == "intersect" {
+                pen.line(&[(2.0, 13.0), (14.0, 8.0), (22.0, 12.0)], ink.gamma_multiply(0.6));
+                pen.line(&[(6.0, 13.0), (11.0, 15.5), (18.0, 12.0)], a);
+            } else {
+                pen.arc(12.0, 26.0, 13.0, 0.6, 2.55, ink.gamma_multiply(0.6));
+                pen.line(&[(6.0, 14.5), (11.0, 16.5), (18.0, 13.5)], a);
+            }
+        }
+        "include" => {
+            pen.iso_box(4.0, 9.0, 10.0, 7.0, 9.0);
+            pen.line(&[(4.0, 9.0), (11.0, 12.5), (21.0, 7.5)], a);
+            pen.dot(11.0, 12.5, a);
+        }
+        "spun" => {
+            pen.line(&[(12.0, 2.0), (12.0, 22.0)], ink);
+            pen.line(&[(14.0, 5.0), (18.0, 9.0), (18.0, 15.0), (14.0, 19.0)], ink);
+            pen.line(&[(10.0, 5.0), (6.0, 9.0), (6.0, 15.0), (10.0, 19.0)], a);
+            pen.arc(12.0, 12.0, 6.0, 0.3, 2.8, ink.gamma_multiply(0.6));
+        }
+        "iso_curve" => {
+            pen.poly(&[(3.0, 16.0), (10.0, 6.0), (21.0, 8.0), (14.0, 19.0)], pen.fill, ink);
+            pen.line(&[(6.5, 11.0), (17.5, 13.5)], ink.gamma_multiply(0.5));
+            pen.line(&[(7.7, 17.3), (14.8, 6.8)], a);
+        }
+        "fit_section" => {
+            pen.closed(&[(3.0, 18.0), (8.0, 6.0), (14.0, 15.0), (19.0, 5.0), (21.0, 18.0)], ink.gamma_multiply(0.6));
+            pen.line(&[(8.0, 6.0), (3.0, 18.0)], ink.gamma_multiply(0.6));
+            pen.line(&[(14.0, 15.0), (3.0, 18.0)], ink.gamma_multiply(0.6));
+            pen.line(&[(14.0, 15.0), (21.0, 18.0)], ink.gamma_multiply(0.6));
+            pen.line(&[(2.0, 12.0), (7.0, 10.5), (12.0, 12.5), (17.0, 10.0), (22.0, 11.5)], a);
+        }
+        "sketch_mirror" => {
+            p.add(Shape::dashed_line(&[pen.at(12.0, 2.0), pen.at(12.0, 22.0)], Stroke::new(pen.w, ink), 2.5 * pen.s(), 1.8 * pen.s()));
+            pen.closed(&[(3.0, 6.0), (9.0, 10.0), (9.0, 18.0), (3.0, 18.0)], ink);
+            pen.closed(&[(21.0, 6.0), (15.0, 10.0), (15.0, 18.0), (21.0, 18.0)], a);
+        }
+        "sketch_circ_pattern" => paint(p, r, "pattern_circ", ink, Color32::TRANSPARENT, a),
+        "sketch_rect_pattern" => paint(p, r, "pattern_rect", ink, Color32::TRANSPARENT, a),
+        "line_mid" => {
+            pen.line(&[(3.0, 19.0), (21.0, 5.0)], a);
+            pen.dot(12.0, 12.0, ink);
+            pen.dot(21.0, 5.0, ink);
+            pen.circle(12.0, 12.0, 3.0, Color32::TRANSPARENT, ink);
+        }
+        "arc_tangent" => {
+            pen.line(&[(2.0, 18.0), (11.0, 18.0)], ink);
+            pen.arc(11.0, 10.0, 8.0, -std::f32::consts::FRAC_PI_2, 0.6, a);
+            pen.dot(11.0, 18.0, ink);
+        }
+        "circle_tt" | "circle_ttt" => {
+            if name == "circle_ttt" {
+                pen.closed(&[(3.0, 20.0), (21.0, 20.0), (12.0, 4.0)], ink);
+            } else {
+                pen.line(&[(21.0, 20.0), (3.0, 20.0), (12.0, 4.0)], ink);
+            }
+            pen.circle(12.0, 14.74, 5.26, Color32::TRANSPARENT, a);
+        }
+        "arc_slot" => {
+            let (t0, t1) = (0.75_f32, 2.4_f32);
+            pen.arc(12.0, 21.0, 13.0, t0, t1, a);
+            pen.arc(12.0, 21.0, 7.0, t0, t1, a);
+            pen.arc(12.0 + 10.0 * t0.cos(), 21.0 - 10.0 * t0.sin(), 3.0, t0, t0 - std::f32::consts::PI, a);
+            pen.arc(12.0 + 10.0 * t1.cos(), 21.0 - 10.0 * t1.sin(), 3.0, t1, t1 + std::f32::consts::PI, a);
+            pen.dot(12.0, 21.0, ink);
+        }
+        "ellipse" => {
+            let pts: Vec<(f32, f32)> =
+                (0..40).map(|i| i as f32 / 40.0 * std::f32::consts::TAU).map(|t| (12.0 + 9.5 * t.cos(), 12.0 + 5.5 * t.sin())).collect();
+            pen.closed(&pts, a);
+            pen.dot(12.0, 12.0, ink);
+            pen.line(&[(12.0, 12.0), (21.5, 12.0)], ink);
+        }
+        "spline" | "spline_cv" => {
+            let c = [(3.0_f32, 18.0_f32), (8.0, 3.0), (16.0, 21.0), (21.0, 6.0)];
+            let pts: Vec<(f32, f32)> = (0..=24)
+                .map(|i| i as f32 / 24.0)
+                .map(|t| {
+                    let u = 1.0 - t;
+                    let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+                    (w.iter().zip(&c).map(|(w, q)| w * q.0).sum(), w.iter().zip(&c).map(|(w, q)| w * q.1).sum())
+                })
+                .collect();
+            if name == "spline_cv" {
+                pen.line(&c, ink.gamma_multiply(0.6));
+                for q in c {
+                    pen.dot(q.0, q.1, ink);
+                }
+            } else {
+                for i in [0, 8, 16, 24] {
+                    if let Some(q) = pts.get(i) {
+                        pen.dot(q.0, q.1, ink);
+                    }
+                }
+            }
+            pen.line(&pts, a);
+        }
+        "conic" => {
+            pen.line(&[(3.0, 20.0), (12.0, 3.0), (21.0, 20.0)], ink.gamma_multiply(0.6));
+            let pts: Vec<(f32, f32)> =
+                (0..=20).map(|i| i as f32 / 20.0).map(|t| (3.0 + 18.0 * t, 20.0 - 4.0 * 0.78 * 17.0 * t * (1.0 - t))).collect();
+            pen.line(&pts, a);
+            pen.dot(3.0, 20.0, ink);
+            pen.dot(21.0, 20.0, ink);
+        }
+        "text" => {
+            p.text(pen.at(12.0, 11.5), egui::Align2::CENTER_CENTER, "A", egui::FontId::proportional(17.0 * pen.s()), a);
+            pen.line(&[(4.0, 20.5), (20.0, 20.5)], ink);
+        }
+        "curvature_comb" => {
+            let f = |x: f32| 16.0 - 6.0 * ((x - 3.0) / 18.0 * std::f32::consts::PI).sin();
+            let mut env = Vec::new();
+            for i in 0..=8 {
+                let x = 3.0 + 18.0 * i as f32 / 8.0;
+                let k = 1.0 + 5.0 * ((x - 3.0) / 18.0 * std::f32::consts::PI).sin();
+                pen.line(&[(x, f(x)), (x, f(x) - k)], a.gamma_multiply(0.7));
+                env.push((x, f(x) - k));
+            }
+            pen.line(&env, a);
+            let pts: Vec<(f32, f32)> = (0..=24).map(|i| 3.0 + 18.0 * i as f32 / 24.0).map(|x| (x, f(x))).collect();
+            pen.line(&pts, ink);
+        }
+        "sketch_fillet" => {
+            pen.line(&[(4.0, 21.0), (4.0, 12.0)], ink);
+            pen.line(&[(12.0, 4.0), (21.0, 4.0)], ink);
+            pen.arc(12.0, 12.0, 8.0, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, a);
+            p.add(Shape::dashed_line(
+                &[pen.at(4.0, 12.0), pen.at(4.0, 4.0), pen.at(12.0, 4.0)],
+                Stroke::new(pen.w * 0.7, ink.gamma_multiply(0.5)),
+                2.0 * pen.s(),
+                1.5 * pen.s(),
+            ));
+        }
+        "sketch_chamfer" => {
+            pen.line(&[(4.0, 21.0), (4.0, 12.0)], ink);
+            pen.line(&[(12.0, 4.0), (21.0, 4.0)], ink);
+            pen.line(&[(4.0, 12.0), (12.0, 4.0)], a);
+            p.add(Shape::dashed_line(
+                &[pen.at(4.0, 12.0), pen.at(4.0, 4.0), pen.at(12.0, 4.0)],
+                Stroke::new(pen.w * 0.7, ink.gamma_multiply(0.5)),
+                2.0 * pen.s(),
+                1.5 * pen.s(),
+            ));
+        }
+        "offset" => {
+            pen.closed(&[(8.0, 9.0), (16.0, 9.0), (16.0, 15.0), (8.0, 15.0)], ink);
+            pen.line(&[(8.0, 4.0), (16.0, 4.0)], a);
+            pen.line(&[(21.0, 9.0), (21.0, 15.0)], a);
+            pen.line(&[(16.0, 20.0), (8.0, 20.0)], a);
+            pen.line(&[(3.0, 15.0), (3.0, 9.0)], a);
+            pen.arc(16.0, 9.0, 5.0, 0.0, std::f32::consts::FRAC_PI_2, a);
+            pen.arc(16.0, 15.0, 5.0, -std::f32::consts::FRAC_PI_2, 0.0, a);
+            pen.arc(8.0, 15.0, 5.0, std::f32::consts::PI, std::f32::consts::PI * 1.5, a);
+            pen.arc(8.0, 9.0, 5.0, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, a);
+        }
+        "trim" => {
+            pen.line(&[(12.0, 3.0), (12.0, 21.0)], ink);
+            pen.line(&[(3.0, 12.0), (12.0, 12.0)], ink);
+            p.add(Shape::dashed_line(&[pen.at(12.0, 12.0), pen.at(21.0, 12.0)], Stroke::new(pen.w, a), 2.0 * pen.s(), 1.6 * pen.s()));
+            pen.line(&[(15.0, 15.0), (19.0, 19.0)], a);
+            pen.line(&[(19.0, 15.0), (15.0, 19.0)], a);
+        }
+        "extend" => {
+            pen.line(&[(20.0, 3.0), (20.0, 21.0)], ink);
+            pen.line(&[(3.0, 12.0), (10.0, 12.0)], ink);
+            pen.dot(10.0, 12.0, ink);
+            pen.arrow((10.0, 12.0), (19.0, 12.0), a);
+        }
+        "break" => {
+            pen.line(&[(3.0, 17.0), (10.5, 11.0)], ink);
+            pen.line(&[(13.5, 10.0), (21.0, 5.0)], a);
+            pen.dot(12.0, 10.5, a);
+            pen.line(&[(9.0, 5.0), (15.0, 16.0)], ink.gamma_multiply(0.5));
+        }
+        "scale" => {
+            pen.closed(&[(3.0, 13.0), (11.0, 13.0), (11.0, 21.0), (3.0, 21.0)], ink);
+            pen.closed(&[(3.0, 3.0), (21.0, 3.0), (21.0, 21.0), (3.0, 21.0)], a);
+            pen.dot(3.0, 21.0, ink);
+            pen.arrow((11.0, 13.0), (18.0, 6.0), a);
+        }
+        "blend" => {
+            pen.line(&[(2.0, 19.0), (8.0, 15.0)], ink);
+            pen.line(&[(16.0, 9.0), (22.0, 5.0)], ink);
+            let c = [(8.0_f32, 15.0_f32), (12.5, 12.0), (11.5, 12.0), (16.0, 9.0)];
+            let pts: Vec<(f32, f32)> = (0..=16)
+                .map(|i| i as f32 / 16.0)
+                .map(|t| {
+                    let u = 1.0 - t;
+                    let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+                    (w.iter().zip(&c).map(|(w, q)| w * q.0).sum(), w.iter().zip(&c).map(|(w, q)| w * q.1).sum())
+                })
+                .collect();
+            pen.line(&pts, a);
+            pen.dot(8.0, 15.0, ink);
+            pen.dot(16.0, 9.0, ink);
+        }
         "warning" => {
             pen.poly(&[(12.0, 3.0), (21.0, 20.0), (3.0, 20.0)], Color32::from_rgb(250, 200, 60), ink);
             pen.line(&[(12.0, 9.0), (12.0, 14.0)], ink);
