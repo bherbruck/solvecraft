@@ -206,6 +206,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 pub fn save(app: &mut SolveApp) {
+    if crate::browser::needs_capture(app, crate::browser::SAVE) {
+        app.tree.capture_prompt = Some(crate::browser::SAVE.into());
+        return;
+    }
     if app.session.path.is_some() {
         let _ = app.run("SaveDocumentCommand", json!({}));
     } else {

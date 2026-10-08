@@ -365,6 +365,11 @@ impl SolveApp {
     /// Start a command the way a toolbar click does: interactive tools and dialogs for commands
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
+        // A component moved without Capture Position: ask first (Capture, Revert or Cancel).
+        if browser::needs_capture(self, id) {
+            self.tree.capture_prompt = Some(id.to_string());
+            return;
+        }
         self.tool = None;
         self.home.open = false;
         if matches!(id, "FusionImportCommandFromToolbar" | "ParaMeshInsertAlignCommand") {

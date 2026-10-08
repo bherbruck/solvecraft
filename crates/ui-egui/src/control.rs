@@ -26,6 +26,7 @@
 //! - `ui.help {item?: about|shortcuts|report}`: the Help menu; returns the version and diagnostics
 //! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_cursor, msaa,
 //!   length_decimals, angle_decimals); returns them all
+//! - `ui.capture {action?: capture|revert|cancel}`: the Capture Position question
 //! - `ui.resize {width, height}`, `app.quit`
 
 use std::sync::mpsc::Sender;
@@ -378,6 +379,13 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 None => ok(json!({"command": id, "key": crate::keymap::effective(app, id)})),
             }
         }
+        "ui.capture" => match s("action") {
+            Some(a) => match crate::browser::answer_capture(app, a) {
+                Ok(()) => ok(json!({"pending_moves": app.session.pending_moves.len()})),
+                Err(e) => err(e),
+            },
+            None => ok(json!({"question": app.tree.capture_prompt, "pending_moves": app.session.pending_moves.len()})),
+        },
         "ui.prefs" => wrap(crate::prefs::set(app, p)),
         "ui.help" => match s("item") {
             Some(i @ ("about" | "shortcuts" | "report")) => {

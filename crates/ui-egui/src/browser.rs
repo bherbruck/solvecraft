@@ -36,6 +36,8 @@ pub struct TreeState {
     pub picked_canvases: Vec<u64>,
     /// The Edit Canvas / Calibrate panel.
     pub canvas_panel: Option<CanvasPanel>,
+    /// What waits for the Capture Position question: a command id, or [`SAVE`].
+    pub capture_prompt: Option<String>,
     /// The last row clicked (for Shift ranges).
     anchor: Option<String>,
     /// Row keys in drawing order this frame (for Shift ranges).
@@ -446,6 +448,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::context_menu::open_for(app, at, target);
     }
     occurrence_panel(app, ui.ctx());
+    capture_prompt(app, ui.ctx());
     canvas_panel(app, ui.ctx());
     redefine_panel(app, ui.ctx());
 }
@@ -1428,6 +1431,80 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
 /// Where the browser's panels open: the viewport's top left corner.
 fn panel_pos(app: &SolveApp) -> Pos2 {
     app.viewport.rect.map(|r| r.left_top() + vec2(16.0, 16.0)).unwrap_or(pos2(270.0, 140.0))
+}
+
+/// The Capture Position question stands for saving.
+pub const SAVE: &str = "__save";
+
+/// Does starting `what` (a command id or [`SAVE`]) need the Capture Position question first?
+/// Yes while components were moved without capturing their positions, except for the commands
+/// that capture, revert or keep moving.
+pub fn needs_capture(app: &SolveApp, what: &str) -> bool {
+    !app.session.pending_moves.is_empty()
+        && !matches!(what, "SnapshotCmd" | "AsBuiltPositionsCmd" | "occurrence.move" | "UndoCommand" | "RedoCommand")
+        && app.tree.capture_prompt.is_none()
+}
+
+/// Answer the Capture Position question: `capture`, `revert` or `cancel`. The waiting command
+/// (or save) then goes ahead, unless cancelled.
+pub fn answer_capture(app: &mut SolveApp, action: &str) -> Result<(), String> {
+    let Some(what) = app.tree.capture_prompt.clone() else { return Err("no Capture Position question is open".into()) };
+    match action {
+        "capture" => drop(app.run("SnapshotCmd", json!({}))),
+        "revert" => drop(app.run("AsBuiltPositionsCmd", json!({}))),
+        "cancel" => {
+            app.tree.capture_prompt = None;
+            return Ok(());
+        }
+        other => return Err(format!("unknown answer `{other}` (capture, revert, cancel)")),
+    }
+    app.tree.capture_prompt = None;
+    app.tree.occurrence_move = None;
+    if what == SAVE {
+        crate::toolbar::save(app);
+    } else {
+        app.start(&what);
+    }
+    Ok(())
+}
+
+fn capture_prompt(app: &mut SolveApp, ctx: &egui::Context) {
+    if app.tree.capture_prompt.is_none() {
+        return;
+    }
+    let n = app.session.pending_moves.len();
+    let mut answer: Option<&str> = None;
+    egui::Window::new("Capture Position")
+        .id(egui::Id::new("sc_capture_prompt"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, -80.0))
+        .show(ctx, |ui| {
+            ui.label(if n == 1 {
+                "A component was moved but its position isn't captured.".to_string()
+            } else {
+                format!("{n} components were moved but their positions aren't captured.")
+            });
+            ui.label(RichText::new("Capture keeps the new position; Revert puts it back.").color(Tokens::get().text_dim));
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Capture Position").clicked() {
+                    answer = Some("capture");
+                }
+                if ui.button("Revert").clicked() {
+                    answer = Some("revert");
+                }
+                if ui.button("Cancel").clicked() {
+                    answer = Some("cancel");
+                }
+            });
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                answer = Some("cancel");
+            }
+        });
+    if let Some(a) = answer {
+        let _ = answer_capture(app, a);
+    }
 }
 
 /// Where an occurrence's origin is now (with its pending move).

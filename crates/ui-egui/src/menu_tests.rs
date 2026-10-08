@@ -416,3 +416,30 @@ fn units_menu_changes_the_design_units_and_new_designs_take_the_preference() {
     assert_eq!(app.session.doc.units, "cm");
     assert!(!app.session.is_dirty(), "a fresh design stays unmodified");
 }
+
+#[test]
+fn an_uncaptured_move_asks_before_the_next_command() {
+    let mut app = sample_app();
+    let b = body(&app);
+    app.run("FusionCreateComponentsFromBodiesCommand", json!({"bodies": [b]})).unwrap();
+    let occ = app.session.doc.occurrences[0].id;
+    app.run("occurrence.move", json!({"occurrence": occ, "translate": [10, 0, 0], "capture": false})).unwrap();
+    app.start("SketchCreate");
+    assert_eq!(app.tree.capture_prompt.as_deref(), Some("SketchCreate"), "asks first");
+    assert!(app.dialog.is_none());
+    crate::browser::answer_capture(&mut app, "cancel").unwrap();
+    assert!(app.tree.capture_prompt.is_none() && !app.session.pending_moves.is_empty());
+    // Revert, then the command goes ahead.
+    app.start("SketchCreate");
+    crate::browser::answer_capture(&mut app, "revert").unwrap();
+    assert!(app.session.pending_moves.is_empty());
+    assert!(app.dialog.is_some(), "Create Sketch started");
+    assert_eq!(app.session.doc.occurrences[0].transform, solvecraft_engine::doc::IDENTITY);
+    // Capture keeps the move.
+    app.dialog = None;
+    app.run("occurrence.move", json!({"occurrence": occ, "translate": [10, 0, 0], "capture": false})).unwrap();
+    app.start("Extrude");
+    crate::browser::answer_capture(&mut app, "capture").unwrap();
+    assert_eq!(app.session.doc.occurrences[0].transform[3][0], 10.0);
+    assert!(crate::browser::answer_capture(&mut app, "capture").is_err(), "nothing waits now");
+}
