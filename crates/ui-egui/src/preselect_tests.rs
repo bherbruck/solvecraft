@@ -190,3 +190,32 @@ fn a_hole_is_mirrored_as_a_feature() {
     let cmds = apply_commands(&app, &d).unwrap();
     assert_eq!(cmds[0].1["features"], json!(["Hole1"]));
 }
+
+#[test]
+fn chamfer_types_send_their_values() {
+    let mut app = boxed();
+    let e = edge(&app, Vec3::new(20.0, 0.0, 20.0));
+    let mut d = start(&mut app, vec![e], "FusionChamferCommand");
+    let mut with = |t: usize| {
+        if let Kind::Fillet { ctype, distance2, angle, flip, .. } = &mut d.kind {
+            *ctype = t;
+            *distance2 = "3 mm".into();
+            *angle = "30 deg".into();
+            *flip = true;
+        }
+        apply_commands(&app, &d).unwrap().remove(0).1
+    };
+    let p = with(0);
+    assert!(p.get("distance2").is_none() && p.get("angle").is_none() && p.get("flip").is_none());
+    let p = with(1);
+    assert_eq!((p["distance2"].clone(), p["flip"].clone()), (json!("3 mm"), json!(true)));
+    let p = with(2);
+    assert_eq!(p["angle"], json!("30 deg"));
+    assert!(p.get("distance2").is_none());
+    // Applied and edited again, the chamfer keeps its type, angle and flip.
+    let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
+    app.session.execute(&id, &p).unwrap();
+    let ch = app.session.doc.features.last().unwrap().id;
+    let e = crate::dialogs::for_feature(&app, ch, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Fillet { chamfer: true, ctype: 2, angle, flip: true, .. } if angle == "30 deg"), "{:?}", e.kind);
+}

@@ -53,6 +53,12 @@ pub enum Kind {
         radius: String,
         chamfer: bool,
         chain: bool,
+        /// Chamfer type: 0 equal distance, 1 two distances, 2 distance and angle; with the
+        /// second distance, the angle and which face the first distance is on.
+        ctype: usize,
+        distance2: String,
+        angle: String,
+        flip: bool,
     },
     Shell {
         thickness: String,
@@ -300,12 +306,8 @@ impl Dialog {
                 Kind::Revolve { angle: "360 deg".into(), operation: 0 },
                 vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Axis", AXES, false)],
             ),
-            "FusionFilletEdgesCommand" => {
-                Dialog::new(Kind::Fillet { radius: "2 mm".into(), chamfer: false, chain: true }, vec![SelInput::new("Edges", EDGES | FACES, true)])
-            }
-            "FusionChamferCommand" => {
-                Dialog::new(Kind::Fillet { radius: "1 mm".into(), chamfer: true, chain: true }, vec![SelInput::new("Edges", EDGES | FACES, true)])
-            }
+            "FusionFilletEdgesCommand" => Dialog::new(fillet_kind("2 mm", false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "FusionChamferCommand" => Dialog::new(fillet_kind("1 mm", true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "FusionShellBodyCommand" => Dialog::new(Kind::Shell { thickness: "2 mm".into() }, vec![SelInput::new("Faces/Body", FACES, true)]),
             "FusionDraftCommand" => Dialog::new(
                 Kind::Draft { angle: "5 deg".into() },
@@ -1248,10 +1250,39 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     combo(ui, "rv_op", &OP_LABELS, operation);
                     ui.end_row();
                 }
-                Kind::Fillet { radius, chamfer, chain } => {
-                    row_label(ui, if *chamfer { "Distance" } else { "Radius" });
+                Kind::Fillet { radius, chamfer, chain, ctype, distance2, angle, flip } => {
+                    if *chamfer {
+                        row_label(ui, "Chamfer Type");
+                        combo(ui, "ch_type", &CHAMFER_TYPES, ctype);
+                        ui.end_row();
+                    }
+                    row_label(
+                        ui,
+                        if !*chamfer {
+                            "Radius"
+                        } else if *ctype == 0 {
+                            "Distance"
+                        } else {
+                            "Distance 1"
+                        },
+                    );
                     enter |= field(ui, radius);
                     ui.end_row();
+                    if *chamfer && *ctype == 1 {
+                        row_label(ui, "Distance 2");
+                        enter |= field(ui, distance2);
+                        ui.end_row();
+                    }
+                    if *chamfer && *ctype == 2 {
+                        row_label(ui, "Angle");
+                        enter |= field(ui, angle);
+                        ui.end_row();
+                    }
+                    if *chamfer && *ctype > 0 {
+                        row_label(ui, "Flip");
+                        ui.checkbox(flip, "");
+                        ui.end_row();
+                    }
                     row_label(ui, "Tangent Chain");
                     ui.checkbox(chain, "");
                     ui.end_row();
@@ -1613,6 +1644,13 @@ pub fn cancel(app: &mut SolveApp) {
     }
 }
 
+const CHAMFER_TYPES: [&str; 3] = ["Equal Distance", "Two Distances", "Distance and Angle"];
+
+/// A new Fillet or Chamfer dialog's values.
+fn fillet_kind(size: &str, chamfer: bool) -> Kind {
+    Kind::Fillet { radius: size.into(), chamfer, chain: true, ctype: 0, distance2: size.into(), angle: "45 deg".into(), flip: false }
+}
+
 fn hole_defaults() -> Kind {
     Kind::Hole {
         diameter: "5 mm".into(),
@@ -1801,7 +1839,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 json!({"sketch": sketch, "profiles": idx, "axis": axis, "angle": angle, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
         }
-        Kind::Fillet { radius, chamfer, .. } => {
+        Kind::Fillet { radius, chamfer, ctype, distance2, angle, flip, .. } => {
             need(0, "edges")?;
             // Faces stand for all their edges.
             let st = s.world_state();
@@ -1832,7 +1870,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             let edges: Vec<Value> = uniq.into_iter().map(pt).collect();
             if *chamfer {
-                ("FusionChamferCommand", json!({"edges": edges, "distance": radius}))
+                let mut p = json!({"edges": edges, "distance": radius});
+                match *ctype {
+                    1 => p["distance2"] = json!(distance2),
+                    2 => p["angle"] = json!(angle),
+                    _ => {}
+                }
+                if *ctype > 0 && *flip {
+                    p["flip"] = json!(true);
+                }
+                ("FusionChamferCommand", p)
             } else {
                 ("FusionFilletEdgesCommand", json!({"edges": edges, "radius": radius}))
             }
@@ -2390,7 +2437,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } => {
             let chamfer = matches!(f.kind, FeatureKind::Chamfer { .. });
             let mut d = start(if chamfer { "FusionChamferCommand" } else { "FusionFilletEdgesCommand" })?;
-            d.kind = Kind::Fillet { radius: radius.clone(), chamfer, chain: false };
+            d.kind = fillet_kind(radius, chamfer);
+            if let Kind::Fillet { chain, ctype, distance2, angle, flip, .. } = &mut d.kind {
+                *chain = false;
+                // An unequal chamfer: two distances, or a distance and an angle.
+                if let FeatureKind::Chamfer { distance2: d2, angle: a, flip: f, .. } = &f.kind {
+                    if let Some(v) = d2 {
+                        *ctype = 1;
+                        *distance2 = v.clone();
+                    } else if let Some(v) = a {
+                        *ctype = 2;
+                        *angle = v.clone();
+                    }
+                    *flip = *f;
+                }
+            }
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = edges.iter().filter_map(|p| edge_sel(s, *p)).collect();
             }
