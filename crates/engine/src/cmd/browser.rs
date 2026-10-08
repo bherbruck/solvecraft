@@ -161,10 +161,41 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
     if !["mm", "cm", "m", "in", "ft"].contains(&u) {
         return Err(bad(cmd, "`units` must be mm, cm, m, in or ft"));
     }
-    if s.doc.units != u {
-        s.doc_mut().units = u.to_string();
+    let old = s.doc.units.clone();
+    if old == u {
+        return Ok(json!({ "units": u, "kept": [] }));
     }
-    Ok(json!({ "units": u }))
+    let (before, _) = s.doc.param_values();
+    s.doc_mut().units = u.to_string();
+    // Unit-less user parameters holding a bare number read it in the design's units where they
+    // stand for lengths. If any value moved, those numbers keep the old unit, written out.
+    let (after, _) = s.doc.param_values();
+    let moved = before.iter().any(|(k, b)| after.get(k).is_none_or(|a| (a.v - b.v).abs() > 1e-9 * b.v.abs().max(1.0)));
+    let mut kept = Vec::new();
+    if moved {
+        let bare: Vec<(String, String)> = s
+            .doc
+            .params
+            .iter()
+            .filter(|p| !p.model && p.unit.is_empty() && solvecraft_doc::expr::is_literal(&p.expr) && p.expr.trim().parse::<f64>().is_ok())
+            .map(|p| (p.name.clone(), p.expr.trim().to_string()))
+            .collect();
+        for (name, e) in bare {
+            let probe = {
+                let mut d = (*s.doc).clone();
+                let _ = d.change_param(&name, &format!("{e} {old}"), None, None);
+                d.param_values().0
+            };
+            // Only when writing the old unit puts the values back where they were.
+            let fixes = before.iter().filter(|(k, b)| probe.get(*k).is_some_and(|a| (a.v - b.v).abs() <= 1e-9 * b.v.abs().max(1.0))).count()
+                > before.iter().filter(|(k, b)| after.get(*k).is_some_and(|a| (a.v - b.v).abs() <= 1e-9 * b.v.abs().max(1.0))).count();
+            if fixes {
+                s.doc_mut().change_param(&name, &format!("{e} {old}"), None, None)?;
+                kept.push(name);
+            }
+        }
+    }
+    Ok(json!({ "units": u, "kept": kept }))
 }
 
 fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
@@ -390,6 +421,17 @@ mod tests {
         assert_eq!(s.doc.units, "in");
         assert!((vol(&mut s) - v0).abs() < 1e-6, "feature inputs keep their millimetres");
         assert!(s.execute("document.units", &json!({"units": "furlong"})).is_err());
+        // A unit-less parameter used as a length keeps its millimetres; a plain count stays a number.
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "w", "expression": "5", "unit": ""}));
+        run(&mut s, "parameters.add", json!({"name": "n", "expression": "3", "unit": ""}));
+        run(&mut s, "PrimitiveBox", json!({"length": "w", "width": 10, "height": 5}));
+        let b = s.model.state().bodies[0].name.clone();
+        run(&mut s, "PatternRectangular", json!({"bodies": [b], "dir1": [1, 0, 0], "count1": "n", "spacing1": 20}));
+        let v0 = vol(&mut s);
+        let r = run(&mut s, "document.units", json!({"units": "cm"}));
+        assert!((vol(&mut s) - v0).abs() < 1e-6, "{r}");
+        assert!(s.doc.param("n").is_some_and(|p| p.expr == "3"), "the count stays bare");
         run(&mut s, "UndoCommand", json!({}));
         assert_eq!(s.doc.units, "mm");
     }
