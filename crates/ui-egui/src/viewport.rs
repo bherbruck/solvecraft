@@ -962,35 +962,7 @@ pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, 
 }
 
 pub fn delete_selection(app: &mut SolveApp) {
-    if crate::dim_view::delete_selected(app) || crate::sketch_tools::delete_glyph(app) {
-        return;
-    }
-    let sel = app.session.selection.clone();
-    if sel.is_empty() {
-        return;
-    }
-    let mut sketch_ids: Vec<String> = Vec::new();
-    let mut features: Vec<u64> = Vec::new();
-    let mut bodies: Vec<String> = Vec::new();
-    for x in &sel {
-        match x {
-            Sel::SketchCurve { id } | Sel::SketchPoint { id } => sketch_ids.push(id.clone()),
-            Sel::Feature { id } => features.push(*id),
-            Sel::Body { name } if !app.ui.locked_bodies.contains(name) => bodies.push(name.clone()),
-            _ => {}
-        }
-    }
-    // Deleting a body removes it from here on in the timeline (a Remove feature).
-    if !bodies.is_empty() && app.session.active_sketch.is_none() {
-        let _ = app.run("SoftDeleteCommand", json!({ "bodies": bodies }));
-    }
-    if !sketch_ids.is_empty() && app.session.active_sketch.is_some() {
-        let _ = app.run("sketch.delete", json!({"entities": sketch_ids}));
-    }
-    if !features.is_empty() {
-        let _ = app.run("FusionDeleteCommand", json!({"features": features.iter().map(|f| f.to_string()).collect::<Vec<_>>()}));
-    }
-    let _ = app.run("select.clear", json!({}));
+    crate::delete::delete_selection(app);
 }
 
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {

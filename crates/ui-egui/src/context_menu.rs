@@ -126,6 +126,8 @@ pub struct MenuState {
     pending: Option<(Pos2, Target)>,
     /// An inline rename in progress.
     pub rename: Option<Rename>,
+    /// A delete waiting for its confirmation (it takes or breaks other features).
+    pub confirm: Option<crate::delete::Pending>,
     /// The Properties window: title and measurements.
     pub props: Option<(String, Value)>,
 }
@@ -284,6 +286,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.findBrowser", "Find in Browser", "").with(json!({ "body": face })));
         v.push(act("ui.findTimeline", "Find in Timeline", "").with(json!({ "body": face })));
         v.push(act("ui.hide", "Hide Body", "eye").with(json!({ "bodies": [face] })));
+        v.push(act("ui.delete", "Delete", "delete").key("Del"));
     } else if has(|s| matches!(s, Sel::Edge { .. })) {
         v.push(cmd(app, "FusionFilletEdgesCommand", "Fillet"));
         v.push(cmd(app, "FusionChamferCommand", "Chamfer"));
@@ -338,7 +341,10 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
             .with(json!({ "bodies": names })),
         act("ui.isolate", "Isolate", "").with(json!({ "bodies": names })),
         act("ui.rename", "Rename", "").with(json!({ "body": bodies.first() })).on(one),
-        cmd(app, "SoftDeleteCommand", "Delete").key("Del").with(json!({ "bodies": names })).on(!locked),
+        act("ui.delete", "Delete", "delete")
+            .key("Del")
+            .with(json!({ "items": bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>() }))
+            .on(!locked),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "").with(json!({ "bodies": names })),
         Item::sep(),
         act("ui.properties", "Properties", "measure").with(json!({ "bodies": names })),
@@ -368,7 +374,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.sketchDims", if dims { "Hide Dimensions" } else { "Show Dimensions" }, "dimension").with(json!({ "sketch": id })),
         act("ui.sketchProfile", if profiles { "Hide Profile" } else { "Show Profile" }, "").with(json!({ "sketch": id })),
         act("ui.rename", "Rename", "").with(json!({ "feature": id })),
-        cmd(app, "FusionDeleteCommand", "Delete").key("Del").with(json!({ "features": [id.to_string()] })),
+        act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "").with(json!({ "feature": id })),
     ]
@@ -397,7 +403,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if id != 0 {
         let grounded = occ.is_some_and(|o| o.grounded);
         let oid = occ.map(|o| o.id).unwrap_or(0);
-        v.push(cmd(app, "component.delete", "Delete").key("Del").with(json!({ "component": id })));
+        v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
         v.push(Item::sep());
         v.push(act("ui.moveOccurrence", "Move/Copy", "move").with(json!({ "occurrence": oid })).on(!grounded && occ.is_some()));
         v.push(cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })));
@@ -523,6 +529,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.start(&id);
             }
         }
+        "ui.delete" if item.params.is_some() => crate::delete::request(app, p),
         "ui.delete" => delete(app),
         "ui.finishSketch" => app.finish_sketch(),
         "ui.hide" => {
@@ -649,7 +656,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
 
 /// Delete what is selected: sketch entities, features, and bodies (a Remove feature).
 pub fn delete(app: &mut SolveApp) {
-    crate::viewport::delete_selection(app);
+    crate::delete::delete_selection(app);
 }
 
 /// Add the edges that continue the selected edges smoothly to the selection.

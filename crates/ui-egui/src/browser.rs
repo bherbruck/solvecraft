@@ -32,6 +32,8 @@ pub struct TreeState {
     pub redefine: Option<u64>,
     /// Components picked in the tree (they have no viewport selection).
     pub picked_components: Vec<u64>,
+    /// Canvases picked in the tree.
+    pub picked_canvases: Vec<u64>,
     /// The last row clicked (for Shift ranges).
     anchor: Option<String>,
     /// Row keys in drawing order this frame (for Shift ranges).

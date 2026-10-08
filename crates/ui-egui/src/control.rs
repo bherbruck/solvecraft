@@ -21,6 +21,7 @@
 //!   the open menu and its items. `ui.menuPick {item}` runs an item by id or label;
 //!   `ui.rename {text?, commit?}` finishes the rename box
 //! - `ui.window {action: minimize|maximize|restore|toggle|close}`: what the title bar's buttons do
+//! - `ui.confirm {accept?}`: the Delete confirmation (without `accept`: what it lists)
 //! - `ui.resize {width, height}`, `app.quit`
 
 use std::sync::mpsc::Sender;
@@ -267,6 +268,16 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             }
             ok(crate::context_menu::describe(app))
         }
+        "ui.confirm" => match p.get("accept").and_then(Value::as_bool) {
+            Some(a) => {
+                if crate::delete::confirm(app, a) {
+                    ok(json!({"accepted": a}))
+                } else {
+                    err("nothing is waiting for a confirmation")
+                }
+            }
+            None => ok(json!({"pending": app.menu.confirm.as_ref().map(|c| c.report.clone())})),
+        },
         "ui.menuPick" => {
             let Some(key) = s("item") else { return err("missing `item` (id or label)") };
             wrap(crate::context_menu::pick(app, key))

@@ -12,6 +12,7 @@ pub mod browser;
 pub mod canvas;
 pub mod context_menu;
 pub mod control;
+pub mod delete;
 pub mod dialogs;
 pub mod dim_view;
 pub mod gpu;
@@ -606,6 +607,7 @@ impl SolveApp {
         dialogs::show(self, ui.ctx());
         params_dialog::show(self, ui.ctx());
         context_menu::show(self, ui.ctx());
+        delete::show(self, ui.ctx());
         if self.custom_titlebar {
             titlebar::resize_zones(ui);
         }

@@ -201,3 +201,54 @@ fn browser_folds_are_kept_in_the_preferences() {
     other.load_prefs(&prefs);
     assert!(other.tree.collapsed.contains("c0/sketches") && other.tree.expanded.contains("origin"));
 }
+
+#[test]
+fn delete_key_handles_every_kind_and_asks_about_dependents() {
+    use solvecraft_engine::Sel;
+    let mut app = sample_app();
+    app.run("ConstructionPlaneOffsetFromPlaneCommand", json!({"base": "XY", "offset": 10})).unwrap();
+    app.run("PrimitiveBox", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
+    let n = app.session.doc.features.len();
+    // A body and a construction plane together: one undo step, no question.
+    let b = app.session.model.state().bodies.last().unwrap().name.clone();
+    app.run("select.set", json!({"items": [{"type": "body", "name": b}, {"type": "plane", "name": "Plane1"}]})).unwrap();
+    crate::delete::delete_selection(&mut app);
+    assert!(app.menu.confirm.is_none());
+    assert!(app.session.model.state().body(&b).is_none());
+    assert!(app.session.doc.find_feature("Plane1").is_none());
+    app.run("UndoCommand", json!({})).unwrap();
+    assert_eq!(app.session.doc.features.len(), n);
+    // A sketch with features built on it: the confirmation lists them first.
+    let sk = app.session.doc.features.iter().find(|f| f.name == "Base").unwrap().id;
+    app.run("select.set", json!({"items": [Sel::Feature { id: sk }]})).unwrap();
+    crate::delete::delete_selection(&mut app);
+    let pending = app.menu.confirm.clone().expect("asks first");
+    assert!(pending.report["deleted"].as_array().unwrap().len() > 1);
+    assert!(crate::delete::confirm(&mut app, false));
+    assert_eq!(app.session.doc.features.len(), n, "cancel keeps everything");
+    crate::delete::delete_selection(&mut app);
+    crate::delete::confirm(&mut app, true);
+    assert!(app.session.doc.features.len() < n);
+    app.run("UndoCommand", json!({})).unwrap();
+    assert_eq!(app.session.doc.features.len(), n);
+    // A face alone: not available yet, nothing changes.
+    let b0 = app.session.model.state().bodies[0].name.clone();
+    app.run("select.set", json!({"items": [{"type": "face", "body": b0, "index": 0, "point": [0, 0, 0]}]})).unwrap();
+    crate::delete::delete_selection(&mut app);
+    assert!(app.status.as_ref().is_some_and(|s| s.0.contains("not available yet")), "{:?}", app.status);
+    assert_eq!(app.session.doc.features.len(), n);
+}
+
+#[test]
+fn menu_delete_items_use_the_same_path() {
+    let mut app = sample_app();
+    let b = body(&app);
+    app.run("FusionCreateComponentsFromBodiesCommand", json!({"bodies": [b]})).unwrap();
+    let c = app.session.doc.components[0].id;
+    act(&mut app, &Target::Component { id: c }, "Delete");
+    assert!(app.session.doc.components.is_empty());
+    // A sketch from the browser: asks, since its features go too.
+    let id = app.session.doc.features.iter().find(|f| f.name == "Base").unwrap().id;
+    act(&mut app, &Target::Sketch { id }, "Delete");
+    assert!(app.menu.confirm.is_some());
+}
