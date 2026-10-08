@@ -343,7 +343,17 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
                     let on_x = x.param_on(p, tol).or_else(|| end_param(x, p, tol));
                     let on_y = y.param_on(p, tol).or_else(|| end_param(y, p, tol));
                     // Crossings at (or next to) curve ends are already cuts.
-                    if on_x.is_none() || on_y.is_none() || ends.iter().any(|e| e.dist(p) < tol * 100.0) {
+                    let near_end = || {
+                        let (cx, cy) = grid.cell(p);
+                        (-1..=1).any(|dx| {
+                            (-1..=1).any(|dy| {
+                                end_cells
+                                    .get(&(cx + dx, cy + dy))
+                                    .is_some_and(|v| v.iter().any(|k| ends.get(*k).is_some_and(|e| e.dist(p) < tol * 100.0)))
+                            })
+                        })
+                    };
+                    if on_x.is_none() || on_y.is_none() || near_end() {
                         continue;
                     }
                     if let (Some(tx), Some(ty)) = (on_x, on_y) {
@@ -611,7 +621,7 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
             v.push(k);
         }
     }
-    let mut out: Vec<Profile> = loops
+    let out: Vec<Profile> = loops
         .iter()
         .enumerate()
         .map(|(i, (l, ids, _))| {
@@ -624,8 +634,11 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
             Profile { region, outer_curves: ids.clone(), hole_curves, area, centroid }
         })
         .collect();
-    let first_curve = |p: &Profile| p.outer_curves.iter().filter_map(|id| sk.curve_index(id)).min().unwrap_or(usize::MAX);
-    out.sort_by(|a, b| first_curve(a).cmp(&first_curve(b)).then(b.area.total_cmp(&a.area)));
+    let index: std::collections::HashMap<&str, usize> = sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
+    let first_curve = |p: &Profile| p.outer_curves.iter().filter_map(|id| index.get(id.as_str()).copied()).min().unwrap_or(usize::MAX);
+    let mut keyed: Vec<(usize, Profile)> = out.into_iter().map(|p| (first_curve(&p), p)).collect();
+    keyed.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.area.total_cmp(&a.1.area)));
+    let out: Vec<Profile> = keyed.into_iter().map(|x| x.1).collect();
     out
 }
 

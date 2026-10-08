@@ -444,6 +444,14 @@ enum Block<'a> {
     TangentAt(usize, &'a ConstraintKind, usize),
 }
 
+fn copy_block<'a>(b: &Block<'a>) -> Block<'a> {
+    match b {
+        Block::Arc { c, a, b } => Block::Arc { c: *c, a: *a, b: *b },
+        Block::User(i, k) => Block::User(*i, k),
+        Block::TangentAt(i, k, p) => Block::TangentAt(*i, k, *p),
+    }
+}
+
 fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
     match b {
         Block::Arc { c, a, b } => {
@@ -634,6 +642,53 @@ fn system(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], x: &mut [f6
     (r, Some(j), owner)
 }
 
+/// Residuals and the Jacobian restricted to `vars` (columns in that order; `col` maps a global
+/// variable to its column, usize::MAX elsewhere). Blocks only touch their component's variables,
+/// so a component's Jacobian is small even in a huge sketch.
+fn local_system(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    x: &mut [f64],
+    col: &[usize],
+    ncols: usize,
+) -> (Vec<f64>, Mat, Vec<usize>) {
+    let (r, _, owner) = system(sk, lay, blocks, x, false);
+    let mut j = Mat::zeros(r.len(), ncols);
+    let mut row = 0;
+    let mut plus = Vec::new();
+    let mut minus = Vec::new();
+    for (b, vars) in blocks {
+        plus.clear();
+        block_residuals(&State { sk, lay, x }, b, &mut plus);
+        let rows = plus.len();
+        for &v in vars {
+            let Some(c) = col.get(v).copied().filter(|c| *c < ncols) else { continue };
+            let Some(x0) = x.get(v).copied() else { continue };
+            let h = 1e-7 * x0.abs().max(1.0);
+            if let Some(xv) = x.get_mut(v) {
+                *xv = x0 + h;
+            }
+            plus.clear();
+            block_residuals(&State { sk, lay, x }, b, &mut plus);
+            if let Some(xv) = x.get_mut(v) {
+                *xv = x0 - h;
+            }
+            minus.clear();
+            block_residuals(&State { sk, lay, x }, b, &mut minus);
+            if let Some(xv) = x.get_mut(v) {
+                *xv = x0;
+            }
+            for k in 0..rows {
+                let d = (plus.get(k).copied().unwrap_or(0.0) - minus.get(k).copied().unwrap_or(0.0)) / (2.0 * h);
+                j.set(row + k, c, d);
+            }
+        }
+        row += rows;
+    }
+    (r, j, owner)
+}
+
 fn max_abs(v: &[f64]) -> f64 {
     v.iter().fold(0.0_f64, |m, x| if x.is_finite() { m.max(x.abs()) } else { f64::INFINITY })
 }
@@ -642,7 +697,7 @@ fn norm2(v: &[f64]) -> f64 {
 }
 
 /// Levenberg–Marquardt on one component (variables `vars`, blocks `blocks`). Returns iterations.
-fn lm(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], vars: &[usize], x: &mut Vec<f64>) -> usize {
+fn lm(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], vars: &[usize], x: &mut Vec<f64>, col: &[usize]) -> usize {
     let n = vars.len();
     let mut lambda = 1e-3;
     let (mut r, _, _) = system(sk, lay, blocks, x, false);
@@ -651,13 +706,13 @@ fn lm(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], vars: &[usize],
         if max_abs(&r) < TOL {
             return it;
         }
-        let (_, Some(j), _) = system(sk, lay, blocks, x, true) else { return it };
-        // Normal equations restricted to this component's variables.
+        let (_, j, _) = local_system(sk, lay, blocks, x, col, n);
+        // Normal equations of this component.
         let mut a = Mat::zeros(n, n);
         let mut g = vec![0.0; n];
         for row in 0..j.rows {
             let ri = r.get(row).copied().unwrap_or(0.0);
-            let nz: Vec<(usize, f64)> = vars.iter().enumerate().map(|(li, &v)| (li, j.get(row, v))).filter(|(_, d)| *d != 0.0).collect();
+            let nz: Vec<(usize, f64)> = (0..n).map(|li| (li, j.get(row, li))).filter(|(_, d)| *d != 0.0).collect();
             for &(li, di) in &nz {
                 if let Some(gi) = g.get_mut(li) {
                     *gi += di * ri;
@@ -766,11 +821,19 @@ pub fn solve(sk: &mut Sketch) -> SolveReport {
         }
     }
     let mut comps: Vec<(usize, Vec<usize>, Vec<usize>)> = Vec::new(); // (root, vars, block idx)
+    let mut comp_of: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
     for v in 0..lay.n {
         let r = find(&mut parent, v);
-        match comps.iter_mut().find(|c| c.0 == r) {
-            Some(c) => c.1.push(v),
-            None => comps.push((r, vec![v], Vec::new())),
+        match comp_of.get(&r) {
+            Some(&k) => {
+                if let Some(c) = comps.get_mut(k) {
+                    c.1.push(v);
+                }
+            }
+            None => {
+                comp_of.insert(r, comps.len());
+                comps.push((r, vec![v], Vec::new()));
+            }
         }
     }
     let mut constant_blocks = Vec::new();
@@ -778,11 +841,20 @@ pub fn solve(sk: &mut Sketch) -> SolveReport {
         match vars.first() {
             Some(&v) => {
                 let r = find(&mut parent, v);
-                if let Some(c) = comps.iter_mut().find(|c| c.0 == r) {
+                if let Some(c) = comp_of.get(&r).and_then(|k| comps.get_mut(*k)) {
                     c.2.push(bi);
                 }
             }
             None => constant_blocks.push(bi),
+        }
+    }
+    // Column of each variable within its component.
+    let mut col = vec![usize::MAX; lay.n];
+    for (_, vars, _) in &comps {
+        for (k, v) in vars.iter().enumerate() {
+            if let Some(c) = col.get_mut(*v) {
+                *c = k;
+            }
         }
     }
 
@@ -793,42 +865,53 @@ pub fn solve(sk: &mut Sketch) -> SolveReport {
         if bis.is_empty() {
             continue;
         }
-        let sub: Vec<(Block, Vec<usize>)> = bis
-            .iter()
-            .filter_map(|&bi| {
-                all_blocks.get(bi).map(|(b, v)| {
-                    let b2 = match b {
-                        Block::Arc { c, a, b } => Block::Arc { c: *c, a: *a, b: *b },
-                        Block::User(i, k) => Block::User(*i, k),
-                        Block::TangentAt(i, k, p) => Block::TangentAt(*i, k, *p),
-                    };
-                    (b2, v.clone())
-                })
-            })
-            .collect();
-        iterations += lm(sk, &lay, &sub, vars, &mut x);
+        let sub: Vec<(Block, Vec<usize>)> = bis.iter().filter_map(|&bi| all_blocks.get(bi).map(|(b, v)| (copy_block(b), v.clone()))).collect();
+        iterations += lm(sk, &lay, &sub, vars, &mut x, &col);
     }
 
-    // Final residuals, Jacobian and analysis over everything.
-    let (r, j, owner) = system(sk, &lay, &all_blocks, &mut x, true);
-    let max_residual = max_abs(&r);
+    // Final residuals and analysis, component by component (the Jacobian is block diagonal:
+    // its rank is the sum of the components' ranks).
+    let mut max_residual = 0.0_f64;
     let mut failing: Vec<String> = Vec::new();
-    for (row, v) in r.iter().enumerate() {
-        if !(v.abs() < ACCEPT)
-            && let Some((Block::User(ci, _) | Block::TangentAt(ci, _, _), _)) = owner.get(row).and_then(|bi| all_blocks.get(*bi))
-            && let Some(c) = sk.constraints.get(*ci)
-            && !failing.contains(&c.id)
-        {
-            failing.push(c.id.clone());
+    let mut det = vec![false; lay.n];
+    let mut rank = 0;
+    let mut check = |r: &[f64], owner: &[usize], blocks: &[(Block, Vec<usize>)], failing: &mut Vec<String>| {
+        max_residual = max_residual.max(max_abs(r));
+        for (row, v) in r.iter().enumerate() {
+            if !(v.abs() < ACCEPT)
+                && let Some((Block::User(ci, _) | Block::TangentAt(ci, _, _), _)) = owner.get(row).and_then(|bi| blocks.get(*bi))
+                && let Some(c) = sk.constraints.get(*ci)
+                && !failing.contains(&c.id)
+            {
+                failing.push(c.id.clone());
+            }
+        }
+    };
+    for (_, vars, bis) in &comps {
+        let sub: Vec<(Block, Vec<usize>)> = bis.iter().filter_map(|&bi| all_blocks.get(bi).map(|(b, v)| (copy_block(b), v.clone()))).collect();
+        if sub.is_empty() {
+            continue;
+        }
+        let (r, j, owner) = local_system(sk, &lay, &sub, &mut x, &col, vars.len());
+        check(&r, &owner, &sub, &mut failing);
+        if j.rows > 0 {
+            let (d, rk) = determined_vars(&j, 1e-7);
+            rank += rk;
+            for (k, v) in vars.iter().enumerate() {
+                if let (Some(slot), Some(flag)) = (det.get_mut(*v), d.get(k)) {
+                    *slot = *flag;
+                }
+            }
         }
     }
-    let _ = constant_blocks;
+    let consts: Vec<(Block, Vec<usize>)> =
+        constant_blocks.iter().filter_map(|&bi| all_blocks.get(bi).map(|(b, v)| (copy_block(b), v.clone()))).collect();
+    if !consts.is_empty() {
+        let (r, _, owner) = system(sk, &lay, &consts, &mut x, false);
+        check(&r, &owner, &consts, &mut failing);
+    }
     let status = if max_residual < ACCEPT { SolveStatus::Solved } else { SolveStatus::Failed };
     let use_x = if status == SolveStatus::Solved { &x } else { &x0 };
-    let (det, rank) = match &j {
-        Some(j) if j.rows > 0 => determined_vars(j, 1e-7),
-        _ => (vec![false; lay.n], 0),
-    };
     // Write back.
     for (i, p) in sk.points.iter_mut().enumerate() {
         if let Some(v) = lay.pvar.get(i).copied().flatten() {
