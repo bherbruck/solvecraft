@@ -684,7 +684,7 @@ fn revolved(curve: mt::Curve, o: mt::Point3, axis: mt::Vector3) -> mt::Surface {
 /// A surface of revolution whose normal at the profile point `(u, 0)` points along `expected`.
 /// The rotation is reversed rather than the surface inverted: truck's inverted `Processor`
 /// swaps the parameters but not the search hints, which breaks meshing.
-fn revolved_oriented(curve: mt::Curve, o: mt::Point3, axis: mt::Vector3, u: f64, expected: mt::Vector3) -> mt::Surface {
+pub(crate) fn revolved_oriented(curve: mt::Curve, o: mt::Point3, axis: mt::Vector3, u: f64, expected: mt::Vector3) -> mt::Surface {
     let s = revolved(curve.clone(), o, axis);
     if s.normal(u, 0.0).dot(expected) >= 0.0 {
         return s;
