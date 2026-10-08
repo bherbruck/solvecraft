@@ -299,10 +299,7 @@ fn hostile_params_never_panic() {
     ];
     let mut internal = Vec::new();
     for spec in command_specs() {
-        if matches!(
-            spec.id,
-            "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf"
-        ) {
+        if matches!(spec.id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf") {
             continue; // file system side effects are covered by their own tests
         }
         for v in hostile_values() {
@@ -405,11 +402,7 @@ fn timeline_edits_reresolve_references() {
     assert_eq!(names, ["Base", "Bore", "Round"]);
     assert!(rel(volume(&mut s), expect(60.0, 25.0)) < 1e-3);
     // Redefine the fillet in place with a new radius; it keeps its name and position.
-    run(
-        &mut s,
-        "timeline.redefine",
-        json!({"feature": "Round", "command": "solid.fillet", "params": {"edges": [[30, 0, 25]], "radius": 4}}),
-    );
+    run(&mut s, "timeline.redefine", json!({"feature": "Round", "command": "solid.fillet", "params": {"edges": [[30, 0, 25]], "radius": 4}}));
     let f4 = (16.0 - 16.0 * PI / 4.0) * 60.0;
     assert!(rel(volume(&mut s), 60.0 * 30.0 * 25.0 - f4 - PI * 9.0 * 25.0) < 1e-3);
     assert_eq!(s.doc.features.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Base", "Bore", "Round"]);
@@ -1117,7 +1110,11 @@ fn face_extrude_follows_edits() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
     let before = volume(&mut s);
-    run(&mut s, "solid.revolve", json!({"face": [40, 15, 10], "axis": {"origin": [40, 0, 30], "dir": [0, 1, 0]}, "angle": "90 deg", "operation": "new"}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"face": [40, 15, 10], "axis": {"origin": [40, 0, 30], "dir": [0, 1, 0]}, "angle": "90 deg", "operation": "new"}),
+    );
     let added = volume(&mut s) - before;
     let want = 30.0 * 20.0 * 20.0 * PI / 2.0;
     assert!(rel(added, want) < 1e-4, "{added} vs {want}");
@@ -1622,6 +1619,8 @@ fn hole_as_deep_as_the_plate() {
         assert!(r.is_ok(), "{i} {p}: {r:?}");
         assert!(volume(&mut s) < before - 1.0, "{i} {p}");
     }
+}
+
 /// Appearances outlive later features: a coloured face keeps its colour after a fillet on a
 /// neighbouring edge; an imported STEP's body and face colours survive a hole.
 #[test]
@@ -1779,8 +1778,7 @@ fn combine_keep_tools_and_new_component() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
     run(&mut s, "solid.box", json!({"corner": [10, 0, 0], "length": 20, "width": 20, "height": 20, "body_name": "B"}));
-    let r =
-        run(&mut s, "solid.combine", json!({"target": "A", "tools": ["B"], "operation": "cut", "keep_tools": true, "new_component": true}));
+    let r = run(&mut s, "solid.combine", json!({"target": "A", "tools": ["B"], "operation": "cut", "keep_tools": true, "new_component": true}));
     let comp = r["component"].as_u64().unwrap_or(0);
     assert!(comp > 0, "{r}");
     let st = s.model.state();

@@ -54,7 +54,8 @@ fn curvature_polygon_arc_length_linear_diameter() {
     // A horizontal line ending where a control-point spline starts: G2 keeps the spline's
     // start straight (zero curvature) and tangent.
     let l = ids(&run(&mut s, "sketch.line", json!({"points": [[-10, 0], [0, 0]], "infer": true}))["curves"])[0].clone();
-    let sp = ids(&run(&mut s, "sketch.spline.control_point", json!({"points": [format!("{l}.end"), [5, 2], [10, 6], [15, 15]]}))["curves"])[0].clone();
+    let sp =
+        ids(&run(&mut s, "sketch.spline.control_point", json!({"points": [format!("{l}.end"), [5, 2], [10, 6], [15, 15]]}))["curves"])[0].clone();
     run(&mut s, "sketch.constraint.curvature", json!({"a": l, "b": sp}));
     let sk = sketch(&s);
     let pts: Vec<Vec2> = sk.curves[sk.curve_index(&sp).unwrap()].kind.point_ids().iter().map(|i| sk.point(*i).unwrap()).collect();

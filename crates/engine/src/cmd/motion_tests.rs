@@ -74,8 +74,7 @@ fn contact_sets_stop_a_driven_joint_at_touching() {
 #[test]
 fn motion_study_plays_and_exports() {
     let mut s = rail();
-    let r =
-        run(&mut s, "motion.study", json!({"name": "Push", "steps": 100, "keys": [{"joint": "Rail", "points": [[0, 10], [100, -5]]}]}));
+    let r = run(&mut s, "motion.study", json!({"name": "Push", "steps": 100, "keys": [{"joint": "Rail", "points": [[0, 10], [100, -5]]}]}));
     assert_eq!(r["keys"], 1);
     run(&mut s, "motion.play", json!({"study": "Push", "step": 50}));
     assert!((b_x(&s) - 12.5).abs() < 1e-6, "{}", b_x(&s));

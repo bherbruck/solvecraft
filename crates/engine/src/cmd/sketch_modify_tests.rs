@@ -348,7 +348,9 @@ fn degree_five_and_cut_free_form_profiles_extrude_exactly() {
     let vol = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
     // A degree-5 control spline closed by a line: one B-spline side face.
     let mut s = new_sketch();
-    let sp = ids(&run(&mut s, "sketch.spline.control_point_5", json!({"points": [[0, 0], [4, 10], [10, 12], [16, 12], [22, 10], [26, 0]]}))["curves"])[0].clone();
+    let sp =
+        ids(&run(&mut s, "sketch.spline.control_point_5", json!({"points": [[0, 0], [4, 10], [10, 12], [16, 12], [22, 10], [26, 0]]}))["curves"])[0]
+            .clone();
     run(&mut s, "sketch.line", json!({"points": [format!("{sp}.end"), format!("{sp}.start")]}));
     let a = profiles(&s)[0];
     run(&mut s, "sketch.finish", json!({}));
@@ -427,7 +429,8 @@ fn fillet_a_line_and_an_arc() {
     let mut s = new_sketch();
     // A line into a quarter arc meeting at a sharp corner.
     let l = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]]}))["curves"])[0].clone();
-    let a = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [30, 0], "start": format!("{l}.end"), "end": [30, -10]}))["curves"])[0].clone();
+    let a =
+        ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [30, 0], "start": format!("{l}.end"), "end": [30, -10]}))["curves"])[0].clone();
     let _ = a;
     let f = run(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 2}));
     let arc = ids(&f["curves"])[0].clone();
