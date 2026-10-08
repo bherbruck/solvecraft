@@ -135,6 +135,20 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // Holes: the depth arrow points into the material (empty depth: through all); the
     // diameter is typed in the box.
     let mut dir = dir;
+    // Extrude taper: a handle beside the arrow tip; dragging it sideways tilts the walls.
+    let cam_right = app.cam.basis().0;
+    if let (Kind::Extrude { direction: 0 | 1, distance, taper, .. }, Some(n)) = (&mut d.kind, dir) {
+        let n = n * sign;
+        if let Ok(l) = app.session.doc.eval(distance, ValueKind::Length)
+            && l.is_finite()
+            && l.abs() > 1e-9
+            && let Some(e) = (cam_right - n * cam_right.dot(n)).normalized()
+        {
+            let px = 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
+            let ang = app.session.doc.eval(taper, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+            taper_handle(ui, painter, proj, base - e * (40.0 * px), n * l, -e, ang, taper);
+        }
+    }
     if let (Kind::Hole { depth, .. }, Some(n)) = (&mut d.kind, dir) {
         let l = app.session.doc.eval(depth, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
         drag_arrow(ui, painter, proj, base, bs, -n, l, false, egui::Id::new("sc_manipulator_depth"), half_height, depth);
@@ -237,6 +251,36 @@ fn measure_line(painter: &egui::Painter, proj: &Proj, r: &serde_json::Value) {
     let rect = egui::Rect::from_min_size(mid, galley.size() + vec2(10.0, 6.0));
     painter.rect(rect, 3.0, t.overlay, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
     painter.galley(rect.min + vec2(5.0, 3.0), galley, t.text);
+}
+
+/// The taper handle: a line from `foot` along the extrude (`span`) leaning by `angle` towards
+/// `e`, with a ring at its end; dragging the ring sideways sets the angle (1° steps, Alt/Ctrl:
+/// free).
+#[allow(clippy::too_many_arguments)]
+fn taper_handle(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, foot: Vec3, span: Vec3, e: Vec3, angle: f64, value: &mut String) {
+    let t = Tokens::get();
+    let l = span.len();
+    let end = foot + span + e * (l * angle.tan().clamp(-10.0, 10.0));
+    let (Some(fs), Some(es)) = (proj.to_screen(foot), proj.to_screen(end)) else { return };
+    let r = ui.interact(egui::Rect::from_center_size(es, vec2(16.0, 16.0)), egui::Id::new("sc_taper"), egui::Sense::drag());
+    let hot = r.hovered() || r.dragged();
+    let col = if hot { t.accent } else { t.manipulator };
+    painter.add(egui::Shape::dashed_line(&[fs, es], Stroke::new(1.2, col), 5.0, 3.0));
+    painter.circle(es, if hot { 6.5 } else { 5.0 }, t.overlay, Stroke::new(2.0, col));
+    if hot {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    if r.dragged()
+        && let Some(p) = r.interact_pointer_pos()
+        && let Some(s) = along(proj, p, foot + span, e)
+    {
+        let mut deg = s.atan2(l).to_degrees();
+        if !ui.input(|i| i.modifiers.alt || i.modifiers.ctrl || i.modifiers.command) {
+            deg = deg.round();
+        }
+        let txt = format!("{deg:.1}");
+        *value = format!("{} deg", txt.trim_end_matches('0').trim_end_matches('.'));
+    }
 }
 
 /// The revolve axis (a point on it and its unit direction).
