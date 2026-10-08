@@ -327,8 +327,8 @@ impl Camera {
         let (r, u, b) = self.basis();
         Quat::from_basis(r, u, b)
     }
-    /// Blend between two cameras at `s` in [0, 1]: orientation by quaternion slerp, target,
-    /// distance and field of view linearly. The ends are returned exactly.
+    /// Blend between two cameras at `s` in [0, 1]: heading (the shorter way), elevation,
+    /// target, distance and field of view linearly. The ends are returned exactly.
     pub fn interpolate(a: &Camera, b: &Camera, s: f64) -> Camera {
         if !(s > 0.0) {
             return *a;
@@ -336,19 +336,13 @@ impl Camera {
         if s >= 1.0 {
             return *b;
         }
-        let q = a.orientation().slerp(b.orientation(), s);
-        let (r, _, back) = q.basis();
-        let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
-        let pitch = back.z.clamp(-1.0, 1.0).asin().clamp(-lim, lim);
-        // The camera has no roll: follow the slerped view direction, and near straight up/down
-        // (where the direction has no heading) the slerped right vector.
-        let yaw = if back.x.hypot(back.y) > 1e-3 {
-            (-back.x).atan2(-back.y)
-        } else if r.x.hypot(r.y) > 1e-9 {
-            (-r.y).atan2(r.x)
-        } else {
-            a.yaw + (b.yaw - a.yaw) * s
-        };
+        // The camera has no roll, so it turns in heading and elevation: both change smoothly
+        // to the very end (the heading the shorter way round). A slerp of orientations would
+        // need a roll-free heading at every step, and near straight up or down that heading
+        // swings fast, so a move to Top spun in its last frames.
+        let dy = (b.yaw - a.yaw + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        let yaw = a.yaw + dy * s;
+        let pitch = a.pitch + (b.pitch - a.pitch) * s;
         Camera {
             target: a.target + (b.target - a.target) * s,
             yaw,
@@ -404,17 +398,11 @@ mod tests {
         assert_eq!(anim.sample(10.0).0, a);
         assert_eq!(anim.sample(10.0 + CameraAnim::DURATION), (b, true));
         assert_eq!(anim.sample(99.0), (b, true));
-        // Midpoint: a valid orientation half way between (equal angles to both ends).
+        // Midpoint: half way in heading, elevation, target and distance.
         let (m, done) = anim.sample(10.0 + CameraAnim::DURATION / 2.0);
         assert!(!done && m.is_valid());
-        let q = m.orientation();
-        assert!((q.len() - 1.0).abs() < 1e-12);
-        let (qa, qb) = (a.orientation(), b.orientation());
-        let qm = qa.slerp(qb, 0.5);
-        assert!((qm.dot(qa).abs() - qm.dot(qb).abs()).abs() < 1e-12);
-        // The camera keeps no roll but follows the slerped view direction.
-        let (_, _, back) = qm.basis();
-        assert!(m.back().dist(back) < 1e-9, "{:?} vs {back:?}", m.back());
+        let dy = (b.yaw - a.yaw + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        assert!((m.yaw - (a.yaw + dy / 2.0)).abs() < 1e-12 && (m.pitch - (a.pitch + b.pitch) / 2.0).abs() < 1e-12);
         assert!(m.target.dist(Vec3::new(-2.0, 1.0, 6.5)) < 1e-9 && (m.distance - 100.0).abs() < 1e-9);
         // Quaternion round trip of a basis.
         let (r, u, bk) = a.basis();
@@ -455,5 +443,63 @@ mod tests {
         assert!(c.is_valid());
         c.fit(&Aabb3::EMPTY);
         assert!(c.is_valid());
+    }
+
+    /// A view change sampled every frame (60 fps) moves smoothly to the very end: no frame
+    /// turns the view, moves the target or changes the distance by much more than the average
+    /// step, and the last frame lands exactly on the target camera.
+    #[test]
+    fn view_animations_have_no_jumps() {
+        let base = Camera { target: Vec3::new(5.0, -3.0, 2.0), distance: 150.0, ..Default::default() };
+        let views = [
+            StandardView::Iso,
+            StandardView::Top,
+            StandardView::Front,
+            StandardView::Right,
+            StandardView::Bottom,
+            StandardView::Back,
+            StandardView::Left,
+        ];
+        let mut cams: Vec<Camera> = views
+            .iter()
+            .map(|v| {
+                let mut c = base;
+                c.set_view(*v);
+                c
+            })
+            .collect();
+        // Corners and edges of the view cube, and a fit (new target and distance).
+        cams.push(base.looking_from(Vec3::new(1.0, -1.0, 1.0)));
+        cams.push(base.looking_from(Vec3::new(-1.0, 0.0, 1.0)));
+        cams.push(base.looking_from(Vec3::new(0.0, 0.0, 1.0)));
+        cams.push(Camera { target: Vec3::new(-40.0, 10.0, 0.0), distance: 60.0, ..base });
+        for a in &cams {
+            for b in &cams {
+                let anim = CameraAnim::new(*a, *b, 0.0);
+                let frames = 30;
+                let mut prev = anim.sample(0.0).0;
+                let (mut steps, mut done_at) = (Vec::new(), None);
+                for f in 1..=frames + 2 {
+                    let (c, done) = anim.sample(f as f64 / 60.0);
+                    let turn = c.back().dist(prev.back()) + c.basis().0.dist(prev.basis().0);
+                    let moved =
+                        c.target.dist(prev.target) / a.distance.max(b.distance) + (c.distance - prev.distance).abs() / a.distance.max(b.distance);
+                    steps.push((f, turn, moved));
+                    prev = c;
+                    if done && done_at.is_none() {
+                        done_at = Some(f);
+                        assert_eq!(c, *b);
+                    }
+                }
+                assert!(done_at.is_some_and(|f| f >= frames), "ended early at {done_at:?}");
+                let total_turn: f64 = steps.iter().map(|s| s.1).sum();
+                let total_move: f64 = steps.iter().map(|s| s.2).sum();
+                for (f, turn, moved) in &steps {
+                    // The eased curve's fastest frame is 1.5x the average: allow 3x.
+                    assert!(*turn <= 3.0 * total_turn / frames as f64 + 1e-9, "turn jump at frame {f}: {turn} of {total_turn} ({a:?} -> {b:?})");
+                    assert!(*moved <= 3.0 * total_move / frames as f64 + 1e-9, "move jump at frame {f}: {moved} of {total_move}");
+                }
+            }
+        }
     }
 }
