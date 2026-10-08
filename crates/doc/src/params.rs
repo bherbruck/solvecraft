@@ -338,6 +338,23 @@ impl Document {
         }
     }
 
+    /// Every length input of every feature as the geometry reads it (mm; a unit-less result is
+    /// in the design's units), for checking that an edit moves nothing.
+    pub fn length_inputs(&self) -> Vec<Option<f64>> {
+        let (vals, _) = self.param_values();
+        let scale = expr::unit_info(self.units.trim()).filter(|(k, _)| *k == Kind::Length).map(|(_, s)| s).unwrap_or(1.0);
+        let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
+        self.features
+            .iter()
+            .flat_map(|f| f.kind.inputs())
+            .filter(|(_, _, k)| *k == Kind::Length)
+            .map(|(_, e, _)| {
+                let d = if expr::is_literal(&e) { expr::Defaults::default() } else { expr::Defaults { len: scale, ..expr::Defaults::default() } };
+                expr::eval_with(&e, &look).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
+            })
+            .collect()
+    }
+
     pub fn change_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {
         let hit = self.features.iter().enumerate().find_map(|(i, f)| f.param_names.iter().position(|n| n == name).map(|k| (i, k)));
         let Some((i, k)) = hit else { return self.set_param(name, expr_s, unit, comment) };
@@ -529,7 +546,16 @@ impl Document {
         for f in &self.features {
             for (name, (_, e, k)) in f.param_names.iter().zip(f.kind.inputs()) {
                 if !name.is_empty() {
-                    v.push(ParamDef { name: name.clone(), expr: e, unit: unit_of(k).into() });
+                    // A bare number stored in an input is mm (the design's units are written in
+                    // when it is typed); anything else that comes out unit-less (a unit-less
+                    // parameter used as a length) is in the design's units.
+                    let unit = match k {
+                        Kind::Length if !expr::is_literal(&e) && expr::unit_info(self.units.trim()).is_some_and(|(k, _)| k == Kind::Length) => {
+                            self.units.trim().to_string()
+                        }
+                        _ => unit_of(k).to_string(),
+                    };
+                    v.push(ParamDef { name: name.clone(), expr: e, unit });
                 }
             }
         }

@@ -338,6 +338,7 @@ fn fingerprint(prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_ba
     let mut h = std::collections::hash_map::DefaultHasher::new();
     prev.hash(&mut h);
     rolled_back.hash(&mut h);
+    vals.get(DESIGN_LEN).map(|v| v.v.to_bits()).hash(&mut h);
     serde_json::to_string(f).unwrap_or_default().hash(&mut h);
     for n in param_names(f) {
         n.hash(&mut h);
@@ -360,6 +361,7 @@ fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     for f in doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. })) {
         fingerprint(0, f, vals, false).hash(&mut h);
     }
+    doc.units.hash(&mut h);
     serde_json::to_string(&doc.sheet).unwrap_or_default().hash(&mut h);
     serde_json::to_string(&doc.plastic).unwrap_or_default().hash(&mut h);
     serde_json::to_string(&doc.components).unwrap_or_default().hash(&mut h);
@@ -429,7 +431,12 @@ impl Model {
 
     /// Re-evaluate the document, reusing results up to the first changed feature.
     pub fn evaluate(&mut self, doc: &Document) {
-        let (vals, perr) = doc.param_values();
+        let (mut vals, perr) = doc.param_values();
+        if let Some((Kind::Length, scale)) = expr::unit_info(doc.units.trim())
+            && scale != 1.0
+        {
+            vals.insert(DESIGN_LEN.into(), Value { v: scale, len: 0, ang: 0 });
+        }
         self.param_errors = perr;
         let mut prev_fp = 0u64;
         let mut state = self.empty.clone();
@@ -586,7 +593,18 @@ impl Model {
     }
 }
 
+/// Key of the design's length unit (mm per unit) among the values (no parameter can be named
+/// so).
+pub(crate) const DESIGN_LEN: &str = "\u{1}design_len";
+
+/// An expression's value. A length that comes out unit-less without being a bare number (a
+/// unit-less parameter used as a length) is in the design's units.
 fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f64> {
+    let scale = vals.get(DESIGN_LEN).map(|x| x.v).unwrap_or(1.0);
+    if k == Kind::Length && scale != 1.0 && !expr::is_literal(e) {
+        let v = expr::eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))))?;
+        return v.to_kind_in(k, expr::Defaults { len: scale, ..expr::Defaults::default() });
+    }
     Document::eval_in(vals, e, k)
 }
 

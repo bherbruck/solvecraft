@@ -165,14 +165,17 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
     if old == u {
         return Ok(json!({ "units": u, "kept": [] }));
     }
-    let (before, _) = s.doc.param_values();
+    // What the geometry reads: every feature's length inputs.
+    let before = s.doc.length_inputs();
     s.doc_mut().units = u.to_string();
     // Unit-less user parameters holding a bare number read it in the design's units where they
-    // stand for lengths. If any value moved, those numbers keep the old unit, written out.
-    let (after, _) = s.doc.param_values();
-    let moved = before.iter().any(|(k, b)| after.get(k).is_none_or(|a| (a.v - b.v).abs() > 1e-9 * b.v.abs().max(1.0)));
+    // stand for lengths. If any input moved, those numbers keep the old unit, written out.
+    let same = |a: &[Option<f64>]| {
+        a.iter().zip(&before).filter(|(x, y)| matches!((x, y), (Some(x), Some(y)) if (x - y).abs() <= 1e-9 * y.abs().max(1.0))).count()
+    };
+    let after = s.doc.length_inputs();
     let mut kept = Vec::new();
-    if moved {
+    if same(&after) < before.len() {
         let bare: Vec<(String, String)> = s
             .doc
             .params
@@ -181,16 +184,15 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|p| (p.name.clone(), p.expr.trim().to_string()))
             .collect();
         for (name, e) in bare {
+            let now = same(&s.doc.length_inputs());
             let probe = {
                 let mut d = (*s.doc).clone();
-                let _ = d.change_param(&name, &format!("{e} {old}"), None, None);
-                d.param_values().0
+                let _ = d.change_param(&name, &format!("{e} {old}"), Some(&old), None);
+                same(&d.length_inputs())
             };
-            // Only when writing the old unit puts the values back where they were.
-            let fixes = before.iter().filter(|(k, b)| probe.get(*k).is_some_and(|a| (a.v - b.v).abs() <= 1e-9 * b.v.abs().max(1.0))).count()
-                > before.iter().filter(|(k, b)| after.get(*k).is_some_and(|a| (a.v - b.v).abs() <= 1e-9 * b.v.abs().max(1.0))).count();
-            if fixes {
-                s.doc_mut().change_param(&name, &format!("{e} {old}"), None, None)?;
+            // Only when writing the old unit puts more inputs back where they were.
+            if probe > now {
+                s.doc_mut().change_param(&name, &format!("{e} {old}"), Some(&old), None)?;
                 kept.push(name);
             }
         }

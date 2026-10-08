@@ -1467,3 +1467,15 @@ fn booleans_stay_in_their_component() {
     assert!((vol(&mut s, "BBox") - (2000.0 - 8.0 * 6.0 * 10.0)).abs() < 1e-6, "{}", vol(&mut s, "BBox"));
     assert!(s.execute("Extrude", &json!({"sketch": "Slot", "distance": 1, "operation": "cut", "participants": ["Nope"]})).is_err());
 }
+
+/// A unit-less parameter used as a length means the design's units.
+#[test]
+fn unitless_parameters_used_as_lengths_take_the_design_units() {
+    let mut s = Session::default();
+    s.doc_mut().units = "in".into();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "2", "unit": ""}));
+    run(&mut s, "PrimitiveBox", json!({"length": "w", "width": "w * 1", "height": "10 mm"}));
+    let m = run(&mut s, "MeasureCommand", json!({}));
+    let max = |i: usize| m["bodies"][0]["bbox"]["max"][i].as_f64().unwrap_or(0.0);
+    assert!((max(0) - 50.8).abs() < 1e-9 && (max(1) - 50.8).abs() < 1e-9 && (max(2) - 10.0).abs() < 1e-9, "{m}");
+}
