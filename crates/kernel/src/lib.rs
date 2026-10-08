@@ -56,6 +56,7 @@ pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
 pub use measure::{BodyMeasure, measure};
 pub use meshbody::{MAX_TRIANGLES, mesh_body};
+pub use offset::with_same_surface;
 pub use ops::{BoolOp, boolean, split_by_plane, transform, transform_matrix};
 pub use polybool::{faceted_boolean, planar_boolean};
 pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};

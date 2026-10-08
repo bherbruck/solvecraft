@@ -372,6 +372,14 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<String>,
     },
+    /// Remove faces (at the given points) and heal the gap from the neighbouring planes, as when
+    /// a fillet, chamfer, hole or boss is taken off. A picked face brings the rest of its surface
+    /// (both halves of a hole's wall).
+    DeleteFace {
+        faces: Vec<Vec3>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
     /// A box around bodies, grown by a margin.
     BoundingSolid {
         bodies: Vec<String>,
@@ -931,6 +939,7 @@ impl FeatureKind {
             FeatureKind::Move { .. } => "MoveFeature",
             FeatureKind::Scale { .. } => "ScaleFeature",
             FeatureKind::OffsetFace { .. } => "OffsetFacesFeature",
+            FeatureKind::DeleteFace { .. } => "DeleteFaceFeature",
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
@@ -991,6 +1000,7 @@ impl FeatureKind {
             FeatureKind::Move { .. } => "Move",
             FeatureKind::Scale { .. } => "Scale",
             FeatureKind::OffsetFace { .. } => "OffsetFace",
+            FeatureKind::DeleteFace { .. } => "DeleteFace",
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::Emboss { .. } => "Emboss",
@@ -1031,6 +1041,7 @@ impl FeatureKind {
             FeatureKind::Shell { faces, .. }
             | FeatureKind::Draft { faces, .. }
             | FeatureKind::OffsetFace { faces, .. }
+            | FeatureKind::DeleteFace { faces, .. }
             | FeatureKind::ReplaceFace { faces, .. } => faces.iter_mut().collect(),
             FeatureKind::Hole { position, points: None, to, .. } => std::iter::once(position).chain(to.iter_mut()).collect(),
             FeatureKind::Hole { to: Some(t), .. } => vec![t],
@@ -1168,7 +1179,7 @@ impl FeatureKind {
                 v.extend(depth.iter().map(String::as_str));
             }
             FeatureKind::ReplaceFace { target, .. } => plane_exprs(target, &mut v),
-            FeatureKind::Align { .. } | FeatureKind::Remove { .. } | FeatureKind::BoundaryFill { .. } => {}
+            FeatureKind::Align { .. } | FeatureKind::Remove { .. } | FeatureKind::BoundaryFill { .. } | FeatureKind::DeleteFace { .. } => {}
             FeatureKind::Stitch { tolerance, .. } => v.push(tolerance),
             FeatureKind::Thicken { thickness, .. } => v.push(thickness),
             FeatureKind::SurfaceTrim { plane, .. } => plane_exprs(plane, &mut v),

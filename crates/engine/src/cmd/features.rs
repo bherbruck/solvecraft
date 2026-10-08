@@ -66,6 +66,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("scale")
         .params("bodies: [names]; factor: expr | factors: [x, y, z] exprs; origin?: [x,y,z]"),
+    CommandSpec::new("face.delete", "Delete Face", delete_face)
+        .at("SOLID", "MODIFY")
+        .icon("delete")
+        .params("faces: [[x,y,z] points on the faces]; body?. The neighbouring planes close the gap (a fillet, chamfer, hole or boss taken off)"),
     CommandSpec::new("solid.offset_face", "Offset Face", offset_face)
         .at("SOLID", "MODIFY")
         .icon("offset_face")
@@ -1186,6 +1190,11 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &factor, Kind::Unitless, cmd, "factor")?;
     let origin = p.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
     add_feature(s, p, FeatureKind::Scale { bodies, origin, factor, factors })
+}
+
+fn delete_face(s: &mut Session, p: &Value) -> Result<Value> {
+    let faces = face_points(p, "face.delete")?;
+    add_feature(s, p, FeatureKind::DeleteFace { faces, body: str_(p, "body").map(str::to_string) })
 }
 
 fn offset_face(s: &mut Session, p: &Value) -> Result<Value> {

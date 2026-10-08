@@ -231,11 +231,11 @@ fn delete_key_handles_every_kind_and_asks_about_dependents() {
     assert!(app.session.doc.features.len() < n);
     app.run("edit.undo", json!({})).unwrap();
     assert_eq!(app.session.doc.features.len(), n);
-    // A face alone: not available yet, nothing changes.
+    // A face its neighbours can't close (a side of the plate): refused, nothing changes.
     let b0 = app.session.model.state().bodies[0].name.clone();
     app.run("select.set", json!({"items": [{"type": "face", "body": b0, "index": 0, "point": [0, 0, 0]}]})).unwrap();
     crate::delete::delete_selection(&mut app);
-    assert!(app.status.as_ref().is_some_and(|s| s.0.contains("not available yet")), "{:?}", app.status);
+    assert!(app.status.as_ref().is_some_and(|s| s.0.contains("Delete Face")), "{:?}", app.status);
     assert_eq!(app.session.doc.features.len(), n);
 }
 

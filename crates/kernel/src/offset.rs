@@ -747,7 +747,7 @@ pub(crate) fn draft_walls(b: &Body, chosen: &[usize], neutral: &solvecraft_geom:
 
 /// The chosen faces and every face on the same surface joined to them (the halves of a hole's
 /// wall), as face indices.
-pub(crate) fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
+pub fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
     let faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
     let size = b.size();
     let tol = (size * 1e-7).max(1e-9) * 100.0;

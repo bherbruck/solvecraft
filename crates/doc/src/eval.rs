@@ -2627,6 +2627,24 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
+        FeatureKind::DeleteFace { faces, body } => {
+            let i = body_at(st, body, faces)?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let mut picked: Vec<usize> = Vec::new();
+            for p in faces {
+                let fi = crate::appearance::face_index_at(&mb, *p)
+                    .ok_or_else(|| DocError::Invalid(format!("Delete Face: no face of {} at {p:?}", mb.name)))?;
+                if !picked.contains(&fi) {
+                    picked.push(fi);
+                }
+            }
+            let all = kernel::with_same_surface(&mb.body, &picked);
+            let nb = kernel::delete_faces(&mb.body, &all)?;
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody::new(mb.name, nb, mb.feature);
+            }
+            Ok(())
+        }
         FeatureKind::BoundingSolid { bodies, margin } => {
             let m = val(vals, margin, Kind::Length)?;
             let mut bb = solvecraft_geom::Aabb3::EMPTY;

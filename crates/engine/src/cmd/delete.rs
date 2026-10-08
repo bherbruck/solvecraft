@@ -6,6 +6,7 @@
 
 use serde_json::{Value, json};
 use solvecraft_doc::FeatureKind;
+use solvecraft_geom::Vec3;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_};
@@ -63,6 +64,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let mut entities = Vec::new();
     let mut features: Vec<u64> = Vec::new();
     let mut bodies: Vec<String> = Vec::new();
+    let mut faces: Vec<(String, Vec<Vec3>)> = Vec::new();
     for x in &items {
         match x {
             Sel::SketchCurve { id } | Sel::SketchPoint { id } | Sel::SketchConstraint { id } => entities.push(id.clone()),
@@ -78,7 +80,10 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             },
             Sel::Axis { .. } => skip("the origin axes can't be deleted".into()),
             Sel::Body { name } => bodies.push(name.clone()),
-            Sel::Face { .. } => skip("Delete Face: not available yet".into()),
+            Sel::Face { body, point, .. } => match faces.iter_mut().find(|(b, _)| b == body) {
+                Some((_, ps)) => ps.push(*point),
+                None => faces.push((body.clone(), vec![*point])),
+            },
             Sel::Edge { .. } | Sel::Vertex { .. } => skip("edges and vertices are deleted with their body or face".into()),
             Sel::Profile { .. } => skip("a profile goes with its sketch".into()),
         }
@@ -92,6 +97,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             sub(s, "sketch.delete", json!({ "entities": entities }))?;
             done = true;
         }
+    }
+    // Faces of a body that is going anyway are left to it; the rest become Delete Face features.
+    for (body, points) in faces.iter().filter(|(b, _)| !bodies.contains(b)) {
+        sub(s, "face.delete", json!({ "faces": points, "body": body }))?;
+        done = true;
     }
     if !features.is_empty() {
         let ids: Vec<String> = features.iter().map(u64::to_string).collect();
