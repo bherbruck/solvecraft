@@ -195,7 +195,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         if app.ui.hidden_bodies.contains(&b.name) || app.preview.replaced.contains(&b.name) {
             continue;
         }
-        let col = c4(tk.body);
+        let col = c4(s.doc.materials.get(&b.name).and_then(|m| crate::theme::material_color(m)).unwrap_or(tk.body));
         let m = b.mesh();
         for t in &m.triangles {
             for k in t {
@@ -663,8 +663,8 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
     // Bodies made by the timeline item under the cursor.
     if let Some(fid) = app.viewport.hover_feature {
         let k = t.hover_face_lift;
-        let c = (t.body.r(), t.body.g(), t.body.b());
         for b in st.bodies.iter().filter(|b| b.feature == fid && !app.ui.hidden_bodies.contains(&b.name)) {
+            let c = body_rgb(app, &b.name);
             let m = b.mesh();
             for f in 0..b.body.face_count() {
                 face_tris(&mut sc, &m, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
@@ -682,7 +682,7 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
         Some(Hit::Face { body, .. }) if app.ui.pick_bodies && app.dialog.is_none() && app.tool.is_none() => {
             if let Some(b) = st.body(body) {
                 let k = t.hover_face_lift;
-                let c = (t.body.r(), t.body.g(), t.body.b());
+                let c = body_rgb(app, body);
                 let m = b.mesh();
                 for f in 0..b.body.face_count() {
                     face_tris(&mut sc, &m, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
@@ -695,7 +695,7 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
         {
             if let Some(b) = st.body(body) {
                 let k = t.hover_face_lift;
-                let c = (t.body.r(), t.body.g(), t.body.b());
+                let c = body_rgb(app, body);
                 face_tris(&mut sc, &b.mesh(), *index, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
                 let m = b.mesh();
                 for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
@@ -725,6 +725,12 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
         _ => {}
     }
     sc
+}
+
+/// A body's display colour (its material's, else the theme's) as RGB.
+fn body_rgb(app: &SolveApp, name: &str) -> (u8, u8, u8) {
+    let c = app.session.doc.materials.get(name).and_then(|m| crate::theme::material_color(m)).unwrap_or(Tokens::get().body);
+    (c.r(), c.g(), c.b())
 }
 
 fn polyline_mid(pts: &[Vec3]) -> Vec3 {

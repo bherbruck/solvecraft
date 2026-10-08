@@ -239,6 +239,26 @@ impl Tokens {
     }
 }
 
+/// How a physical material looks (the default appearance follows the material).
+pub fn material_color(name: &str) -> Option<Color32> {
+    Some(match name {
+        "Steel" => Color32::from_rgb(158, 164, 172),
+        "Stainless Steel" => Color32::from_rgb(186, 191, 198),
+        "Aluminum" => Color32::from_rgb(204, 208, 214),
+        "Brass" => Color32::from_rgb(208, 172, 88),
+        "Copper" => Color32::from_rgb(204, 122, 80),
+        "Titanium" => Color32::from_rgb(150, 148, 158),
+        "Cast Iron" => Color32::from_rgb(104, 104, 110),
+        "ABS Plastic" => Color32::from_rgb(222, 222, 216),
+        "PLA" => Color32::from_rgb(110, 160, 222),
+        "Nylon" => Color32::from_rgb(236, 230, 214),
+        "Polycarbonate" => Color32::from_rgb(196, 216, 232),
+        "Oak" => Color32::from_rgb(190, 146, 92),
+        "Glass" => Color32::from_rgb(170, 208, 218),
+        _ => return None,
+    })
+}
+
 /// Switch themes (the visuals follow on the next [`apply`]).
 pub fn set_dark(dark: bool) {
     DARK.store(dark, Ordering::Relaxed);

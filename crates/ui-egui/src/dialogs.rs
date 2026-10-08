@@ -78,6 +78,10 @@ pub enum Kind {
     Sweep {
         operation: usize,
     },
+    /// Physical material (and with it the appearance) of bodies.
+    Material {
+        index: usize,
+    },
     /// Section Analysis: cut the view by a plane, moved along its normal.
     Section {
         offset: String,
@@ -202,6 +206,7 @@ impl Dialog {
             "MirrorCommand" => {
                 Dialog::new(Kind::Mirror, vec![SelInput::new("Bodies", BODIES, true), SelInput::new("Mirror plane", PLANES | PLANAR_FACES, false)])
             }
+            "PhysicalMaterialCommand" => Dialog::new(Kind::Material { index: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
             "FusionHalfSectionViewCommand" => {
                 Dialog::new(Kind::Section { offset: "0 mm".into(), flip: false }, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)])
             }
@@ -489,6 +494,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Draft { .. } => "DRAFT",
         Kind::Mirror => "MIRROR",
         Kind::Measure { .. } => "MEASURE",
+        Kind::Material { .. } => "PHYSICAL MATERIAL",
         Kind::Section { .. } => "SECTION ANALYSIS",
         Kind::PatternRect { .. } => "RECTANGULAR PATTERN",
         Kind::PatternCirc { .. } => "CIRCULAR PATTERN",
@@ -749,6 +755,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     Kind::Mirror => {}
                     Kind::Measure { result, .. } => measure_rows(ui, result.as_ref()),
+                    Kind::Material { index } => {
+                        let names: Vec<&str> = solvecraft_engine::doc::MATERIALS.iter().map(|(n, _)| *n).collect();
+                        ui.label("Material");
+                        combo(ui, "mat", &names, index);
+                        ui.end_row();
+                    }
                     Kind::Section { offset, flip } => {
                         ui.label("Distance");
                         enter |= field(ui, offset);
@@ -902,7 +914,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (enter_free, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
     let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::new("sc_canvas_value")));
-    if d.previews() && (enter || canvas_enter || (enter_free && nothing_focused)) {
+    let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::ConfirmDelete { .. });
+    if enter_applies && (enter || canvas_enter || (enter_free && nothing_focused)) {
         ok = true;
     }
     if esc {
@@ -1211,6 +1224,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 "Sweep",
                 json!({"sketch": sketch, "profiles": idx, "path_sketch": path_sketch, "path": path, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
+        }
+        Kind::Material { index } => {
+            need(0, "bodies")?;
+            let name = solvecraft_engine::doc::MATERIALS.get(*index).map(|(n, _)| *n).unwrap_or("Default");
+            ("PhysicalMaterialCommand", json!({"bodies": body_names(0), "material": name}))
         }
         Kind::Section { offset, flip } => {
             need(0, "a plane or planar face")?;
