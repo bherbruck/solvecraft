@@ -50,11 +50,7 @@ impl FeatureKind {
             }
             FeatureKind::Pipe { path_sketch, .. } => sk(path_sketch),
             FeatureKind::Loft { sections, .. } => sections.iter_mut().for_each(|s| sk(&mut s.sketch)),
-            FeatureKind::Hole { points, .. } => {
-                if let Some(p) = points {
-                    sk(&mut p.sketch);
-                }
-            }
+            FeatureKind::Hole { points: Some(p), .. } => sk(&mut p.sketch),
             FeatureKind::Pattern { features, pattern, .. } => {
                 feats(features);
                 if let PatternKind::Path { path_sketch, .. } = pattern {
