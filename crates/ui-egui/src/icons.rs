@@ -192,6 +192,13 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.poly(&[(4.0, 7.5), (12.0, 12.0), (12.0, 21.0), (4.0, 16.5)], a, ink);
             pen.poly(&[(12.0, 12.0), (20.0, 7.5), (20.0, 16.5), (12.0, 21.0)], Color32::TRANSPARENT, ink);
         }
+        // Help: a question mark in a ring.
+        "help" => {
+            pen.circle(12.0, 12.0, 9.0, Color32::TRANSPARENT, ink);
+            pen.arc(12.0, 9.5, 3.2, -0.6, 3.4, ink);
+            pen.line(&[(13.9, 12.0), (12.0, 13.6), (12.0, 15.0)], ink);
+            pen.dot(12.0, 17.8, ink);
+        }
         "sun" => {
             pen.circle(12.0, 12.0, 4.5, a, ink);
             for i in 0..8 {

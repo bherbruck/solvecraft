@@ -21,6 +21,8 @@ pub struct Keymap {
     pub custom: BTreeMap<String, String>,
     /// The Keyboard Shortcuts window.
     pub open: bool,
+    /// Opened from Help: a list to read, not to edit.
+    pub read_only: bool,
     filter: String,
     /// The command waiting for a key press.
     capturing: Option<String>,
@@ -145,7 +147,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut app.keymap.filter).hint_text("Filter commands or keys").desired_width(300.0));
-                if ui.button("Reset All").clicked() {
+                if !app.keymap.read_only && ui.button("Reset All").clicked() {
                     action = Some((String::new(), "reset_all"));
                 }
             });
@@ -182,6 +184,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         } else {
                             key.clone()
                         };
+                        if app.keymap.read_only {
+                            ui.label(RichText::new(text).strong());
+                            ui.end_row();
+                            continue;
+                        }
                         let b =
                             egui::Button::new(RichText::new(text).color(if changed { t.accent } else { t.text })).min_size(egui::vec2(110.0, 0.0));
                         if ui.add(b).on_hover_text("Click, then press the new key").clicked() {

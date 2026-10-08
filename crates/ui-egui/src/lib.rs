@@ -23,6 +23,7 @@ pub mod dialogs_sheet;
 pub mod dim_view;
 pub mod documents;
 pub mod gpu;
+pub mod help;
 pub mod home;
 pub mod icons;
 pub mod inference;
@@ -158,6 +159,8 @@ pub struct SolveApp {
     pub sbox: shortcut_box::ShortcutBox,
     /// Keyboard shortcuts the user changed.
     pub keymap: keymap::Keymap,
+    /// The Help menu and the About window.
+    pub help: help::HelpState,
     pub preview: preview::PreviewState,
     /// The last command started interactively (id, label), for Repeat.
     pub last_command: Option<(String, String)>,
@@ -211,6 +214,7 @@ impl SolveApp {
             tree: browser::TreeState::default(),
             sbox: shortcut_box::ShortcutBox::default(),
             keymap: keymap::Keymap::default(),
+            help: help::HelpState::default(),
             preview: preview::PreviewState::default(),
             last_command: None,
             esc_handled: false,
@@ -239,6 +243,8 @@ impl SolveApp {
     /// bits and MSAA sample count). Without it the viewport renders on the CPU.
     pub fn set_wgpu(&mut self, rs: &egui_wgpu::RenderState, depth_bits: u8, samples: u32) {
         self.viewport.gpu = Some(gpu::install(rs, depth_bits, samples));
+        let info = rs.adapter.get_info();
+        self.help.gpu = Some(format!("{} ({:?}, {:?})", info.name.trim(), info.backend, info.device_type));
     }
 
     /// Preferences kept between runs (JSON), for the host to store.

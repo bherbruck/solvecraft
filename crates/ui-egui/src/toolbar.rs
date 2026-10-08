@@ -86,6 +86,14 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         if click(ui, if app.ui.dark { "sun" } else { "moon" }, theme_tip) {
             app.ui.dark = !app.ui.dark;
         }
+        if click(ui, "help", "Help") {
+            app.help.menu = !app.help.menu;
+            let at = ui.ctx().input(|i| i.pointer.latest_pos()).map_or(300.0, |p| p.x);
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(egui::Id::new("sc_help_opened"), true);
+                d.insert_temp(egui::Id::new("sc_help_anchor"), at);
+            });
+        }
         if file {
             app.ui.palette_open = false;
             let ctx = ui.ctx().clone();
@@ -113,6 +121,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     file_menu(app, ui.ctx());
+    let help_x = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::new("sc_help_anchor")).unwrap_or(300.0));
+    crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, 34.0));
 }
 
 fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
@@ -180,6 +190,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 if item(ui, "Keyboard Shortcuts…", "") {
                     app.keymap.open = true;
+                    app.keymap.read_only = false;
                     close = true;
                 }
                 if item(ui, "Quit", "") {
