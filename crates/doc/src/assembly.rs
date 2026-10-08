@@ -166,7 +166,13 @@ impl FeatureKind {
                 pt(origin);
                 dir(d);
             }
-            FeatureKind::Fillet { edges, .. } | FeatureKind::Chamfer { edges, .. } => edges.iter_mut().for_each(pt),
+            FeatureKind::Fillet { edges, style, .. } => {
+                edges.iter_mut().for_each(pt);
+                if let crate::FilletStyle::Variable { start, .. } = style {
+                    pt(start);
+                }
+            }
+            FeatureKind::Chamfer { edges, .. } => edges.iter_mut().for_each(pt),
             FeatureKind::Shell { faces, .. } | FeatureKind::OffsetFace { faces, .. } => faces.iter_mut().for_each(pt),
             FeatureKind::Draft { faces, neutral, pull, .. } => {
                 faces.iter_mut().for_each(pt);

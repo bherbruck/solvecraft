@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 mod blend;
+mod blend_variable;
 mod body;
 mod build;
 mod coplanar;
@@ -42,6 +43,7 @@ mod sweep_path;
 mod topo;
 
 pub use blend::{ChamferSide, chamfer, chamfer_sides, fillet};
+pub use blend_variable::{fillet_chord, fillet_variable};
 pub use body::{Body, EdgeInfo, FaceInfo, FacePaint, Paint};
 pub use build::{PathSeg, box_solid, cylinder, extrude, extrude_tapered, loft, revolve, sphere, sweep, torus};
 pub use delete_face::delete_faces;

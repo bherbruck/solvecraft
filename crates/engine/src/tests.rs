@@ -1058,6 +1058,25 @@ fn split_body_by_a_face() {
     assert!(s.execute("FusionSplitBodyCommand", &json!({"body": "Block", "tool": {"body": "Tool", "point": [100, 0, 0]}})).is_err());
 }
 
+/// Fillet types: chord length (radius from the face angle) and a radius varying along the
+/// edge; volumes from the removed material.
+#[test]
+fn chord_and_variable_fillets() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 20, "height": 30, "body_name": "B"}));
+    run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [[10, 10, 30]], "radius": 4, "type": "chord"}));
+    let r = 4.0 / 2f64.sqrt();
+    let v = solvecraft_kernel::measure(&s.world_state().body("B").unwrap().body).unwrap().volume;
+    assert!(rel(v, 6000.0 - (1.0 - PI / 4.0) * r * r * 20.0) < 1e-4, "{v}");
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 20, "height": 30, "body_name": "B"}));
+    run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [[10, 10, 30]], "radius": 2, "type": "variable", "radius2": 5, "start": [10, 0, 30]}));
+    let v = solvecraft_kernel::measure(&s.world_state().body("B").unwrap().body).unwrap().volume;
+    let removed = (1.0 - PI / 4.0) * 20.0 * (4.0 + 10.0 + 25.0) / 3.0;
+    assert!(rel(v, 6000.0 - removed) < 1e-4, "{v}");
+    assert!(s.execute("FusionFilletEdgesCommand", &json!({"edges": [[10, 10, 30]], "radius": 2, "type": "variable"})).is_err());
+}
+
 /// Components export as a STEP assembly: products, occurrences, placements.
 #[test]
 fn components_export_as_step_assembly() {

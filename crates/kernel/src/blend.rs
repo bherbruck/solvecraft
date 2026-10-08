@@ -21,16 +21,16 @@ enum Shape {
     Flat,
 }
 
-fn unsupported(msg: &str) -> KernelError {
+pub(crate) fn unsupported(msg: &str) -> KernelError {
     KernelError::Failed(format!("not supported yet: {msg}"))
 }
 
-fn vtx(v: &mt::Vertex) -> Vec3 {
+pub(crate) fn vtx(v: &mt::Vertex) -> Vec3 {
     from_p3(v.point())
 }
 
 /// Outward unit normal of a planar face (from its oriented surface), if planar.
-fn plane_normal(f: &mt::Face) -> Option<Vec3> {
+pub(crate) fn plane_normal(f: &mt::Face) -> Option<Vec3> {
     match f.oriented_surface() {
         mt::Surface::Plane(p) => {
             let n = p.normal();
@@ -42,7 +42,7 @@ fn plane_normal(f: &mt::Face) -> Option<Vec3> {
 
 /// Replace edges in a face's oriented boundary (by id, keeping orientation), and insert extra
 /// edges where consecutive edges no longer connect.
-fn rebuild_face(f: &mt::Face, subst: &HashMap<mt::EdgeID, mt::Edge>, connectors: &[mt::Edge]) -> Result<mt::Face> {
+pub(crate) fn rebuild_face(f: &mt::Face, subst: &HashMap<mt::EdgeID, mt::Edge>, connectors: &[mt::Edge]) -> Result<mt::Face> {
     let mut wires = Vec::new();
     for w in f.absolute_boundaries() {
         let mut edges: Vec<mt::Edge> = Vec::new();

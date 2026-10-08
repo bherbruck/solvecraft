@@ -2101,7 +2101,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
-        FeatureKind::Fillet { edges, radius, body } | FeatureKind::Chamfer { edges, distance: radius, body, .. } => {
+        FeatureKind::Fillet { edges, radius, body, .. } | FeatureKind::Chamfer { edges, distance: radius, body, .. } => {
             let r = val(vals, radius, Kind::Length)?;
             let ti = blend_target(st, body, edges)?;
             let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
@@ -2144,6 +2144,15 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 resolve_edges(&mb.body, edges, &f.edge_refs, warning)?
             };
             let nb = match &f.kind {
+                FeatureKind::Fillet { style: crate::FilletStyle::Chord, .. } => kernel::fillet_chord(&mb.body, &edges, r)?,
+                FeatureKind::Fillet { style: crate::FilletStyle::Variable { radius2, start }, .. } => {
+                    let r2 = val(vals, radius2, Kind::Length)?;
+                    let mut b = mb.body.clone();
+                    for p in &edges {
+                        b = kernel::fillet_variable(&b, *p, *start, r, r2)?;
+                    }
+                    b
+                }
                 FeatureKind::Fillet { .. } => kernel::fillet(&mb.body, &edges, r)?,
                 FeatureKind::Chamfer { distance2, angle, flip, .. } => chamfer_with(vals, &mb.body, &edges, r, distance2, angle, *flip)?,
                 _ => return Err(DocError::Invalid("blend".into())),

@@ -562,7 +562,11 @@ mod tests {
             None,
         )
         .unwrap();
-        doc.add_feature(FeatureKind::Fillet { edges: vec![Vec3::new(0.0, 0.0, 5.0)], radius: "4".into(), body: None }, None).unwrap();
+        doc.add_feature(
+            FeatureKind::Fillet { edges: vec![Vec3::new(0.0, 0.0, 5.0)], radius: "4".into(), body: None, style: Default::default() },
+            None,
+        )
+        .unwrap();
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: Vec3::new(80.0, 0.0, 0.0),

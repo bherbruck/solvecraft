@@ -48,7 +48,14 @@ impl FeatureKind {
                 }
             }
             FeatureKind::Revolve { angle, .. } => v.push(("Angle", angle, A)),
-            FeatureKind::Fillet { radius, .. } => v.push(("Radius", radius, L)),
+            FeatureKind::Fillet { radius, style, .. } => match style {
+                crate::FilletStyle::Constant => v.push(("Radius", radius, L)),
+                crate::FilletStyle::Chord => v.push(("Chord length", radius, L)),
+                crate::FilletStyle::Variable { radius2, .. } => {
+                    v.push(("Start radius", radius, L));
+                    v.push(("End radius", radius2, L));
+                }
+            },
             FeatureKind::Chamfer { distance, distance2, angle, .. } => {
                 v.push(("Distance", distance, L));
                 if let Some(d) = distance2 {

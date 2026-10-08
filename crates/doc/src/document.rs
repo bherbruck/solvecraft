@@ -172,6 +172,10 @@ pub enum FeatureKind {
         radius: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<String>,
+        /// Constant radius (the default), chord length (`radius` is the width across), or a
+        /// radius varying along each edge.
+        #[serde(default, skip_serializing_if = "FilletStyle::is_constant")]
+        style: FilletStyle,
     },
     Chamfer {
         edges: Vec<Vec3>,
@@ -677,6 +681,24 @@ pub enum FeatureKind {
     },
 }
 
+/// How a fillet's size is given.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FilletStyle {
+    #[default]
+    Constant,
+    /// `radius` is the chord: the width across the blend.
+    Chord,
+    /// `radius` at the end of each edge nearest `start`, `radius2` at the other, linear between.
+    Variable { radius2: String, start: Vec3 },
+}
+
+impl FilletStyle {
+    pub fn is_constant(&self) -> bool {
+        *self == FilletStyle::Constant
+    }
+}
+
 /// A face picked by a point on it, on a named body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FaceAt {
@@ -995,7 +1017,12 @@ impl FeatureKind {
                 }
             }
             FeatureKind::Revolve { angle, .. } => v.push(angle),
-            FeatureKind::Fillet { radius, .. } => v.push(radius),
+            FeatureKind::Fillet { radius, style, .. } => {
+                v.push(radius);
+                if let FilletStyle::Variable { radius2, .. } = style {
+                    v.push(radius2);
+                }
+            }
             FeatureKind::Chamfer { distance, distance2, angle, .. } => {
                 v.push(distance);
                 v.extend(distance2.iter().map(String::as_str));

@@ -42,7 +42,7 @@ pub fn patch_region(plane: &Plane, region: &Region2) -> Result<Body> {
 }
 
 /// The edge of a body nearest a point (by samples along each edge).
-fn edge_near(body: &Body, p: Vec3) -> Option<mt::Edge> {
+pub(crate) fn edge_near(body: &Body, p: Vec3) -> Option<mt::Edge> {
     let mut best: Option<(f64, mt::Edge)> = None;
     for e in body.solid.edge_iter() {
         let c = e.curve();

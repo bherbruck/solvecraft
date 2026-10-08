@@ -31,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("fillet")
         .key("F")
-        .params("edges: [[x,y,z] point on edge | {body, index}]; radius: expr; body?"),
+        .params("edges: [[x,y,z] point on edge | {body, index}]; radius: expr; body?; type?: constant|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other); radius2?; start?: [x,y,z]"),
     CommandSpec::new("FusionChamferCommand", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
     CommandSpec::new("FusionCombineCommand", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool"),
     CommandSpec::new("PatternRectangular", "Rectangular Pattern", pattern_rect)
@@ -515,7 +515,19 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let edges = edge_points(s, p, cmd)?;
     let radius = req_expr(cmd, p, "radius")?;
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
-    add_feature(s, p, FeatureKind::Fillet { edges, radius, body: str_(p, "body").map(str::to_string) })
+    let style = match str_(p, "type").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("constant") | Some("rolling_ball") => solvecraft_doc::FilletStyle::Constant,
+        Some("chord") | Some("chord_length") => solvecraft_doc::FilletStyle::Chord,
+        Some("variable") => {
+            let radius2 = req_expr(cmd, p, "radius2")?;
+            check_expr(s, &radius2, Kind::Length, cmd, "radius2")?;
+            let start =
+                p.get("start").and_then(vec3).ok_or_else(|| bad(cmd, "a variable fillet needs `start`: [x,y,z] near the end that takes `radius`"))?;
+            solvecraft_doc::FilletStyle::Variable { radius2, start }
+        }
+        Some(o) => return Err(bad(cmd, format!("unknown fillet type `{o}` (constant, chord or variable)"))),
+    };
+    add_feature(s, p, FeatureKind::Fillet { edges, radius, body: str_(p, "body").map(str::to_string), style })
 }
 
 fn chamfer(s: &mut Session, p: &Value) -> Result<Value> {
