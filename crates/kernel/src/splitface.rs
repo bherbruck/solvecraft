@@ -706,6 +706,34 @@ fn surface_field(s: &mt::Surface) -> Field {
     Field::Surface(s.clone())
 }
 
+/// A plane or circular cylinder behind a surface (for offsetting).
+pub(crate) enum Analytic {
+    Plane { n: Vec3 },
+    Cylinder { o: Vec3, axis: Vec3, r: f64, out: f64 },
+}
+
+pub(crate) fn analytic_field(s: &mt::Surface) -> Option<Analytic> {
+    match surface_field(s) {
+        Field::Plane { n, .. } => Some(Analytic::Plane { n }),
+        Field::Cylinder { o, axis, r, out } => Some(Analytic::Cylinder { o, axis, r, out }),
+        _ => None,
+    }
+}
+
+/// Which side of a tool a point is on.
+pub(crate) fn side_of_point(tool: &SplitTool, p: Vec3) -> Result<f64> {
+    let f = fields(tool)?;
+    let [g] = f.as_slice() else { return Err(KernelError::Invalid("one tool at a time".into())) };
+    Ok(g.eval(p))
+}
+
+/// Which side of a tool a face lies on (its field well inside it).
+pub(crate) fn face_side(face: &mt::Face, tool: &SplitTool, size: f64) -> Result<f64> {
+    let f = fields(tool)?;
+    let [g] = f.as_slice() else { return Err(KernelError::Invalid("one tool at a time".into())) };
+    side_of(face, g, size)
+}
+
 fn fields(tool: &SplitTool) -> Result<Vec<Field>> {
     Ok(match tool {
         SplitTool::Plane(p) => vec![Field::Plane { o: p.origin, n: p.normal() }],

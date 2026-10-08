@@ -223,6 +223,10 @@ impl FeatureKind {
                 }
             }
             FeatureKind::ReplaceFace { target, .. } => plane_inputs_mut(target, &mut v),
+            FeatureKind::Stitch { tolerance, .. } => v.push(("Tolerance", tolerance, L)),
+            FeatureKind::Thicken { thickness, .. } => v.push(("Thickness", thickness, L)),
+            FeatureKind::SurfaceTrim { plane, .. } => plane_inputs_mut(plane, &mut v),
+            FeatureKind::Patch { .. } => {}
             FeatureKind::Combine { .. }
             | FeatureKind::SheetBase { .. }
             | FeatureKind::SheetUnfold { .. }

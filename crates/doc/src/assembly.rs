@@ -153,10 +153,15 @@ impl FeatureKind {
         let pt = |p: &mut Vec3| *p = apply_point(m, *p);
         let dir = |v: &mut Vec3| *v = apply_vector(m, *v);
         match self {
-            FeatureKind::Sketch { plane, .. }
-            | FeatureKind::ConstructionPlane { plane }
-            | FeatureKind::Split { plane, .. }
-            | FeatureKind::Mirror { plane, .. } => map_plane_ref(m, plane),
+            FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } | FeatureKind::Mirror { plane, .. } => {
+                map_plane_ref(m, plane)
+            }
+            FeatureKind::Split { plane, tool, .. } => {
+                map_plane_ref(m, plane);
+                if let Some(t) = tool {
+                    pt(&mut t.point);
+                }
+            }
             FeatureKind::Revolve { axis: AxisRef::Line { origin, dir: d }, .. } => {
                 pt(origin);
                 dir(d);
@@ -252,8 +257,18 @@ impl FeatureKind {
             | FeatureKind::Emboss { .. }
             | FeatureKind::Rib { .. }
             | FeatureKind::Remove { .. }
+            | FeatureKind::Stitch { .. }
+            | FeatureKind::Thicken { .. }
             | FeatureKind::Import { .. }
             | FeatureKind::MeshImport { .. } => {}
+            FeatureKind::Patch { edges, .. } => edges.iter_mut().for_each(pt),
+            FeatureKind::SurfaceTrim { plane, tool, keep, .. } => {
+                map_plane_ref(m, plane);
+                if let Some(t) = tool {
+                    pt(&mut t.point);
+                }
+                pt(keep);
+            }
         }
     }
 }

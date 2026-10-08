@@ -1815,6 +1815,8 @@ fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut 
 
 #[path = "eval_more.rs"]
 mod more;
+#[path = "eval_surface.rs"]
+mod surface;
 
 /// The plane of the body face a sketch sits on, found again: among planar faces with the
 /// picked plane's normal, the one nearest `at`. The picked frame moves along its normal onto it.
@@ -1913,6 +1915,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::SheetConvert { .. } => more::sheet_eval(doc, vals, f, st, warning),
         FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => {
             more::plastic_eval(doc, vals, f, st)
+        }
+        FeatureKind::Patch { .. } | FeatureKind::Stitch { .. } | FeatureKind::Thicken { .. } | FeatureKind::SurfaceTrim { .. } => {
+            surface::eval(doc, vals, f, st)
         }
         FeatureKind::Emboss { .. }
         | FeatureKind::Rib { .. }

@@ -605,6 +605,44 @@ pub enum FeatureKind {
     Remove {
         bodies: Vec<String>,
     },
+    /// Surface bodies: planar patches filling sketch regions (`profiles` of `sketch`), or a
+    /// closed loop of a body's edges (`edges`: points on them, on `body`).
+    Patch {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<u64>,
+        #[serde(default = "all_profiles")]
+        profiles: ProfileSel,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        edges: Vec<Vec3>,
+    },
+    /// Surface bodies sewn along shared edges into the first one (a solid when they close).
+    Stitch {
+        bodies: Vec<String>,
+        #[serde(default = "zero_expr")]
+        tolerance: String,
+    },
+    /// Surface bodies thickened into solids along their normals (by half each way when
+    /// `symmetric`).
+    Thicken {
+        bodies: Vec<String>,
+        thickness: String,
+        #[serde(default)]
+        symmetric: bool,
+        operation: Operation,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<String>,
+    },
+    /// A surface body trimmed by a plane, or by a face of a body (`tool`), keeping the side of
+    /// `keep`.
+    SurfaceTrim {
+        body: String,
+        plane: PlaneRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool: Option<FaceAt>,
+        keep: Vec3,
+    },
     Move {
         bodies: Vec<String>,
         translate: [String; 3],
@@ -845,6 +883,10 @@ impl FeatureKind {
             FeatureKind::ReplaceFace { .. } => "ReplaceFaceFeature",
             FeatureKind::Align { .. } => "AlignFeature",
             FeatureKind::Remove { .. } => "RemoveFeature",
+            FeatureKind::Patch { .. } => "PatchFeature",
+            FeatureKind::Stitch { .. } => "StitchFeature",
+            FeatureKind::Thicken { .. } => "ThickenFeature",
+            FeatureKind::SurfaceTrim { .. } => "TrimFeature",
             FeatureKind::Import { .. } => "BaseFeature",
             FeatureKind::MeshImport { .. } => "MeshFeature",
         }
@@ -899,6 +941,10 @@ impl FeatureKind {
             FeatureKind::ReplaceFace { .. } => "ReplaceFace",
             FeatureKind::Align { .. } => "Align",
             FeatureKind::Remove { .. } => "Remove",
+            FeatureKind::Patch { .. } => "Patch",
+            FeatureKind::Stitch { .. } => "Stitch",
+            FeatureKind::Thicken { .. } => "Thicken",
+            FeatureKind::SurfaceTrim { .. } => "Trim",
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
         }
@@ -1037,6 +1083,10 @@ impl FeatureKind {
             }
             FeatureKind::ReplaceFace { target, .. } => plane_exprs(target, &mut v),
             FeatureKind::Align { .. } | FeatureKind::Remove { .. } => {}
+            FeatureKind::Stitch { tolerance, .. } => v.push(tolerance),
+            FeatureKind::Thicken { thickness, .. } => v.push(thickness),
+            FeatureKind::SurfaceTrim { plane, .. } => plane_exprs(plane, &mut v),
+            FeatureKind::Patch { .. } => {}
             FeatureKind::Import { .. } | FeatureKind::MeshImport { .. } => {}
         }
         v
@@ -1078,6 +1128,10 @@ pub struct Feature {
 
 fn inside_str() -> String {
     "inside".into()
+}
+
+fn all_profiles() -> ProfileSel {
+    ProfileSel::All
 }
 
 fn zero_expr() -> String {
