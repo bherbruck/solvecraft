@@ -407,7 +407,15 @@ impl Sketch {
                 }
             };
             let cid = self.fresh(prefix);
-            self.curves.push(Curve { id: cid, kind, construction: false, reversed: false, link: Some(id.to_string()), centerline: false });
+            self.curves.push(Curve {
+                id: cid,
+                kind,
+                construction: false,
+                reversed: false,
+                link: Some(id.to_string()),
+                centerline: false,
+                fixed: false,
+            });
         }
         for li in &lay.lone {
             point(self, *li)?;

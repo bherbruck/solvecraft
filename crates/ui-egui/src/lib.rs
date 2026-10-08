@@ -295,6 +295,22 @@ impl SolveApp {
             let edges = self.session.selection.iter().any(|s| matches!(s, solvecraft_engine::Sel::Edge { .. }));
             return self.start(if edges { "FusionFilletEdgesCommand" } else { "Extrude" });
         }
+        // Fix/Unfix: the selected sketch points and curves change at once, otherwise pick them.
+        if id == "ConstraintFix" {
+            let ents: Vec<String> = self
+                .session
+                .selection
+                .iter()
+                .filter_map(|s| match s {
+                    solvecraft_engine::Sel::SketchCurve { id } | solvecraft_engine::Sel::SketchPoint { id } => Some(id.clone()),
+                    _ => None,
+                })
+                .collect();
+            if !ents.is_empty() {
+                let _ = self.run(id, json!({ "entities": ents }));
+                return;
+            }
+        }
         // Construction toggle: selected sketch curves switch at once, otherwise pick them.
         if id == "sketch.construction" {
             let curves: Vec<String> = self

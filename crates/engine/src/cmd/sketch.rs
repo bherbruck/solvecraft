@@ -123,7 +123,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_fix")
         .enabled(in_sketch)
-        .params("entity: point or curve; fixed?: bool (default toggles)"),
+        .params("entity: point or curve | entities: [points and curves]; fixed?: bool (default: fix them all unless all are fixed, then unfix)"),
     CommandSpec::new("ConstraintMidPoint", "MidPoint", c_midpoint)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_midpoint")
@@ -972,31 +972,55 @@ fn round_center(sk: &Sketch, c: usize) -> Option<usize> {
 fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "ConstraintFix";
     let want = bool_(p, "fixed");
+    let mut refs = string_list(p, "entities");
+    if let Some(e) = str_(p, "entity") {
+        refs.insert(0, e.to_string());
+    }
+    if refs.is_empty() {
+        return Err(bad(cmd, "`entity` or `entities` must name sketch points or curves"));
+    }
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
-        let r = p.get("entity").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`entity` must be a point or curve id"))?;
-        let pts: Vec<usize> = if let Some(i) = sk.resolve_point(r) {
-            vec![i]
-        } else {
-            let c = sk.curve_index(r).ok_or_else(|| bad(cmd, format!("unknown entity `{r}`")))?;
-            sk.curves.get(c).map(|c| c.kind.point_ids()).unwrap_or_default()
-        };
-        let is_fixed = |sk: &Sketch, q: usize| sk.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: q });
-        let all_fixed = pts.iter().all(|q| is_fixed(sk, *q));
+        // Points and curves; a point is fixed by a Fix constraint, a curve by its flag (which
+        // also holds its radius). Projected geometry is always fixed.
+        let mut pts = Vec::new();
+        let mut curves = Vec::new();
+        for r in &refs {
+            if let Some(i) = sk.resolve_point(r) {
+                pts.push(i);
+            } else {
+                curves.push(sk.curve_index(r).ok_or_else(|| bad(cmd, format!("unknown entity `{r}`")))?);
+            }
+        }
+        let all_fixed = pts.iter().all(|q| *q == 0 || sk.point_locked(*q)) && curves.iter().all(|c| sk.curve_locked(*c));
         let fix = want.unwrap_or(!all_fixed);
         let mut n = 0;
         for q in pts {
-            if q == 0 {
+            let own = sk.points.get(q).is_some_and(|x| x.fixed || x.link.is_some());
+            if q == 0 || own {
                 continue;
             }
-            if fix && !is_fixed(sk, q) {
+            let has = sk.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: q });
+            if fix && !has {
                 add_c(sk, ConstraintKind::Fix { p: q })?;
                 n += 1;
-            } else if !fix {
+            } else if !fix && has {
                 sk.constraints.retain(|c| c.kind != ConstraintKind::Fix { p: q });
                 n += 1;
             }
         }
-        Ok(json!({"fixed": fix, "points": n}))
+        for c in curves {
+            let Some(cu) = sk.curves.get_mut(c) else { continue };
+            if cu.link.is_some() {
+                continue;
+            }
+            cu.fixed = fix;
+            n += 1;
+            if !fix {
+                let ids = cu.kind.point_ids();
+                sk.constraints.retain(|k| !matches!(k.kind, ConstraintKind::Fix { p } if ids.contains(&p)));
+            }
+        }
+        Ok(json!({"fixed": fix, "changed": n}))
     })?;
     Ok(json!({"result": n, "sketch": info}))
 }
@@ -1319,8 +1343,9 @@ fn move_point(s: &mut Session, p: &Value) -> Result<Value> {
     let to = req_vec2(cmd, p, "to")?;
     let (_, info) = edit(s, p, cmd, false, |sk, _| {
         let q = point_ref(sk, p.get("point"), cmd, "point")?;
+        let locked = sk.point_locked(q);
         if let Some(pt) = sk.points.get_mut(q)
-            && !pt.fixed
+            && !locked
         {
             pt.pos = to;
         }

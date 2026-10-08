@@ -70,6 +70,13 @@ fn layout(sk: &Sketch) -> Layout {
             *f = true;
         }
     }
+    for c in sk.curves.iter().filter(|c| c.fixed) {
+        for p in c.kind.point_ids() {
+            if let Some(f) = fixed.get_mut(p) {
+                *f = true;
+            }
+        }
+    }
     let mut n = 0;
     let pvar = fixed
         .iter()
@@ -86,7 +93,7 @@ fn layout(sk: &Sketch) -> Layout {
         .curves
         .iter()
         .map(|c| match c.kind {
-            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } if c.link.is_none() => {
+            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } if c.link.is_none() && !c.fixed => {
                 n += 1;
                 Some(n - 1)
             }

@@ -178,6 +178,8 @@ fn sketch_color(t: &Tokens, c: Rgb) -> [u8; 4] {
         c4(t.sketch)
     } else if c == colors::SKETCH_DONE || c == colors::SKETCH_FIXED {
         c4(t.sketch_fixed)
+    } else if c == colors::SKETCH_LOCKED {
+        c4(t.sketch_locked)
     } else {
         rgba(c)
     }
@@ -1265,13 +1267,20 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some(sid) = app.session.active_sketch else { return };
     let Some(ss) = st.sketch(sid) else { return };
     let sk = &ss.sketch;
+    let locked = sk.locked_points();
     for (i, p) in sk.points.iter().enumerate() {
         if !solvecraft_engine::view::sketch_point_visible(sk, i) {
             continue;
         }
         let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)) else { continue };
         let det = ss.report.point_determined.get(i).copied().unwrap_or(false);
-        let c = if det { t.sketch_point } else { t.sketch_point_free };
+        let c = if p.link.is_none() && locked.get(i).copied().unwrap_or(false) {
+            t.sketch_locked
+        } else if det {
+            t.sketch_point
+        } else {
+            t.sketch_point_free
+        };
         if i == 0 {
             painter.circle(sp, 3.5, Color32::from_rgb(240, 200, 60), Stroke::new(1.0, t.body_edge));
         } else {

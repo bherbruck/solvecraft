@@ -140,6 +140,9 @@ pub struct Curve {
     /// an axis (revolve, diameter dimensions).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub centerline: bool,
+    /// Fixed (locked): its points and radius are constants for the solver.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fixed: bool,
 }
 
 /// Geometric constraints and dimensions. Indices refer to `Sketch::points` (`p`, `q`) or
@@ -536,7 +539,15 @@ impl Sketch {
             return Err(SketchError::Invalid("line needs two distinct points".into()));
         }
         let id = self.curve_id(id, "l")?;
-        self.curves.push(Curve { id, kind: CurveKind::Line { a, b }, construction: false, reversed: false, link: None, centerline: false });
+        self.curves.push(Curve {
+            id,
+            kind: CurveKind::Line { a, b },
+            construction: false,
+            reversed: false,
+            link: None,
+            centerline: false,
+            fixed: false,
+        });
         Ok(self.curves.len() - 1)
     }
 
@@ -565,7 +576,15 @@ impl Sketch {
             Some(i) if i < self.points.len() => i,
             _ => self.own_point(&id, "center", center)?,
         };
-        self.curves.push(Curve { id, kind: CurveKind::Circle { c, r }, construction: false, reversed: false, link: None, centerline: false });
+        self.curves.push(Curve {
+            id,
+            kind: CurveKind::Circle { c, r },
+            construction: false,
+            reversed: false,
+            link: None,
+            centerline: false,
+            fixed: false,
+        });
         Ok(self.curves.len() - 1)
     }
 
@@ -591,7 +610,15 @@ impl Sketch {
             Some(i) if i < n && i != a => i,
             _ => self.own_point(&id, "end", p1)?,
         };
-        self.curves.push(Curve { id, kind: CurveKind::Arc { c, a, b }, construction: false, reversed: false, link: None, centerline: false });
+        self.curves.push(Curve {
+            id,
+            kind: CurveKind::Arc { c, a, b },
+            construction: false,
+            reversed: false,
+            link: None,
+            centerline: false,
+            fixed: false,
+        });
         Ok(self.curves.len() - 1)
     }
 
@@ -678,6 +705,40 @@ impl Sketch {
             return Err(SketchError::Invalid(format!("dimension value {v}")));
         }
         Ok(())
+    }
+
+    /// Is point `i` held in place: fixed, projected (linked), fixed by a Fix constraint or a
+    /// point of a fixed curve.
+    pub fn point_locked(&self, i: usize) -> bool {
+        self.points.get(i).is_some_and(|p| p.fixed || p.link.is_some())
+            || self.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: i })
+            || self.curves.iter().any(|c| c.fixed && c.kind.uses(i))
+    }
+
+    /// [`Sketch::point_locked`] for every point at once.
+    pub fn locked_points(&self) -> Vec<bool> {
+        let mut out: Vec<bool> = self.points.iter().map(|p| p.fixed || p.link.is_some()).collect();
+        let mut set = |i: usize| {
+            if let Some(x) = out.get_mut(i) {
+                *x = true;
+            }
+        };
+        for c in &self.constraints {
+            if let ConstraintKind::Fix { p } = c.kind {
+                set(p);
+            }
+        }
+        for c in self.curves.iter().filter(|c| c.fixed) {
+            for p in c.kind.point_ids() {
+                set(p);
+            }
+        }
+        out
+    }
+
+    /// Is curve `c` held in place: fixed or projected (linked).
+    pub fn curve_locked(&self, c: usize) -> bool {
+        self.curves.get(c).is_some_and(|c| c.fixed || c.link.is_some())
     }
 
     /// Radius of a circle or arc.
@@ -834,7 +895,7 @@ impl Sketch {
             }
         };
         let id = self.curve_id(id, prefix)?;
-        self.curves.push(Curve { id, kind, construction: false, reversed: false, link: None, centerline: false });
+        self.curves.push(Curve { id, kind, construction: false, reversed: false, link: None, centerline: false, fixed: false });
         Ok(self.curves.len() - 1)
     }
 

@@ -586,11 +586,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.unsection" => drop(app.run("FusionHalfSectionViewCommand", json!({"clear": true}))),
         "ui.fit" => app.animate_view("fit"),
         "ui.home" => app.animate_view("home"),
-        "ui.fix" => {
-            for e in strs(&p, "entities") {
-                let _ = app.run("ConstraintFix", json!({ "entity": e }));
-            }
-        }
+        // One command for the whole selection: all fixed unless all already are.
+        "ui.fix" => drop(app.run("ConstraintFix", json!({ "entities": strs(&p, "entities") }))),
         "ui.editSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
                 app.edit_sketch(id);

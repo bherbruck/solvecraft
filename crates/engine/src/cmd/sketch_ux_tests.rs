@@ -110,3 +110,91 @@ fn deleting_a_dimension_frees_its_parameter() {
     assert!(sketch(&s).constraints.iter().all(|c| !c.kind.is_dimension()));
     assert!(s.doc.param(&param).is_none());
 }
+
+// ---------------------------------------------------------------------------------------------
+// Fix / Unfix
+
+fn pt(s: &Session, id: &str) -> solvecraft_geom::Vec2 {
+    let sk = sketch(s);
+    sk.resolve_point(id).and_then(|i| sk.point(i)).unwrap_or_else(|| panic!("no point {id}"))
+}
+
+fn dof(s: &mut Session) -> i64 {
+    run(s, "sketch.inspect", json!({}))["dof"].as_i64().unwrap_or(-1)
+}
+
+#[test]
+fn fixed_points_survive_drags_and_solves_and_unfix_frees_them() {
+    let mut s = new_sketch();
+    run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [30, 0], [30, 20]]}));
+    let free = dof(&mut s);
+    let r = run(&mut s, "ConstraintFix", json!({"entity": "l1.end"}));
+    assert_eq!(r["result"]["fixed"], true);
+    assert_eq!(dof(&mut s), free - 2);
+    let corner = pt(&s, "l1.end");
+    // Dragging the fixed point does nothing; dragging its neighbours never moves it.
+    run(&mut s, "sketch.move_point", json!({"point": "l1.end", "to": [50, 50]}));
+    assert_eq!(pt(&s, "l1.end"), corner);
+    run(&mut s, "ConstraintHorizontalVertical", json!({"line": "l2", "mode": "vertical"}));
+    run(&mut s, "sketch.move_point", json!({"point": "l2.end", "to": [40, 25]}));
+    run(&mut s, "SketchDimension", json!({"entities": ["l1"], "value": 12}));
+    assert!(pt(&s, "l1.end").dist(corner) < 1e-12, "{:?}", pt(&s, "l1.end"));
+    assert!((pt(&s, "l1.start").dist(corner) - 12.0).abs() < 1e-6);
+    // Unfix: the point moves again.
+    let r = run(&mut s, "ConstraintFix", json!({"entity": "l1.end"}));
+    assert_eq!(r["result"]["fixed"], false);
+    run(&mut s, "sketch.move_point", json!({"point": "l1.end", "to": [30, -5]}));
+    assert!(pt(&s, "l1.end").dist(corner) > 1.0);
+}
+
+#[test]
+fn fixing_curves_holds_their_points_and_radius() {
+    let mut s = new_sketch();
+    run(&mut s, "CircleCenterRadius", json!({"center": [10, 10], "radius": 5}));
+    run(&mut s, "DrawPolyline", json!({"points": [[30, 0], [50, 0]]}));
+    run(&mut s, "ArcCenterTwoPoint", json!({"center": [0, 40], "start": [10, 40], "end": [0, 50]}));
+    run(&mut s, "CircleElipse", json!({"center": [60, 40], "major": [70, 40], "minor_radius": 4}));
+    let free = dof(&mut s);
+    // Multi-select fixes them all (circle 3, line 4, arc 5, ellipse 5 degrees of freedom).
+    let r = run(&mut s, "ConstraintFix", json!({"entities": ["c1", "l1", "a1", "e1"]}));
+    assert_eq!(r["result"]["changed"], 4);
+    assert_eq!(dof(&mut s), free - 17);
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert!(si["curves"].as_array().is_some_and(|c| c.iter().all(|c| c["fixed"] == true)), "{si}");
+    // A fixed circle keeps centre and radius; a dimension on it conflicts.
+    run(&mut s, "sketch.move_point", json!({"point": "c1.center", "to": [0, 0]}));
+    assert_eq!(pt(&s, "c1.center"), solvecraft_geom::Vec2::new(10.0, 10.0));
+    assert!(s.execute("SketchDimension", &json!({"entities": ["c1"], "value": 20})).is_err());
+    let r0 = sketch(&s).radius(0);
+    assert_eq!(r0, Some(5.0));
+    // Toggle without `fixed`: all fixed, so all are unfixed.
+    let r = run(&mut s, "ConstraintFix", json!({"entities": ["c1", "l1", "a1", "e1"]}));
+    assert_eq!(r["result"]["fixed"], false);
+    assert_eq!(dof(&mut s), free);
+    run(&mut s, "SketchDimension", json!({"entities": ["c1"], "type": "radius", "value": 7}));
+    assert!((sketch(&s).radius(0).unwrap_or(0.0) - 7.0).abs() < 1e-9);
+    // Mixed selection: one fixed, one free → both end up fixed.
+    run(&mut s, "ConstraintFix", json!({"entity": "l1"}));
+    let r = run(&mut s, "ConstraintFix", json!({"entities": ["l1", "l1.start", "a1"]}));
+    assert_eq!(r["result"]["fixed"], true);
+    assert!(sketch(&s).curves.iter().filter(|c| c.id == "l1" || c.id == "a1").all(|c| c.fixed));
+}
+
+#[test]
+fn projected_geometry_counts_as_fixed() {
+    let mut s = Session::default();
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Extrude", json!({"distance": 5}));
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    let r = run(&mut s, "ProjectNewCmd", json!({"refs": [{"edge": [10, 0, 5]}]}));
+    let sk = sketch(&s);
+    let ci = sk.curves.iter().position(|c| c.link.is_some()).unwrap_or_else(|| panic!("projected: {r}"));
+    let id = sk.curves[ci].id.clone();
+    assert!(sk.curve_locked(ci));
+    let r = run(&mut s, "ConstraintFix", json!({"entity": id}));
+    // Already fixed: the toggle unfixes, which projected geometry ignores.
+    assert_eq!(r["result"]["changed"], 0);
+    assert!(sketch(&s).curve_locked(ci));
+}
