@@ -15,6 +15,12 @@ const ASSEMBLE: &[&str] = &[
     "RigidGroupCmd",
     "FusionMoveJointsCommand",
     "FusionMotionRelationshipCommand",
+    "FusionMotionStudyCommand",
+    "explode.create",
+    "EnableContactSetsCmd",
+    "EnableAllContactCmd",
+    "DisableAllContactCmd",
+    "ContactSetCmd",
     "InterferenceCheckCommand",
 ];
 
@@ -83,6 +89,7 @@ const PLASTIC_CREATE: &[&str] = &[
 /// Panels of a tab, when this module lays the tab out.
 pub fn panels(tab: &str) -> Option<&'static [&'static str]> {
     match tab {
+        "SOLID" => Some(&["CREATE", "MODIFY", "ASSEMBLE", "CONFIGURE", "CONSTRUCT", "INSPECT", "INSERT", "SELECT"]),
         "PLASTIC" => Some(&["SETUP", "CREATE", "MODIFY", "ASSEMBLE", "CONSTRUCT", "INSPECT", "INSERT", "SELECT"]),
         _ => None,
     }

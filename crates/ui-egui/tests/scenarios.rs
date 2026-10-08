@@ -43,7 +43,8 @@ scenarios!(
     s18_3d_sketch_pipe,
     s19_canvas_calibrate,
     s20_section_with_joint_drive,
-    s21_named_views
+    s21_named_views,
+    s26_drive_joint_typed
 );
 
 /// Scenarios written ahead of their features (the commands are in solvecraft-params' unpushed

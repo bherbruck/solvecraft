@@ -206,6 +206,8 @@ pub enum Kind {
     Plastic(crate::dialogs_plastic::Pl),
     /// Appearance (`dialogs_appearance`).
     Appearance(crate::dialogs_appearance::Ap),
+    /// Contact sets, motion studies, exploded views, configurations (`dialogs_motion`).
+    Motion(crate::dialogs_motion::Mo),
 }
 
 /// The rest of the Hole dialog: placement, extents, tap type and drill point.
@@ -405,7 +407,8 @@ impl Dialog {
                 let (kind, inputs) = crate::dialogs_assembly::start(app, id)
                     .or_else(|| crate::dialogs_sheet::start(app, id))
                     .or_else(|| crate::dialogs_plastic::start(app, id))
-                    .or_else(|| crate::dialogs_appearance::start(app, id))?;
+                    .or_else(|| crate::dialogs_appearance::start(app, id))
+                    .or_else(|| crate::dialogs_motion::start(app, id))?;
                 Dialog::new(kind, inputs)
             }
         };
@@ -756,6 +759,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Sheet(k) => k.title(),
         Kind::Plastic(k) => k.title(),
         Kind::Appearance(_) => "APPEARANCE",
+        Kind::Motion(k) => k.title(),
     }
 }
 
@@ -1037,9 +1041,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let anchor = egui::pos2(vp.right(), vp.top() + crate::viewport::VIEW_CUBE_CLEARANCE);
     let mut keep = true;
     let mut ok = false;
+    let mut applied = false;
     let mut cancel = false;
     let mut enter = false;
-    let wide = matches!(d.kind, Kind::Params { .. });
+    let wide = matches!(d.kind, Kind::Params { .. }) || matches!(&d.kind, Kind::Motion(k) if k.wide());
     let heading = if d.editing.is_some() { format!("EDIT {}", title(&d.kind)) } else { title(&d.kind).to_string() };
     let frame = egui::Frame::window(&ctx.global_style())
         .fill(t.dialog_bg)
@@ -1404,6 +1409,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
                     Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
                     Kind::Appearance(k) => enter |= crate::dialogs_appearance::rows(app, ui, k, &mut d.inputs),
+                    Kind::Motion(k) => enter |= crate::dialogs_motion::rows(app, ui, k, &mut d.inputs),
                     Kind::ConfirmDelete { with, fail, .. } => {
                         if !with.is_empty() {
                             row_label(ui, "Also deletes");
@@ -1476,9 +1482,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     if ok {
         match run_dialog(app, &d) {
-            Ok(()) => cancel = true,
+            Ok(()) => {
+                cancel = true;
+                applied = true;
+            }
             Err(e) => d.error = Some(e),
         }
+    }
+    if !(keep && !cancel) {
+        crate::dialogs_motion::closed(app, &mut d, applied);
     }
     if keep && !cancel {
         app.dialog = Some(d);
@@ -1490,6 +1502,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
 pub fn cancel(app: &mut SolveApp) {
+    if let Some(mut d) = app.dialog.take() {
+        crate::dialogs_motion::closed(app, &mut d, false);
+        app.dialog = Some(d);
+    }
     if let Some(d) = app.dialog.take()
         && let Some((_, marker)) = d.editing
     {
@@ -2028,6 +2044,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
+        Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
     };
     let mut params = params;
     if let Value::Object(m) = &mut params {

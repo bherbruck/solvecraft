@@ -1,0 +1,243 @@
+[
+ {
+  "start": "FusionCreateNewComponentCommand"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    20,
+    20
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "text": "10"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "call": "ui.menu",
+  "params": {
+   "x": 100,
+   "y": 170,
+   "target": {
+    "type": "component",
+    "id": 0
+   }
+  }
+ },
+ {
+  "call": "ui.menuPick",
+  "params": {
+   "item": "Activate"
+  }
+ },
+ {
+  "start": "FusionCreateNewComponentCommand"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XZ"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    30,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    50,
+    10
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "click": {
+   "world": [
+    40,
+    0,
+    5
+   ]
+  }
+ },
+ {
+  "text": "20"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 2,
+   "errors": 0
+  }
+ },
+ {
+  "start": "JointAssembleCmdNew"
+ },
+ {
+  "click": {
+   "world": [
+    10,
+    10,
+    10
+   ]
+  }
+ },
+ {
+  "click": {
+   "world": [
+    40,
+    0,
+    5
+   ]
+  }
+ },
+ {
+  "widget": "Rigid"
+ },
+ {
+  "widget": "Revolute"
+ },
+ {
+  "shot": "s07_joint"
+ },
+ {
+  "widget": "OK"
+ },
+ {
+  "expect": {
+   "dialog": null,
+   "errors": 0,
+   "query": {
+    "command": "joint.list",
+    "path": [
+     "joints",
+     0,
+     "type"
+    ],
+    "value": "revolute"
+   }
+  }
+ },
+ {
+  "start": "FusionMoveJointsCommand"
+ },
+ {
+  "text": "45"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "dialog": null,
+   "errors": 0,
+   "query": {
+    "command": "joint.list",
+    "path": [
+     "joints",
+     0,
+     "values",
+     0,
+     "value"
+    ],
+    "value": 45
+   }
+  }
+ },
+ {
+  "start": "FusionMoveJointsCommand"
+ },
+ {
+  "text": "-30 deg"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "query": {
+    "command": "joint.list",
+    "path": [
+     "joints",
+     0,
+     "values",
+     0,
+     "value"
+    ],
+    "value": -30
+   }
+  }
+ },
+ {
+  "shot": "s26_drive_typed"
+ }
+]
