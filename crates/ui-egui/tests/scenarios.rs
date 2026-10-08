@@ -53,7 +53,9 @@ scenarios!(
     s33_move_x_arrow,
     s34_component_move_carries_sketches,
     s35_construction_mode,
-    s36_sketch_palette_visible
+    s36_sketch_palette_visible,
+    s32_cut_in_active_component,
+    s30_pattern_a_hole
 );
 
 /// Scenarios written ahead of their fixes or features (the user's open bugs): run with
@@ -70,6 +72,4 @@ macro_rules! pending {
 
 pending!(
     s31_sketch_on_face_projects: "user bug: a sketch on a face projects its loops as reference (solvecraft-sketch)",
-    s32_cut_in_active_component: "user bug: a cut in the active component leaves others alone (solvecraft-params)",
-    s30_pattern_a_hole: "the dialog sends the hole as a feature; the engine's pattern of a blind hole cuts too little (one hole short)",
 );

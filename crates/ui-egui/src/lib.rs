@@ -420,8 +420,8 @@ impl SolveApp {
             }
         }
         // Construction toggle: selected sketch curves switch at once, otherwise pick them.
-        // Construction (X): convert the selection, or switch construction mode.
-        if id == "sketch.construction" && self.session.active_sketch.is_some() {
+        // Construction (X): convert the selection, or switch construction mode; no pick tool.
+        if id == "sketch.construction" {
             sketch_palette::toggle_construction(self);
             return;
         }

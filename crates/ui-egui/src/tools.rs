@@ -65,7 +65,6 @@ impl Tool {
             "ConstraintCollinear" => ("ConstraintCollinear", Kind::Pick(2)),
             "ConstraintMidPoint" => ("ConstraintMidPoint", Kind::Pick(2)),
             "ConstraintSymmetry" => ("ConstraintSymmetry", Kind::Pick(3)),
-            "sketch.construction" => ("sketch.construction", Kind::Pick(1)),
             _ => return crate::sketch_tools::tool_for(id),
         };
         Some(Tool { cmd, kind, pts: Vec::new(), hover: None, picks: Vec::new(), dims: Vec::new(), dims_stage: usize::MAX, dims_focus: false })
@@ -280,7 +279,6 @@ fn run_pick(app: &mut SolveApp, t: &Tool) {
     let params = match t.cmd {
         "ConstraintHorizontalVertical" => json!({"line": k[0]}),
         "ConstraintFix" => json!({"entity": k[0]}),
-        "sketch.construction" => json!({"curves": [k[0]]}),
         "ConstraintCoincident" => json!({"a": k[0], "b": k[1]}),
         "ConstraintMidPoint" => json!({"point": k[0], "line": k[1]}),
         "ConstraintSymmetry" => json!({"a": k[0], "b": k[1], "line": k[2]}),

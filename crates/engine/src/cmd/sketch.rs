@@ -552,10 +552,16 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let (l, pts) = polygon_lines(sk, &[c - h, Vec2::new(c.x + h.x, c.y - h.y), c + h, Vec2::new(c.x - h.x, c.y + h.y)])?;
         let mut cons = rect_constraints(sk, &l)?;
-        if let (Some(p0), Some(p2)) = (pts.first(), pts.get(2)) {
+        // Both diagonals (construction), the centre at their crossing. Only the first carries
+        // the midpoint constraint: diagonals of a parallelogram bisect each other, so a second
+        // one would be redundant (over-constrained).
+        if let (Some(p0), Some(p1), Some(p2), Some(p3)) = (pts.first(), pts.get(1), pts.get(2), pts.get(3)) {
             let diag = sk.add_line_pts(*p0, *p2, None)?;
-            if let Some(cu) = sk.curves.get_mut(diag) {
-                cu.construction = true;
+            let diag2 = sk.add_line_pts(*p1, *p3, None)?;
+            for d in [diag, diag2] {
+                if let Some(cu) = sk.curves.get_mut(d) {
+                    cu.construction = true;
+                }
             }
             let cp = sk.add_point(c, None)?;
             cons.push(add_c(sk, ConstraintKind::Midpoint { p: cp, l: diag })?);

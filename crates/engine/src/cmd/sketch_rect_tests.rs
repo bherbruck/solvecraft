@@ -101,3 +101,19 @@ fn dragging_corners_never_collapses_a_side() {
         }
     }
 }
+
+#[test]
+fn center_rectangle_draws_both_diagonals_like_fusion() {
+    let (mut s, _) = rect("center");
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    let curves = si["curves"].as_array().cloned().unwrap_or_default();
+    // Four sides plus two construction diagonals; the other rectangles have no diagonals.
+    assert_eq!(curves.len(), 6, "{si}");
+    assert_eq!(curves.iter().filter(|c| c["construction"] == true).count(), 2, "{si}");
+    assert_eq!(healthy(&mut s, "center diagonals"), 4);
+    for k in ["two", "three"] {
+        let (mut s, _) = rect(k);
+        let si = run(&mut s, "sketch.inspect", json!({}));
+        assert_eq!(si["curves"].as_array().map(Vec::len), Some(4), "{k}: {si}");
+    }
+}

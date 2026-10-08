@@ -75,7 +75,9 @@ pub fn set_mode(app: &mut SolveApp, m: u8) {
 /// switch construction mode on or off.
 pub fn toggle_construction(app: &mut SolveApp) {
     let curves = selected_curves(app);
-    if curves.is_empty() {
+    if curves.is_empty() && app.session.active_sketch.is_none() {
+        app.set_status("Construction mode is for drawing in a sketch: edit a sketch first", false);
+    } else if curves.is_empty() {
         let m = if mode(app) == 1 { 0 } else { 1 };
         set_mode(app, m);
     } else {
