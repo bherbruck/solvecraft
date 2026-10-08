@@ -263,6 +263,10 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
             let st = s.model.state();
             (solvecraft_doc::edge_refs(&st, body, edges), solvecraft_doc::edge_names_for(&st, body, edges))
         }
+        // Sheet metal edges are named by the sheet model.
+        FeatureKind::SheetFlange { edges, .. } | FeatureKind::SheetHem { edges, .. } => {
+            (Vec::new(), solvecraft_doc::sheet::sheet_edge_names(&s.model.state(), edges))
+        }
         _ => (Vec::new(), Vec::new()),
     };
     let face_names = {

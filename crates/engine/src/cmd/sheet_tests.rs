@@ -298,3 +298,32 @@ fn fold_through_cut_outs() {
     let e = c.execute("SheetMetalFoldCmd", &json!({"sketch": "FoldLine", "curve": "fl"})).map(|_| ()).unwrap_err().to_string();
     assert!(e.contains("not supported yet"), "{e}");
 }
+
+#[test]
+fn flange_edges_are_named_and_follow_the_base_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [100, 60]}));
+    let d = run(&mut s, "SketchDimension", json!({"entities": ["l1"], "value": 100}));
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "FusionSheetMetalFlangeCommand", json!({"sketch": "Base"}));
+    run(&mut s, "FusionSheetMetalFlangeCommand", json!({"edges": [[100, 30, 2.5]], "height": 20, "name": "Side"}));
+    let side = s.doc.find_feature("Side").cloned().unwrap();
+    assert_eq!(side.edge_names, vec!["base:l2:top".to_string()]);
+    let v0 = volume(&mut s);
+    // Narrower base: the flange stays on the right edge (now at x = 40).
+    let name = d["param"].as_str().or_else(|| d["name"].as_str()).map(str::to_string).unwrap_or_else(|| "d1".into());
+    run(&mut s, "ChangeParameterCommand", json!({"name": name, "expression": "40"}));
+    let b = run(&mut s, "MeasureCommand", json!({}))["bodies"][0]["bbox"].clone();
+    let w = b["max"][0].as_f64().unwrap_or(0.0) - b["min"][0].as_f64().unwrap_or(0.0);
+    assert!((w - 40.0).abs() < 1e-3 && b["max"][2].as_f64().unwrap_or(0.0) > 19.0, "{b}");
+    assert!(volume(&mut s) < v0);
+    let id = side.id;
+    assert_eq!(s.model.result(id).and_then(|r| r.warning.clone()), None);
+    // A hem on the flange's far edge is named after the flange.
+    let top = b["max"][2].as_f64().unwrap_or(0.0);
+    let x = b["max"][0].as_f64().unwrap_or(0.0);
+    run(&mut s, "FusionSheetMetalHemFlangeCommand", json!({"edges": [[x, 30, top]], "length": 6, "name": "H"}));
+    let h = s.doc.find_feature("H").cloned().unwrap();
+    assert!(h.edge_names[0].starts_with(&format!("F{id}.0:far")), "{:?}", h.edge_names);
+}

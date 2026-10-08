@@ -288,7 +288,13 @@ fn mirror_y(r: &Region2) -> Region2 {
     Region2 { outer: m(&r.outer), holes: r.holes.iter().map(|h| m(h).reversed()).collect() }
 }
 
-pub(super) fn sheet_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+pub(super) fn sheet_eval(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    warning: &mut Option<String>,
+) -> Result<()> {
     use crate::sheet;
     match &f.kind {
         FeatureKind::SheetBase { sketch, profiles, rule, flip } => {
@@ -303,7 +309,22 @@ pub(super) fn sheet_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Fea
                     (ss.plane, region)
                 };
                 let name = new_name(st, f, k);
-                let sh = sheet::base_flange(&name, &r.name, &rv, plane, region);
+                let mut sh = sheet::base_flange(&name, &r.name, &rv, plane, region);
+                // The sketch's lines name the base panel's edges.
+                sh.base_curves = ss
+                    .sketch
+                    .curves
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| !c.construction)
+                    .flat_map(|(ci, c)| {
+                        ss.sketch.segs(ci).into_iter().filter_map(move |sg| match sg {
+                            Seg2::Line { a, b } => Some((c.id.clone(), a, b)),
+                            _ => None,
+                        })
+                    })
+                    .map(|(id, a, b)| if *flip { (id, Vec2::new(a.x, -a.y), Vec2::new(b.x, -b.y)) } else { (id, a, b) })
+                    .collect();
                 let solid = sh.solid()?;
                 st.bodies.push(ModelBody::new(name, solid, f.id));
                 st.sheets.push(sh);
@@ -349,7 +370,10 @@ pub(super) fn sheet_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Fea
             if sh.flat {
                 return Err(DocError::Invalid("refold the sheet before adding flanges".into()));
             }
-            sh.add_flanges(edges, h, a, rr, position, *flip)?;
+            let picks = sheet_picks(sh, f, edges, warning);
+            let n0 = sh.flanges.len();
+            sh.add_flanges(&picks, h, a, rr, position, *flip)?;
+            tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
         }
         FeatureKind::SheetHem { edges, length, gap, flip, body } => {
@@ -363,9 +387,12 @@ pub(super) fn sheet_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Fea
                 }
             };
             let sh = st.sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
-            for e in edges {
+            let picks = sheet_picks(sh, f, edges, warning);
+            let n0 = sh.flanges.len();
+            for e in &picks {
                 sh.add_hem(*e, l, g, *flip)?;
             }
+            tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
         }
         FeatureKind::SheetFold { sketch, curve, a, b, angle, radius, position, flip, fixed, body } => {
@@ -394,7 +421,9 @@ pub(super) fn sheet_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Fea
             if sh.flat {
                 return Err(DocError::Invalid("refold the sheet before folding it".into()));
             }
+            let n0 = sh.flanges.len();
             sh.add_fold(a, b, ang, rr, position, *flip, *fixed)?;
+            tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
         }
         FeatureKind::SheetUnfold { body, refold } => {
@@ -841,5 +870,33 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
             apply_op(st, f, tool, Operation::Join, std::slice::from_ref(&target))
         }
         _ => Err(DocError::Invalid(format!("{} is not a plastic feature", f.name))),
+    }
+}
+
+/// Edge picks of a sheet feature, moved onto their named edges (a name that is gone keeps the
+/// point, with a warning).
+fn sheet_picks(sh: &crate::sheet::SheetBody, f: &Feature, edges: &[Vec3], warning: &mut Option<String>) -> Vec<Vec3> {
+    let mut gone = Vec::new();
+    let out = edges
+        .iter()
+        .enumerate()
+        .map(|(i, p)| match f.edge_names.get(i).filter(|n| !n.is_empty()) {
+            Some(n) => sh.edge_by_name(n, *p).unwrap_or_else(|| {
+                gone.push(n.clone());
+                *p
+            }),
+            None => *p,
+        })
+        .collect();
+    if !gone.is_empty() {
+        *warning = Some(format!("sheet edge(s) {} no longer exist; using the edges at the picked points", gone.join(", ")));
+    }
+    out
+}
+
+/// Tag the flanges a feature just added (`F<feature>.<k>`).
+fn tag_flanges(sh: &mut crate::sheet::SheetBody, from: usize, feature: u64) {
+    for (k, fl) in sh.flanges.iter_mut().enumerate().skip(from) {
+        fl.tag = format!("F{feature}.{}", k - from);
     }
 }

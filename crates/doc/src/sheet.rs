@@ -160,6 +160,9 @@ pub struct SheetFlange {
     /// instead of a rectangle `leg` long.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shape: Option<Vec<Vec2>>,
+    /// Which feature made it: `F<feature>.<k>` (persistent edge names).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tag: String,
 }
 
 /// A sheet metal body (see the module docs).
@@ -179,6 +182,9 @@ pub struct SheetBody {
     pub flat: bool,
     /// Gap between flanges that meet at a corner.
     pub gap: f64,
+    /// The base sketch's lines (id, ends in flat coordinates), naming the base panel's edges.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub base_curves: Vec<(String, Vec2, Vec2)>,
 }
 
 /// A piece of the sheet: a panel (None = the base) or a flange's bend zone.
@@ -839,6 +845,7 @@ impl SheetBody {
                 radius,
                 leg: leg.max(0.0),
                 shape: None,
+                tag: String::new(),
                 ext: (0.0, 0.0),
             });
             made.push(self.flanges.len() - 1);
@@ -905,6 +912,7 @@ impl SheetBody {
             leg,
             ext: (0.0, 0.0),
             shape: None,
+            tag: String::new(),
         });
         Ok(self.flanges.len() - 1)
     }
@@ -968,7 +976,7 @@ impl SheetBody {
             n = n * -1.0;
         }
         let l = a2.dot(n);
-        let probe = SheetFlange { parent: panel, p: a2, d, len: 1.0, n, angle, radius, leg: 0.0, ext: (0.0, 0.0), shape: None };
+        let probe = SheetFlange { parent: panel, p: a2, d, len: 1.0, n, angle, radius, leg: 0.0, ext: (0.0, 0.0), shape: None, tag: String::new() };
         let ba = self.allowance(&probe);
         let s0 = match position {
             "centerline" | "center" | "centre" => l - ba / 2.0,
@@ -1018,6 +1026,7 @@ impl SheetBody {
             leg,
             ext: (0.0, 0.0),
             shape: Some(ccw(moving)),
+            tag: String::new(),
         });
         let i = self.flanges.len() - 1;
         // Flanges on the moving part's edges now hang off the fold and move with it.
@@ -1038,6 +1047,69 @@ impl SheetBody {
         // Cut-outs may cross the bend where their edges run along or across it (the faces
         // check the rest when the sheet is built).
         Ok(i)
+    }
+
+    /// Name a panel edge (flat coordinates a→b on `panel`, top or bottom face): base edges by the
+    /// base sketch line they lie on, flange edges by the flange (its tag) and side.
+    fn edge_name_of(&self, panel: Option<usize>, a: Vec2, b: Vec2, top: bool) -> Option<String> {
+        let face = if top { "top" } else { "bottom" };
+        let d = (b - a).normalized()?;
+        match panel {
+            None => {
+                let on = |p: Vec2, s: Vec2, e: Vec2| {
+                    let t = e - s;
+                    t.len() > 1e-9 && ((p - s).cross(t) / t.len()).abs() < 1e-6
+                };
+                self.base_curves.iter().find(|(_, s, e)| on(a, *s, *e) && on(b, *s, *e)).map(|(id, _, _)| format!("base:{id}:{face}"))
+            }
+            Some(i) => {
+                let f = self.flanges.get(i)?;
+                if f.tag.is_empty() {
+                    return None;
+                }
+                let side = if d.cross(f.d).abs() < 1e-6 {
+                    // Along the bend: the far edge (or the bend side, never picked).
+                    if ((a - f.p).dot(f.n)) > self.allowance(f) + 1e-6 { "far" } else { "bend" }
+                } else if ((a + b) * 0.5 - f.p).dot(f.d) < f.len / 2.0 {
+                    "side0"
+                } else {
+                    "side1"
+                };
+                Some(format!("{}:{side}:{face}", f.tag))
+            }
+        }
+    }
+
+    /// The persistent name of the sheet edge nearest a world point.
+    pub fn edge_name(&self, pick: Vec3) -> Option<String> {
+        let (panel, a, b, top, _) = self.edge_at(pick)?;
+        self.edge_name_of(panel, a, b, top)
+    }
+
+    /// A world point on the sheet edge with this name (the one nearest `near` if several).
+    pub fn edge_by_name(&self, name: &str, near: Vec3) -> Option<Vec3> {
+        let mut best: Option<(f64, Vec3)> = None;
+        for (pi, r) in self.panels() {
+            let pts = r.outer.ccw().polyline(1e-3);
+            let m = pts.len();
+            let w = self.world(pi);
+            for i in 0..m {
+                let (Some(&a), Some(&b)) = (pts.get(i), pts.get((i + 1) % m)) else { continue };
+                if a.dist(b) < 1e-9 {
+                    continue;
+                }
+                for (z, top) in [(0.0, false), (self.t, true)] {
+                    if self.edge_name_of(pi, a, b, top).as_deref() == Some(name) {
+                        let mid = (a + b) * 0.5;
+                        let q = apply_point(&w, Vec3::new(mid.x, mid.y, z));
+                        if best.is_none_or(|(d, _)| q.dist(near) < d) {
+                            best = Some((q.dist(near), q));
+                        }
+                    }
+                }
+            }
+        }
+        best.map(|(_, q)| q)
     }
 
     /// Map a region in a world plane to flat coordinates through a panel's placement.
@@ -1239,6 +1311,7 @@ pub fn base_flange(body: &str, rule: &str, rv: &RuleValues, plane: Plane, region
         holes: Vec::new(),
         flat: false,
         gap: rv.gap,
+        base_curves: Vec::new(),
     }
 }
 
@@ -1289,6 +1362,7 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
         holes: Vec::new(),
         flat: false,
         gap: rv.gap,
+        base_curves: Vec::new(),
     };
     let (y0, y1) = if ysign > 0.0 { (0.0, width) } else { (-width, 0.0) };
     // First segment: the base panel.
@@ -1320,6 +1394,7 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
             leg: leg.max(0.0),
             ext: (0.0, 0.0),
             shape: None,
+            tag: String::new(),
         };
         let ba = sheet.allowance(&f);
         sheet.flanges.push(f);
@@ -1420,4 +1495,18 @@ mod tests {
         s.flat = true;
         assert!(s.solid().is_ok());
     }
+}
+
+/// Persistent names of the sheet edges nearest each world point (empty when none).
+pub fn sheet_edge_names(st: &crate::ModelState, pts: &[Vec3]) -> Vec<String> {
+    pts.iter()
+        .map(|p| {
+            st.sheets
+                .iter()
+                .filter_map(|sh| sh.edge_at(*p).map(|e| (e.4, sh)))
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .and_then(|(_, sh)| sh.edge_name(*p))
+                .unwrap_or_default()
+        })
+        .collect()
 }
