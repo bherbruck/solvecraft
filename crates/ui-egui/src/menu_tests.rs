@@ -455,3 +455,27 @@ fn f2_renames_the_selected_item() {
     app.run("select.clear", json!({})).unwrap();
     assert!(!context_menu::rename_selection(&mut app, pos2(0.0, 0.0)), "nothing selected");
 }
+
+#[test]
+fn occurrence_moves_turn_about_their_origin_then_move() {
+    let mut app = sample_app();
+    let b = body(&app);
+    app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
+    let occ = app.session.doc.occurrences[0].id;
+    let mut m = crate::browser::OccMove::new(occ);
+    m.pivot = Some(solvecraft_engine::geom::Vec3::new(5.0, 0.0, 0.0));
+    m.translate = [10.0, 0.0, 0.0];
+    m.angles = [0.0, 0.0, 90.0];
+    crate::browser::apply_occurrence_move(&mut app, &m);
+    let t = *app.session.pending_moves.get(&occ).unwrap();
+    // The pivot lands 10 mm along X; X turns into Y.
+    let p = solvecraft_engine::doc::apply_point(&t, solvecraft_engine::geom::Vec3::new(5.0, 0.0, 0.0));
+    let x = solvecraft_engine::doc::apply_vector(&t, solvecraft_engine::geom::Vec3::X);
+    assert!((p.x - 15.0).abs() < 1e-9 && p.y.abs() < 1e-9, "{p:?}");
+    assert!((x.y - 1.0).abs() < 1e-9, "{x:?}");
+    // Changing the values again starts from where it was, not from the last move.
+    m.translate = [0.0, 0.0, 0.0];
+    m.angles = [0.0; 3];
+    crate::browser::apply_occurrence_move(&mut app, &m);
+    assert_eq!(*app.session.pending_moves.get(&occ).unwrap(), solvecraft_engine::doc::IDENTITY);
+}

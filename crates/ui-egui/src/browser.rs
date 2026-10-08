@@ -59,13 +59,18 @@ pub struct TreeState {
 #[derive(Clone, Debug)]
 pub struct OccMove {
     pub occurrence: u64,
+    /// Distances along X, Y, Z (mm) and turns about X, Y, Z (degrees) from where it was.
     pub translate: [f64; 3],
-    pub angle_deg: f64,
+    pub angles: [f64; 3],
+    /// The occurrence's origin when the move began: what it turns about.
+    pub pivot: Option<solvecraft_engine::geom::Vec3>,
+    /// The values when the current triad drag began.
+    drag0: Option<([f64; 3], [f64; 3])>,
 }
 
 impl OccMove {
     pub fn new(occurrence: u64) -> Self {
-        OccMove { occurrence, translate: [0.0; 3], angle_deg: 0.0 }
+        OccMove { occurrence, translate: [0.0; 3], angles: [0.0; 3], pivot: None, drag0: None }
     }
 }
 
@@ -493,7 +498,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some((at, target)) = acts.menu {
         crate::context_menu::open_for(app, at, target);
     }
-    occurrence_panel(app, ui.ctx());
+    occurrence_panel(app, ui);
     capture_prompt(app, ui.ctx());
     canvas_panel(app, ui.ctx());
     redefine_panel(app, ui.ctx());
@@ -1357,12 +1362,16 @@ fn apply_drop(app: &mut SolveApp, d: DropAction) {
 // ---------------------------------------------------------------------------------------------
 
 /// Move/Copy of an occurrence: offsets and a rotation about Z, pending until Capture Position.
-fn occurrence_panel(app: &mut SolveApp, ctx: &egui::Context) {
+fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(mut m) = app.tree.occurrence_move.clone() else { return };
+    let ctx = ui.ctx().clone();
+    if m.pivot.is_none() {
+        m.pivot = occurrence_origin(app, m.occurrence);
+    }
     let name = app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.name.clone()).unwrap_or_default();
     let mut open = true;
     let mut action: Option<&str> = None;
-    let before = (m.translate, m.angle_deg);
+    let before = (m.translate, m.angles);
     crate::frame::window(ctx, format!("Move: {name}"), crate::frame::Width::Normal)
         .id(egui::Id::new("sc_occ_move"))
         .pivot(egui::Align2::LEFT_TOP)
@@ -1370,7 +1379,7 @@ fn occurrence_panel(app: &mut SolveApp, ctx: &egui::Context) {
         .open(&mut open)
         .resizable(false)
         .collapsible(false)
-        .show(ctx, |ui| {
+        .show(&ctx, |ui| {
             egui::Grid::new("sc_occ_grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 for (k, axis) in ["X distance", "Y distance", "Z distance"].iter().enumerate() {
                     ui.label(*axis);
@@ -1379,9 +1388,13 @@ fn occurrence_panel(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     ui.end_row();
                 }
-                ui.label("Z angle");
-                ui.add(egui::DragValue::new(&mut m.angle_deg).speed(1.0).suffix(" deg"));
-                ui.end_row();
+                for (k, axis) in ["X angle", "Y angle", "Z angle"].iter().enumerate() {
+                    ui.label(*axis);
+                    if let Some(v) = m.angles.get_mut(k) {
+                        ui.add(egui::DragValue::new(v).speed(1.0).suffix(" deg"));
+                    }
+                    ui.end_row();
+                }
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -1393,14 +1406,9 @@ fn occurrence_panel(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             });
         });
-    gizmo(app, ctx, &mut m);
-    if (m.translate, m.angle_deg) != before {
-        // The pending move is the typed offset from where the occurrence is now.
-        let _ = app.session.execute("component.revert_position", &json!({}));
-        let _ = app.run(
-            "occurrence.move",
-            json!({ "occurrence": m.occurrence, "translate": m.translate, "axis": [0, 0, 1], "angle": m.angle_deg.to_radians(), "capture": false }),
-        );
+    triad(app, ui, &mut m);
+    if (m.translate, m.angles) != before {
+        apply_occurrence_move(app, &m);
     }
     match action {
         Some("capture") => {
@@ -1416,6 +1424,50 @@ fn occurrence_panel(app: &mut SolveApp, ctx: &egui::Context) {
             app.tree.occurrence_move = None;
         }
         None => app.tree.occurrence_move = Some(m),
+    }
+}
+
+/// The pending move: turned about X, then Y, then Z through the starting origin, then moved.
+pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
+    use crate::gizmo;
+    use solvecraft_engine::geom::Vec3;
+    let a = m.angles.map(f64::to_radians);
+    let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, a[2]), &gizmo::rotation(Vec3::Y, a[1])), &gizmo::rotation(Vec3::X, a[0]));
+    let (axis, angle) = gizmo::axis_angle(&r);
+    let o = m.pivot.unwrap_or(Vec3::ZERO);
+    let _ = app.session.execute("component.revert_position", &json!({}));
+    let _ = app.run(
+        "occurrence.move",
+        json!({ "occurrence": m.occurrence, "translate": m.translate, "axis": [axis.x, axis.y, axis.z], "angle": angle, "origin": [o.x, o.y, o.z], "capture": false }),
+    );
+}
+
+/// The shared move triad at the occurrence's origin: arrows and squares move it, rings turn it.
+fn triad(app: &mut SolveApp, ui: &mut egui::Ui, m: &mut OccMove) {
+    use crate::gizmo::{self, Change};
+    let (Some(rect), Some(pivot)) = (app.viewport.rect, m.pivot) else { return };
+    let proj = crate::viewport::projection(app, rect);
+    let center = pivot + solvecraft_engine::geom::Vec3::new(m.translate[0], m.translate[1], m.translate[2]);
+    let layer = egui::LayerId::new(egui::Order::Middle, egui::Id::new("sc_occ_triad_layer"));
+    let mut gui = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(rect));
+    let painter = gui.painter().with_clip_rect(rect);
+    let t = gizmo::Triad { center, translate: true, rotate: true };
+    let step = crate::canvas::snap_step(app.cam.half_height());
+    let Some(g) = gizmo::show(&mut gui, &painter, &proj, egui::Id::new("sc_occ_triad"), &t, step) else { return };
+    if g.started || m.drag0.is_none() {
+        m.drag0 = Some((m.translate, m.angles));
+    }
+    let (t0, a0) = m.drag0.unwrap_or((m.translate, m.angles));
+    match g.change {
+        Change::Translate(v) => m.translate = [t0[0] + v.x, t0[1] + v.y, t0[2] + v.z],
+        Change::Rotate { axis, angle } => {
+            if let Some(slot) = m.angles.get_mut(axis) {
+                *slot = a0.get(axis).copied().unwrap_or(0.0) + angle.to_degrees();
+            }
+        }
+    }
+    if g.done {
+        m.drag0 = None;
     }
 }
 
@@ -1561,65 +1613,6 @@ fn occurrence_origin(app: &SolveApp, occurrence: u64) -> Option<solvecraft_engin
     let parent = app.session.doc.component_transform(o.parent);
     let own = app.session.pending_moves.get(&occurrence).copied().unwrap_or(o.transform);
     Some(solvecraft_engine::doc::apply_point(&solvecraft_engine::doc::mat_mul(&parent, &own), solvecraft_engine::geom::Vec3::ZERO))
-}
-
-/// Screen length of the gizmo's arrows.
-const GIZMO_PX: f32 = 80.0;
-
-/// Arrows along X, Y and Z at the occurrence's origin: dragging one moves it along that axis.
-fn gizmo(app: &mut SolveApp, ctx: &egui::Context, m: &mut OccMove) {
-    use solvecraft_engine::geom::Vec3;
-    let t = Tokens::get();
-    let (Some(rect), Some(o)) = (app.viewport.rect, occurrence_origin(app, m.occurrence)) else { return };
-    let proj = crate::viewport::projection(app, rect);
-    let Some(p0) = proj.to_screen(o) else { return };
-    if !rect.contains(p0) {
-        return;
-    }
-    let axes = [(Vec3::X, t.axis_x), (Vec3::Y, t.axis_y), (Vec3::Z, t.axis_z)];
-    // Per axis: the screen direction and pixels per millimetre.
-    let mut arms = Vec::new();
-    for (k, (a, col)) in axes.iter().enumerate() {
-        let Some(p1) = proj.to_screen(o + *a) else { continue };
-        let d = p1 - p0;
-        let px_per_mm = d.length();
-        if px_per_mm < 1e-6 || !px_per_mm.is_finite() {
-            continue;
-        }
-        arms.push((k, d / px_per_mm, px_per_mm, *col));
-    }
-    let bbox = Rect::from_center_size(p0, vec2(2.0 * GIZMO_PX + 30.0, 2.0 * GIZMO_PX + 30.0)).intersect(rect);
-    egui::Area::new(egui::Id::new("sc_occ_gizmo")).fixed_pos(bbox.min).order(egui::Order::Middle).show(ctx, |ui| {
-        let (_, _) = ui.allocate_exact_size(bbox.size(), Sense::hover());
-        let painter = ui.painter_at(bbox);
-        for (k, dir, px_per_mm, col) in &arms {
-            // An axis seen end-on has no arrow to drag.
-            let len = GIZMO_PX * dir.length().min(1.0);
-            let tip = p0 + *dir * len;
-            let handle =
-                Rect::from_center_size(p0 + *dir * (len * 0.6), vec2(len * 0.8, len * 0.8)).intersect(Rect::from_two_pos(p0, tip).expand(9.0));
-            let resp = ui.interact(handle, ui.id().with(("arm", *k)), Sense::drag());
-            let lit = resp.hovered() || resp.dragged();
-            let w = if lit { 4.0 } else { 2.5 };
-            painter.line_segment([p0 + *dir * 10.0, tip], Stroke::new(w, *col));
-            let n = vec2(-dir.y, dir.x);
-            painter.add(egui::Shape::convex_polygon(vec![tip + *dir * 10.0, tip + n * 5.5, tip - n * 5.5], *col, Stroke::NONE));
-            if resp.dragged() {
-                let mm = resp.drag_delta().dot(*dir) / px_per_mm;
-                if let Some(v) = m.translate.get_mut(*k)
-                    && mm.is_finite()
-                {
-                    *v += f64::from(mm);
-                }
-            }
-            if resp.drag_stopped()
-                && let Some(v) = m.translate.get_mut(*k)
-            {
-                *v = (*v * 100.0).round() / 100.0;
-            }
-        }
-        painter.circle(p0, 6.0, t.panel, Stroke::new(1.5, t.accent));
-    });
 }
 
 /// Redefine Sketch Plane: pick an origin or construction plane, or the selected planar face.
