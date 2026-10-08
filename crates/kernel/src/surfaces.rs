@@ -463,7 +463,7 @@ pub fn trim(body: &Body, tool: &crate::SplitTool, keep: Vec3) -> Result<Body> {
     body.require_brep("trim")?;
     let total = body.solid.face_iter().count();
     let all: Vec<usize> = (0..total).collect();
-    let split = crate::split_faces(body, &all, tool)?;
+    let (split, _) = crate::splitface::split_any(body, &all, tool)?;
     let side = crate::splitface::side_of_point(tool, keep)?;
     guard("trim", || {
         let mut kept = Vec::new();

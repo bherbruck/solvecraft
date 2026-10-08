@@ -53,7 +53,7 @@ pub use ops::{BoolOp, boolean, split_by_plane, transform, transform_matrix};
 pub use polybool::planar_boolean;
 pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew};
-pub use splitface::{SplitTool, split_body, split_faces};
+pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
 pub use step::step_export;
 pub use step_in::{ImportedBody, StepImport, StepNode, step_import, step_import_shared, step_orientation_errors, step_validate};
 pub use step_out::{ExportBody, ExportProduct, StepHeader, step_export_bodies, step_export_products};

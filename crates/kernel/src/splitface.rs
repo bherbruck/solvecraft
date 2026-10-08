@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use mt::{BoundedCurve, InnerSpace, MetricSpace, ParametricCurve, ParametricSurface, ParametricSurface3D, SearchNearestParameter};
-use solvecraft_geom::{Plane, Vec2, Vec3};
+use solvecraft_geom::{Plane, Seg2, Vec2, Vec3};
 use truck_meshalgo::tessellation::RobustMeshableShape;
 use truck_modeling as mt;
 
@@ -23,9 +23,10 @@ pub enum SplitTool<'a> {
     Plane(Plane),
     /// The surface of another body's face (`face` in that body's face order), extended.
     Face { body: &'a Body, face: usize },
-    /// Sketch curves (2D polylines in `plane`) swept along the plane's normal; each curve
-    /// splits on its own, its end segments extended.
-    Curves { plane: Plane, curves: Vec<Vec<Vec2>> },
+    /// Sketch curves (chains of segments in `plane`) swept along the plane's normal; each curve
+    /// splits on its own, extended past its ends. A single line or arc splits exactly (a plane
+    /// or a cylinder); longer chains and splines follow the curve.
+    Curves { plane: Plane, curves: Vec<Vec<Seg2>> },
 }
 
 /// Which side of the tool a point is on (zero on the tool).
@@ -355,6 +356,23 @@ fn fit(pts: &[mt::Point3], scale: f64) -> Result<mt::Curve> {
     Ok(mt::Curve::BSplineCurve(bsp))
 }
 
+/// The curve of a split line: an exact circular arc when a cylinder meets a plane square to its
+/// axis (a sketch arc splitting a planar face), else [`fit`].
+fn fit_on(g: &Field, face: &mt::Face, pts: &[mt::Point3], scale: f64) -> Result<mt::Curve> {
+    if let (Field::Cylinder { axis, .. }, mt::Surface::Plane(pl)) = (g, face.surface())
+        && let (Some(a), Some(b), Some(m)) = (pts.first(), pts.last(), pts.get(pts.len() / 2))
+        && a.distance(*b) > scale * 1e-9
+    {
+        let n = pl.normal();
+        if n.cross(crate::body::v3(*axis)).magnitude() < 1e-9 {
+            let (va, vb) = (mt::Vertex::new(*a), mt::Vertex::new(*b));
+            let e = guard("split arc", || Ok(mt::builder::circle_arc(&va, &vb, *m)))?;
+            return Ok(e.curve());
+        }
+    }
+    fit(pts, scale)
+}
+
 /// Cut an edge at a parameter (none when the point is already a vertex): the vertex and the
 /// pieces in the edge's absolute direction.
 fn cut_edge(e: &mt::Edge, t: f64, p: mt::Point3, tol: f64) -> Result<(mt::Vertex, Option<(mt::Edge, mt::Edge)>)> {
@@ -556,7 +574,7 @@ fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64, new_edg
                 edges.iter().skip(k).chain(edges.iter().take(k)).cloned().collect()
             };
             let (Some(w1), Some(w2)) = (ws.get(wa_i), ws.get(wb_i)) else { continue };
-            let slit = mt::Edge::new_unchecked(&va, &vb, fit(&pts, size)?);
+            let slit = mt::Edge::new_unchecked(&va, &vb, fit_on(g, &face, &pts, size)?);
             new_edges.push(slit.clone());
             let mut joined = from(w1, &va);
             joined.push(slit.clone());
@@ -597,7 +615,7 @@ fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64, new_edg
         else {
             continue;
         };
-        let split = mt::Edge::new_unchecked(&va, &vb, fit(&pts, size)?);
+        let split = mt::Edge::new_unchecked(&va, &vb, fit_on(g, &face, &pts, size)?);
         new_edges.push(split.clone());
         let run = |from: usize, to: usize| -> Vec<mt::Edge> {
             let mut out = Vec::new();
@@ -743,25 +761,58 @@ fn fields(tool: &SplitTool) -> Result<Vec<Field>> {
             vec![surface_field(&f.oriented_surface())]
         }
         SplitTool::Curves { plane, curves } => {
-            if curves.iter().any(|c| c.len() < 2 || c.iter().any(|p| !(p.x.is_finite() && p.y.is_finite()))) {
-                return Err(KernelError::Invalid("split curves need at least two finite points each".into()));
+            let mut out = Vec::new();
+            for c in curves {
+                out.push(match c.as_slice() {
+                    [Seg2::Line { a, b }] => {
+                        let (wa, wb) = (plane.to_world(*a), plane.to_world(*b));
+                        let n = plane.normal().cross(wb - wa).normalized().ok_or_else(|| KernelError::Invalid("a zero-length split line".into()))?;
+                        Field::Plane { o: wa, n }
+                    }
+                    [Seg2::Arc { center, radius, .. }] if radius.is_finite() && *radius > 0.0 => {
+                        Field::Cylinder { o: plane.to_world(*center), axis: plane.normal(), r: *radius, out: 1.0 }
+                    }
+                    segs => {
+                        let mut pts: Vec<Vec2> = Vec::new();
+                        for sg in segs {
+                            for p in sg.polyline(1e-3) {
+                                if pts.last().is_none_or(|q| (*q - p).len() > 1e-9) {
+                                    pts.push(p);
+                                }
+                            }
+                        }
+                        if pts.len() < 2 || pts.iter().any(|p| !(p.x.is_finite() && p.y.is_finite())) || pts.len() > 1_000_000 {
+                            return Err(KernelError::Invalid("split curves need finite segments".into()));
+                        }
+                        Field::Curve { plane: *plane, pts }
+                    }
+                });
             }
-            curves.iter().map(|c| Field::Curve { plane: *plane, pts: c.clone() }).collect()
+            out
         }
     })
 }
 
 /// The body's shells with the chosen faces split by each field in turn, the new edges, and
 /// how many lines split something.
-fn imprint(body: &Body, faces: &[usize], fields: &[Field], size: f64) -> Result<(Vec<Vec<mt::Face>>, Vec<mt::Edge>, usize)> {
-    let mut out_shells = Vec::new();
-    let mut new_edges = Vec::new();
+/// What an imprint made: the shells' faces, for each face the body face it came from, the new
+/// edges, and how many lines split each chosen face.
+pub(crate) struct Imprint {
+    shells: Vec<Vec<mt::Face>>,
+    origin: Vec<usize>,
+    new_edges: Vec<mt::Edge>,
+    made: HashMap<usize, usize>,
+}
+
+fn imprint(body: &Body, faces: &[usize], fields: &[Field], size: f64) -> Result<Imprint> {
+    let mut out = Imprint { shells: Vec::new(), origin: Vec::new(), new_edges: Vec::new(), made: HashMap::new() };
     let mut base = 0;
-    let mut made = 0;
     for sh in body.solid.boundaries() {
         let mut fs: Vec<mt::Face> = sh.face_iter().cloned().collect();
-        // Which faces (by position) are to be split: the chosen ones and, later, their pieces.
+        // Which faces (by position) are to be split: the chosen ones and, later, their pieces;
+        // and the body face each came from.
         let mut target: Vec<bool> = (0..fs.len()).map(|k| faces.contains(&(base + k))).collect();
+        let mut origin: Vec<usize> = (0..fs.len()).map(|k| base + k).collect();
         base += fs.len();
         for g in fields {
             let mut k = 0;
@@ -770,24 +821,38 @@ fn imprint(body: &Body, faces: &[usize], fields: &[Field], size: f64) -> Result<
                     k += 1;
                     continue;
                 }
-                let (m, pieces) = split_one(&mut fs, k, g, size, &mut new_edges)?;
-                made += m;
+                let src = origin.get(k).copied().unwrap_or(0);
+                let (m, pieces) = split_one(&mut fs, k, g, size, &mut out.new_edges)?;
+                *out.made.entry(src).or_default() += m;
                 // The pieces stand at k..k + pieces; positions after shift.
-                let mut t: Vec<bool> = target.iter().take(k).copied().collect();
-                t.extend(std::iter::repeat_n(true, pieces));
-                t.extend(target.iter().skip(k + 1).copied());
-                target = t;
+                target = target.iter().take(k).copied().chain(std::iter::repeat_n(true, pieces)).chain(target.iter().skip(k + 1).copied()).collect();
+                origin = origin.iter().take(k).copied().chain(std::iter::repeat_n(src, pieces)).chain(origin.iter().skip(k + 1).copied()).collect();
                 k += pieces;
             }
         }
-        out_shells.push(fs);
+        out.shells.push(fs);
+        out.origin.extend(origin);
     }
-    Ok((out_shells, new_edges, made))
+    Ok(out)
 }
 
 /// Split the given faces (indices in `body`'s face order) where the tool meets them. The solid
-/// is unchanged; faces the tool misses stay whole.
+/// is unchanged. A listed face the tool misses is an error naming it.
 pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Body> {
+    split_faces_with_map(body, faces, tool).map(|(b, _)| b)
+}
+
+/// Like [`split_faces`], with the body face each face of the result came from (in face order).
+pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<usize>)> {
+    let (b, imp) = split_any(body, faces, tool)?;
+    if let Some(missed) = faces.iter().find(|f| imp.made.get(f).copied().unwrap_or(0) == 0) {
+        return Err(KernelError::Invalid(format!("the tool does not cross face {missed}")));
+    }
+    Ok((b, imp.origin))
+}
+
+/// Split where the tool meets the listed faces (missing some is fine; missing all is an error).
+pub(crate) fn split_any(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Imprint)> {
     body.require_brep("split face")?;
     let size = body.size();
     let fields = fields(tool)?;
@@ -796,12 +861,13 @@ pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Bod
         return Err(KernelError::Invalid("no such face".into()));
     }
     guard("split face", || {
-        let (shells, _, made) = imprint(body, faces, &fields, size)?;
-        if made == 0 {
+        let mut imp = imprint(body, faces, &fields, size)?;
+        if imp.made.values().all(|m| *m == 0) {
             return Err(KernelError::Invalid("the tool does not cross the selected faces".into()));
         }
+        let shells = std::mem::take(&mut imp.shells);
         let solid = mt::Solid::new_unchecked(shells.into_iter().map(mt::Shell::from).collect());
-        Ok(Body { solid: std::sync::Arc::new(solid), mesh: None, color: body.color, paint: None })
+        Ok((Body { solid: std::sync::Arc::new(solid), mesh: None, color: body.color, paint: None }, imp))
     })
 }
 
@@ -930,11 +996,12 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     let total = body.solid.face_iter().count();
     let all: Vec<usize> = (0..total).collect();
     guard("split body", || {
-        let (shells, new_edges, made) = imprint(body, &all, &fields, size)?;
-        if made == 0 || new_edges.is_empty() {
+        let imp = imprint(body, &all, &fields, size)?;
+        let new_edges = imp.new_edges;
+        if imp.made.values().all(|m| *m == 0) || new_edges.is_empty() {
             return Ok(vec![body.clone()]);
         }
-        let faces: Vec<mt::Face> = shells.into_iter().flatten().collect();
+        let faces: Vec<mt::Face> = imp.shells.into_iter().flatten().collect();
         // The section: loops of the new edges on the tool surface, outer loops counter-clockwise
         // about its normal and holes inside them.
         let loops = chain_loops(&new_edges)?;
@@ -1096,7 +1163,7 @@ mod tests {
         let side = c.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_none()).unwrap();
         // A horizontal line seen from the front (XZ sketch) at z = 5, swept along y.
         let xz = Plane::XZ;
-        let tool = SplitTool::Curves { plane: xz, curves: vec![vec![Vec2::new(-20.0, 5.0), Vec2::new(20.0, 5.0)]] };
+        let tool = SplitTool::Curves { plane: xz, curves: vec![vec![Seg2::Line { a: Vec2::new(-20.0, 5.0), b: Vec2::new(20.0, 5.0) }]] };
         let s = split_faces(&c, &[side], &tool).unwrap();
         let m = measure(&s).unwrap();
         // (Measured on meshes: curved faces agree to about 1e-4.)
@@ -1167,6 +1234,32 @@ mod tests {
         // A plane that misses gives the body back.
         let far = Plane::new(Vec3::new(50.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
         assert_eq!(split_body(&b, &SplitTool::Plane(far)).unwrap().len(), 1);
+    }
+
+    /// Sketch arcs split exactly (a circular edge), a listed face the tool misses is named, and
+    /// the map gives each new face its source.
+    #[test]
+    fn sketch_arc_splits_exactly_and_misses_are_named() {
+        let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let t = top(&b, 30.0);
+        let arc = Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 6.0, start: 0.0, sweep: std::f64::consts::FRAC_PI_2 };
+        let plane = Plane { origin: Vec3::new(0.0, 0.0, 30.0), ..Plane::XY };
+        let tool = SplitTool::Curves { plane, curves: vec![vec![arc]] };
+        let (s, map) = split_faces_with_map(&b, &[t], &tool).unwrap();
+        assert_eq!(map.len(), s.face_count());
+        assert_eq!(map.iter().filter(|o| **o == t).count(), 2);
+        let mut tops: Vec<f64> = s.faces(0.001).unwrap().iter().filter(|f| (f.centroid.z - 30.0).abs() < 1e-6).map(|f| f.area).collect();
+        tops.sort_by(f64::total_cmp);
+        let quarter = std::f64::consts::PI * 36.0 / 4.0;
+        // (Face areas come from meshes.)
+        assert!(rel(tops[0], quarter) < 1e-3 && rel(tops[1], 200.0 - quarter) < 1e-3, "{tops:?}");
+        assert!(s.solid.edge_iter().any(|e| matches!(e.curve(), mt::Curve::NurbsCurve(_))));
+        // A listed face the tool misses is named: the plane z = 10 crosses the sides, not the top.
+        let mid = Plane { origin: Vec3::new(0.0, 0.0, 10.0), ..Plane::XY };
+        let side = b.faces(0.01).unwrap().iter().position(|f| (f.centroid.x - 10.0).abs() < 1e-6).unwrap();
+        assert!(split_faces(&b, &[side], &SplitTool::Plane(mid)).is_ok());
+        let e = split_faces(&b, &[side, t], &SplitTool::Plane(mid)).unwrap_err().to_string();
+        assert!(e.contains(&format!("face {t}")), "{e}");
     }
 
     #[test]
