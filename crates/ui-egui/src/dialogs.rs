@@ -1671,6 +1671,14 @@ pub fn start_sketch(app: &mut SolveApp, sel: &Sel) {
     if app.run("SketchCreate", json!({ "plane": plane })).is_ok() {
         app.pre_sketch_cam = Some(before);
         look_at_sketch(app);
+        // On a face: look at the picked point, not the plane's origin (a corner of the face),
+        // which left the face filling the view off-centre like a big square.
+        if let Sel::Face { point, .. } = sel
+            && let Some(mut to) = app.cam_anim.as_ref().map(|a| a.to)
+        {
+            to.target = *point;
+            app.animate_to(to);
+        }
     }
 }
 
