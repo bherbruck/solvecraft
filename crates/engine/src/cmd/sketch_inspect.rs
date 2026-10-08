@@ -313,7 +313,7 @@ fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         vol += m.volume;
-        moment = moment + m.centroid * m.volume;
+        moment += m.centroid * m.volume;
         out.push(json!({"body": b.name, "center": [m.centroid.x, m.centroid.y, m.centroid.z], "volume": m.volume}));
     }
     if out.is_empty() {

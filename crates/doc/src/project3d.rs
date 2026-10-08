@@ -363,12 +363,12 @@ pub fn iso_grid(m: &Mesh, f: u32, p: Vec3, count: usize) -> Vec<Vec<Vec3>> {
     for dir in ["u", "v"] {
         // The family's cutting direction, from the curve through p.
         let Some(first) = iso_curve(m, f, p, dir).into_iter().next() else { continue };
-        let pts: Vec<Vec3> = first.iter().copied().collect();
+        let pts: Vec<Vec3> = first.to_vec();
         // Normal of the plane that curve lies in.
         let Some(c) = pts.first().copied() else { continue };
         let mut n = Vec3::ZERO;
         for w in pts.windows(2) {
-            n = n + (w[0] - c).cross(w[1] - c);
+            n += (w[0] - c).cross(w[1] - c);
         }
         let cut_n = match n.normalized() {
             Some(n) => n,

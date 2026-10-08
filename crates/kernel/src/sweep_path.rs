@@ -117,7 +117,7 @@ fn stations(pts: &[Vec3], tangents: &[Vec3], mitre: &[Option<(Vec3, f64)>]) -> R
         let mut m = [col(Vec3::X), col(Vec3::Y), col(Vec3::Z)];
         if let Some(Some((b, s))) = mitre.get(i) {
             for c in &mut m {
-                *c = *c + *b * ((s - 1.0) * c.dot(*b));
+                *c += *b * ((s - 1.0) * c.dot(*b));
             }
         }
         out.push(Station { at: *pts.get(i).ok_or_else(|| KernelError::Invalid("sweep path".into()))?, m });
