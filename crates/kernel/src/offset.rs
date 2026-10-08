@@ -64,6 +64,15 @@ impl Surf {
             }
         }
     }
+    /// The gradient of [`Surf::dist`] (the normal before orientation).
+    fn grad(&self, p: Vec3) -> Option<Vec3> {
+        match *self {
+            Surf::Plane { n, .. } => Some(n),
+            Surf::Cylinder { convex, .. } | Surf::Sphere { convex, .. } | Surf::Cone { convex, .. } => {
+                self.normal(p).map(|n| if convex { n } else { -n })
+            }
+        }
+    }
     fn moved(&self, s: f64) -> Option<Surf> {
         match *self {
             Surf::Plane { n, d } => Some(Surf::Plane { n, d: d + s }),
@@ -222,6 +231,10 @@ pub(crate) fn surf_of(f: &mt::Face, tol: f64) -> Option<Surf> {
         return Some(t);
     }
     let (p0, n0) = *s.first()?;
+    // Flat though not built as a plane (a radial line swept round an axis).
+    if s.iter().all(|(p, n)| n.dot(n0) > 1.0 - 1e-9 && (*p - p0).dot(n0).abs() < tol) {
+        return Some(Surf::Plane { n: n0, d: n0.dot(p0) });
+    }
     // The normal most square to the first (a half cylinder's two ends are opposite).
     let far = s.iter().map(|x| x.1).min_by(|a, b| a.dot(n0).abs().total_cmp(&b.dot(n0).abs()))?;
     let Some(a) = n0.cross(far).normalized() else { return sphere_or_cone(&s, tol) };
@@ -354,9 +367,26 @@ fn sphere_or_cone(s: &[(Vec3, Vec3)], tol: f64) -> Option<Surf> {
 /// n_i · δ = s_i for each face's normal n_i at p, then checked against the moved surfaces.
 fn move_point(p: Vec3, old: &[Surf], shifts: &[f64], new: &[Surf], tol: f64) -> Option<Vec3> {
     let ns: Vec<Vec3> = old.iter().map(|sf| sf.normal(p)).collect::<Option<_>>()?;
+    let mut q = p + span_step(&ns, shifts)?;
+    // The step is exact for planes; a curved face meeting another at an angle needs a few
+    // Newton steps onto the moved surfaces.
+    for _ in 0..30 {
+        let d: Vec<f64> = new.iter().map(|sf| sf.dist(q)).collect();
+        if d.iter().all(|x| x.abs() < tol) {
+            return Some(q);
+        }
+        let gs: Vec<Vec3> = new.iter().map(|sf| sf.grad(q)).collect::<Option<_>>()?;
+        let rhs: Vec<f64> = d.iter().map(|x| -x).collect();
+        q += span_step(&gs, &rhs)?;
+    }
+    new.iter().all(|sf| sf.dist(q).abs() < tol).then_some(q)
+}
+
+/// The smallest move `v` (in the span of `ns`) with `n_i · v = s_i` (least squares).
+fn span_step(ns: &[Vec3], s: &[f64]) -> Option<Vec3> {
     // Orthonormal basis of the normals' span (tangent faces share a normal).
     let mut basis: Vec<Vec3> = Vec::new();
-    for n in &ns {
+    for n in ns {
         let mut v = *n;
         for e in &basis {
             v = v - *e * v.dot(*e);
@@ -369,13 +399,13 @@ fn move_point(p: Vec3, old: &[Surf], shifts: &[f64], new: &[Surf], tol: f64) -> 
     let r = basis.len();
     let mut m = [[0.0f64; 3]; 3];
     let mut rhs = [0.0f64; 3];
-    for (n, s) in ns.iter().zip(shifts) {
+    for (n, si) in ns.iter().zip(s) {
         let row: Vec<f64> = basis.iter().map(|e| n.dot(*e)).collect();
         for i in 0..r {
             for j in 0..r {
                 m[i][j] += row[i] * row[j];
             }
-            rhs[i] += row[i] * s;
+            rhs[i] += row[i] * si;
         }
     }
     // Pad unused dimensions with the identity.
@@ -383,11 +413,11 @@ fn move_point(p: Vec3, old: &[Surf], shifts: &[f64], new: &[Surf], tol: f64) -> 
         row[i] = 1.0;
     }
     let c = crate::polyhedron::solve3_pub(m, rhs)?;
-    let mut q = p;
+    let mut v = Vec3::ZERO;
     for (k, e) in basis.iter().enumerate() {
-        q += *e * c[k];
+        v += *e * c[k];
     }
-    new.iter().all(|sf| sf.dist(q).abs() < tol).then_some(q)
+    Some(v)
 }
 
 /// A line or circular arc through an edge (by samples): `None` for other curves.
@@ -475,6 +505,16 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
         };
         newpos.insert(v.id(), q);
     }
+    // An edge turned round: faces crossed over (a wall thinner than the move), which would
+    // leave the body inside out.
+    for e in b.solid.edge_iter() {
+        let (f0, f1) = (e.absolute_front(), e.absolute_back());
+        let (Some(q0), Some(q1)) = (newpos.get(&f0.id()), newpos.get(&f1.id())) else { continue };
+        let (old_v, new_v) = (from_p3(f1.point()) - from_p3(f0.point()), *q1 - *q0);
+        if old_v.len() > size * 1e-6 && old_v.dot(new_v) < 0.0 {
+            return Err(fail("not supported yet: the move is larger than a wall or step is thick (faces would cross)"));
+        }
+    }
     guard("offset", || {
         let verts: HashMap<mt::VertexID, mt::Vertex> = newpos.iter().map(|(k, p)| (*k, builder::vertex(p3(*p)))).collect();
         let mut edges: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
@@ -486,7 +526,27 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
             if from_p3(a.point()).dist(from_p3(c.point())) < size * 1e-9 {
                 return Err(fail("an edge vanishes (the offset is too large)"));
             }
-            let kind = arc_mid(&e, size * 1e-6).ok_or_else(|| fail("edges must be lines or arcs"))?;
+            let Some(kind) = arc_mid(&e, size * 1e-6) else {
+                // Another curve (where two cylinders meet): its points moved onto the moved
+                // faces, through a smooth curve.
+                use mt::{BoundedCurve, ParametricCurve};
+                let fs = efaces.get(&e.id()).ok_or_else(|| fail("edge faces"))?;
+                let (o, s, n) = pick(fs);
+                let cv = e.curve();
+                let (t0, t1) = cv.range_tuple();
+                let k = 16;
+                let mut pts = vec![from_p3(a.point())];
+                for j in 1..k {
+                    let p = from_p3(cv.subs(t0 + (t1 - t0) * j as f64 / k as f64));
+                    pts.push(
+                        move_point(p, &o, &s, &n, size * 1e-6).ok_or_else(|| fail("an edge whose faces don't meet the same way after the move"))?,
+                    );
+                }
+                pts.push(from_p3(c.point()));
+                let curve = crate::build::interpolate_cubic(&pts).ok_or_else(|| fail("edge curve"))?;
+                edges.insert(e.id(), mt::Edge::new(a, c, mt::Curve::BSplineCurve(curve)));
+                continue;
+            };
             let ne = match kind {
                 None => builder::line(a, c),
                 Some(m) => {
@@ -540,8 +600,13 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
             }
             out.push(nf);
         }
-        let shell: mt::Shell = out.into();
-        let solid = Solid::try_new(vec![shell]).map_err(|e| fail(&e.to_string()))?;
+        // One shell per shell of the body (pieces, voids).
+        let mut shells: Vec<mt::Shell> = Vec::new();
+        let mut it = out.into_iter();
+        for sh in b.solid.boundaries() {
+            shells.push(it.by_ref().take(sh.len()).collect::<Vec<_>>().into());
+        }
+        let solid = Solid::try_new(shells).map_err(|e| fail(&e.to_string()))?;
         Body::new(solid)
     })
 }

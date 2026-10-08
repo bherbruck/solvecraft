@@ -16,6 +16,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod fuzz;
 mod oracle;
 mod recipe;
 mod seams;
@@ -35,6 +36,7 @@ const USAGE: &str = "usage:
   solvecraft-cli commands
   solvecraft-cli recipe <recipe.json>
   solvecraft-cli oracle <case-dir>... [--json]
+  solvecraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]
   solvecraft-cli step-corpus <case-dir>... [--json]
   solvecraft-cli mcp [--in design.solvecraft|script.json] [--connect 127.0.0.1:PORT]
   solvecraft-cli licences
@@ -58,6 +60,8 @@ fn main() -> ExitCode {
         }),
         Some("oracle") => oracle::run(&args[1..]),
         Some("step-corpus") => oracle::step_corpus(&args[1..]),
+        Some("fuzz") => fuzz::run(&args[1..]),
+        Some("fuzz-one") => fuzz::one(&args[1..]),
         Some("mcp") => cmd_mcp(&args[1..]),
         Some("icon") => cmd_icon(&args[1..]),
         Some("licences" | "licenses") => {

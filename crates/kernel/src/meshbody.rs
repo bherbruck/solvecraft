@@ -147,7 +147,7 @@ fn unify_winding(m: &mut TriMesh) {
 }
 
 /// Every triangle side is shared by exactly two triangles in opposite directions.
-fn is_closed(m: &TriMesh) -> bool {
+pub(crate) fn is_closed(m: &TriMesh) -> bool {
     let mut count: HashMap<(u32, u32), i32> = HashMap::new();
     for t in &m.triangles {
         for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {

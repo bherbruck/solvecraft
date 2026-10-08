@@ -296,7 +296,8 @@ fn isoparametric_curves_of_a_cylinder() {
     let w = &sk.wires[sk.wire_index(r["wires"][0].as_str().unwrap()).unwrap()];
     let zs: Vec<f64> = w.pts.iter().map(|p| p.z).collect();
     assert!(zs.iter().cloned().fold(f64::MIN, f64::max) > 19.9 && zs.iter().cloned().fold(f64::MAX, f64::min) < 0.1, "{zs:?}");
-    assert!(w.pts.iter().all(|p| (p.x - 6.0).abs() < 1e-3 && p.y.abs() < 1e-3));
+    // Within the mesh's sag: the cut runs across facets unless a seam happens to lie there.
+    assert!(w.pts.iter().all(|p| (p.x - 6.0).abs() < 1e-2 && p.y.abs() < 1e-2), "{:?}", w.pts);
 }
 
 #[test]

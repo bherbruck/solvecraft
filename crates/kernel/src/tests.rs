@@ -1297,3 +1297,66 @@ fn tight_bend_counts() {
     let m = measure(&b).unwrap().merged;
     assert_eq!((m.faces, m.edges, m.vertices), (5, 6, 4), "{m:?}");
 }
+
+#[test]
+#[ignore]
+fn boolean_identity_survey() {
+    let n: u64 = std::env::var("N").ok().and_then(|x| x.parse().ok()).unwrap_or(100);
+    let seeds: Vec<u64> = match std::env::var("SEEDS") {
+        Ok(s) => s.split(',').filter_map(|x| x.parse().ok()).collect(),
+        Err(_) => (0..n).collect(),
+    };
+    let mut bad = 0;
+    for seed in seeds {
+        let c = crate::fuzz::boolean_case(seed);
+        if c.outcome != "ok" {
+            bad += 1;
+            println!("{seed}: {} {} | {:?} | {:?}", c.outcome, c.detail, c.a, c.b);
+        }
+    }
+    println!("{bad}/{n} failed");
+}
+
+/// A quarter turn of a rectangle with an edge on the axis: no zero-area face along the axis, so
+/// a cylinder can be cut through the corner (it failed in every boolean attempt before).
+#[test]
+fn partial_revolve_on_the_axis() {
+    let sq =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 7.5), Vec2::new(0.0, 7.5)]), holes: vec![] };
+    let pie = revolve(&Plane::XZ, &[sq], Vec2::ZERO, Vec2::Y, std::f64::consts::FRAC_PI_2).unwrap().pop().unwrap();
+    assert!(pie.validity().is_empty(), "{:?}", pie.validity());
+    let v = measure(&pie).unwrap().volume;
+    assert!((v - PI * 400.0 / 4.0 * 7.5).abs() < 1e-3 * v, "{v}");
+    assert_eq!(measure(&pie).unwrap().merged.faces, 5);
+    let cyl = cylinder(Vec3::new(2.5, 0.0, 5.0), Vec3::Z, 3.75, 22.5).unwrap();
+    let cut = boolean(&pie, &cyl, BoolOp::Cut).unwrap().unwrap();
+    assert!(cut.validity().is_empty());
+    let vc = measure(&cut).unwrap().volume;
+    assert!(vc < v - 1.0 && vc > v - PI * 3.75 * 3.75 * 2.5, "{vc}");
+}
+
+/// Boolean identities on primitives the robustness runs found failing: cylinders tangent to box
+/// faces from inside and out, crossing cylinders touching along a line (their seams used to lie
+/// exactly where the other body cut them).
+#[test]
+fn boolean_identity_on_tangent_primitives() {
+    for seed in [1, 32, 169] {
+        let c = crate::fuzz::boolean_case(seed);
+        assert_eq!(c.outcome, "ok", "seed {seed}: {} {:?} {:?}", c.detail, c.a, c.b);
+    }
+}
+
+/// A body in two pieces: booleans go a piece at a time.
+#[test]
+fn boolean_of_a_body_in_pieces() {
+    let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let b = box_solid(Vec3::new(20.0, 0.0, 0.0), Vec3::new(30.0, 10.0, 10.0)).unwrap();
+    let two = boolean(&a, &b, BoolOp::Union).unwrap().unwrap();
+    assert_eq!(two.shell_count(), 2);
+    let tool = cylinder(Vec3::new(-5.0, 5.0, 5.0), Vec3::X, 2.0, 40.0).unwrap();
+    let cut = boolean(&two, &tool, BoolOp::Cut).unwrap().unwrap();
+    assert_eq!(cut.shell_count(), 2);
+    assert!(cut.validity().is_empty(), "{:?}", cut.validity());
+    let v = measure(&cut).unwrap().volume;
+    assert!((v - (2000.0 - 2.0 * PI * 4.0 * 10.0)).abs() < 1.0, "{v}");
+}

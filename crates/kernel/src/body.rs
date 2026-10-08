@@ -616,6 +616,31 @@ impl Body {
         let mut seen = std::collections::HashSet::new();
         self.solid.vertex_iter().filter(|v| seen.insert(v.id())).count()
     }
+    /// What is wrong with the body as a solid: shells that aren't closed and consistently
+    /// oriented, faces that don't mesh, a volume that isn't positive. Empty when it is sound.
+    pub fn validity(&self) -> Vec<String> {
+        if let Some(m) = &self.mesh {
+            return if crate::meshbody::is_closed(m) { Vec::new() } else { vec!["the mesh is not closed".into()] };
+        }
+        let mut out = Vec::new();
+        for (i, sh) in self.solid.boundaries().iter().enumerate() {
+            let c = sh.shell_condition();
+            if c != truck_topology::shell::ShellCondition::Closed {
+                out.push(format!("shell {i} is {c:?}, not closed"));
+            }
+        }
+        let missing = self.unmeshed_faces();
+        if missing > 0 {
+            out.push(format!("{missing} face(s) don't mesh"));
+        }
+        match crate::measure(self) {
+            Ok(m) if m.volume.is_finite() && m.volume > 0.0 => {}
+            Ok(m) => out.push(format!("volume {}", m.volume)),
+            Err(e) => out.push(format!("no measure: {e}")),
+        }
+        out
+    }
+
     pub fn shell_count(&self) -> usize {
         match &self.mesh {
             Some(_) => 1,

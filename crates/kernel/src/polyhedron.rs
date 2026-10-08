@@ -365,14 +365,31 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     match crate::ops::boolean(&healed, &cavity, crate::BoolOp::Cut) {
         Ok(Some(r)) => Ok(r),
         Ok(None) => Err(KernelError::Failed("the shell removed everything".into())),
-        // Healing can leave faces the boolean dislikes (revolved patches): the body as it was.
-        Err(e) if healed.face_count() == b.face_count() => {
+        // Healing can leave faces the boolean dislikes (revolved patches): the body as it was,
+        // its faces to open found again.
+        Err(e) => {
+            let raw = b.tessellate((size * 1e-3).max(1e-3)).map_err(|_| e.clone())?;
+            let mut opened_raw: Vec<usize> = Vec::new();
+            for p in open {
+                let near = raw
+                    .triangles
+                    .iter()
+                    .zip(&raw.tri_face)
+                    .filter_map(|(t, f)| raw.tri(t).map(|[x, y, z]| (point_tri(*p, x, y, z), *f as usize)))
+                    .min_by(|a, c| a.0.total_cmp(&c.0));
+                if let Some((d, f)) = near
+                    && d < size * 1e-3 + 1e-6
+                    && !opened_raw.contains(&f)
+                {
+                    opened_raw.push(f);
+                }
+            }
+            let opened = opened_raw;
             let cavity = offset_planar(b, |fi, _| if opened.contains(&fi) { margin } else { -thickness }).map_err(|_| e.clone())?;
             crate::ops::boolean(b, &cavity, crate::BoolOp::Cut)
                 .map_err(|_| e)?
                 .ok_or_else(|| KernelError::Failed("the shell removed everything".into()))
         }
-        Err(e) => Err(e),
     }
 }
 

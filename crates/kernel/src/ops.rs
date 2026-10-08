@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use solvecraft_geom::Vec3;
 use truck_modeling as mt;
 
-use crate::body::{Body, from_p3, p3, v3};
+use crate::body::{Body, Solid, from_p3, p3, v3};
 use crate::{KernelError, Result, guard};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,6 +162,25 @@ thread_local! {
 /// everything or an intersection of disjoint bodies. Results are checked against volume bounds
 /// and retried with shifted copies and other tolerances when they fail or look wrong.
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
+    let r = boolean_whole(a, b, op);
+    // Bodies in several pieces: when the whole failed (or came out empty), a piece at a time.
+    let retry = match &r {
+        Err(_) => true,
+        Ok(None) => op != BoolOp::Intersect,
+        Ok(Some(_)) => false,
+    };
+    if retry && (a.solid.boundaries().len() > 1 || b.solid.boundaries().len() > 1) {
+        let (la, lb) = (a.lumps()?, b.lumps()?);
+        if (la.len() > 1 || lb.len() > 1)
+            && let Ok(Some(x)) = by_lumps(la, lb, op)
+        {
+            return Ok(Some(x));
+        }
+    }
+    r
+}
+
+fn boolean_whole(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     a.require_brep("a boolean")?;
     b.require_brep("a boolean")?;
     let size = a.size().max(b.size());
@@ -337,6 +356,80 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         }
     }
     Err(KernelError::Failed(format!("boolean {op:?}: {last}")))
+}
+
+/// A boolean of bodies given as their pieces; the result's pieces in one body.
+fn by_lumps(la: Vec<Body>, lb: Vec<Body>, op: BoolOp) -> Result<Option<Body>> {
+    let boxes_meet = |x: &Body, y: &Body| -> bool {
+        let (Ok(mx), Ok(my)) = (x.tessellate(x.size() * 0.05 + 1e-3), y.tessellate(y.size() * 0.05 + 1e-3)) else { return true };
+        let (bx, by) = (mx.bounds(), my.bounds());
+        let g = (x.size() + y.size()) * 0.01;
+        bx.min.x <= by.max.x + g
+            && by.min.x <= bx.max.x + g
+            && bx.min.y <= by.max.y + g
+            && by.min.y <= bx.max.y + g
+            && bx.min.z <= by.max.z + g
+            && by.min.z <= bx.max.z + g
+    };
+    let mut out: Vec<Body> = Vec::new();
+    match op {
+        BoolOp::Cut => {
+            for x in la {
+                let mut cur = Some(x);
+                for y in &lb {
+                    cur = match cur {
+                        Some(c) if boxes_meet(&c, y) => boolean(&c, y, BoolOp::Cut)?,
+                        other => other,
+                    };
+                }
+                out.extend(cur);
+            }
+        }
+        BoolOp::Intersect => {
+            for x in &la {
+                for y in &lb {
+                    if boxes_meet(x, y)
+                        && let Some(r) = boolean(x, y, BoolOp::Intersect)?
+                    {
+                        out.push(r);
+                    }
+                }
+            }
+        }
+        BoolOp::Union => {
+            out = la;
+            for y in lb {
+                let mut cur = y;
+                let mut rest = Vec::new();
+                for x in out {
+                    if boxes_meet(&x, &cur) {
+                        match boolean(&x, &cur, BoolOp::Union)? {
+                            Some(u) if u.solid.boundaries().len() == 1 => cur = u,
+                            _ => rest.push(x),
+                        }
+                    } else {
+                        rest.push(x);
+                    }
+                }
+                rest.push(cur);
+                out = rest;
+            }
+        }
+    }
+    join_pieces(out)
+}
+
+/// Bodies (apart from each other) as one body of several pieces.
+pub(crate) fn join_pieces(pieces: Vec<Body>) -> Result<Option<Body>> {
+    match pieces.len() {
+        0 => Ok(None),
+        1 => Ok(pieces.into_iter().next()),
+        _ => {
+            let shells: Vec<mt::Shell> = pieces.iter().flat_map(|p| p.solid.boundaries().clone()).collect();
+            let solid = guard("pieces", || Solid::try_new(shells).map_err(|e| KernelError::Failed(e.to_string())))?;
+            Body::new(solid).map(Some)
+        }
+    }
 }
 
 /// Affine transform by a column-major 4×4 matrix (rotations, translations, reflections).
