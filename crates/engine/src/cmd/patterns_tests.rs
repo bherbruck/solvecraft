@@ -114,3 +114,29 @@ fn path_pattern_orientation_follows_the_path() {
     assert!((width_of_copy("identical") - 2.0).abs() < 1e-6);
     assert!((width_of_copy("path") - 4.0).abs() < 1e-6);
 }
+
+/// Patterns of a blind hole drill every copy to the full depth from the face at the copy
+/// (QA s30): n copies remove n times one hole.
+#[test]
+fn patterns_of_a_blind_hole_drill_every_copy() {
+    let one = {
+        let mut s = Session::default();
+        run(&mut s, "PrimitiveBox", json!({"length": 50, "width": 25, "height": 15}));
+        let v0 = volume(&mut s);
+        run(&mut s, "FusionHoleCommand", json!({"position": [10, 12, 15], "diameter": "5 mm", "depth": "10 mm"}));
+        v0 - volume(&mut s)
+    };
+    let patterned = |p: (&str, Value)| {
+        let mut s = Session::default();
+        run(&mut s, "PrimitiveBox", json!({"length": 50, "width": 25, "height": 15}));
+        let v0 = volume(&mut s);
+        run(&mut s, "FusionHoleCommand", json!({"position": [10, 12, 15], "diameter": "5 mm", "depth": "10 mm"}));
+        run(&mut s, p.0, p.1);
+        v0 - volume(&mut s)
+    };
+    let r = patterned(("PatternRectangular", json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": "15 mm"})));
+    assert!((r - 3.0 * one).abs() < 1e-3 * one, "{r} vs 3 × {one}");
+    let c =
+        patterned(("PatternCircular", json!({"features": ["Hole1"], "axis": {"origin": [25, 12, 0], "dir": [0, 0, 1]}, "count": 2, "angle": 360})));
+    assert!((c - 2.0 * one).abs() < 1e-3 * one, "{c} vs 2 × {one}");
+}

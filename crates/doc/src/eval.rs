@@ -1134,6 +1134,20 @@ fn hole_spots(st: &ModelState, f: &Feature) -> Result<(Vec<Vec3>, Vec3)> {
     Ok((spots.into_iter().map(|p| hole_on_surface(st, p, dir)).collect(), dir))
 }
 
+/// A hole's spots as given (not yet moved onto the surface) and its direction.
+fn hole_spots_raw(st: &ModelState, f: &Feature) -> Result<(Vec<Vec3>, Vec3)> {
+    let FeatureKind::Hole { position, direction, points, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
+    match points {
+        Some(sp) => {
+            let ss = st.sketch(sp.sketch).ok_or_else(|| DocError::Unknown(format!("sketch {}", sp.sketch)))?;
+            let v: Vec<Vec3> =
+                sp.ids.iter().filter_map(|id| ss.sketch.points.iter().find(|p| &p.id == id)).map(|p| ss.plane.to_world(p.pos)).take(10_000).collect();
+            Ok((v, -ss.plane.normal()))
+        }
+        None => Ok((vec![*position], direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?)),
+    }
+}
+
 /// The cutting tools of one hole at `position`, drilling along `dir`.
 #[allow(clippy::too_many_arguments)]
 fn hole_tools(
@@ -1766,12 +1780,26 @@ fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut 
             }
             continue;
         }
-        let tools = feature_tools(vals, src, st)?;
         let (op, targets) = feature_op(src);
         let mut copies = Vec::new();
-        for m in mats {
-            for t in &tools {
-                copies.push(kernel::transform_matrix(t, *m)?);
+        if let FeatureKind::Hole { diameter, depth, hole, .. } = &src.kind {
+            // A hole is drilled again at each copy of its spot (found on the surface there), so
+            // a blind hole's depth counts from the face at the copy, not from the bottom of the
+            // original hole under the original spot.
+            let (spots, dir) = hole_spots_raw(st, src)?;
+            for m in mats {
+                let d = crate::apply_vector(m, dir).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
+                for p in &spots {
+                    let at = hole_on_surface(st, crate::apply_point(m, *p), d);
+                    copies.extend(hole_tools(vals, st, &at, d, diameter, depth, hole)?);
+                }
+            }
+        } else {
+            let tools = feature_tools(vals, src, st)?;
+            for m in mats {
+                for t in &tools {
+                    copies.push(kernel::transform_matrix(t, *m)?);
+                }
             }
         }
         // New bodies from a pattern join their source when they touch it (as one feature would).
