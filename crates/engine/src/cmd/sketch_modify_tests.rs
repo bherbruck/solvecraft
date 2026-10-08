@@ -314,3 +314,31 @@ fn centerline_is_left_out_of_profiles() {
     assert!(s.execute("sketch.centerline", &json!({"curves": ["nope"]})).is_err());
     let _ = l;
 }
+
+#[test]
+fn free_form_profiles_extrude_exactly() {
+    let pi = std::f64::consts::PI;
+    let vol = |s: &mut Session| run(s, "MeasureCommand", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    // Ellipse a = 10, b = 4: π a b h.
+    let mut s = new_sketch();
+    run(&mut s, "CircleElipse", json!({"center": [0, 0], "major": [10, 0], "minor_radius": 4}));
+    let a = profiles(&s)[0];
+    assert!((a - pi * 40.0).abs() < 1e-9, "{a}");
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Extrude", json!({"distance": 5}));
+    let v = vol(&mut s);
+    assert!((v - pi * 40.0 * 5.0).abs() / (pi * 200.0) < 2e-4, "{v}");
+    let m = run(&mut s, "MeasureCommand", json!({}));
+    assert_eq!(m["bodies"][0]["faces"], 3, "an exact ellipse: top, bottom and one side ({m})");
+    // A region closed by a fit spline and a line.
+    let mut s = new_sketch();
+    let sp = ids(&run(&mut s, "DrawSpline", json!({"points": [[0, 0], [10, 8], [20, 0]]}))["curves"])[0].clone();
+    run(&mut s, "DrawPolyline", json!({"points": [format!("{sp}.end"), format!("{sp}.start")]}));
+    let a = profiles(&s)[0];
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Extrude", json!({"distance": 2}));
+    let v = vol(&mut s);
+    assert!((v - a * 2.0).abs() / (a * 2.0) < 2e-4, "{v} vs {}", a * 2.0);
+    let m = run(&mut s, "MeasureCommand", json!({}));
+    assert!(m["bodies"][0]["faces"].as_u64().unwrap() <= 5, "{m}");
+}

@@ -83,3 +83,58 @@ fn tangent_chains_follow_smooth_edges() {
     assert_eq!(m.tangent_chain(2, 5f64.to_radians()), vec![2]);
     assert_eq!(m.face_edges(1), vec![1, 2]);
 }
+
+#[test]
+fn cubic_and_conic_segments_measure_exactly() {
+    use crate::{Loop2, Seg2, Vec2};
+    // An ellipse (a = 5, b = 3) as four quarter conics: area π a b.
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let (a, b) = (5.0, 3.0);
+    let q = |p0: Vec2, c: Vec2, p1: Vec2| Seg2::Conic { a: p0, apex: c, b: p1, w };
+    let e = Loop2 {
+        segs: vec![
+            q(Vec2::new(a, 0.0), Vec2::new(a, b), Vec2::new(0.0, b)),
+            q(Vec2::new(0.0, b), Vec2::new(-a, b), Vec2::new(-a, 0.0)),
+            q(Vec2::new(-a, 0.0), Vec2::new(-a, -b), Vec2::new(0.0, -b)),
+            q(Vec2::new(0.0, -b), Vec2::new(a, -b), Vec2::new(a, 0.0)),
+        ],
+    };
+    assert!((e.signed_area() - std::f64::consts::PI * a * b).abs() < 1e-9, "{}", e.signed_area());
+    for s in &e.segs {
+        let m = s.point_at(0.37);
+        assert!(((m.x / a).powi(2) + (m.y / b).powi(2) - 1.0).abs() < 1e-12);
+    }
+    // A cubic on a straight line has the line's length; reversing flips the area sign.
+    let c = Seg2::Cubic { p0: Vec2::new(0.0, 0.0), p1: Vec2::new(1.0, 0.0), p2: Vec2::new(2.0, 0.0), p3: Vec2::new(3.0, 0.0) };
+    assert!((c.length() - 3.0).abs() < 1e-12);
+    // Square with one bulging cubic side: area = 1 + the cubic's area over the chord.
+    let bulge = Seg2::Cubic { p0: Vec2::new(1.0, 0.0), p1: Vec2::new(1.5, 1.0 / 3.0), p2: Vec2::new(1.5, 2.0 / 3.0), p3: Vec2::new(1.0, 1.0) };
+    let sq = Loop2 {
+        segs: vec![
+            Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(1.0, 0.0) },
+            bulge,
+            Seg2::Line { a: Vec2::new(1.0, 1.0), b: Vec2::new(0.0, 1.0) },
+            Seg2::Line { a: Vec2::new(0.0, 1.0), b: Vec2::new(0.0, 0.0) },
+        ],
+    };
+    // x(t) - 1 = 1.5 t(1-t) (Bernstein: 3·0.5·t(1-t)²+3·0.5·t²(1-t)), y = t: ∫ 1.5 t(1-t) dt = 0.25.
+    assert!((sq.signed_area() - 1.25).abs() < 1e-12, "{}", sq.signed_area());
+    let rev = bulge.reversed();
+    assert!((rev.area_term() + bulge.area_term()).abs() < 1e-12);
+    assert!(bulge.polyline(1e-4).len() > 4);
+    // Halves cover the same curve.
+    let (l, r) = bulge.split_half();
+    assert!(l.point_at(0.5).dist(bulge.point_at(0.25)) < 1e-12);
+    assert!(r.point_at(0.5).dist(bulge.point_at(0.75)) < 1e-12);
+    // Conic halves are re-parameterised but stay on the ellipse.
+    let (l2, r2) = e.segs[0].split_half();
+    for t in [0.1, 0.5, 0.9] {
+        for q in [l2.point_at(t), r2.point_at(t)] {
+            assert!(((q.x / a).powi(2) + (q.y / b).powi(2) - 1.0).abs() < 1e-12, "{q:?}");
+        }
+    }
+    for (seg, (l, r)) in [(bulge, (l, r)), (e.segs[0], (l2, r2))] {
+        assert!(l.end().dist(r.start()) < 1e-12);
+        assert!((l.area_term() + r.area_term() - seg.area_term()).abs() < 1e-12);
+    }
+}

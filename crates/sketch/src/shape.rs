@@ -159,7 +159,7 @@ impl Sketch {
             CurveKind::Circle { c, r } => Some(Shape::Round { c: self.point(c)?, r, start: 0.0, sweep: TAU }),
             CurveKind::Arc { .. } => match self.segs(ci).into_iter().next()? {
                 Seg2::Arc { center, radius, start, sweep } => Some(Shape::Round { c: center, r: radius, start, sweep }),
-                Seg2::Line { .. } => None,
+                _ => None,
             },
             _ => None,
         }

@@ -1,5 +1,6 @@
-//! Planar profiles: closed loops of lines and circular arcs, and regions (an outer loop minus
-//! holes). Sketches produce them; the kernel turns them into faces.
+//! Planar profiles: closed loops of lines, circular arcs, cubic Béziers and conics (rational
+//! quadratic Béziers), and regions (an outer loop minus holes). Sketches produce them; the
+//! kernel turns them into faces.
 
 use std::f64::consts::TAU;
 
@@ -22,18 +23,61 @@ pub enum Seg2 {
         start: f64,
         sweep: f64,
     },
+    /// Cubic Bézier.
+    Cubic {
+        p0: Vec2,
+        p1: Vec2,
+        p2: Vec2,
+        p3: Vec2,
+    },
+    /// Rational quadratic Bézier from `a` to `b` with control `apex` of weight `w` (end
+    /// weights 1): exact conic arcs (ellipses, parabolas, hyperbolas).
+    Conic {
+        a: Vec2,
+        apex: Vec2,
+        b: Vec2,
+        w: f64,
+    },
 }
 
+/// Gauss–Legendre nodes and weights on [0, 1] (5 points).
+const GL5: [(f64, f64); 5] = [
+    (0.046_910_077_030_668, 0.118_463_442_528_095),
+    (0.230_765_344_947_158, 0.239_314_335_249_683),
+    (0.5, 0.284_444_444_444_444),
+    (0.769_234_655_052_842, 0.239_314_335_249_683),
+    (0.953_089_922_969_332, 0.118_463_442_528_095),
+];
+
 impl Seg2 {
+    /// Derivative with respect to the parameter at `t` (Béziers and conics; lines and arcs too).
+    pub fn derivative(&self, t: f64) -> Vec2 {
+        match *self {
+            Seg2::Line { a, b } => b - a,
+            Seg2::Arc { radius, start, sweep, .. } => Vec2::from_angle(start + sweep * t).perp() * (radius * sweep),
+            Seg2::Cubic { p0, p1, p2, p3 } => {
+                let u = 1.0 - t;
+                (p1 - p0) * (3.0 * u * u) + (p2 - p1) * (6.0 * u * t) + (p3 - p2) * (3.0 * t * t)
+            }
+            Seg2::Conic { a, apex, b, w } => {
+                let u = 1.0 - t;
+                let (n, d) = (a * (u * u) + apex * (2.0 * w * u * t) + b * (t * t), u * u + 2.0 * w * u * t + t * t);
+                let (dn, dd) = (a * (-2.0 * u) + apex * (2.0 * w * (1.0 - 2.0 * t)) + b * (2.0 * t), -2.0 * u + 2.0 * w * (1.0 - 2.0 * t) + 2.0 * t);
+                (dn * d - n * dd) / (d * d).max(1e-300)
+            }
+        }
+    }
     pub fn start(&self) -> Vec2 {
         match *self {
-            Seg2::Line { a, .. } => a,
+            Seg2::Line { a, .. } | Seg2::Conic { a, .. } => a,
+            Seg2::Cubic { p0, .. } => p0,
             Seg2::Arc { center, radius, start, .. } => center + Vec2::from_angle(start) * radius,
         }
     }
     pub fn end(&self) -> Vec2 {
         match *self {
-            Seg2::Line { b, .. } => b,
+            Seg2::Line { b, .. } | Seg2::Conic { b, .. } => b,
+            Seg2::Cubic { p3, .. } => p3,
             Seg2::Arc { center, radius, start, sweep } => center + Vec2::from_angle(start + sweep) * radius,
         }
     }
@@ -41,6 +85,15 @@ impl Seg2 {
         match *self {
             Seg2::Line { a, b } => a.lerp(b, t),
             Seg2::Arc { center, radius, start, sweep } => center + Vec2::from_angle(start + sweep * t) * radius,
+            Seg2::Cubic { p0, p1, p2, p3 } => {
+                let u = 1.0 - t;
+                p0 * (u * u * u) + p1 * (3.0 * u * u * t) + p2 * (3.0 * u * t * t) + p3 * (t * t * t)
+            }
+            Seg2::Conic { a, apex, b, w } => {
+                let u = 1.0 - t;
+                let d = u * u + 2.0 * w * u * t + t * t;
+                (a * (u * u) + apex * (2.0 * w * u * t) + b * (t * t)) / d.max(1e-300)
+            }
         }
     }
     pub fn mid(&self) -> Vec2 {
@@ -51,6 +104,8 @@ impl Seg2 {
         match *self {
             Seg2::Line { a, b } => (b - a).normalized().unwrap_or(Vec2::X),
             Seg2::Arc { start, sweep, .. } => Vec2::from_angle(start).perp() * sweep.signum(),
+            Seg2::Cubic { p0, p1, p2, .. } => (p1 - p0).normalized().or_else(|| (p2 - p0).normalized()).unwrap_or(Vec2::X),
+            Seg2::Conic { a, apex, b, .. } => (apex - a).normalized().or_else(|| (b - a).normalized()).unwrap_or(Vec2::X),
         }
     }
     /// Unit tangent at the end (direction of travel).
@@ -58,19 +113,62 @@ impl Seg2 {
         match *self {
             Seg2::Line { a, b } => (b - a).normalized().unwrap_or(Vec2::X),
             Seg2::Arc { start, sweep, .. } => Vec2::from_angle(start + sweep).perp() * sweep.signum(),
+            Seg2::Cubic { p1, p2, p3, .. } => (p3 - p2).normalized().or_else(|| (p3 - p1).normalized()).unwrap_or(Vec2::X),
+            Seg2::Conic { a, apex, b, .. } => (b - apex).normalized().or_else(|| (b - a).normalized()).unwrap_or(Vec2::X),
         }
     }
     pub fn reversed(&self) -> Seg2 {
         match *self {
             Seg2::Line { a, b } => Seg2::Line { a: b, b: a },
             Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center, radius, start: start + sweep, sweep: -sweep },
+            Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: p3, p1: p2, p2: p1, p3: p0 },
+            Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: b, apex, b: a, w },
         }
     }
     pub fn length(&self) -> f64 {
         match *self {
             Seg2::Line { a, b } => a.dist(b),
             Seg2::Arc { radius, sweep, .. } => (radius * sweep).abs(),
+            Seg2::Cubic { .. } | Seg2::Conic { .. } => self.integrate(|s, t| s.derivative(t).len()),
         }
+    }
+    /// The two halves of the segment (same kind, exact).
+    pub fn split_half(&self) -> (Seg2, Seg2) {
+        match *self {
+            Seg2::Line { a, b } => {
+                let m = a.lerp(b, 0.5);
+                (Seg2::Line { a, b: m }, Seg2::Line { a: m, b })
+            }
+            Seg2::Arc { center, radius, start, sweep } => (
+                Seg2::Arc { center, radius, start, sweep: sweep / 2.0 },
+                Seg2::Arc { center, radius, start: start + sweep / 2.0, sweep: sweep / 2.0 },
+            ),
+            Seg2::Cubic { p0, p1, p2, p3 } => {
+                let (a, b, c) = (p0.lerp(p1, 0.5), p1.lerp(p2, 0.5), p2.lerp(p3, 0.5));
+                let (d, e) = (a.lerp(b, 0.5), b.lerp(c, 0.5));
+                let m = d.lerp(e, 0.5);
+                (Seg2::Cubic { p0, p1: a, p2: d, p3: m }, Seg2::Cubic { p0: m, p1: e, p2: c, p3 })
+            }
+            Seg2::Conic { a, apex, b, w } => {
+                // Rational de Casteljau at the middle, weights normalised to 1 at the ends.
+                let m = self.point_at(0.5);
+                let w2 = ((1.0 + w) / 2.0).max(0.0).sqrt();
+                let (l, r) = ((a + apex * w) / (1.0 + w), (apex * w + b) / (1.0 + w));
+                (Seg2::Conic { a, apex: l, b: m, w: w2 }, Seg2::Conic { a: m, apex: r, b, w: w2 })
+            }
+        }
+    }
+    /// ∫₀¹ f(t) dt by composite Gauss–Legendre (16 pieces of 5 points).
+    fn integrate(&self, f: impl Fn(&Seg2, f64) -> f64) -> f64 {
+        let n = 16;
+        let mut sum = 0.0;
+        for k in 0..n {
+            let (t0, h) = (k as f64 / n as f64, 1.0 / n as f64);
+            for (x, w) in GL5 {
+                sum += w * h * f(self, t0 + x * h);
+            }
+        }
+        sum
     }
     /// Contribution to the loop's signed area (shoelace integral ½∮(x dy − y dx)).
     pub fn area_term(&self) -> f64 {
@@ -81,6 +179,7 @@ impl Seg2 {
                 // Chord term plus the circular segment between chord and arc.
                 0.5 * a.cross(b) + 0.5 * radius * radius * (sweep - sweep.sin())
             }
+            Seg2::Cubic { .. } | Seg2::Conic { .. } => self.integrate(|s, t| 0.5 * s.point_at(t).cross(s.derivative(t))),
         }
     }
     /// Polyline approximation (including both end points) with at most `tol` chord error.
@@ -91,6 +190,17 @@ impl Seg2 {
                 let tol = tol.max(radius.abs() * 1e-6).max(1e-9);
                 let step = if tol < radius { 2.0 * (1.0 - tol / radius).clamp(-1.0, 1.0).acos() } else { TAU / 8.0 };
                 let n = ((sweep.abs() / step.max(1e-6)).ceil() as usize).clamp(2, 4096);
+                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
+            }
+            Seg2::Cubic { p0, p1, p2, p3 } => {
+                // Chord error of n pieces ≈ max second difference / (8 n²).
+                let bow = (p0 - p1 * 2.0 + p2).len().max((p1 - p2 * 2.0 + p3).len()) * 6.0;
+                let n = ((bow / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
+                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
+            }
+            Seg2::Conic { a, apex, b, w } => {
+                let bow = (a - apex * 2.0 + b).len() * 2.0 * w.max(1.0);
+                let n = ((bow / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
                 (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
             }
         }

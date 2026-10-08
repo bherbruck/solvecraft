@@ -46,7 +46,11 @@ struct Edge {
     u: usize,
     v: usize,
     id: String,
+    /// A piece of an exact free-form segment: (curve, segment, piece, pieces).
+    tag: Option<Piece>,
 }
+
+type Piece = (usize, usize, usize, usize);
 
 /// Parameter of `p` at an end of the shape (lines: 0 or 1), for intersections at end points.
 fn end_param(sh: &Shape, p: Vec2, tol: f64) -> Option<f64> {
@@ -66,6 +70,41 @@ fn end_param(sh: &Shape, p: Vec2, tol: f64) -> Option<f64> {
             (p.dist(s0) <= tol || p.dist(s1) <= tol).then_some(0.0)
         }
     }
+}
+
+/// Put exact free-form segments back where a loop runs over all the pieces of one, in order.
+fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::collections::HashMap<usize, Vec<Seg2>>) -> Vec<Seg2> {
+    let n = segs.len();
+    if n == 0 || tags.len() != n || tags.iter().all(Option::is_none) {
+        return segs;
+    }
+    let key = |i: usize| tags.get(i % n).copied().flatten().map(|((ci, k, _, _), fwd)| (ci, k, fwd));
+    // Start where a run begins so no run wraps around.
+    let r = (0..n).find(|i| key(*i) != key(*i + n - 1)).unwrap_or(0);
+    let mut out = Vec::with_capacity(n);
+    let mut i = 0;
+    while i < n {
+        let k0 = key(r + i);
+        let mut j = i + 1;
+        while j < n && key(r + j) == k0 && k0.is_some() {
+            j += 1;
+        }
+        let run: Vec<usize> = (i..j).map(|x| (r + x) % n).collect();
+        let whole = match (k0, tags.get(run[0]).copied().flatten()) {
+            (Some((ci, k, fwd)), Some(((_, _, _, cnt), _))) if run.len() == cnt => {
+                let order: Vec<usize> = run.iter().filter_map(|x| tags.get(*x).copied().flatten().map(|((_, _, p, _), _)| p)).collect();
+                let want: Vec<usize> = if fwd { (0..cnt).collect() } else { (0..cnt).rev().collect() };
+                if order == want { exact.get(&ci).and_then(|e| e.get(k)).map(|s| if fwd { *s } else { s.reversed() }) } else { None }
+            }
+            _ => None,
+        };
+        match whole {
+            Some(s) => out.push(s),
+            None => out.extend(run.iter().filter_map(|x| segs.get(*x).copied())),
+        }
+        i = j;
+    }
+    out
 }
 
 /// A uniform grid over a set of boxes (about one box per cell), for neighbour queries.
@@ -122,6 +161,11 @@ fn curvature(s: &Seg2) -> f64 {
     match *s {
         Seg2::Line { .. } => 0.0,
         Seg2::Arc { radius, sweep, .. } => sweep.signum() / radius.max(1e-12),
+        Seg2::Cubic { .. } | Seg2::Conic { .. } => {
+            let (d1, h) = (s.derivative(0.0), 1e-5);
+            let d2 = (s.derivative(h) - d1) / h;
+            d1.cross(d2) / d1.len().powi(3).max(1e-300)
+        }
     }
 }
 
@@ -145,6 +189,8 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
     let tol = MERGE_TOL * 10.0;
     // Analytic shapes of the profile curves.
     let mut shapes: Vec<(usize, Shape)> = Vec::new();
+    let mut tags: Vec<Option<Piece>> = Vec::new();
+    let mut exact: std::collections::HashMap<usize, Vec<Seg2>> = std::collections::HashMap::new();
     for (ci, c) in sk.curves.iter().enumerate() {
         if c.construction || c.centerline {
             continue;
@@ -167,15 +213,33 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
                     shapes.push((ci, Shape::Round { c: center, r: radius, start, sweep }));
                 }
             }
-            // Free-form curves take part as their polylines.
-            _ => {
-                for s in sk.segs(ci) {
-                    if let Seg2::Line { a, b } = s {
-                        shapes.push((ci, Shape::Line { a, b }));
+            // Free-form curves take part as polylines of their exact segments; loops that use
+            // a whole segment get the exact one back.
+            _ => match sk.exact_segs(ci) {
+                Some(ex) => {
+                    for (k, seg) in ex.iter().enumerate() {
+                        let poly = seg.polyline(1e-3);
+                        let n = poly.len().saturating_sub(1);
+                        for (j, w) in poly.windows(2).enumerate() {
+                            if w[0].dist(w[1]) > MERGE_TOL {
+                                shapes.push((ci, Shape::Line { a: w[0], b: w[1] }));
+                                tags.resize(shapes.len() - 1, None);
+                                tags.push(Some((ci, k, j, n)));
+                            }
+                        }
+                    }
+                    exact.insert(ci, ex);
+                }
+                None => {
+                    for s in sk.segs(ci) {
+                        if let Seg2::Line { a, b } = s {
+                            shapes.push((ci, Shape::Line { a, b }));
+                        }
                     }
                 }
-            }
+            },
         }
+        tags.resize(shapes.len(), None);
         if shapes.len() > MAX_EDGES {
             break;
         }
@@ -344,11 +408,13 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
                 let mut ps = vec![a];
                 ps.extend(ts.iter().map(|t| sh.point(*t)));
                 ps.push(b);
+                // Pieces split by other curves no longer stand for their whole piece.
+                let tag = if ts.is_empty() { tags.get(k).copied().flatten() } else { None };
                 for w in ps.windows(2) {
                     let (p, q) = (w[0], w[1]);
                     if p.dist(q) > MERGE_TOL {
                         let (u, v) = (node(p), node(q));
-                        edges.push(Edge { seg: Seg2::Line { a: p, b: q }, u, v, id: id.clone() });
+                        edges.push(Edge { seg: Seg2::Line { a: p, b: q }, u, v, id: id.clone(), tag });
                     }
                 }
             }
@@ -371,7 +437,7 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
                     }
                     let seg = Seg2::Arc { center: c, radius: r, start: start + t0, sweep: t1 - t0 };
                     let (u, v) = (node(seg.start()), node(seg.end()));
-                    edges.push(Edge { seg, u, v, id: id.clone() });
+                    edges.push(Edge { seg, u, v, id: id.clone(), tag: None });
                 }
             }
         }
@@ -441,6 +507,7 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
         }
         let mut segs = Vec::new();
         let mut ids = Vec::new();
+        let mut ptags: Vec<Option<(Piece, bool)>> = Vec::new();
         let mut h = start;
         let mut ok = true;
         for _ in 0..=edges.len() * 2 {
@@ -454,6 +521,9 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
             segs.push(seg);
             if let Some(e) = edges.get(h / 2) {
                 ids.push(e.id.clone());
+                ptags.push(e.tag.map(|t| (t, h.is_multiple_of(2))));
+            } else {
+                ptags.push(None);
             }
             let back = (-seg.end_tangent()).angle();
             let twin = h ^ 1;
@@ -496,7 +566,7 @@ pub fn find_profiles(sk: &Sketch) -> Vec<Profile> {
         if !ok || h != start {
             continue;
         }
-        let lp = Loop2 { segs };
+        let lp = Loop2 { segs: restore_exact(segs, &ptags, &exact) };
         if lp.signed_area() > 1e-9 {
             let c = edges.get(start / 2).map(|e| find(&mut comp, e.u)).unwrap_or(0);
             loops.push((lp, ids, c));

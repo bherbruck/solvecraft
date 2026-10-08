@@ -720,6 +720,52 @@ impl Sketch {
         }
     }
 
+    /// Exact boundary segments of a free-form curve: ellipses as four conics, conics, fit
+    /// splines and control splines up to degree 3 as Béziers. None for other curves (and for
+    /// higher-degree splines, which stay polylines).
+    pub fn exact_segs(&self, ci: usize) -> Option<Vec<Seg2>> {
+        let cu = self.curves.get(ci)?;
+        let pt = |i: &usize| self.point(*i);
+        match &cu.kind {
+            CurveKind::Ellipse { c, m, r } => {
+                let (c, m) = (pt(c)?, pt(m)?);
+                let u = m - c;
+                let v = u.perp().normalized()? * *r;
+                let w = std::f64::consts::FRAC_1_SQRT_2;
+                let corners = [c + u, c + v, c - u, c - v];
+                Some(
+                    (0..4)
+                        .map(|i| {
+                            let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                            Seg2::Conic { a, apex: a + b - c, b, w }
+                        })
+                        .collect(),
+                )
+            }
+            CurveKind::Conic { a, b, apex, rho } => Some(vec![Seg2::Conic { a: pt(a)?, apex: pt(apex)?, b: pt(b)?, w: rho / (1.0 - rho).max(1e-9) }]),
+            CurveKind::Spline { pts, control: false, .. } => {
+                let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
+                Some(crate::curves::fit_beziers(&p).into_iter().map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 }).collect())
+            }
+            CurveKind::Spline { pts, control: true, degree } if *degree <= 3 => {
+                let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
+                let k = (*degree as usize).min(p.len().saturating_sub(1)).max(1);
+                Some(
+                    crate::curves::bspline_beziers(&p, k)
+                        .into_iter()
+                        .filter_map(|c| match c[..] {
+                            [a, b] => Some(Seg2::Line { a, b }),
+                            [a, x, b] => Some(Seg2::Conic { a, apex: x, b, w: 1.0 }),
+                            [p0, p1, p2, p3] => Some(Seg2::Cubic { p0, p1, p2, p3 }),
+                            _ => None,
+                        })
+                        .collect(),
+                )
+            }
+            _ => None,
+        }
+    }
+
     /// Polyline of a free-form curve (ellipse, spline, conic); other curves: their segments'
     /// polylines.
     pub fn polyline(&self, ci: usize) -> Vec<Vec2> {

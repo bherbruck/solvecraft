@@ -1106,10 +1106,14 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
     let n = ps.plane.normal();
     Ok(segs
         .iter()
-        .map(|s| match *s {
-            solvecraft_geom::Seg2::Line { a, b } => kernel::PathSeg::Line { a: w(a), b: w(b) },
+        .flat_map(|s| match *s {
+            solvecraft_geom::Seg2::Line { a, b } => vec![kernel::PathSeg::Line { a: w(a), b: w(b) }],
             solvecraft_geom::Seg2::Arc { center, sweep, .. } => {
-                kernel::PathSeg::Arc { a: w(s.start()), center: w(center), axis: n * sweep.signum(), angle: sweep.abs() }
+                vec![kernel::PathSeg::Arc { a: w(s.start()), center: w(center), axis: n * sweep.signum(), angle: sweep.abs() }]
+            }
+            // Free-form path curves are followed as polylines.
+            solvecraft_geom::Seg2::Cubic { .. } | solvecraft_geom::Seg2::Conic { .. } => {
+                s.polyline(1e-2).windows(2).map(|q| kernel::PathSeg::Line { a: w(q[0]), b: w(q[1]) }).collect()
             }
         })
         .collect())

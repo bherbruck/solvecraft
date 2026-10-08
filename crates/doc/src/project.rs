@@ -424,7 +424,7 @@ fn tilted_circle(plane: &Plane, pts: &[Vec3]) -> Option<Vec<LinkGeom>> {
         return Some(vec![LinkGeom::Ellipse { c: plane.to_local(c), major: plane.to_local(c + u * r), minor: r * cosang }]);
     }
     // Sweep from the first point along the polyline's direction.
-    let (p0, p1) = (*pts.first()?, *pts.last()?);
+    let p0 = *pts.first()?;
     let e1 = (p0 - c).normalized()?;
     let e2 = n.cross(e1);
     let ang = |p: Vec3| (p - c).dot(e2).atan2((p - c).dot(e1));
@@ -439,7 +439,6 @@ fn tilted_circle(plane: &Plane, pts: &[Vec3]) -> Option<Vec<LinkGeom>> {
         }
         sweep += d;
     }
-    let _ = p1;
     let k = ((sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize).clamp(1, 8);
     let h = sweep / k as f64;
     let at = |t: f64| c + (e1 * t.cos() + e2 * t.sin()) * r;

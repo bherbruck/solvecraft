@@ -163,6 +163,53 @@ pub fn end_curvature(f: &dyn Fn(f64) -> Vec2, at_end: bool) -> Vec2 {
     (d2 - t * t.dot(d2)) / l2
 }
 
+/// The cubic Bézier pieces of a fit spline (exact: each span is a cubic Hermite).
+pub fn fit_beziers(p: &[Vec2]) -> Vec<[Vec2; 4]> {
+    fit_spans(p).into_iter().map(|(p0, p1, t0, t1)| [p0, p0 + t0 / 3.0, p1 - t1 / 3.0, p1]).collect()
+}
+
+/// The Bézier pieces (each `degree + 1` points) of the clamped uniform B-spline over `ctrl`
+/// (Boehm knot insertion until every interior knot has multiplicity `degree`).
+pub fn bspline_beziers(ctrl: &[Vec2], degree: usize) -> Vec<Vec<Vec2>> {
+    let n = ctrl.len();
+    let k = degree.min(n.saturating_sub(1)).max(1);
+    let spans = n - k;
+    let mut knots = vec![0.0; k + 1];
+    for i in 1..spans {
+        knots.push(i as f64 / spans as f64);
+    }
+    knots.extend(std::iter::repeat_n(1.0, k + 1));
+    let mut pts = ctrl.to_vec();
+    for s in 1..spans {
+        let u = s as f64 / spans as f64;
+        for _ in 1..k {
+            // Span holding u (the last knot ≤ u).
+            let Some(span) = knots.iter().rposition(|x| *x <= u + 1e-15) else { break };
+            let mut q = Vec::with_capacity(pts.len() + 1);
+            for i in 0..=pts.len() {
+                let p = if i + k <= span {
+                    pts.get(i).copied()
+                } else if i > span {
+                    pts.get(i - 1).copied()
+                } else {
+                    let (lo, hi) = (knots.get(i).copied().unwrap_or(0.0), knots.get(i + k).copied().unwrap_or(1.0));
+                    let a = if hi - lo > 1e-15 { (u - lo) / (hi - lo) } else { 0.0 };
+                    match (pts.get(i.wrapping_sub(1)), pts.get(i)) {
+                        (Some(x), Some(y)) => Some(*x * (1.0 - a) + *y * a),
+                        _ => None,
+                    }
+                };
+                if let Some(p) = p {
+                    q.push(p);
+                }
+            }
+            knots.insert(span + 1, u);
+            pts = q;
+        }
+    }
+    pts.windows(k + 1).step_by(k).map(|w| w.to_vec()).collect()
+}
+
 /// Polyline of a spline through (`control == false`) or over (`control`) the points.
 pub fn spline_polyline(p: &[Vec2], control: bool, degree: u8) -> Vec<Vec2> {
     if p.len() < 2 {
@@ -242,6 +289,35 @@ mod tests {
         // Fit splines have natural (straight) ends.
         let p = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 5.0), Vec2::new(20.0, 0.0)];
         assert!(end_curvature(&|t| spline_point(&p, false, 3, t), false).len() < 1e-3);
+    }
+
+    #[test]
+    fn spline_bezier_pieces_match_the_spline() {
+        let p = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 5.0), Vec2::new(20.0, -3.0), Vec2::new(30.0, 8.0), Vec2::new(35.0, 0.0)];
+        let bez = |c: &[Vec2], t: f64| -> Vec2 {
+            // de Casteljau.
+            let mut v = c.to_vec();
+            while v.len() > 1 {
+                v = v.windows(2).map(|w| w[0] * (1.0 - t) + w[1] * t).collect();
+            }
+            v[0]
+        };
+        for degree in [2usize, 3] {
+            let pieces = bspline_beziers(&p, degree);
+            assert_eq!(pieces.len(), p.len() - degree, "degree {degree}");
+            let spans = pieces.len();
+            for (i, c) in pieces.iter().enumerate() {
+                for t in [0.0, 0.3, 0.7, 1.0] {
+                    let g = (i as f64 + t) / spans as f64;
+                    let want = spline_point(&p, true, degree as u8, g);
+                    assert!(bez(c, t).dist(want) < 1e-9, "degree {degree} piece {i} t {t}: {:?} vs {want:?}", bez(c, t));
+                }
+            }
+        }
+        for (i, c) in fit_beziers(&p).iter().enumerate() {
+            let g = (i as f64 + 0.4) / 4.0;
+            assert!(bez(c, 0.4).dist(spline_point(&p, false, 3, g)) < 1e-9);
+        }
     }
 
     #[test]

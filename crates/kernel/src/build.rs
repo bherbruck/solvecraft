@@ -41,6 +41,9 @@ pub(crate) fn wire(plane: &Plane, lp: &Loop2) -> Result<mt::Wire> {
                     builder::circle_arc(a, b, p3(plane.to_world(s.mid())))
                 }
             }
+            Seg2::Cubic { .. } | Seg2::Conic { .. } => {
+                crate::freeform::edge(plane, s, a, b).ok_or_else(|| KernelError::Invalid("profile curve".into()))?
+            }
         };
         edges.push(e);
     }
@@ -66,6 +69,8 @@ fn region_ok(r: &Region2) -> Result<()> {
             Seg2::Arc { center, radius, start, sweep } => {
                 center.is_finite() && radius.is_finite() && radius > 1e-9 && start.is_finite() && sweep.is_finite()
             }
+            Seg2::Cubic { p0, p1, p2, p3 } => p0.is_finite() && p1.is_finite() && p2.is_finite() && p3.is_finite(),
+            Seg2::Conic { a, apex, b, w } => a.is_finite() && apex.is_finite() && b.is_finite() && w.is_finite() && w > 1e-9,
         };
         if !ok {
             return Err(KernelError::Invalid("non-finite profile".into()));
@@ -234,7 +239,7 @@ fn offset_loop(lp: &Loop2, d: f64) -> Result<Loop2> {
                         Err(KernelError::Invalid("the taper closes the profile".into()))
                     }
                 }
-                Seg2::Line { .. } => Err(KernelError::Failed("not supported yet: tapered profiles mixing lines and arcs".into())),
+                _ => Err(KernelError::Failed("not supported yet: tapered profiles mixing lines and arcs".into())),
             })
             .collect::<Result<Vec<_>>>()?;
         return Ok(Loop2 { segs });
@@ -377,6 +382,10 @@ fn revolve_touching_axis(plane: &Plane, lp: &Loop2, axis_origin: Vec2, d: Vec2) 
             edges.push(match *s {
                 Seg2::Line { .. } => builder::line(a, b),
                 Seg2::Arc { .. } => builder::circle_arc(a, b, p3(plane.to_world(s.mid()))),
+                Seg2::Cubic { .. } | Seg2::Conic { .. } => match crate::freeform::edge(plane, s, a, b) {
+                    Some(e) => e,
+                    None => builder::line(a, b),
+                },
             });
         }
         let mut w: mt::Wire = edges.into();
@@ -459,16 +468,7 @@ fn resample(lp: &Loop2, n: usize, angles: &[f64]) -> Loop2 {
     while segs.len() < n {
         let Some((k, _)) = segs.iter().enumerate().max_by(|a, b| a.1.length().total_cmp(&b.1.length())) else { break };
         let s = segs.remove(k);
-        let (p, q) = match s {
-            Seg2::Line { a, b } => {
-                let m = a.lerp(b, 0.5);
-                (Seg2::Line { a, b: m }, Seg2::Line { a: m, b })
-            }
-            Seg2::Arc { center, radius, start, sweep } => (
-                Seg2::Arc { center, radius, start, sweep: sweep / 2.0 },
-                Seg2::Arc { center, radius, start: start + sweep / 2.0, sweep: sweep / 2.0 },
-            ),
-        };
+        let (p, q) = s.split_half();
         segs.insert(k, q);
         segs.insert(k, p);
     }
