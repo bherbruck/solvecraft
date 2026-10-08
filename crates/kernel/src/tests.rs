@@ -1195,3 +1195,19 @@ fn fillet_two_edges_meeting_at_a_corner() {
     let f3 = fillet(&b, &[Vec3::new(20.0, 0.0, 20.0), Vec3::new(0.0, 15.0, 20.0), Vec3::new(20.0, 30.0, 20.0)], 3.0).unwrap();
     assert!(measure(&f3).unwrap().volume < measure(&f).unwrap().volume);
 }
+
+#[test]
+fn fillet_three_edges_at_a_corner() {
+    // The three edges meeting at one corner of a box: the corner becomes a sphere octant.
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let r = 3.0;
+    let f = fillet(&b, &[Vec3::new(20.0, 0.0, 20.0), Vec3::new(0.0, 15.0, 20.0), Vec3::new(0.0, 0.0, 10.0)], r).unwrap();
+    let removed = 24000.0 - measure(&f).unwrap().volume;
+    // Three edges lose r²(1 − π/4) each along their length; the corner, a cube r³ less an
+    // octant of the ball, was counted three times over and is removed once (r³ − πr³/6).
+    let a = r * r * (1.0 - PI / 4.0);
+    let want = a * (40.0 + 30.0 + 20.0) - 3.0 * a * r + (r * r * r - PI * r * r * r / 6.0);
+    assert!(rel(removed, want) < 2e-3, "removed {removed} vs {want}");
+    let m = measure(&f).unwrap().merged;
+    assert_eq!(m.face_types.get("sphere"), Some(&1), "{m:?}");
+}

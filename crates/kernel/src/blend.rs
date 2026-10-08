@@ -318,19 +318,6 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
         cur = blend(&cur, &rest, r, shape, what)?;
         return blend(&cur, &loop_pts, r, shape, what);
     }
-    // Neighbouring edges along a planar face's loop (sharp corners between them: the blends
-    // meet in mitres), ending where unblended edges go on.
-    if edges.len() >= 2 {
-        let size = cur.size();
-        let solid = cur.deep_copy();
-        let ids = edge_ids(&cur, &solid, edges)?;
-        if ids.len() == edges.len()
-            && let Some(Ok(res)) = crate::loopblend::loop_blend(&solid, &ids, size, r, shape == Shape::Round)
-            && let Ok(b) = guard(what, || Ok(res)).and_then(Body::new)
-        {
-            return Ok(b);
-        }
-    }
     if let Some(groups) = loop_groups(&cur, edges)? {
         for g in groups {
             let size = cur.size();
@@ -343,28 +330,174 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
         }
         return Ok(cur);
     }
-    for p in edges {
+    // One at a time, in whatever order works: a run along a planar face's loop (bridging arcs
+    // that earlier blends left between selected edges, so corners round off), a single edge,
+    // or a chain of curved edges.
+    let mut todo: Vec<Vec3> = edges.to_vec();
+    for _ in 0..(2 * edges.len() + 4) {
+        if todo.is_empty() {
+            return Ok(cur);
+        }
         let size = cur.size();
         let tol = (size * 2e-3).max(1e-3);
-        let Some((idx, dist)) = cur.nearest_edge(*p, tol)? else { return Err(KernelError::Invalid("the body has no edges".into())) };
-        if dist > size * 0.05 + 1e-3 {
-            return Err(KernelError::Invalid(format!("no edge near {:?}", [p.x, p.y, p.z])));
-        }
         let solid = cur.deep_copy();
-        let edge = Body::unique_edges(&solid).into_iter().nth(idx).ok_or_else(|| KernelError::Invalid("edge index".into()))?;
-        let out = match guard(what, || blend_one(&solid, &edge, size, r, shape)) {
-            Ok(o) => o,
-            // A curved edge, or one between curved faces: roll a ball along its smooth chain.
-            Err(e) if !curved_case(&solid, &edge) => return Err(e),
-            Err(e) => match smooth_chain(&solid, &edge) {
-                Some(ids) => guard(what, || crate::curveblend::curve_blend(&solid, &ids, size, r, shape == Shape::Round))
-                    .map_err(|e2| KernelError::Failed(format!("{e2} ({e})")))?,
-                None => return Err(e),
-            },
-        };
-        cur = Body::new(out)?;
+        if todo.len() >= 2
+            && let Some((ids, covered)) = run_on_loop(&cur, &solid, &todo)?
+            && let Some(Ok(res)) = crate::loopblend::loop_blend(&solid, &ids, size, r, shape == Shape::Round)
+            && let Ok(b) = guard(what, || Ok(res)).and_then(Body::new)
+        {
+            cur = b;
+            todo.retain(|p| !covered.iter().any(|q| q.dist(*p) < 1e-12));
+            continue;
+        }
+        let mut first_err: Option<KernelError> = None;
+        let mut done: Option<(Body, Vec<usize>)> = None;
+        for (j, p) in todo.iter().enumerate() {
+            let Some((idx, dist)) = cur.nearest_edge(*p, tol)? else { return Err(KernelError::Invalid("the body has no edges".into())) };
+            if dist > size * 0.05 + 1e-3 {
+                return Err(KernelError::Invalid(format!("no edge near {:?}", [p.x, p.y, p.z])));
+            }
+            let edge = Body::unique_edges(&solid).into_iter().nth(idx).ok_or_else(|| KernelError::Invalid("edge index".into()))?;
+            let attempt = match guard(what, || blend_one(&solid, &edge, size, r, shape)) {
+                Ok(o) => Ok((o, vec![j])),
+                // A curved edge, or one between curved faces: roll a ball along its smooth chain.
+                Err(e) if !curved_case(&solid, &edge) => Err(e),
+                Err(e) => match smooth_chain(&solid, &edge) {
+                    Some(ids) => {
+                        let on_chain: Vec<usize> = todo
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, q)| {
+                                cur.nearest_edge(**q, tol)
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|(i, _)| Body::unique_edges(&solid).into_iter().nth(i))
+                                    .is_some_and(|x| ids.contains(&x.id()))
+                            })
+                            .map(|(i, _)| i)
+                            .collect();
+                        guard(what, || crate::curveblend::curve_blend(&solid, &ids, size, r, shape == Shape::Round))
+                            .map(|o| (o, if on_chain.is_empty() { vec![j] } else { on_chain }))
+                            .map_err(|e2| KernelError::Failed(format!("{e2} ({e})")))
+                    }
+                    None => Err(e),
+                },
+            };
+            match attempt.and_then(|(o, js)| Body::new(o).map(|b| (b, js))) {
+                Ok(x) => {
+                    done = Some(x);
+                    break;
+                }
+                Err(e) => {
+                    if first_err.is_none() {
+                        first_err = Some(e);
+                    }
+                }
+            }
+        }
+        match done {
+            Some((b, js)) => {
+                cur = b;
+                let mut k = 0;
+                todo.retain(|_| {
+                    let keep = !js.contains(&k);
+                    k += 1;
+                    keep
+                });
+            }
+            None => return Err(first_err.unwrap_or_else(|| unsupported("these edges"))),
+        }
     }
-    Ok(cur)
+    if todo.is_empty() { Ok(cur) } else { Err(unsupported("blending these edges together")) }
+}
+
+/// Neighbouring edges along one boundary loop of a planar face that between them hold at least
+/// two of the points' edges, joined by arcs that meet them smoothly (left by earlier blends):
+/// the run's edge ids and the points it covers.
+#[allow(clippy::type_complexity)]
+fn run_on_loop(cur: &Body, solid: &Solid, pts: &[Vec3]) -> Result<Option<(Vec<mt::EdgeID>, Vec<Vec3>)>> {
+    use mt::{BoundedCurve, ParametricCurve};
+    let size = cur.size();
+    let tol = (size * 2e-3).max(1e-3);
+    let all = Body::unique_edges(solid);
+    let mut per: Vec<(Vec3, mt::EdgeID)> = Vec::new();
+    for p in pts {
+        if let Some((idx, dist)) = cur.nearest_edge(*p, tol)?
+            && dist <= size * 0.05 + 1e-3
+            && let Some(e) = all.get(idx)
+        {
+            per.push((*p, e.id()));
+        }
+    }
+    let dir = |e: &mt::Edge, at_end: bool| -> Option<Vec3> {
+        let c = e.oriented_curve();
+        let (t0, t1) = c.range_tuple();
+        let d = c.der(if at_end { t1 } else { t0 });
+        Vec3::new(d.x, d.y, d.z).normalized()
+    };
+    let mut best: Option<(Vec<mt::EdgeID>, Vec<Vec3>)> = None;
+    for f in solid.face_iter() {
+        if !matches!(f.oriented_surface(), mt::Surface::Plane(_)) {
+            continue;
+        }
+        for w in f.boundaries() {
+            let es: Vec<mt::Edge> = w.edge_iter().cloned().collect();
+            let m = es.len();
+            let sel = |i: usize| es.get(i % m).is_some_and(|e| per.iter().any(|(_, id)| *id == e.id()));
+            // A filler: an unselected arc meeting both neighbours smoothly.
+            let smooth = |a: &mt::Edge, b: &mt::Edge| match (dir(a, true), dir(b, false)) {
+                (Some(x), Some(y)) => x.dot(y) > 1.0 - 1e-6,
+                _ => false,
+            };
+            let filler = |i: usize| {
+                let (Some(prev), Some(e), Some(next)) = (es.get((i + m - 1) % m), es.get(i % m), es.get((i + 1) % m)) else { return false };
+                !matches!(e.curve(), mt::Curve::Line(_)) && smooth(prev, e) && smooth(e, next)
+            };
+            let usable = |i: usize| sel(i) || filler(i);
+            if (0..m).all(usable) {
+                // The whole loop.
+                if (0..m).filter(|i| sel(*i)).count() >= 2 {
+                    let ids: Vec<mt::EdgeID> = es.iter().map(|e| e.id()).collect();
+                    let covered: Vec<Vec3> = per.iter().filter(|(_, id)| ids.contains(id)).map(|(p, _)| *p).collect();
+                    if best.as_ref().is_none_or(|b| covered.len() > b.1.len()) {
+                        best = Some((ids, covered));
+                    }
+                }
+                continue;
+            }
+            // Runs: start after an unusable edge; trim fillers off both ends.
+            for s0 in 0..m {
+                if usable(s0) && !usable(s0 + m - 1) {
+                    let mut idx: Vec<usize> = (0..m).map(|j| s0 + j).take_while(|i| usable(*i)).collect();
+                    while idx.first().is_some_and(|i| !sel(*i)) {
+                        idx.remove(0);
+                    }
+                    while idx.last().is_some_and(|i| !sel(*i)) {
+                        idx.pop();
+                    }
+                    if idx.iter().filter(|i| sel(**i)).count() < 2 {
+                        continue;
+                    }
+                    let ids: Vec<mt::EdgeID> = idx.iter().filter_map(|i| es.get(i % m).map(|e| e.id())).collect();
+                    // Not yet when another selected edge meets one of the run's inner corners:
+                    // that edge goes first, and the run then rounds the corner.
+                    let inner: Vec<mt::Vertex> = idx.iter().skip(1).filter_map(|i| es.get(i % m).map(|e| e.front().clone())).collect();
+                    let blocked = per
+                        .iter()
+                        .filter(|(_, id)| !ids.contains(id))
+                        .any(|(_, id)| all.iter().find(|e| e.id() == *id).is_some_and(|e| inner.iter().any(|v| v == e.front() || v == e.back())));
+                    if blocked {
+                        continue;
+                    }
+                    let covered: Vec<Vec3> = per.iter().filter(|(_, id)| ids.contains(id)).map(|(p, _)| *p).collect();
+                    if best.as_ref().is_none_or(|b| covered.len() > b.1.len()) {
+                        best = Some((ids, covered));
+                    }
+                }
+            }
+        }
+    }
+    Ok(best)
 }
 
 /// Is the edge curved, or does it lie between faces that aren't both planar?

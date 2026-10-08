@@ -61,7 +61,8 @@ headline counts in-scope tabs only and lists the deferred ones separately.
   planar end faces; whole smooth loops of a planar face, picked whole or by one edge (tangent
   chain), including circles and walls at any angle (boss bases and tops, bores, pocket floors,
   plate outlines), loops with sharp corners between straight edges (the blends meet in mitres), runs of
-  neighbouring edges along a planar face's loop (two top edges of a box: mitred, ending square),
+  neighbouring edges along a planar face's loop (two top edges of a box: mitred, ending square;
+  with the edge between them too, the corner becomes a sphere octant),
   rounded corners rounded again (sphere octants, tori at concave corners); every edge of a
   convex planar body or of an extruded part; fillets inside patterns; closed chains of curved
   edges between any two smooth sides (a branch pipe on a main pipe), by a rolling ball (the
