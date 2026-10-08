@@ -1102,3 +1102,76 @@ fn fillet_an_open_curved_edge() {
     let want = r * r * (1.0 - PI / 4.0) * (10.0 - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI))) * PI;
     assert!(rel(removed, want) < 1e-3, "{removed} vs {want}");
 }
+
+/// Boolean survey: random boxes, cylinders and spheres combined every way; prints what fails.
+#[test]
+#[ignore]
+fn boolean_survey() {
+    let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut rnd = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed % 1_000_000) as f64 / 1_000_000.0
+    };
+    let mut shapes: Vec<(String, Body)> = Vec::new();
+    for i in 0..40 {
+        let kind = i % 4;
+        let (x, y, z) = ((rnd() - 0.5) * 20.0, (rnd() - 0.5) * 20.0, (rnd() - 0.5) * 20.0);
+        // Snap some coordinates to a 5 mm grid: coincident faces and tangencies.
+        let snap = |v: f64, s: bool| if s { (v / 5.0).round() * 5.0 } else { v };
+        let s = rnd() < 0.5;
+        let (x, y, z) = (snap(x, s), snap(y, s), snap(z, s));
+        let a = 5.0 + snap(rnd() * 20.0, s);
+        let ax = (rnd() * 3.0) as usize % 3;
+        let b = match kind {
+            0 => box_solid(Vec3::new(x, y, z), Vec3::new(x + a, y + a * 0.8, z + a * 0.6)),
+            1 => cylinder(Vec3::new(x, y, z), [Vec3::X, Vec3::Y, Vec3::Z][ax], a * 0.4, a),
+            2 => sphere(Vec3::new(x, y, z), a * 0.5),
+            _ => box_solid(Vec3::new(x, y, z), Vec3::new(x + a * 0.5, y + a, z + a * 0.3)),
+        };
+        if let Ok(b) = b {
+            shapes.push((format!("{}{i}@({x:.3},{y:.3},{z:.3}) a={a:.3} ax={ax}", ["box", "cyl", "sph", "slab"][kind]), b));
+        }
+    }
+    let (mut ok, mut empty, mut fail) = (0, 0, Vec::new());
+    for i in 0..shapes.len() {
+        for j in i + 1..(i + 4).min(shapes.len()) {
+            for op in [BoolOp::Union, BoolOp::Cut, BoolOp::Intersect] {
+                let (na, a) = &shapes[i];
+                let (nb, b) = &shapes[j];
+                match boolean(a, b, op) {
+                    Ok(Some(_)) => ok += 1,
+                    Ok(None) => empty += 1,
+                    Err(e) => fail.push(format!("{na} {op:?} {nb}: {}", e.to_string().chars().take(140).collect::<String>())),
+                }
+            }
+        }
+    }
+    println!("ok {ok} empty {empty} failed {}", fail.len());
+    for f in &fail {
+        println!("  {f}");
+    }
+}
+
+#[test]
+fn booleans_found_by_the_survey() {
+    // A tool wholly inside: a void (the solid keeps an inner shell).
+    let sp = sphere(Vec3::new(-2.894, 7.008, 8.081), 8.869).unwrap();
+    let slab = box_solid(Vec3::new(-5.0, 0.0, 5.0), Vec3::new(-2.5, 5.0, 6.5)).unwrap();
+    let c = boolean(&sp, &slab, BoolOp::Cut).unwrap().unwrap();
+    let want = 4.0 / 3.0 * PI * 8.869f64.powi(3) - 18.75;
+    assert!(rel(measure(&c).unwrap().volume, want) < 1e-3, "{}", measure(&c).unwrap().volume);
+    // A sphere clipping a box's corner: the result comes out outward-facing.
+    let sp = sphere(Vec3::new(-8.226, 9.539, -1.251), 11.8435).unwrap();
+    let bx = box_solid(Vec3::new(0.0, -5.0, -5.0), Vec3::new(15.0, 7.0, 4.0)).unwrap();
+    let c = boolean(&bx, &sp, BoolOp::Cut).unwrap().unwrap();
+    let v = measure(&c).unwrap().volume;
+    assert!(v > 1400.0 && v < 1620.0, "{v}");
+    // A cylinder and a box sharing an end plane, the box's side near-tangent to the cylinder.
+    let cy = cylinder(Vec3::new(-5.0, 0.0, 0.0), Vec3::X, 8.0, 20.0).unwrap();
+    let bx = box_solid(Vec3::new(0.0, -5.0, -5.0), Vec3::new(15.0, 7.0, 4.0)).unwrap();
+    let u = boolean(&cy, &bx, BoolOp::Union).unwrap().unwrap();
+    let vu = measure(&u).unwrap().volume;
+    assert!(vu > PI * 64.0 * 20.0 && vu < PI * 64.0 * 20.0 + 1620.0, "{vu}");
+}

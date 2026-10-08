@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use solvecraft_geom::Vec3;
 use truck_modeling as mt;
 
-use crate::body::{Body, p3, v3};
+use crate::body::{Body, from_p3, p3, v3};
 use crate::{KernelError, Result, guard};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,8 +110,44 @@ fn trivial(a: &Body, b: &Body, op: BoolOp, ma: &solvecraft_geom::Mesh, mb: &solv
         BoolOp::Intersect if a_in_b > ALL => Some(Some(a.clone())),
         BoolOp::Union if b_in_a > ALL => Some(Some(a.clone())),
         BoolOp::Union if a_in_b > ALL => Some(Some(b.clone())),
+        // The tool wholly inside, clear of the outside: a void.
+        BoolOp::Cut if b_in_a > ALL && clear_inside(ma, mb, a.size().max(b.size()) * 1e-6) => void(a, b).ok(),
         _ => None,
     }
+}
+
+/// Does every vertex of `inner` lie inside `outer` and farther than `gap` from its surface?
+fn clear_inside(outer: &solvecraft_geom::Mesh, inner: &solvecraft_geom::Mesh, gap: f64) -> bool {
+    if outer.triangles.len() * inner.positions.len() > 40_000_000 {
+        return false;
+    }
+    let tris: Vec<[Vec3; 3]> = outer.triangles.iter().filter_map(|t| outer.tri(t)).collect();
+    inner.positions.iter().all(|p| {
+        outer.contains(*p)
+            && tris.iter().all(|[a, b, c]| {
+                // Distance to the triangle's plane bounds the distance to the triangle from below.
+                let n = (*b - *a).cross(*c - *a);
+                let Some(nn) = n.normalized() else { return true };
+                let h = (*p - *a).dot(nn).abs();
+                h > gap || {
+                    let q = *p - nn * (*p - *a).dot(nn);
+                    let inside = [(*a, *b), (*b, *c), (*c, *a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= 0.0);
+                    !inside && [(*a, *b), (*b, *c), (*c, *a)].iter().all(|(u, v)| p.dist_to_segment(*u, *v) > gap)
+                }
+            })
+    })
+}
+
+/// `a` with the inside of `b` (wholly within it) taken out: a second, inward-facing shell.
+fn void(a: &Body, b: &Body) -> Result<Option<Body>> {
+    guard("void", || {
+        let mut inner = b.deep_copy();
+        inner.not();
+        let mut shells = a.solid.boundaries().clone();
+        shells.extend(inner.boundaries().iter().cloned());
+        let s = crate::body::Solid::try_new(shells).map_err(|e| KernelError::Failed(format!("void: {e}")))?;
+        Ok(Some(Body::new(s)?))
+    })
 }
 
 thread_local! {
@@ -266,6 +302,26 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         }
         Ok(None) => return Ok(None),
         Err(e) => last = format!("{last}; {e}"),
+    }
+    // Last resort: nudge the tool by a micron-scale screw motion (turned 2e-6 rad about a
+    // skew axis and moved 2e-6 of the size), which breaks tangencies and seams lying exactly on
+    // the other body. The result moves by no more than that.
+    if !APART.with(|c| c.get()) {
+        APART.with(|c| c.set(true));
+        let c = b.solid.vertex_iter().fold(Vec3::ZERO, |acc, v| acc + from_p3(v.point())) * (1.0 / b.solid.vertex_iter().count().max(1) as f64);
+        let r = transform(b, Vec3::new(0.61, -0.37, 0.71) * (size * 2e-6), c, Vec3::new(0.27, 0.83, -0.49), 2e-6).and_then(|nb| boolean(a, &nb, op));
+        APART.with(|c| c.set(false));
+        match r {
+            Ok(Some(body)) => {
+                let v = volume(&body);
+                if v > 0.0 && plausible(v, &body) {
+                    return Ok(Some(body));
+                }
+                last = format!("{last}; the nudged tool gave an implausible volume {v:.4}");
+            }
+            Ok(None) => return Ok(None),
+            Err(e) => last = format!("{last}; nudged: {e}"),
+        }
     }
     Err(KernelError::Failed(format!("boolean {op:?}: {last}")))
 }

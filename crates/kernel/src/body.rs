@@ -255,8 +255,20 @@ impl Body {
             return Err(KernelError::Failed("empty result".into()));
         }
         let mut solid = rephase_revolved(solid);
-        // Orient outward: a closed solid must have positive volume.
-        let v = guard("orient", || Ok(mesh_shells(&solid, 1.0).iter().map(|s| s.to_polygon().volume()).sum::<f64>()))?;
+        // Orient outward: a closed solid must have positive volume (meshed finely enough that
+        // every face comes out: a face missing from a coarse mesh can flip the sign).
+        let span = {
+            let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+            let mut hi = -lo;
+            for v in solid.vertex_iter() {
+                let p = from_p3(v.point());
+                lo = Vec3::new(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
+                hi = Vec3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
+            }
+            if lo.x.is_finite() { (hi - lo).len() } else { 1.0 }
+        };
+        let tol = (span * 0.01).clamp(1e-3, 1.0);
+        let v = guard("orient", || Ok(mesh_shells(&solid, tol).iter().map(|s| s.to_polygon().volume()).sum::<f64>()))?;
         if v < 0.0 {
             solid.not();
         }
