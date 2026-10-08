@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use crate::{read_json, recipe};
+use crate::{read_json, recipe, seams};
 
 /// Relative tolerance for volume and area (our curved-face tessellation is within ~2e-4).
 pub const REL_TOL: f64 = 1e-3;
@@ -48,13 +48,47 @@ fn check_case(dir: &str) -> Value {
     // Cases where Fusion's part is itself an approximation: compare size loosely, not topology.
     let approx = APPROXIMATE.iter().find(|(c, _, _)| *c == name);
     let tol = approx.map(|(_, t, _)| *t).unwrap_or(REL_TOL);
+    let within = |k: &str, rel: f64| match (got["total"][k].as_f64(), want["total"][k].as_f64()) {
+        (Some(g), Some(w)) => (g - w).abs() <= rel * w.abs().max(1.0),
+        _ => false,
+    };
+    let size_ok = got["body_count"] == want["body_count"] && within("volume_mm3", tol) && within("area_mm2", tol);
     num("body_count", got["body_count"].as_f64(), want["body_count"].as_f64(), 0.0);
     num("volume_mm3", got["total"]["volume_mm3"].as_f64(), want["total"]["volume_mm3"].as_f64(), tol);
     num("area_mm2", got["total"]["area_mm2"].as_f64(), want["total"]["area_mm2"].as_f64(), tol);
+    let mut seam_note = None;
     if approx.is_none() {
-        num("faces", got["total"]["faces"].as_f64(), want["total"]["faces"].as_f64(), 0.0);
-        num("edges", got["total"]["edges"].as_f64(), want["total"]["edges"].as_f64(), 0.0);
-        num("vertices", got["total"]["vertices"].as_f64(), want["total"]["vertices"].as_f64(), 0.0);
+        let exact = ["faces", "edges", "vertices"].iter().all(|k| got["total"][k].as_f64().is_some() && got["total"][k] == want["total"][k]);
+        let fusion_seams = want["bodies"].as_array().and_then(|bs| {
+            bs.iter().map(seams::normalised).try_fold((0, 0, 0), |a, n| n.map(|n| (a.0 + n.0, a.1 + n.1, a.2 + n.2)))
+        });
+        match fusion_seams {
+            // Size matches and only the topology differs: compare with Fusion's seam splits merged.
+            Some((f, e, v)) if size_ok && !exact => {
+                let raw: Vec<String> = ["faces", "edges", "vertices"]
+                    .iter()
+                    .map(|k| {
+                        let ours: i64 = got["bodies"].as_array().into_iter().flatten().filter_map(|b| b["kernel"][k].as_i64()).sum();
+                        format!("{k} {ours}/{}", want["total"][k])
+                    })
+                    .collect();
+                seam_note = Some(format!(
+                    "topology compared seam-normalised: Fusion's {}/{}/{} faces/edges/vertices become {f}/{e}/{v} with closed-surface patches counted once and seam edges and vertices dropped (raw SolveCraft/Fusion: {})",
+                    want["total"]["faces"],
+                    want["total"]["edges"],
+                    want["total"]["vertices"],
+                    raw.join(", ")
+                ));
+                num("faces (seam-normalised)", got["total"]["faces"].as_f64(), Some(f as f64), 0.0);
+                num("edges (seam-normalised)", got["total"]["edges"].as_f64(), Some(e as f64), 0.0);
+                num("vertices (seam-normalised)", got["total"]["vertices"].as_f64(), Some(v as f64), 0.0);
+            }
+            _ => {
+                num("faces", got["total"]["faces"].as_f64(), want["total"]["faces"].as_f64(), 0.0);
+                num("edges", got["total"]["edges"].as_f64(), want["total"]["edges"].as_f64(), 0.0);
+                num("vertices", got["total"]["vertices"].as_f64(), want["total"]["vertices"].as_f64(), 0.0);
+            }
+        }
     }
     // Our STEP export of the rebuilt part: well formed, and read back with no warnings and the
     // same volume.
@@ -64,6 +98,9 @@ fn check_case(dir: &str) -> Value {
     let mut out = json!({"case": name, "pass": pass, "checks": checks});
     if let Some((_, _, why)) = approx {
         out["note"] = json!(why);
+    }
+    if let Some(n) = seam_note {
+        out["note"] = json!(n);
     }
     let effective: Vec<String> = recipe["features"]
         .as_array()

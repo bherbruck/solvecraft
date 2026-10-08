@@ -16,6 +16,7 @@
 
 mod oracle;
 mod recipe;
+mod seams;
 
 use std::process::ExitCode;
 
