@@ -147,7 +147,7 @@ pub fn projection(app: &SolveApp, rect: Rect) -> Proj {
 
 /// Sketches drawn in the viewport: the active one, and finished ones not yet used by a feature.
 fn visible_sketches(app: &SolveApp) -> Vec<u64> {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     st.sketches
         .iter()
         .filter(|s| {
@@ -696,7 +696,7 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
 /// The section cut shown now: the open Section Analysis dialog's plane, else the session's.
 /// The active sketch's display options (defaults when not sketching).
 pub fn active_view(app: &SolveApp) -> solvecraft_engine::sketch::SketchView {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     app.session.active_sketch.and_then(|s| st.sketch(s)).map(|ss| ss.sketch.view.clone()).unwrap_or_default()
 }
 
@@ -710,7 +710,7 @@ pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
     }
     // Slice (Sketch Palette): cut the model at the plane of the sketch being edited.
     if app.session.section.is_none() {
-        let st = app.session.model.state();
+        let st = app.session.world_state();
         if let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)).filter(|ss| ss.sketch.view.slice) {
             return Some((ss.plane.origin, ss.plane.normal()));
         }
@@ -873,7 +873,7 @@ fn edge_lines(sc: &mut GpuScene, e: &[Vec3], core: Color32, halo: Color32, w: f3
 }
 
 fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index: usize, fill: Color32, edge: Color32) {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let Some(ss) = st.sketch(sketch) else { return };
     let Some(p) = ss.profiles.get(index) else { return };
     // Lift toward the eye so a profile on a face shows over it.
@@ -1100,7 +1100,7 @@ fn body_color(doc: &solvecraft_engine::doc::Document, b: &solvecraft_engine::doc
 
 /// A body's display colour (else the theme's) as RGB.
 fn body_rgb(app: &SolveApp, name: &str) -> (u8, u8, u8) {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let c = st.body(name).and_then(|b| body_color(&app.session.doc, b)).unwrap_or(Tokens::get().body);
     (c.r(), c.g(), c.b())
 }
@@ -1130,7 +1130,7 @@ fn seg_dist(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 /// id of the sketch point it snapped to.
 pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, Option<String>)> {
     let sid = app.session.active_sketch?;
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let ss = st.sketch(sid)?;
     for h in pick(app, proj, pos) {
         if let Hit::SketchPoint { id, at, .. } = h {
@@ -1362,7 +1362,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && app.tool.is_none()
             && app.dialog.is_none()
             && let Some(Hit::Edge { body, index, .. }) = app.viewport.hover.clone()
-            && let Some(b) = app.session.model.state().body(&body).cloned()
+            && let Some(b) = app.session.world_state().body(&body).cloned()
         {
             let m = b.mesh();
             let items: Vec<Sel> = m
@@ -1383,7 +1383,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Dragging a sketch point of the active sketch moves it; the solver keeps the constraints.
     if app.tool.is_none() && app.dialog.is_none() && app.viewport.nav.is_none() && app.session.active_sketch.is_some() {
         let on_plane = |app: &SolveApp, p: Pos2| {
-            let ss = app.session.active_sketch.and_then(|sid| app.session.model.state().sketch(sid).cloned())?;
+            let ss = app.session.active_sketch.and_then(|sid| app.session.world_state().sketch(sid).cloned())?;
             let (o, d) = proj.ray(p);
             ss.plane.intersect_ray(o, d).map(|w| ss.plane.to_local(w))
         };
@@ -1652,7 +1652,7 @@ fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 /// Hover feedback for the active sketch's points and curves (drawn on top of everything).
 fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let col = Tokens::get().hover_profile_edge;
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     match &app.viewport.hover {
         Some(Hit::SketchCurve { sketch, id, .. }) => {
             if let Some(ss) = st.sketch(*sketch)
@@ -1678,7 +1678,7 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 /// Sketch points, dimension labels and constraint glyphs of the active sketch.
 fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let Some(sid) = app.session.active_sketch else { return };
     let Some(ss) = st.sketch(sid) else { return };
     let sk = &ss.sketch;

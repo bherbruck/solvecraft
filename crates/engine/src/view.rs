@@ -189,7 +189,21 @@ pub fn construction_planes(s: &Session) -> Vec<(u64, String, Plane)> {
         .features
         .iter()
         .filter_map(|f| match &f.kind {
-            FeatureKind::ConstructionPlane { plane } if !f.suppressed => s.doc.resolve_plane(&vals, plane, 0).ok().map(|p| (f.id, f.name.clone(), p)),
+            FeatureKind::ConstructionPlane { plane } if !f.suppressed => s.doc.resolve_plane(&vals, plane, 0).ok().map(|p| {
+                // Shown where its component is placed.
+                let m = s.doc.component_transform(f.component);
+                let p = if solvecraft_doc::is_identity(&m) {
+                    p
+                } else {
+                    Plane::new(
+                        solvecraft_doc::apply_point(&m, p.origin),
+                        solvecraft_doc::apply_vector(&m, p.x),
+                        solvecraft_doc::apply_vector(&m, p.y),
+                    )
+                    .unwrap_or(p)
+                };
+                (f.id, f.name.clone(), p)
+            }),
             _ => None,
         })
         .collect()

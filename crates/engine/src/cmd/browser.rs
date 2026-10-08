@@ -332,6 +332,9 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     for f in d.appearances.faces.iter_mut().filter(|f| f.body == old) {
         f.body = name.to_string();
     }
+    if let Some(o) = d.body_offsets.remove(&old) {
+        d.body_offsets.insert(name.to_string(), o);
+    }
     if let Some(c) = d.body_components.remove(&old) {
         d.body_components.insert(name.to_string(), c);
     }

@@ -61,7 +61,7 @@ pub fn set_linetype(app: &mut SolveApp, kind: u8) {
         return;
     }
     let lines: Vec<String> = {
-        let st = app.session.model.state();
+        let st = app.session.world_state();
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         curves
             .iter()
@@ -96,7 +96,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let (opts, dof_line, ok) = {
-        let st = app.session.model.state();
+        let st = app.session.world_state();
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         (ss.sketch.view.clone(), dof_text(ss.report.dof, ss.report.ok()), ss.report.ok() && ss.report.dof == 0)
     };

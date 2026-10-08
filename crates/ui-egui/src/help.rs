@@ -38,7 +38,7 @@ pub fn diagnostics(app: &SolveApp) -> String {
         if app.custom_titlebar { "custom title bar" } else { "system title bar" },
         app.session.doc.name,
         app.session.doc.features.len(),
-        app.session.model.state().bodies.len(),
+        app.session.world_state().bodies.len(),
     )
 }
 

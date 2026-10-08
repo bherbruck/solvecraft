@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cmd;
+pub mod frames;
 pub mod params;
 pub mod recovery;
 pub mod sample;
@@ -297,6 +298,11 @@ impl Session {
         let before = Snapshot { label: spec.label.to_string(), doc: self.doc.clone(), active_sketch: self.active_sketch };
         let null = Value::Object(Default::default());
         let params = if params.is_null() { &null } else { params };
+        // Picks in the world go into their component's frame (once: commands run by commands
+        // already have them there).
+        let (_nested, outermost) = frames::Nested::enter(spec.id);
+        let mapped = if outermost { frames::to_local(self, spec.id, params) } else { None };
+        let params = mapped.as_ref().unwrap_or(params);
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (spec.run)(self, params)));
         let r = match r {
             Ok(r) => r,

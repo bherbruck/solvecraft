@@ -1128,6 +1128,10 @@ pub struct Document {
     /// Bodies moved into another component than their feature's (by body name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub body_components: std::collections::BTreeMap<String, u64>,
+    /// Bodies moved into another component keep their place in the world: the transform from
+    /// the new component's frame to the frame the body was made in (by body name).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub body_offsets: std::collections::BTreeMap<String, crate::Mat>,
     /// Browser groups (folders of bodies, sketches or construction planes).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub browser_groups: Vec<BrowserGroup>,
@@ -1196,6 +1200,7 @@ impl Document {
             configs: Default::default(),
             parts: Default::default(),
             body_components: Default::default(),
+            body_offsets: Default::default(),
             materials: Default::default(),
             appearances: Default::default(),
             favorites: Default::default(),

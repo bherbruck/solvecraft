@@ -18,7 +18,7 @@ use crate::viewport::Proj;
 /// Where the dialog's geometry is: a base point and, for values that can be dragged, the
 /// direction a growing value points.
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let first = d.inputs.first()?.items.first()?;
     let (at, normal) = match first {
         Sel::Profile { sketch, index } => {

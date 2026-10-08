@@ -102,6 +102,9 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
 fn sketch_json(s: &Session, id: u64) -> Option<Value> {
     let state = s.model.state();
     let ss = state.sketch(id)?;
+    // Where the sketch is in the world (its component's placement).
+    let world = s.world_state();
+    let plane = world.sketch(id).map(|w| w.plane).unwrap_or(ss.plane);
     let sk = &ss.sketch;
     let curves: Vec<Value> = sk
         .curves
@@ -129,7 +132,7 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
         .points
         .iter()
         .enumerate()
-        .map(|(i, p)| json!({"id": p.id, "at": p.pos, "world": ss.plane.to_world(p.pos), "fixed": locked.get(i).copied().unwrap_or(false), "link": p.link, "fully_constrained": ss.report.point_determined.get(i).copied().unwrap_or(false)}))
+        .map(|(i, p)| json!({"id": p.id, "at": p.pos, "world": plane.to_world(p.pos), "fixed": locked.get(i).copied().unwrap_or(false), "link": p.link, "fully_constrained": ss.report.point_determined.get(i).copied().unwrap_or(false)}))
         .collect();
     let constraints: Vec<Value> = sk
         .constraints

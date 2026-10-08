@@ -298,6 +298,43 @@ impl Document {
         out
     }
 
+    /// Every body as the world shows it: its world name ("Body1", or "Body1 (Occ:2)" for a
+    /// further instance), its component, the occurrence path, and the transform from the frame
+    /// its geometry is in to the world.
+    pub fn body_frames(&self, st: &crate::ModelState) -> Vec<(String, u64, Vec<u64>, Mat)> {
+        let mut out = Vec::new();
+        for (comp, path, m) in self.placements() {
+            let primary = path == self.first_path(comp);
+            let label = || -> String {
+                path.iter().filter_map(|id| self.occurrences.iter().find(|o| o.id == *id)).map(|o| o.name.as_str()).collect::<Vec<_>>().join("/")
+            };
+            for b in st.bodies.iter().filter(|b| self.body_component(&b.name, b.feature) == comp) {
+                let name = if primary { b.name.clone() } else { format!("{} ({})", b.name, label()) };
+                let w = match self.body_offsets.get(&b.name) {
+                    Some(o) => mat_mul(&m, o),
+                    None => m,
+                };
+                out.push((name, comp, path.clone(), w));
+            }
+        }
+        out
+    }
+
+    /// The occurrence path of a component's first placement.
+    pub fn first_path(&self, component: u64) -> Vec<u64> {
+        let mut path = Vec::new();
+        let mut c = component;
+        for _ in 0..1000 {
+            if c == 0 {
+                break;
+            }
+            let Some(o) = self.occurrence_of(c) else { break };
+            path.insert(0, o.id);
+            c = o.parent;
+        }
+        path
+    }
+
     /// Is `a` inside `b` (or `b` itself)?
     pub fn component_within(&self, a: u64, b: u64) -> bool {
         let mut c = a;

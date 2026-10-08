@@ -156,7 +156,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     }
     d.components.retain(|c| !gone.contains(&c.id));
     d.occurrences.retain(|o| !gone.contains(&o.component) && !gone.contains(&o.parent));
+    let moved_out: Vec<String> = d.body_components.iter().filter(|(_, c)| gone.contains(c)).map(|(b, _)| b.clone()).collect();
     d.body_components.retain(|_, c| !gone.contains(c));
+    d.body_offsets.retain(|b, _| !moved_out.contains(b));
     if gone.contains(&s.active_component) {
         s.active_component = 0;
     }
@@ -174,10 +176,23 @@ fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     for b in &bodies {
         let feature = st.body(b).map(|x| x.feature).unwrap_or(0);
         let own = s.doc.feature(feature).map(|f| f.component).unwrap_or(0);
+        // The body keeps its place in the world: where it is shown now (its component's frame and
+        // any earlier offset), seen from the new component's frame.
+        let from = s.doc.body_component(b, feature);
+        let now = solvecraft_doc::mat_mul(&s.doc.component_transform(from), s.doc.body_offsets.get(b).unwrap_or(&solvecraft_doc::IDENTITY));
+        let offset = solvecraft_doc::mat_inverse(&s.doc.component_transform(to))
+            .map(|inv| solvecraft_doc::mat_mul(&inv, &now))
+            .unwrap_or(solvecraft_doc::IDENTITY);
+        let doc = s.doc_mut();
         if own == to {
-            s.doc_mut().body_components.remove(b);
+            doc.body_components.remove(b);
         } else {
-            s.doc_mut().body_components.insert(b.clone(), to);
+            doc.body_components.insert(b.clone(), to);
+        }
+        if solvecraft_doc::is_identity(&offset) {
+            doc.body_offsets.remove(b);
+        } else {
+            doc.body_offsets.insert(b.clone(), offset);
         }
     }
     Ok(json!({"bodies": bodies, "component": to}))
@@ -355,7 +370,8 @@ fn revert(s: &mut Session, _p: &Value) -> Result<Value> {
 
 /// The active component's frame from world coordinates (for new features' geometry).
 pub fn to_active_frame(s: &Session, kind: &mut FeatureKind) {
-    if s.active_component == 0 {
+    // Commands whose picks `frames` maps are already in their frames.
+    if s.active_component == 0 || crate::frames::mapped() {
         return;
     }
     let m = s.doc.component_transform(s.active_component);

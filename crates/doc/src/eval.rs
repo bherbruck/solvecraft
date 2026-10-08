@@ -2291,7 +2291,10 @@ pub fn world_state(doc: &Document, st: &ModelState) -> ModelState {
         let ident = crate::is_identity(&m);
         for b in st.bodies.iter().filter(|b| doc.body_component(&b.name, b.feature) == comp) {
             let name = if primary { b.name.clone() } else { format!("{} ({})", b.name, label()) };
-            let body = if ident { b.body.clone() } else { kernel::transform_matrix(&b.body, m).unwrap_or_else(|_| b.body.clone()) };
+            // A body moved in from another component keeps its place (its offset).
+            let bm = doc.body_offsets.get(&b.name).map(|o| crate::mat_mul(&m, o)).unwrap_or(m);
+            let body =
+                if crate::is_identity(&bm) { b.body.clone() } else { kernel::transform_matrix(&b.body, bm).unwrap_or_else(|_| b.body.clone()) };
             out.bodies.push(ModelBody::new(name, body, b.feature));
         }
         if primary {

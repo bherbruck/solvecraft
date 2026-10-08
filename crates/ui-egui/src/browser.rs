@@ -90,7 +90,7 @@ fn find_group(app: &SolveApp, id: u64) -> Option<&solvecraft_engine::doc::Browse
 
 /// The bodies in a group (none for sketch and plane groups).
 pub fn group_bodies(app: &SolveApp, id: u64) -> Vec<String> {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     find_group(app, id)
         .filter(|g| g.folder == "bodies")
         .map(|g| g.items.iter().filter(|b| st.body(b).is_some()).cloned().collect())
@@ -172,7 +172,7 @@ pub fn toggle_folder(app: &mut SolveApp, component: u64, folder: &str) {
 pub fn selection_group(app: &SolveApp, target: &Target) -> Option<Value> {
     let (comp, folder) = match target {
         Target::Body { name } => {
-            let st = app.session.model.state();
+            let st = app.session.world_state();
             let b = st.body(name)?;
             (app.session.doc.body_component(name, b.feature), "bodies")
         }

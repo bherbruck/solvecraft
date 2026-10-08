@@ -1,0 +1,358 @@
+//! Component frames for picks. The viewport shows the placed model (`Session::world_state`):
+//! a component's bodies and sketches moved by its occurrence (and pasted instances moved by
+//! theirs). Features are made and kept in their component's own frame. So a command's picked
+//! points and directions, given in the world, are mapped into the frame of the body they lie on
+//! (through the inverse of that body's placement), and points that create geometry into the
+//! active component's frame, before the command runs. Instance body names ("Body1 (Occ:2)")
+//! become the component's body name.
+//!
+//! Nothing changes while every placement is the identity (the common case, and every design
+//! without moved components).
+
+use serde_json::{Map, Value};
+use solvecraft_doc::{Mat, apply_point, apply_vector, is_identity, mat_inverse};
+use solvecraft_geom::Vec3;
+
+use crate::Session;
+
+/// How a parameter is mapped.
+#[derive(Clone, Copy, PartialEq)]
+enum K {
+    /// A point on a body (a pick): into that body's frame.
+    Pick,
+    /// A list of picks: `[[x,y,z]…]` or `[{point|face|edge: [x,y,z], body?}…]`.
+    Picks,
+    /// A point that places new geometry: into the active component's frame.
+    Make,
+    /// A direction: turned with the command's frame.
+    Dir,
+    /// A plane object (`{face}`, `{origin, normal}`, `{origin, x_dir, y_dir}`) or a plane name.
+    Plane,
+    /// A body name, or a list of them.
+    Body,
+}
+
+use K::*;
+
+/// The parameters each command takes in world coordinates.
+fn table(id: &str) -> &'static [(&'static str, K)] {
+    match id {
+        "Extrude" | "Revolve" => &[("face", Pick), ("targets", Body), ("participants", Body)],
+        "PrimitiveBox" | "PrimitiveSphere" => &[("corner", Make), ("center", Make)],
+        "PrimitiveCylinder" | "PrimitiveCoil" | "PrimitiveTorus" => &[("base", Make), ("center", Make), ("axis", Dir)],
+        "FusionFilletEdgesCommand" | "FusionChamferCommand" => &[("edges", Picks), ("body", Body)],
+        "FusionHoleCommand" => &[("position", Pick), ("direction", Dir), ("body", Body)],
+        "ModifyScale" => &[("origin", Make), ("bodies", Body)],
+        "FusionOffsetFacesCommand" | "FusionShellBodyCommand" => &[("faces", Picks), ("body", Body)],
+        "FusionThreadCommand" => &[("face", Pick)],
+        "FusionDraftCommand" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
+        "FusionPressPullCommand" => &[("face", Pick), ("edges", Picks)],
+        "FusionReplaceFaceCommand" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],
+        "AlignCmd" => &[("from", Pick), ("from_face", Pick), ("to", Pick), ("to_face", Pick), ("bodies", Body)],
+        "MirrorCommand" | "FusionSplitBodyCommand" => &[("plane", Plane), ("bodies", Body), ("body", Body)],
+        "FusionBossCommand" | "FusionSnapFitCommand" | "FusionRestCommand" => {
+            &[("position", Pick), ("direction", Dir), ("hook", Dir), ("along", Dir), ("body", Body)]
+        }
+        "FusionLipCommand" | "ConvertToSheetMetalCmd" => &[("face", Pick), ("body", Body)],
+        "FusionSheetMetalFlangeCommand" | "FusionSheetMetalHemFlangeCommand" => &[("edges", Picks), ("body", Body)],
+        "SheetMetalFoldCmd" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
+        "SketchCreate" | "sketch.redefine" => &[("plane", Plane)],
+        "FusionAddEditDecalCommand" => &[("face", Pick)],
+        "IntersectCmd" => &[("refs", Picks)],
+        "ProjectToSurface" | "SketchIsoparametricCurve" => &[("face", Pick), ("body", Body)],
+        "IntersectionCurve" => &[("a", Picks), ("b", Picks)],
+        "FusionCurvatureCombAnalysisCommand" | "FusionMinimumRadiusAnalysisCommand" | "FusionIsoCurveAnalysisCommand" => {
+            &[("edges", Picks), ("faces", Picks)]
+        }
+        "AppearanceCommand" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
+        "FusionMoveCommand" => &[("bodies", Body), ("translate", Dir), ("axis", Dir), ("origin", Make)],
+        "FusionCombineCommand" => &[("target", Body), ("tools", Body)],
+        "SoftDeleteCommand" | "StockModelCommand" | "PhysicalMaterialCommand" => &[("bodies", Body)],
+        _ => &[],
+    }
+}
+
+/// The world placement of bodies (name → frame), with moves not captured yet.
+struct Frames {
+    bodies: Vec<(String, String, Mat)>,
+    active: Mat,
+}
+
+fn frames(s: &Session) -> Frames {
+    let st = s.model.state();
+    let doc: std::borrow::Cow<solvecraft_doc::Document> = if s.pending_moves.is_empty() {
+        std::borrow::Cow::Borrowed(&*s.doc)
+    } else {
+        let mut d = (*s.doc).clone();
+        for o in &mut d.occurrences {
+            if let Some(m) = s.pending_moves.get(&o.id) {
+                o.transform = *m;
+            }
+        }
+        std::borrow::Cow::Owned(d)
+    };
+    // World name, the component's own body name, and its frame.
+    let bodies = doc
+        .body_frames(&st)
+        .into_iter()
+        .map(|(world, _, _, m)| {
+            let own = st
+                .bodies
+                .iter()
+                .find(|b| world == b.name || world.starts_with(&format!("{} (", b.name)))
+                .map(|b| b.name.clone())
+                .unwrap_or_else(|| world.clone());
+            (world, own, m)
+        })
+        .collect();
+    Frames { bodies, active: doc.component_transform(s.active_component) }
+}
+
+/// Does any placement move anything (so the world differs from the components' frames)?
+pub fn placed(s: &Session) -> bool {
+    !s.pending_moves.is_empty() || !s.doc.body_offsets.is_empty() || s.doc.placements().iter().any(|(_, _, m)| !is_identity(m))
+}
+
+fn vec3(v: &Value) -> Option<Vec3> {
+    let a = v.as_array()?;
+    if a.len() != 3 {
+        return None;
+    }
+    let c = |i: usize| a.get(i).and_then(Value::as_f64).filter(|x| x.is_finite());
+    Some(Vec3::new(c(0)?, c(1)?, c(2)?))
+}
+
+fn pt(p: Vec3) -> Value {
+    serde_json::json!([p.x, p.y, p.z])
+}
+
+/// The frame of the body a world point lies on (the nearest), or of the named body.
+fn frame_at(s: &Session, f: &Frames, p: Vec3, body: Option<&str>) -> Option<Mat> {
+    if let Some(b) = body
+        && let Some((_, _, m)) = f.bodies.iter().find(|(w, own, _)| w == b || (own == b && !w.contains(" (")))
+    {
+        return Some(*m);
+    }
+    let world = s.world_state();
+    let mut best: Option<(f64, Mat)> = None;
+    for wb in &world.bodies {
+        let Some((_, _, m)) = f.bodies.iter().find(|(w, _, _)| *w == wb.name) else { continue };
+        let mesh = wb.mesh();
+        let bb = mesh.bounds();
+        let tol = (bb.diagonal() * 1e-3).max(1e-3);
+        if p.x < bb.min.x - tol
+            || p.y < bb.min.y - tol
+            || p.z < bb.min.z - tol
+            || p.x > bb.max.x + tol
+            || p.y > bb.max.y + tol
+            || p.z > bb.max.z + tol
+        {
+            continue;
+        }
+        let d = mesh.triangles.iter().filter_map(|t| mesh.tri(t)).map(|[a, b, c]| tri_dist(p, a, b, c)).fold(f64::INFINITY, f64::min);
+        if d <= tol && best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+            best = Some((d, *m));
+        }
+    }
+    best.map(|(_, m)| m)
+}
+
+fn tri_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
+    let n = (b - a).cross(c - a);
+    let Some(nn) = n.normalized() else { return p.dist_to_segment(a, b).min(p.dist_to_segment(b, c)) };
+    let h = (p - a).dot(nn);
+    let q = p - nn * h;
+    let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-12);
+    if inside { h.abs() } else { [(a, b), (b, c), (c, a)].iter().map(|(u, v)| p.dist_to_segment(*u, *v)).fold(f64::INFINITY, f64::min) }
+}
+
+struct Mapper<'a> {
+    s: &'a Session,
+    f: Frames,
+    /// The frame of the command's first pick (its directions turn with it).
+    first: Option<Mat>,
+    changed: bool,
+}
+
+impl Mapper<'_> {
+    fn pick(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
+        let p = vec3(v)?;
+        let m = frame_at(self.s, &self.f, p, body).unwrap_or(self.f.active);
+        self.first.get_or_insert(m);
+        self.local_point(&m, p)
+    }
+
+    fn local_point(&mut self, m: &Mat, p: Vec3) -> Option<Value> {
+        if is_identity(m) {
+            return None;
+        }
+        let inv = mat_inverse(m)?;
+        self.changed = true;
+        Some(pt(apply_point(&inv, p)))
+    }
+
+    fn make(&mut self, v: &Value) -> Option<Value> {
+        let p = vec3(v)?;
+        let m = self.f.active;
+        self.local_point(&m, p)
+    }
+
+    fn dir(&mut self, v: &Value) -> Option<Value> {
+        let d = vec3(v)?;
+        let m = self.first.unwrap_or(self.f.active);
+        if is_identity(&m) {
+            return None;
+        }
+        let inv = mat_inverse(&m)?;
+        self.changed = true;
+        Some(pt(apply_vector(&inv, d)))
+    }
+
+    /// A list of picks (points, or objects holding one).
+    fn picks(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
+        match v {
+            Value::Array(a) if vec3(v).is_some() && a.iter().all(Value::is_number) => self.pick(v, body),
+            Value::Array(a) => {
+                let out: Vec<Value> = a.iter().map(|x| self.picks(x, body).unwrap_or_else(|| x.clone())).collect();
+                Some(Value::Array(out))
+            }
+            Value::Object(o) => {
+                let b = o.get("body").and_then(Value::as_str).map(str::to_string);
+                let mut m = o.clone();
+                for k in ["point", "face", "edge", "vertex", "at"] {
+                    if let Some(x) = o.get(k)
+                        && let Some(y) = self.pick(x, b.as_deref().or(body))
+                    {
+                        m.insert(k.into(), y);
+                    }
+                }
+                if let Some(bn) = &b
+                    && let Some(own) = self.own_name(bn)
+                {
+                    m.insert("body".into(), Value::String(own));
+                }
+                Some(Value::Object(m))
+            }
+            _ => None,
+        }
+    }
+
+    fn plane(&mut self, v: &Value) -> Option<Value> {
+        let o = v.as_object()?;
+        let mut m = o.clone();
+        if let Some(x) = o.get("face").and_then(|x| self.pick(x, None)) {
+            m.insert("face".into(), x);
+        }
+        if let Some(x) = o.get("origin").and_then(|x| self.pick(x, None)) {
+            m.insert("origin".into(), x);
+        }
+        for k in ["normal", "x_dir", "y_dir"] {
+            if let Some(x) = o.get(k).and_then(|x| self.dir(x)) {
+                m.insert(k.into(), x);
+            }
+        }
+        Some(Value::Object(m))
+    }
+
+    /// The component's body name for a world (instance) body name.
+    fn own_name(&mut self, world: &str) -> Option<String> {
+        let own = self.f.bodies.iter().find(|(w, _, _)| w == world).map(|(_, own, _)| own.clone())?;
+        (own != world).then(|| {
+            self.changed = true;
+            own
+        })
+    }
+
+    fn body(&mut self, v: &Value) -> Option<Value> {
+        match v {
+            Value::String(n) => self.own_name(n).map(Value::String),
+            Value::Array(a) => {
+                let out: Vec<Value> = a.iter().map(|x| self.body(x).unwrap_or_else(|| x.clone())).collect();
+                Some(Value::Array(out))
+            }
+            _ => None,
+        }
+    }
+}
+
+thread_local! {
+    static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// The outermost command's coordinates were mapped here (its table lists them).
+    static MAPPED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Did this module map the running command's coordinates? (Otherwise a new feature's geometry
+/// goes into the active component's frame as a whole.)
+pub fn mapped() -> bool {
+    MAPPED.with(std::cell::Cell::get)
+}
+
+/// A command running inside another (its parameters are already in component frames).
+pub struct Nested;
+
+impl Nested {
+    /// Enter command `id`; true when it is the outermost one.
+    pub fn enter(id: &str) -> (Nested, bool) {
+        let outer = DEPTH.with(|d| {
+            let n = d.get();
+            d.set(n + 1);
+            n == 0
+        });
+        if outer {
+            let inner = if id == "timeline.redefine" { None } else { Some(id) };
+            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty())));
+        }
+        (Nested, outer)
+    }
+}
+
+impl Drop for Nested {
+    fn drop(&mut self) {
+        DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+    }
+}
+
+/// `params` with world picks mapped into component frames (`None`: nothing to change).
+pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
+    if id == "timeline.redefine" {
+        let cmd = params.get("command")?.as_str()?;
+        let inner = to_local(s, cmd, params.get("params")?)?;
+        let mut out = params.clone();
+        out["params"] = inner;
+        return Some(out);
+    }
+    let keys = table(id);
+    if keys.is_empty() || !placed(s) {
+        return None;
+    }
+    let obj = params.as_object()?;
+    let mut m = Mapper { s, f: frames(s), first: None, changed: false };
+    let body = obj.get("body").and_then(Value::as_str).map(str::to_string);
+    let mut out: Map<String, Value> = obj.clone();
+    // Picks first: their frame turns the directions.
+    for pass in [true, false] {
+        for (k, kind) in keys {
+            let Some(v) = obj.get(*k) else { continue };
+            let is_pick = matches!(kind, Pick | Picks | Plane);
+            if is_pick != pass {
+                continue;
+            }
+            let new = match kind {
+                Pick => m.pick(v, body.as_deref()),
+                Picks => m.picks(v, body.as_deref()),
+                Make => m.make(v),
+                Dir => m.dir(v),
+                Plane => m.plane(v),
+                Body => m.body(v),
+            };
+            if let Some(n) = new {
+                out.insert((*k).to_string(), n);
+            }
+        }
+    }
+    m.changed.then_some(Value::Object(out))
+}
+
+#[cfg(test)]
+#[path = "frames_tests.rs"]
+mod tests;

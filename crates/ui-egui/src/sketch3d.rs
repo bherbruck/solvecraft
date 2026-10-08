@@ -32,7 +32,7 @@ const ARROW: f32 = 60.0;
 
 /// Is the sketch being edited a 3D sketch?
 pub fn active(app: &SolveApp) -> bool {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     app.session.active_sketch.and_then(|s| st.sketch(s)).is_some_and(|ss| ss.sketch.view.three_d)
 }
 
@@ -42,7 +42,7 @@ fn takes(cmd: &str) -> bool {
 
 /// Points drawn in 3D: (wire id, fit index, point).
 fn drawn_points(app: &SolveApp) -> Vec<(String, usize, Vec3)> {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return Vec::new() };
     ss.sketch.wires.iter().flat_map(|w| w.fit.iter().enumerate().map(|(i, p)| (w.id.clone(), i, *p))).collect()
 }
@@ -66,7 +66,7 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
             return Some((p, "Pt"));
         }
     }
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let ss = app.session.active_sketch.and_then(|s| st.sketch(s))?;
     let (o, d) = proj.ray(pos);
     for h in pick(app, proj, pos) {
@@ -92,7 +92,7 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
 
 /// The sketch-plane coordinates of `p` when it lies on the plane.
 fn on_plane(app: &SolveApp, p: Vec3) -> Option<Vec2> {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let ss = app.session.active_sketch.and_then(|s| st.sketch(s))?;
     let q = ss.plane.to_local(p);
     (ss.plane.to_world(q).dist(p) < 1e-6).then_some(q)
@@ -305,7 +305,7 @@ fn target(app: &SolveApp, proj: &Proj, pos: Pos2, axis: Option<Vec3>, p: Vec3) -
             Some(p + u * ((b * d.dot(w0) - c * u.dot(w0)) / den))
         }
         None => {
-            let st = app.session.model.state();
+            let st = app.session.world_state();
             let n = app.session.active_sketch.and_then(|s| st.sketch(s))?.plane.normal();
             let den = d.dot(n);
             (den.abs() > 1e-12).then(|| o + d * ((p - o).dot(n) / den))

@@ -90,7 +90,7 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
             let params = p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}));
             let r = app.run(id, params);
-            if r.is_ok() && app.session.active_sketch.is_none() && app.session.model.state().bodies.len() == 1 && app.session.undo.len() <= 2 {
+            if r.is_ok() && app.session.active_sketch.is_none() && app.session.world_state().bodies.len() == 1 && app.session.undo.len() <= 2 {
                 app.fit_view();
             }
             wrap(r)
@@ -269,7 +269,7 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             let world = if let Some(w) = p.get("world") {
                 Some(solvecraft_engine::geom::Vec3::new(num(w, 0), num(w, 1), num(w, 2)))
             } else if let Some(s) = p.get("sketch") {
-                let st = app.session.model.state();
+                let st = app.session.world_state();
                 app.session
                     .active_sketch
                     .and_then(|id| st.sketch(id))
@@ -311,7 +311,7 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
         }
         "ui.sketchToScreen" => {
             // Screen points of active-sketch coordinates (for driving sketch interaction).
-            let st = app.session.model.state();
+            let st = app.session.world_state();
             let (Some(rect), Some(ss)) = (app.viewport.rect, app.session.active_sketch.and_then(|s| st.sketch(s))) else {
                 return err("no active sketch in a drawn viewport");
             };

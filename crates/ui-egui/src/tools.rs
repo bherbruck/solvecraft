@@ -149,7 +149,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
             });
             if let Some((id, is_point)) = hit {
                 tool.picks.push(id.clone());
-                let st = app.session.model.state();
+                let st = app.session.world_state();
                 let is_line = app
                     .session
                     .active_sketch
@@ -252,7 +252,7 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Vec<String> {
 fn tie_snaps(app: &mut SolveApp, t: &Tool, curves: &[String]) {
     let mut ties = Vec::new();
     {
-        let st = app.session.model.state();
+        let st = app.session.world_state();
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         let sk = &ss.sketch;
         let new_pts: Vec<usize> =
@@ -319,7 +319,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         return crate::sketch_tools::preview(app, t, painter, proj);
     }
     let Some(sid) = app.session.active_sketch else { return };
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = crate::theme::Tokens::get();

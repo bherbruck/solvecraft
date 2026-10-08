@@ -434,7 +434,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                 2 => {
                     let ids: Vec<String> =
                         items(inputs, 0).iter().filter_map(|x| if let Sel::SketchCurve { id } = x { Some(id.clone()) } else { None }).collect();
-                    let st = s.model.state();
+                    let st = s.world_state();
                     let sketch = st
                         .sketches
                         .iter()
@@ -475,7 +475,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             let mut p = json!({"angle": angle, "position": FOLD_POSITIONS.get(*position).copied().unwrap_or("centerline"), "flip": flip});
             match items(inputs, 0).first() {
                 Some(Sel::SketchCurve { id }) => {
-                    let st = s.model.state();
+                    let st = s.world_state();
                     let sketch = st
                         .sketches
                         .iter()
@@ -543,7 +543,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
 /// The dialog editing a sheet metal feature, filled from it.
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
     let s = &app.session;
-    let st = s.model.state();
+    let st = s.world_state();
     let rule_index = |r: &Option<String>| r.as_ref().and_then(|n| rule_list(app).iter().position(|x| &x.name == n)).map_or(0, |i| i + 1);
     let mut extra = Map::new();
     let (k, items): (Sm, Vec<Sel>) = match kind {
@@ -654,7 +654,7 @@ pub fn arrow(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
         _ => return None,
     };
     let Sel::Edge { body, index, point } = d.inputs.first()?.items.first()? else { return None };
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let m = st.body(body)?.mesh();
     let faces = m.edge_faces.get(*index)?;
     let area = |f: u32| -> f64 {

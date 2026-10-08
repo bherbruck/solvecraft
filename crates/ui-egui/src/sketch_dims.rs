@@ -233,7 +233,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
 fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option<Vec2> {
     let tk = Tokens::get();
     let sid = app.session.active_sketch?;
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let plane = st.sketch(sid)?.plane;
     let h = t.hover.as_ref().map(|x| x.0)?;
     let e = effective(app, t, h);

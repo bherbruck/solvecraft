@@ -174,7 +174,7 @@ pub fn label(k: &ConstraintKind, expr: Option<&str>, driven: bool) -> String {
 /// Draw the active sketch's dimensions and remember where they are for picking.
 pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
     let mut drawn = Vec::new();
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else {
         DRAWN.with(|d| d.borrow_mut().clear());
         EDIT.with(|e| *e.borrow_mut() = None);

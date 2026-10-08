@@ -278,7 +278,7 @@ impl Dialog {
 
     pub fn for_command(app: &SolveApp, id: &str) -> Option<Dialog> {
         let s = &app.session;
-        let has_bodies = !s.model.state().bodies.is_empty();
+        let has_bodies = !s.world_state().bodies.is_empty();
         let mut d = match id {
             "SketchCreate" => Dialog::new(Kind::Sketch, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)]),
             "Extrude" => Dialog::new(
@@ -614,7 +614,7 @@ impl Dialog {
         // Tangent chain: an edge brings the edges that continue it smoothly.
         if chain
             && let Sel::Edge { body, index, .. } = &sel
-            && let Some(b) = s.model.state().body(body)
+            && let Some(b) = s.world_state().body(body)
         {
             let m = b.mesh();
             picked = m
@@ -660,7 +660,7 @@ impl Dialog {
 
 /// Profiles of the sketch a feature would use (active, else the last), when there is just one.
 fn default_profiles(s: &Session) -> Vec<Sel> {
-    let st = s.model.state();
+    let st = s.world_state();
     let sid = s.active_sketch.or_else(|| s.doc.features.iter().rev().find(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id));
     match sid.and_then(|id| st.sketch(id).map(|ss| (id, ss.profiles.len()))) {
         Some((id, 1)) => vec![Sel::Profile { sketch: id, index: 0 }],
@@ -670,7 +670,7 @@ fn default_profiles(s: &Session) -> Vec<Sel> {
 
 /// The plane of a planar body face: (point on it, unit normal).
 pub fn planar_face(s: &Session, body: &str, face: usize) -> Option<(Vec3, Vec3)> {
-    let st = s.model.state();
+    let st = s.world_state();
     let b = st.body(body)?;
     let tol = (b.body.size() * 1e-3).max(1e-3);
     let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.index == face)?;
@@ -1670,7 +1670,7 @@ pub fn start_sketch(app: &mut SolveApp, sel: &Sel) {
 
 /// Animate the camera to look straight at the active sketch plane.
 pub fn look_at_sketch(app: &mut SolveApp) {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     if let Some(ss) = app.session.active_sketch.and_then(|id| st.sketch(id)) {
         let mut to = app.cam.looking_from(ss.plane.normal());
         // Keep the sketch's own x axis to the right when looking straight down or up.
@@ -1781,7 +1781,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Fillet { radius, chamfer, .. } => {
             need(0, "edges")?;
             // Faces stand for all their edges.
-            let st = s.model.state();
+            let st = s.world_state();
             let mut pts: Vec<Vec3> = Vec::new();
             for x in sels(d, 0) {
                 match x {
@@ -2165,7 +2165,7 @@ fn pattern_features(s: &Session, objects: &[Sel]) -> Vec<String> {
 }
 
 fn source_features(s: &Session, bodies: &[String]) -> Vec<String> {
-    let st = s.model.state();
+    let st = s.world_state();
     let mut features: Vec<String> = Vec::new();
     for n in bodies {
         if let Some(f) = st.body(n).and_then(|b| s.doc.feature(b.feature)).map(|f| f.name.clone())
@@ -2179,7 +2179,7 @@ fn source_features(s: &Session, bodies: &[String]) -> Vec<String> {
 
 /// The sketch holding all these curve ids (the active sketch first, never `not`).
 fn curves_sketch(app: &SolveApp, ids: &[String], not: Option<u64>) -> Option<u64> {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let has =
         |sid: u64| st.sketch(sid).is_some_and(|ss| ids.iter().all(|id| ss.sketch.curve_index(id).is_some() || ss.sketch.wire_index(id).is_some()));
     if let Some(a) = app.session.active_sketch
@@ -2204,7 +2204,7 @@ pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
             },
         )),
         Sel::SketchCurve { id } => {
-            let st = app.session.model.state();
+            let st = app.session.world_state();
             let sid = curves_sketch(app, std::slice::from_ref(id), None)?;
             let ss = st.sketch(sid)?;
             let c = ss.sketch.curves.get(ss.sketch.curve_index(id)?)?;
@@ -2240,7 +2240,7 @@ pub(crate) fn profile_indices(ss: &solvecraft_engine::doc::SolvedSketch, sel: &P
 
 /// The edge of a visible body through (or nearest) a point.
 pub(crate) fn edge_sel(s: &Session, p: Vec3) -> Option<Sel> {
-    let st = s.model.state();
+    let st = s.world_state();
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
         let m = b.mesh();
@@ -2256,7 +2256,7 @@ pub(crate) fn edge_sel(s: &Session, p: Vec3) -> Option<Sel> {
 
 /// The body face containing a point (nearest triangle).
 pub(crate) fn face_sel(s: &Session, p: Vec3) -> Option<Sel> {
-    let st = s.model.state();
+    let st = s.world_state();
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
         let m = b.mesh();
@@ -2305,7 +2305,7 @@ fn pt3(v: Vec3) -> Value {
 pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dialog> {
     let s = &app.session;
     let f = s.doc.feature(id)?.clone();
-    let st = s.model.state();
+    let st = s.world_state();
     let start = |cmd: &str| Dialog::for_command(app, cmd);
     let mut d = match &f.kind {
         FeatureKind::Extrude { sketch, profiles, extent, operation, targets } => {

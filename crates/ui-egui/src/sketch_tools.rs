@@ -476,14 +476,14 @@ fn arg(p: &(Vec2, Option<String>)) -> Value {
 
 /// Length of a curve (for default sizes).
 fn curve_len(app: &SolveApp, id: &str) -> f64 {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return 10.0 };
     ss.sketch.curve_index(id).map(|c| ss.sketch.polyline(c).windows(2).map(|w| w[0].dist(w[1])).sum::<f64>()).unwrap_or(10.0)
 }
 
 /// Lines meeting at a sketch point.
 fn corner_len(app: &SolveApp, point: &str) -> f64 {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return 10.0 };
     let sk = &ss.sketch;
     let Some(q) = sk.resolve_point(point) else { return 10.0 };
@@ -571,7 +571,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             });
             // Empty space while sketching: the sketch plane.
             let target = target.or_else(|| {
-                let st = app.session.model.state();
+                let st = app.session.world_state();
                 let ss = st.sketch(app.session.active_sketch?)?;
                 let (o, d) = proj.ray(pos);
                 let w = ss.plane.intersect_ray(o, d)?;
@@ -850,7 +850,7 @@ fn offset_side(app: &mut SolveApp, tool: &mut Tool, p: Vec2) -> bool {
     if tool.cmd != "Offset" || tool.picks.is_empty() {
         return false;
     }
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let d = active_sketch(app)
         .and_then(|s| st.sketch(s))
         .and_then(|ss| ss.sketch.curve_index(&tool.picks[0]).and_then(|c| ss.sketch.shape(c)))
@@ -866,7 +866,7 @@ fn offset_side(app: &mut SolveApp, tool: &mut Tool, p: Vec2) -> bool {
 /// Rubber band for point tools and pick markers.
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let Some(sid) = active_sketch(app) else { return };
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = crate::theme::Tokens::get();
@@ -898,7 +898,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
 /// (conflicting ones red).
 fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some(sid) = active_sketch(app) else { return };
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let Some(ss) = st.sketch(sid) else { return };
     if ss.sketch.view.hide_constraints {
         GLYPHS.with(|g| g.borrow_mut().clear());
@@ -995,7 +995,7 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         return;
     }
     let Some((label, p)) = SNAP.with(|s| *s.borrow()) else { return };
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return };
     let Some(sp) = proj.to_screen(ss.plane.to_world(p)) else { return };
     let tk = crate::theme::Tokens::get();

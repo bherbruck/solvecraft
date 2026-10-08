@@ -212,7 +212,7 @@ fn touched_bodies(app: &SolveApp) -> Vec<String> {
 }
 
 fn body_feature(app: &SolveApp, body: &str) -> Option<u64> {
-    app.session.model.state().body(body).map(|b| b.feature)
+    app.session.world_state().body(body).map(|b| b.feature)
 }
 
 /// The bodies a target stands for.
@@ -451,7 +451,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let profiles = !app.ui.hidden_profiles.contains(&id);
     let dims = app.ui.shown_dims.contains(&id);
     let editing = app.session.active_sketch == Some(id);
-    let has_profiles = app.session.model.state().sketch(id).is_some_and(|s| !s.profiles.is_empty());
+    let has_profiles = app.session.world_state().sketch(id).is_some_and(|s| !s.profiles.is_empty());
     vec![
         act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
         Item::sep(),
@@ -540,7 +540,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
 fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     use solvecraft_engine::sketch::CurveKind;
     let Some(sid) = app.session.active_sketch else { return Vec::new() };
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let Some(ss) = st.sketch(sid) else { return Vec::new() };
     let mut lines = Vec::new();
     let mut rounds = Vec::new();
@@ -665,7 +665,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             app.ui.hidden_sketches.clear();
         }
         "ui.isolate" => {
-            app.ui.hidden_bodies = app.session.model.state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
+            app.ui.hidden_bodies = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
         }
         "ui.lock" => {
             let locked = bodies.iter().all(|b| app.ui.locked_bodies.contains(b));
@@ -844,7 +844,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.extrudeSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
-                let n = app.session.model.state().sketch(id).map_or(0, |s| s.profiles.len());
+                let n = app.session.world_state().sketch(id).map_or(0, |s| s.profiles.len());
                 let items: Vec<Value> = (0..n).map(|i| json!({"type": "profile", "sketch": id, "index": i})).collect();
                 let _ = app.run("select.set", json!({ "items": items }));
                 app.start("Extrude");
@@ -949,7 +949,7 @@ pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
 
 /// Add the edges that continue the selected edges smoothly to the selection.
 fn tangent_chain(app: &mut SolveApp) {
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let mut out: Vec<Sel> = Vec::new();
     for s in &app.session.selection {
         let Sel::Edge { body, index, .. } = s else { continue };

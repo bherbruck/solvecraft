@@ -240,7 +240,7 @@ fn pt(v: Vec3) -> Value {
 
 /// The occurrence placing a body (0: the root design), when the body is its primary instance.
 fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
-    let st = s.model.state();
+    let st = s.world_state();
     let b = st.body(body)?;
     let comp = s.doc.body_component(&b.name, b.feature);
     if comp == 0 { Some(0) } else { s.doc.occurrence_of(comp).map(|o| o.id) }
@@ -769,7 +769,10 @@ fn next_joint_id(s: &Session) -> u64 {
 /// after is compared, so the components that move show where they go (`None`: not such
 /// commands).
 pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Option<Result<Built, String>> {
-    if cmds.is_empty() || !cmds.iter().all(|(c, _)| MOVES.contains(&c.as_str())) {
+    // Any feature, when components are placed away from their frames: the preview must show
+    // the world the viewport shows.
+    let moves = cmds.iter().all(|(c, _)| MOVES.contains(&c.as_str()));
+    if cmds.is_empty() || !(moves || solvecraft_engine::frames::placed(s)) {
         return None;
     }
     let mut scratch = s.scratch();
