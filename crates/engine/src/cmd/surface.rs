@@ -22,6 +22,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SURFACE", "CREATE")
         .icon("thicken")
         .params("bodies: [surface names]; thickness: expr (negative: against the normal); symmetric?: bool; operation?: new|join|cut|intersect; targets?"),
+    CommandSpec::new("FusionExtendCommand", "Extend", extend)
+        .at("SURFACE", "MODIFY")
+        .icon("extend")
+        .params("body: planar surface name; edges: [[x,y,z]] (points on straight edges to push out); distance: expr"),
     CommandSpec::new("FusionSurfaceTrimCommand", "Trim", trim)
         .at("SURFACE", "MODIFY")
         .icon("trim")
@@ -78,6 +82,21 @@ fn thicken(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, kind)
 }
 
+fn extend(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionExtendCommand";
+    let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
+    if s.model.state().body(&body).is_none() {
+        return Err(bad(cmd, format!("no body `{body}`")));
+    }
+    let edges: Vec<solvecraft_geom::Vec3> = p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    if edges.is_empty() || edges.len() > 10_000 {
+        return Err(bad(cmd, "`edges` must list points on the edges to extend"));
+    }
+    let distance = expr(p, "distance").ok_or_else(|| bad(cmd, "`distance` is required"))?;
+    check_expr(s, &distance, Kind::Length, cmd, "distance")?;
+    add_feature(s, p, FeatureKind::SurfaceExtend { body, edges, distance })
+}
+
 fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "FusionSurfaceTrimCommand";
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
@@ -121,9 +140,10 @@ mod tests {
         let st = s.world_state();
         assert!(st.body("Sheet").unwrap().body.is_surface());
         run(&mut s, "FusionSurfaceTrimCommand", json!({"body": "Sheet", "plane": {"origin": [3, 0, 0], "normal": [1, 0, 0]}, "keep": [8, 5, 0]}));
+        run(&mut s, "FusionExtendCommand", json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": 5}));
         run(&mut s, "FusionSurfaceThickenCommand", json!({"bodies": ["Sheet"], "thickness": "2 mm", "body_name": "Slab"}));
         let v = volume(&s, "Slab");
-        assert!((v - 140.0).abs() < 1e-9, "{v}");
+        assert!((v - 240.0).abs() < 1e-9, "{v}");
         // Stitch the patch of a box's open top back on.
         run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Cup"}));
         run(

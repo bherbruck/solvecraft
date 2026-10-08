@@ -74,6 +74,16 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
+        FeatureKind::SurfaceExtend { body, edges, distance } => {
+            let d = val(vals, distance, Kind::Length)?;
+            let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let out = kernel::extend(&mb.body, edges, d)?;
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody::new(mb.name, out, mb.feature);
+            }
+            Ok(())
+        }
         _ => Err(DocError::Invalid("not a surface feature".into())),
     }
 }

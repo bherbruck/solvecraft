@@ -634,6 +634,12 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<String>,
     },
+    /// A planar surface body extended outward by `distance` past the edges through `edges`.
+    SurfaceExtend {
+        body: String,
+        edges: Vec<Vec3>,
+        distance: String,
+    },
     /// A surface body trimmed by a plane, or by a face of a body (`tool`), keeping the side of
     /// `keep`.
     SurfaceTrim {
@@ -887,6 +893,7 @@ impl FeatureKind {
             FeatureKind::Stitch { .. } => "StitchFeature",
             FeatureKind::Thicken { .. } => "ThickenFeature",
             FeatureKind::SurfaceTrim { .. } => "TrimFeature",
+            FeatureKind::SurfaceExtend { .. } => "ExtendFeature",
             FeatureKind::Import { .. } => "BaseFeature",
             FeatureKind::MeshImport { .. } => "MeshFeature",
         }
@@ -945,6 +952,7 @@ impl FeatureKind {
             FeatureKind::Stitch { .. } => "Stitch",
             FeatureKind::Thicken { .. } => "Thicken",
             FeatureKind::SurfaceTrim { .. } => "Trim",
+            FeatureKind::SurfaceExtend { .. } => "Extend",
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
         }
@@ -1086,6 +1094,7 @@ impl FeatureKind {
             FeatureKind::Stitch { tolerance, .. } => v.push(tolerance),
             FeatureKind::Thicken { thickness, .. } => v.push(thickness),
             FeatureKind::SurfaceTrim { plane, .. } => plane_exprs(plane, &mut v),
+            FeatureKind::SurfaceExtend { distance, .. } => v.push(distance),
             FeatureKind::Patch { .. } => {}
             FeatureKind::Import { .. } | FeatureKind::MeshImport { .. } => {}
         }

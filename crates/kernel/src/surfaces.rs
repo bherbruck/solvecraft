@@ -480,6 +480,71 @@ pub fn trim(body: &Body, tool: &crate::SplitTool, keep: Vec3) -> Result<Body> {
     })
 }
 
+/// A planar surface extended: the chosen straight edges (picked by points on them) move
+/// outward in the face's plane by `distance`, their neighbours lengthened to meet them.
+pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
+    body.require_brep("extend")?;
+    if !(distance.is_finite() && distance > 0.0) {
+        return Err(KernelError::Invalid("the extension distance must be positive".into()));
+    }
+    let faces: Vec<mt::Face> = body.solid.face_iter().cloned().collect();
+    let [face] = faces.as_slice() else { return Err(KernelError::Invalid("not supported yet: extending a surface of more than one face".into())) };
+    let Some(crate::splitface::Analytic::Plane { n }) = crate::splitface::analytic_field(&face.oriented_surface()) else {
+        return Err(KernelError::Invalid("not supported yet: extending a surface that is not planar".into()));
+    };
+    let chosen: Vec<mt::EdgeID> = at
+        .iter()
+        .map(|p| edge_near(body, *p).map(|e| e.id()).ok_or_else(|| KernelError::Invalid(format!("no edge at {p:?}"))))
+        .collect::<Result<_>>()?;
+    guard("extend", || {
+        let bounds = face.boundaries();
+        let [outer] = bounds.as_slice() else { return Err(KernelError::Invalid("not supported yet: extending a surface with holes".into())) };
+        let edges: Vec<mt::Edge> = outer.edge_iter().cloned().collect();
+        let m = edges.len();
+        // Each edge as a line (point, direction) moved outward when chosen.
+        let mut lines = Vec::with_capacity(m);
+        for e in &edges {
+            let (a, b) = (from_p3(e.front().point()), from_p3(e.back().point()));
+            if !matches!(e.curve(), mt::Curve::Line(_)) {
+                return Err(KernelError::Invalid("not supported yet: extending a surface with curved edges".into()));
+            }
+            let d = (b - a).normalized().ok_or_else(|| KernelError::Invalid("a zero-length edge".into()))?;
+            // Outward: right of the edge seen along the normal (the face is on its left).
+            let out = d.cross(n);
+            let shift = if chosen.contains(&e.id()) || chosen.contains(&e.inverse().id()) { distance } else { 0.0 };
+            lines.push((a + out * shift, d));
+        }
+        // Corners: where consecutive lines meet.
+        let meet = |(p, d): (Vec3, Vec3), (q, e): (Vec3, Vec3)| -> Option<Vec3> {
+            let w = q - p;
+            let c = d.cross(e);
+            let cc = c.dot(c);
+            if cc < 1e-24 {
+                return None;
+            }
+            Some(p + d * (w.cross(e).dot(c) / cc))
+        };
+        let mut corners = Vec::with_capacity(m);
+        for i in 0..m {
+            let (Some(prev), Some(cur)) = (lines.get((i + m - 1) % m), lines.get(i)) else { continue };
+            let p = meet(*prev, *cur).unwrap_or(cur.0);
+            corners.push(mt::Vertex::new(p3(p)));
+        }
+        let wire: mt::Wire = (0..m)
+            .filter_map(|i| {
+                let (a, b) = (corners.get(i)?, corners.get((i + 1) % m)?);
+                Some(mt::Edge::new_unchecked(a, b, mt::Curve::Line(mt::Line(a.point(), b.point()))))
+            })
+            .collect::<Vec<_>>()
+            .into();
+        let mut f = mt::builder::try_attach_plane(&[wire]).map_err(|e| KernelError::Failed(format!("extend: {e}")))?;
+        if f.oriented_surface().normal(0.0, 0.0).dot(crate::body::v3(n)) < 0.0 {
+            f = f.inverse();
+        }
+        Ok(surface_body(vec![f]))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,6 +617,20 @@ mod tests {
         let closed = stitch(&[&open, &lid], 0.0).unwrap();
         assert!(!closed.is_surface());
         assert!(rel(measure(&closed).unwrap().volume, 6000.0) < 1e-9);
+    }
+
+    #[test]
+    fn extend_a_planar_surface() {
+        let r = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]),
+            holes: vec![],
+        };
+        let s = patch_region(&Plane::XY, &r).unwrap();
+        let e = extend(&s, &[Vec3::new(10.0, 5.0, 0.0)], 5.0).unwrap();
+        assert!(rel(measure(&e).unwrap().area, 150.0) < 1e-9);
+        let e = extend(&s, &[Vec3::new(10.0, 5.0, 0.0), Vec3::new(5.0, 10.0, 0.0)], 5.0).unwrap();
+        assert!(rel(measure(&e).unwrap().area, 225.0) < 1e-9);
+        assert!(extend(&s, &[Vec3::new(10.0, 5.0, 0.0)], -1.0).is_err());
     }
 
     #[test]

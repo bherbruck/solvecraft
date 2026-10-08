@@ -1916,9 +1916,11 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => {
             more::plastic_eval(doc, vals, f, st)
         }
-        FeatureKind::Patch { .. } | FeatureKind::Stitch { .. } | FeatureKind::Thicken { .. } | FeatureKind::SurfaceTrim { .. } => {
-            surface::eval(doc, vals, f, st)
-        }
+        FeatureKind::Patch { .. }
+        | FeatureKind::Stitch { .. }
+        | FeatureKind::Thicken { .. }
+        | FeatureKind::SurfaceTrim { .. }
+        | FeatureKind::SurfaceExtend { .. } => surface::eval(doc, vals, f, st),
         FeatureKind::Emboss { .. }
         | FeatureKind::Rib { .. }
         | FeatureKind::ReplaceFace { .. }

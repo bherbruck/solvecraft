@@ -261,7 +261,7 @@ impl FeatureKind {
             | FeatureKind::Thicken { .. }
             | FeatureKind::Import { .. }
             | FeatureKind::MeshImport { .. } => {}
-            FeatureKind::Patch { edges, .. } => edges.iter_mut().for_each(pt),
+            FeatureKind::Patch { edges, .. } | FeatureKind::SurfaceExtend { edges, .. } => edges.iter_mut().for_each(pt),
             FeatureKind::SurfaceTrim { plane, tool, keep, .. } => {
                 map_plane_ref(m, plane);
                 if let Some(t) = tool {
