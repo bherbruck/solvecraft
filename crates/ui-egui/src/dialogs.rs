@@ -350,6 +350,14 @@ impl Dialog {
                 Kind::Primitive { cmd: "PrimitiveTorus", fields: vec![("major", "20".into()), ("minor", "5".into())], operation: 0 },
                 vec![],
             ),
+            "PrimitiveCoil" => Dialog::new(
+                Kind::Primitive {
+                    cmd: "PrimitiveCoil",
+                    fields: vec![("diameter", "40".into()), ("revolutions", "4".into()), ("pitch", "8".into()), ("section_size", "3".into())],
+                    operation: 0,
+                },
+                vec![],
+            ),
             "FusionCombineCommand" => Dialog::new(
                 Kind::Combine { operation: 1, keep_tools: false },
                 vec![SelInput::new("Target body", BODIES, false), SelInput::new("Tool bodies", BODIES, true)],
@@ -647,6 +655,7 @@ fn title(k: &Kind) -> &'static str {
             "PrimitiveBox" => "BOX",
             "PrimitiveCylinder" => "CYLINDER",
             "PrimitiveSphere" => "SPHERE",
+            "PrimitiveCoil" => "COIL",
             _ => "TORUS",
         },
         Kind::Combine { .. } => "COMBINE",

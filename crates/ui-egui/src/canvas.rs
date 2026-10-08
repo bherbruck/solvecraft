@@ -29,6 +29,11 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         Sel::Face { body, index, point } => (*point, crate::dialogs::planar_face(&app.session, body, *index).map(|(_, n)| n)),
         Sel::Edge { body, index, point } => (*point, st.body(body).and_then(|b| edge_bisector(&b.mesh(), *index, *point))),
         Sel::Vertex { point, .. } => (*point, None),
+        Sel::SketchCurve { id } => {
+            let ss = st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(id).is_some())?;
+            let pts = ss.sketch.polyline(ss.sketch.curve_index(id)?);
+            (ss.plane.to_world(*pts.get(pts.len() / 2)?), None)
+        }
         Sel::Body { name } => (st.body(name)?.mesh().bounds().center(), None),
         Sel::Plane { name } => {
             let pl = solvecraft_engine::geom::Plane::named(name).or_else(|| {
