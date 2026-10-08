@@ -20,6 +20,8 @@ pub(crate) mod motion;
 mod parts;
 mod section;
 pub(crate) use measure_sel::measure_items;
+#[cfg(test)]
+mod kernel_heal_tests;
 mod parameters;
 mod plastic;
 mod sheet;

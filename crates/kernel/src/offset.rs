@@ -25,6 +25,17 @@ enum Surf {
     /// Apex, unit axis (into the cone, away from the apex) and half-angle; `convex` when the
     /// outward normal points away from the axis.
     Cone { v: Vec3, a: Vec3, half: f64, convex: bool },
+    /// Axis point and unit axis, the tube's centre circle (radius `big` at height `h` along the
+    /// axis) and the tube radius; `convex` when the outward normal points away from the tube's
+    /// centre.
+    Torus { o: Vec3, a: Vec3, big: f64, h: f64, r: f64, convex: bool },
+}
+
+/// The centre of a torus tube nearest `p`.
+fn tube_centre(o: Vec3, a: Vec3, big: f64, h: f64, p: Vec3) -> Option<Vec3> {
+    let w = p - o;
+    let u = (w - a * w.dot(a)).normalized()?;
+    Some(o + a * h + u * big)
 }
 
 impl Surf {
@@ -47,6 +58,10 @@ impl Surf {
                 let n = q * half.cos() - a * half.sin();
                 Some(if convex { n } else { -n })
             }
+            Surf::Torus { o, a, big, h, convex, .. } => {
+                let n = (p - tube_centre(o, a, big, h, p)?).normalized()?;
+                Some(if convex { n } else { -n })
+            }
         }
     }
     fn moved(&self, s: f64) -> Option<Surf> {
@@ -66,6 +81,10 @@ impl Surf {
                 let sh = half.sin();
                 (sh > 1e-9).then_some(Surf::Cone { v: v - a * (s / sh), a, half, convex })
             }
+            Surf::Torus { o, a, big, h, r, convex } => {
+                let r2 = if convex { r + s } else { r - s };
+                (r2 > 1e-9).then_some(Surf::Torus { o, a, big, h, r: r2, convex })
+            }
         }
     }
     fn dist(&self, p: Vec3) -> f64 {
@@ -81,6 +100,7 @@ impl Surf {
                 let h = w.dot(a);
                 (w - a * h).len() * half.cos() - h * half.sin()
             }
+            Surf::Torus { o, a, big, h, r, .. } => tube_centre(o, a, big, h, p).map(|c| p.dist(c) - r).unwrap_or(f64::INFINITY),
         }
     }
     /// The affine map taking this surface onto `to` (same kind, same axis).
@@ -174,10 +194,18 @@ fn samples(f: &mt::Face) -> Vec<(Vec3, Vec3)> {
             uv.push((lo.0 + (hi.0 - lo.0) * i as f64 / 4.0, lo.1 + (hi.1 - lo.1) * j as f64 / 4.0));
         }
     }
+    // Parameter steps for checking that the normal is steady (not at a cone's apex).
+    let (du, dv) = (((hi.0 - lo.0) * 1e-6).max(1e-9), ((hi.1 - lo.1) * 1e-6).max(1e-9));
+    let nrm = |u: f64, v: f64| {
+        let n = surf.normal(u, v);
+        Vec3::new(n.x, n.y, n.z).normalized()
+    };
     uv.iter()
         .filter_map(|(u, v)| {
-            let n = surf.normal(*u, *v);
-            Some((from_p3(surf.subs(*u, *v)), Vec3::new(n.x, n.y, n.z).normalized()?))
+            let n = nrm(*u, *v)?;
+            let steady =
+                [nrm(*u + du, *v), nrm(*u - du, *v), nrm(*u, *v + dv), nrm(*u, *v - dv)].iter().all(|m| m.is_some_and(|m| m.dot(n) > 1.0 - 1e-6));
+            steady.then(|| (from_p3(surf.subs(*u, *v)), n))
         })
         .collect()
 }
@@ -190,6 +218,9 @@ fn surf_of(f: &mt::Face, tol: f64) -> Option<Surf> {
         return Some(Surf::Plane { n, d: n.dot(from_p3(pl.origin())) });
     }
     let s = samples(f);
+    if let Some(t) = torus_of(f, &s, tol) {
+        return Some(t);
+    }
     let (p0, n0) = *s.first()?;
     // The normal most square to the first (a half cylinder's two ends are opposite).
     let far = s.iter().map(|x| x.1).min_by(|a, b| a.dot(n0).abs().total_cmp(&b.dot(n0).abs()))?;
@@ -215,6 +246,42 @@ fn surf_of(f: &mt::Face, tol: f64) -> Option<Surf> {
     let cyl = Surf::Cylinder { o, a, r, convex };
     let ok = s.iter().all(|(p, n)| cyl.dist(*p).abs() < tol && cyl.normal(*p).is_some_and(|m| m.dot(*n) > 1.0 - 1e-6));
     ok.then_some(cyl)
+}
+
+/// A torus: a surface of revolution whose normals (in the meridian plane) all point from one
+/// circle, the tube's centre, at one distance.
+fn torus_of(f: &mt::Face, s: &[(Vec3, Vec3)], tol: f64) -> Option<Surf> {
+    let mt::Surface::RevolutedCurve(rc) = f.surface() else { return None };
+    if *rc.transform() != <mt::Matrix4 as mt::One>::one() {
+        return None;
+    }
+    let (o, ax) = (from_p3(rc.entity().origin()), rc.entity().axis());
+    let a = Vec3::new(ax.x, ax.y, ax.z).normalized()?;
+    // Meridian coordinates: ρ − r n_ρ = R and h − r n_h = h0 for every sample, least squares
+    // in (R, h0, r).
+    let mut m = [[0.0f64; 3]; 3];
+    let mut rhs = [0.0f64; 3];
+    for (p, n) in s {
+        let w = *p - o;
+        let hh = w.dot(a);
+        let radial = w - a * hh;
+        let u = radial.normalized()?;
+        for (row, val) in [([1.0, 0.0, n.dot(u)], radial.len()), ([0.0, 1.0, n.dot(a)], hh)] {
+            for i in 0..3 {
+                for j in 0..3 {
+                    m[i][j] += row[i] * row[j];
+                }
+                rhs[i] += row[i] * val;
+            }
+        }
+    }
+    let x = crate::polyhedron::solve3_pub(m, rhs)?;
+    let (big, h, r) = (x[0], x[1], x[2]);
+    if !(big > 1e-9 && r.abs() > 1e-9 && r.abs() < big) {
+        return None;
+    }
+    let t = Surf::Torus { o, a, big, h, r: r.abs(), convex: r > 0.0 };
+    s.iter().all(|(p, n)| t.dist(*p).abs() < tol && t.normal(*p).is_some_and(|m| m.dot(*n) > 1.0 - 1e-6)).then_some(t)
 }
 
 /// A sphere (normal lines all through one point) or a cone (tangent planes all through one
@@ -357,10 +424,10 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
     let mut new = Vec::with_capacity(faces.len());
     let mut shifts = Vec::with_capacity(faces.len());
     for (i, f) in faces.iter().enumerate() {
-        let sf = surf_of(f, tol * 100.0).ok_or_else(|| fail("only bodies with planes, cylinders, cones and spheres"))?;
+        let sf = surf_of(f, tol * 100.0).ok_or_else(|| fail("only bodies with planes, cylinders, cones, spheres and tori"))?;
         let n = match sf {
             Surf::Plane { n, .. } => n,
-            Surf::Cylinder { a, .. } | Surf::Cone { a, .. } => a.any_perp(),
+            Surf::Cylinder { a, .. } | Surf::Cone { a, .. } | Surf::Torus { a, .. } => a.any_perp(),
             Surf::Sphere { .. } => Vec3::Z,
         };
         let s = shift(i, n);
@@ -396,8 +463,16 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
     for v in b.solid.vertex_iter() {
         let fs = vfaces.get(&v.id()).ok_or_else(|| fail("vertex"))?;
         let (o, s, n) = pick(fs);
-        let q = move_point(from_p3(v.point()), &o, &s, &n, size * 1e-6)
-            .ok_or_else(|| fail("a corner whose faces don't meet the same way after the move"))?;
+        let p = from_p3(v.point());
+        // A cone's apex goes with the cone (its normal is not defined there).
+        let apex = o.iter().zip(&n).find_map(|(a, b)| match (a, b) {
+            (Surf::Cone { v: va, .. }, Surf::Cone { v: vb, .. }) if va.dist(p) < size * 1e-6 => Some(*vb),
+            _ => None,
+        });
+        let q = match apex {
+            Some(q) if n.iter().all(|sf| sf.dist(q).abs() < size * 1e-6) => q,
+            _ => move_point(p, &o, &s, &n, size * 1e-6).ok_or_else(|| fail("a corner whose faces don't meet the same way after the move"))?,
+        };
         newpos.insert(v.id(), q);
     }
     guard("offset", || {
@@ -437,8 +512,28 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
                 })
                 .collect();
             let (Some(o), Some(n)) = (old.get(i), new.get(i)) else { return Err(fail("face")) };
-            let mat = o.map_to(n).ok_or_else(|| fail("surface"))?;
-            let surface = mt::Transformed::transformed(&f.surface(), mat);
+            let surface = match (o.map_to(n), *o, *n) {
+                (Some(mat), _, _) => mt::Transformed::transformed(&f.surface(), mat),
+                // A torus: its tube's circle scaled about the tube's centre, revolved again.
+                (None, Surf::Torus { o: to, a, big, h, r, .. }, Surf::Torus { r: r2, .. }) => {
+                    use mt::{BoundedCurve, ParametricCurve};
+                    let mt::Surface::RevolutedCurve(rc) = f.surface() else { return Err(fail("torus surface")) };
+                    let curve = rc.entity().entity_curve().clone();
+                    let (t0, t1) = curve.range_tuple();
+                    let q = from_p3(curve.subs((t0 + t1) / 2.0));
+                    let c = tube_centre(to, a, big, h, q).ok_or_else(|| fail("torus"))?;
+                    let k = r2 / r;
+                    let t = c * (1.0 - k);
+                    let mat = mt::Matrix4::from_translation(mt::Vector3::new(t.x, t.y, t.z)) * mt::Matrix4::from_scale(k);
+                    let moved = mt::Transformed::transformed(&curve, mat);
+                    let mut p = mt::Processor::new(mt::RevolutedCurve::by_revolution(moved, rc.entity().origin(), rc.entity().axis()));
+                    if !rc.orientation() {
+                        mt::Invertible::invert(&mut p);
+                    }
+                    mt::Surface::RevolutedCurve(p)
+                }
+                _ => return Err(fail("surface")),
+            };
             let mut nf = mt::Face::try_new(wires, surface).map_err(|e| fail(&e.to_string()))?;
             if !f.orientation() {
                 nf.invert();
@@ -472,7 +567,7 @@ pub(crate) fn draft_walls(b: &Body, chosen: &[usize], neutral: &solvecraft_geom:
         let wall = match sf {
             Surf::Plane { n, .. } => n.dot(pull).abs() < 1e-9,
             Surf::Cylinder { a, .. } => a.dot(pull).abs() > 1.0 - 1e-9,
-            Surf::Sphere { .. } | Surf::Cone { .. } => false,
+            Surf::Sphere { .. } | Surf::Cone { .. } | Surf::Torus { .. } => false,
         };
         let cap = matches!(sf, Surf::Plane { n, .. } if n.dot(pull).abs() > 1.0 - 1e-9);
         if chosen.contains(&i) && !wall {
@@ -563,7 +658,9 @@ pub(crate) fn draft_walls(b: &Body, chosen: &[usize], neutral: &solvecraft_geom:
                 let rc = mt::RevolutedCurve::by_revolution(line, p3(o), mt::Vector3::new(a.x, a.y, a.z));
                 mt::Surface::RevolutedCurve(mt::Processor::new(rc))
             }
-            Surf::Sphere { .. } | Surf::Cone { .. } => return Err(fail("draft: only planes and cylinders along the pull can be drafted")),
+            Surf::Sphere { .. } | Surf::Cone { .. } | Surf::Torus { .. } => {
+                return Err(fail("draft: only planes and cylinders along the pull can be drafted"));
+            }
         };
         if let Some(slot) = surfaces.get_mut(i) {
             *slot = Some(surface);
@@ -663,6 +760,9 @@ pub(crate) fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
         (Surf::Sphere { c, r, convex }, Surf::Sphere { c: c2, r: r2, convex: k2 }) => c.dist(c2) < tol && (r - r2).abs() < tol && convex == k2,
         (Surf::Cone { v, a, half, convex }, Surf::Cone { v: v2, a: a2, half: h2, convex: k2 }) => {
             v.dist(v2) < tol && a.dot(a2) > 1.0 - 1e-9 && (half - h2).abs() < 1e-9 && convex == k2
+        }
+        (Surf::Torus { o, a, big, h, r, convex }, Surf::Torus { o: o2, a: a2, big: b2, h: h2, r: r2, convex: k2 }) => {
+            (o + a * h).dist(o2 + a2 * h2) < tol && a.dot(a2).abs() > 1.0 - 1e-9 && (big - b2).abs() < tol && (r - r2).abs() < tol && convex == k2
         }
         _ => false,
     };
