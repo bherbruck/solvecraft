@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use solvecraft_doc::{FeatureKind, PlaneRef};
 use solvecraft_geom::{Plane, Vec2, Vec3};
-use solvecraft_sketch::{ConstraintKind, CurveKind, Sketch, solve};
+use solvecraft_sketch::{ConstraintKind, CurveKind, Hold, Sketch, SolveReport, solve, solve_holding};
 
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_vec2, str_, string_list, vec2, vec3};
@@ -833,11 +833,153 @@ fn constrain(s: &mut Session, p: &Value, cmd: &str, f: impl FnOnce(&Sketch) -> R
     let mut before = None;
     let (id, info) = edit(s, p, cmd, true, |sk, _| {
         let k = f(sk)?;
-        before = Some(dof_now(sk));
-        add_c(sk, k)
+        let rep = solve(&mut sk.clone());
+        before = Some(rep.dof);
+        let order = entity_order(sk, p);
+        let id = add_c(sk, k)?;
+        if let Some((first, second)) = order {
+            apply_in_order(sk, &rep, &[first], second, cmd)?;
+        }
+        Ok(id)
     })?;
     reject_redundant(before, &info, cmd)?;
     Ok(json!({"constraint": id, "sketch": info}))
+}
+
+/// A sketch entity a constraint is applied to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Ent {
+    Point(usize),
+    Curve(usize),
+}
+
+fn ent(sk: &Sketch, r: &str) -> Option<Ent> {
+    sk.resolve_point(r).map(Ent::Point).or_else(|| sk.curve_index(r).map(Ent::Curve))
+}
+
+/// The entities of a two-entity constraint in the order they were picked (`a` then `b`, or
+/// `point` then `line`).
+fn entity_order(sk: &Sketch, p: &Value) -> Option<(Ent, Ent)> {
+    let r = |k: &str| p.get(k).and_then(Value::as_str).and_then(|r| ent(sk, r));
+    Some((r("a").or_else(|| r("point"))?, r("b").or_else(|| r("line"))?))
+}
+
+/// Held in place: fixed or projected, or fully determined by the constraints already there.
+fn ent_locked(sk: &Sketch, rep: &SolveReport, e: Ent) -> bool {
+    match e {
+        Ent::Point(i) => sk.point_locked(i) || rep.point_determined.get(i).copied().unwrap_or(false),
+        Ent::Curve(c) => sk.curve_locked(c) || rep.curve_determined.get(c).copied().unwrap_or(false),
+    }
+}
+
+/// Hold entities: their points, and with `radius` their radii too.
+fn hold_of(sk: &Sketch, ents: &[Ent], radius: bool) -> Hold {
+    let mut h = Hold::default();
+    for e in ents {
+        match *e {
+            Ent::Point(i) => h.points.push(i),
+            Ent::Curve(c) => {
+                h.points.extend(sk.curves.get(c).map(|c| c.kind.point_ids()).unwrap_or_default());
+                h.radii.push(c);
+            }
+        }
+    }
+    if !radius {
+        h.radii.clear();
+    }
+    h
+}
+
+/// Did a solve shrink a line or an arc to nothing (a degenerate way to satisfy tangency)?
+fn collapsed(before: &Sketch, after: &Sketch) -> bool {
+    let size = |sk: &Sketch, i: usize| match sk.curves.get(i).map(|c| &c.kind) {
+        Some(CurveKind::Line { .. }) => line_pts(sk, i).map(|(a, b)| a.dist(b)),
+        Some(CurveKind::Arc { .. } | CurveKind::Circle { .. }) => sk.radius(i),
+        _ => None,
+    };
+    (0..before.curves.len()).any(|i| match (size(before, i), size(after, i)) {
+        (Some(b), Some(a)) => b > 1e-6 && a < b * 1e-3,
+        _ => false,
+    })
+}
+
+/// Keep an entity's size while it moves: a line's length (circles keep their radius by holding
+/// it).
+fn keep_size(sk: &Sketch, e: Ent) -> Vec<ConstraintKind> {
+    match (
+        e,
+        line_pts(
+            sk,
+            match e {
+                Ent::Curve(c) => c,
+                Ent::Point(_) => usize::MAX,
+            },
+        ),
+    ) {
+        (Ent::Curve(l), Some((a, b))) => vec![ConstraintKind::Length { l, value: a.dist(b) }],
+        _ => Vec::new(),
+    }
+}
+
+/// Satisfy a just-added constraint the way Fusion applies it: the first-picked entities stay
+/// put and only the second moves (first keeping its size, so it turns and slides, then also
+/// resizing).
+/// If the second can't move (fixed, projected or fully determined), the first moves instead;
+/// if neither can, the constraint conflicts and nothing changes. Everything else moves as
+/// little as it can. Later solves are ordinary ones (nothing is held).
+pub(super) fn apply_in_order(sk: &mut Sketch, rep: &SolveReport, first: &[Ent], second: Ent, cmd: &str) -> Result<()> {
+    let first_locked = first.iter().any(|e| ent_locked(sk, rep, *e));
+    let second_locked = ent_locked(sk, rep, second);
+    // (held geometry, temporary size constraints) to try in turn.
+    let mut tries: Vec<(Hold, Vec<ConstraintKind>)> = Vec::new();
+    let mut ordered = |stay: &[Ent], mover: Ent| {
+        let mut h = hold_of(sk, stay, true);
+        h.radii.extend(hold_of(sk, &[mover], true).radii);
+        tries.push((h.clone(), keep_size(sk, mover)));
+        tries.push((hold_of(sk, stay, true), Vec::new()));
+        // An end point the two share may slide (a line tangent to an arc it ends on, whose
+        // centre is pinned, has to turn about its other end).
+        let shared = hold_of(sk, &[mover], false).points;
+        if h.points.iter().any(|p| shared.contains(p)) {
+            h.points.retain(|p| !shared.contains(p));
+            tries.push((h.clone(), keep_size(sk, mover)));
+            tries.push((h, Vec::new()));
+        }
+    };
+    if !second_locked {
+        ordered(first, second);
+    }
+    if !first_locked {
+        for f in first {
+            ordered(&[second], *f);
+        }
+    }
+    const TEMP: &str = "__keep_size";
+    for (h, extra) in tries {
+        let mut trial = sk.clone();
+        trial.constraints.extend(extra.into_iter().map(|kind| solvecraft_sketch::Constraint {
+            id: TEMP.into(),
+            kind,
+            param: None,
+            driven: false,
+            text: None,
+        }));
+        let ok = solve_holding(&mut trial, &h).ok();
+        trial.constraints.retain(|c| c.id != TEMP);
+        if ok && !collapsed(sk, &trial) {
+            *sk = trial;
+            return Ok(());
+        }
+    }
+    // Both could move but holding either one leads nowhere: solve as usual.
+    if !first_locked && !second_locked {
+        let mut trial = sk.clone();
+        if solve(&mut trial).ok() {
+            *sk = trial;
+            return Ok(());
+        }
+    }
+    Err(bad(cmd, "that conflicts with the sketch: neither entity can move to satisfy it (they are fixed or fully constrained)"))
 }
 
 /// Degrees of freedom of a sketch as it is.
@@ -890,8 +1032,13 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
 fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "ConstraintCoincident";
     constrain(s, p, cmd, |sk| {
-        let a = point_ref(sk, p.get("a"), cmd, "a")?;
+        let aref = p.get("a").and_then(Value::as_str).unwrap_or_default();
         let bref = p.get("b").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`b` must be a point or curve"))?;
+        // A curve picked first and a point second: the point goes onto the curve.
+        if let (None, Some(c), Some(q)) = (sk.resolve_point(aref), sk.curve_index(aref), sk.resolve_point(bref)) {
+            return Ok(ConstraintKind::PointOnCurve { p: q, c });
+        }
+        let a = point_ref(sk, p.get("a"), cmd, "a")?;
         if let Some(b) = sk.resolve_point(bref) {
             return Ok(ConstraintKind::Coincident { p: a, q: b });
         }
@@ -934,6 +1081,8 @@ fn c_symmetry(s: &mut Session, p: &Value) -> Result<Value> {
         let l = curve_ref(sk, p.get("line"), cmd, "line")?;
         let ra = p.get("a").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`a` must be a point or curve"))?;
         let rb = p.get("b").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`b` must be a point or curve"))?;
+        let rep = solve(&mut sk.clone());
+        let order = ent(sk, ra).zip(ent(sk, rb));
         let mut out = Vec::new();
         match (sk.resolve_point(ra), sk.resolve_point(rb)) {
             (Some(a), Some(b)) => out.push(add_c(sk, ConstraintKind::Symmetric { p: a, q: b, l })?),
@@ -956,6 +1105,10 @@ fn c_symmetry(s: &mut Session, p: &Value) -> Result<Value> {
                     _ => return Err(bad(cmd, "symmetry needs two points or two curves")),
                 }
             }
+        }
+        // The first entity and the symmetry line stay; the second mirrors onto it.
+        if let Some((a, b)) = order {
+            apply_in_order(sk, &rep, &[a, Ent::Curve(l)], b, cmd)?;
         }
         Ok(out)
     })?;

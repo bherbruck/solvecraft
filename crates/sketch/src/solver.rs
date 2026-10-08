@@ -61,8 +61,20 @@ struct Layout {
     n: usize,
 }
 
-fn layout(sk: &Sketch) -> Layout {
+/// Geometry held in place for one solve: point indices and curves whose radius is held.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Hold {
+    pub points: Vec<usize>,
+    pub radii: Vec<usize>,
+}
+
+fn layout(sk: &Sketch, hold: &Hold) -> Layout {
     let mut fixed: Vec<bool> = sk.points.iter().map(|p| p.fixed).collect();
+    for p in &hold.points {
+        if let Some(f) = fixed.get_mut(*p) {
+            *f = true;
+        }
+    }
     for c in &sk.constraints {
         if let ConstraintKind::Fix { p } = c.kind
             && let Some(f) = fixed.get_mut(p)
@@ -92,8 +104,9 @@ fn layout(sk: &Sketch) -> Layout {
     let rvar = sk
         .curves
         .iter()
-        .map(|c| match c.kind {
-            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } if c.link.is_none() && !c.fixed => {
+        .enumerate()
+        .map(|(i, c)| match c.kind {
+            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } if c.link.is_none() && !c.fixed && !hold.radii.contains(&i) => {
                 n += 1;
                 Some(n - 1)
             }
@@ -774,7 +787,14 @@ fn lm(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], vars: &[usize],
 /// Solve the sketch in place. On failure the geometry is restored and the report lists the
 /// violated constraints.
 pub fn solve(sk: &mut Sketch) -> SolveReport {
-    let lay = layout(sk);
+    solve_holding(sk, &Hold::default())
+}
+
+/// Solve with some geometry held as if it were fixed (for this solve only): applying a
+/// constraint between two entities holds the first so only the second moves. Everything else
+/// moves as little as it can. On failure the geometry is restored.
+pub fn solve_holding(sk: &mut Sketch, hold: &Hold) -> SolveReport {
+    let lay = layout(sk, hold);
     let mut x = vec![0.0; lay.n];
     for (i, p) in sk.points.iter().enumerate() {
         if let Some(v) = lay.pvar.get(i).copied().flatten() {

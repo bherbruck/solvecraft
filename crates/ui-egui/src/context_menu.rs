@@ -421,9 +421,12 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     let mut rounds = Vec::new();
     let mut curves = Vec::new();
     let mut points = Vec::new();
+    // Selection order: a two-entity constraint keeps the first and moves the second.
+    let mut picked: Vec<String> = Vec::new();
     for s in &app.session.selection {
         match s {
             Sel::SketchCurve { id } => {
+                picked.push(id.clone());
                 curves.push(id.clone());
                 match ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i)).map(|c| &c.kind) {
                     Some(CurveKind::Line { .. }) => lines.push(id.clone()),
@@ -431,7 +434,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
                     _ => {}
                 }
             }
-            Sel::SketchPoint { id } => points.push(id.clone()),
+            Sel::SketchPoint { id } => {
+                picked.push(id.clone());
+                points.push(id.clone());
+            }
             _ => {}
         }
     }
@@ -461,7 +467,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         c.push(cmd(app, "ConstraintHorizontalVertical", "Horizontal/Vertical").with(json!({ "points": points })));
     }
     if p == 1 && curves.len() == 1 && n == 2 {
-        c.push(cmd(app, "ConstraintCoincident", "Coincident").with(json!({ "a": points[0], "b": curves[0] })));
+        c.push(cmd(app, "ConstraintCoincident", "Coincident").with(json!({ "a": picked[0], "b": picked[1] })));
         if l == 1 {
             c.push(cmd(app, "ConstraintMidPoint", "MidPoint").with(json!({ "point": points[0], "line": lines[0] })));
         }
@@ -480,7 +486,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         c.push(cmd(app, "ConstraintTangent", "Tangent").with(ab));
     }
     if l == 1 && r == 1 && n == 2 {
-        c.push(cmd(app, "ConstraintTangent", "Tangent").with(json!({ "a": lines[0], "b": rounds[0] })));
+        c.push(cmd(app, "ConstraintTangent", "Tangent").with(json!({ "a": picked[0], "b": picked[1] })));
     }
     if p == 2 && l == 1 && n == 3 {
         c.push(cmd(app, "ConstraintSymmetry", "Symmetry").with(json!({ "a": points[0], "b": points[1], "line": lines[0] })));

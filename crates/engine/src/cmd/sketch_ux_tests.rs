@@ -252,3 +252,151 @@ fn projected_geometry_can_become_construction() {
     let sk = sketch(&s);
     assert!(sk.curves.iter().any(|c| c.id == id && c.construction && c.link.is_some()));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Two-entity constraints: the first pick stays, the second moves
+
+/// Positions of an entity's points (and its radius).
+fn snap(s: &Session, id: &str) -> (Vec<solvecraft_geom::Vec2>, Option<f64>) {
+    let sk = sketch(s);
+    if let Some(i) = sk.curve_index(id) {
+        let pts = sk.curves[i].kind.point_ids().into_iter().filter_map(|p| sk.point(p)).collect();
+        return (pts, sk.radius(i));
+    }
+    (vec![pt(s, id)], None)
+}
+
+fn same(a: &(Vec<solvecraft_geom::Vec2>, Option<f64>), b: &(Vec<solvecraft_geom::Vec2>, Option<f64>)) -> bool {
+    a.0.len() == b.0.len() && a.0.iter().zip(&b.0).all(|(p, q)| p.dist(*q) < 1e-9) && a.1.zip(b.1).is_none_or(|(x, y)| (x - y).abs() < 1e-9)
+}
+
+/// A free line l1 (5,3)–(45,3) and a circle c1 at (20,18) with radius 5.
+fn line_and_circle() -> Session {
+    let mut s = new_sketch();
+    run(&mut s, "DrawPolyline", json!({"points": [[5, 3], [45, 3]]}));
+    run(&mut s, "CircleCenterRadius", json!({"center": [20, 18], "radius": 5}));
+    s
+}
+
+/// Apply `cmd` with `a` then `b`; the first must not move, the second must.
+fn check_order(mut s: Session, cmd: &str, a: &str, b: &str) {
+    let (a0, b0) = (snap(&s, a), snap(&s, b));
+    run(&mut s, cmd, json!({"a": a, "b": b}));
+    assert!(same(&snap(&s, a), &a0), "{cmd}: first `{a}` moved: {a0:?} -> {:?}", snap(&s, a));
+    assert!(!same(&snap(&s, b), &b0), "{cmd}: second `{b}` did not move");
+}
+
+#[test]
+fn tangent_moves_only_the_second_pick() {
+    // Line then circle: only the circle moves (and keeps its size).
+    let mut s = line_and_circle();
+    let l0 = snap(&s, "l1");
+    run(&mut s, "ConstraintTangent", json!({"a": "l1", "b": "c1"}));
+    assert!(same(&snap(&s, "l1"), &l0), "line moved: {:?}", snap(&s, "l1"));
+    let c = snap(&s, "c1");
+    assert!((c.1.unwrap_or(0.0) - 5.0).abs() < 1e-9 && (c.0[0].y - 8.0).abs() < 1e-6, "{c:?}");
+    // Circle then line: only the line moves.
+    check_order(line_and_circle(), "ConstraintTangent", "c1", "l1");
+}
+
+#[test]
+fn a_fixed_second_pick_makes_the_first_move() {
+    let mut s = line_and_circle();
+    run(&mut s, "ConstraintFix", json!({"entity": "l1"}));
+    let l0 = snap(&s, "l1");
+    let c0 = snap(&s, "c1");
+    run(&mut s, "ConstraintTangent", json!({"a": "c1", "b": "l1"}));
+    assert!(same(&snap(&s, "l1"), &l0));
+    assert!(!same(&snap(&s, "c1"), &c0));
+    // Fixed first: the second moves as usual.
+    let mut s = line_and_circle();
+    run(&mut s, "ConstraintFix", json!({"entity": "c1"}));
+    let c0 = snap(&s, "c1");
+    run(&mut s, "ConstraintTangent", json!({"a": "c1", "b": "l1"}));
+    assert!(same(&snap(&s, "c1"), &c0));
+}
+
+#[test]
+fn two_fully_constrained_entities_conflict_and_nothing_moves() {
+    let mut s = line_and_circle();
+    run(&mut s, "ConstraintFix", json!({"entities": ["l1.start", "l1.end", "c1.center"]}));
+    run(&mut s, "SketchDimension", json!({"entities": ["c1"], "type": "radius", "value": 5}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert!(si["curves"].as_array().is_some_and(|c| c.iter().all(|c| c["fully_constrained"] == true)), "{si}");
+    let before = sketch(&s);
+    let e = s.execute("ConstraintTangent", &json!({"a": "l1", "b": "c1"}));
+    assert!(e.is_err(), "{e:?}");
+    assert_eq!(sketch(&s), before);
+}
+
+#[test]
+fn line_pairs_keep_the_first_line() {
+    let lines = || {
+        let mut s = new_sketch();
+        run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [30, 2]]}));
+        run(&mut s, "DrawPolyline", json!({"points": [[5, 20], [25, 35]]}));
+        s
+    };
+    let len = |s: &Session, l: &str| {
+        let p = snap(s, l).0;
+        p[0].dist(p[1])
+    };
+    for cmd in ["ConstraintParallel", "ConstraintPerpendicular", "ConstraintEqual", "ConstraintCollinear"] {
+        check_order(lines(), cmd, "l1", "l2");
+        check_order(lines(), cmd, "l2", "l1");
+        // The second line turns and slides; only Equal changes its length.
+        let mut s = lines();
+        let l0 = len(&s, "l2");
+        run(&mut s, cmd, json!({"a": "l1", "b": "l2"}));
+        if cmd != "ConstraintEqual" {
+            assert!((len(&s, "l2") - l0).abs() < 1e-6, "{cmd}: {l0} -> {}", len(&s, "l2"));
+        } else {
+            assert!((len(&s, "l2") - len(&s, "l1")).abs() < 1e-6);
+        }
+    }
+}
+
+#[test]
+fn circle_pairs_keep_the_first_circle() {
+    let circles = || {
+        let mut s = new_sketch();
+        run(&mut s, "CircleCenterRadius", json!({"center": [0, 0], "radius": 5}));
+        run(&mut s, "CircleCenterRadius", json!({"center": [30, 10], "radius": 8}));
+        s
+    };
+    for cmd in ["ConstraintConcentric", "ConstraintEqual", "ConstraintTangent"] {
+        check_order(circles(), cmd, "c1", "c2");
+        check_order(circles(), cmd, "c2", "c1");
+    }
+    // Equal resizes the second to the first.
+    let mut s = circles();
+    run(&mut s, "ConstraintEqual", json!({"a": "c2", "b": "c1"}));
+    assert!((snap(&s, "c1").1.unwrap_or(0.0) - 8.0).abs() < 1e-9);
+}
+
+#[test]
+fn point_constraints_keep_the_first_pick() {
+    let pts = || {
+        let mut s = new_sketch();
+        run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [30, 0]]}));
+        run(&mut s, "DrawPolyline", json!({"points": [[10, 10], [20, 25]]}));
+        s
+    };
+    check_order(pts(), "ConstraintCoincident", "l2.start", "l1.end");
+    check_order(pts(), "ConstraintCoincident", "l1.end", "l2.start");
+    // Curve picked first, point second: the point goes onto the line.
+    check_order(pts(), "ConstraintCoincident", "l1", "l2.start");
+    // Midpoint: the point stays, the line moves.
+    let mut s = pts();
+    let p0 = snap(&s, "l2.end");
+    run(&mut s, "ConstraintMidPoint", json!({"point": "l2.end", "line": "l1"}));
+    assert!(same(&snap(&s, "l2.end"), &p0));
+    // Symmetry: the first point and the line stay, the second mirrors.
+    let mut s = pts();
+    run(&mut s, "DrawPoint", json!({"point": [3, 7]}));
+    run(&mut s, "DrawPoint", json!({"point": [4, -9]}));
+    let (a0, l0) = (snap(&s, "p1"), snap(&s, "l1"));
+    run(&mut s, "ConstraintSymmetry", json!({"a": "p1", "b": "p2", "line": "l1"}));
+    assert!(same(&snap(&s, "p1"), &a0) && same(&snap(&s, "l1"), &l0));
+    assert!(pt(&s, "p2").dist(solvecraft_geom::Vec2::new(3.0, -7.0)) < 1e-6, "{:?}", pt(&s, "p2"));
+}
