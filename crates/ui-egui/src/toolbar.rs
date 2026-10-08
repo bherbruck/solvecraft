@@ -243,6 +243,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let tabs_y = r.top() + 2.0;
         let ws = Rect::from_min_size(pos2(r.left() + 8.0, tabs_y + 26.0), vec2(96.0, 56.0));
         painter.rect(ws, 4.0, t.field, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        crate::scenario::publish_rect("toolbar", r);
+        crate::scenario::publish_rect("workspace_switcher", ws);
         painter.text(pos2(ws.center().x - 5.0, ws.top() + 14.0), Align2::CENTER_CENTER, "DESIGN", FontId::proportional(12.0), t.text);
         caret(&painter, pos2(ws.center().x + 26.0, ws.top() + 14.0), t.text);
         painter.text(pos2(ws.center().x, ws.top() + 34.0), Align2::CENTER_CENTER, "workspace", FontId::proportional(10.0), t.text_dim);

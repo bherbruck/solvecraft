@@ -1,0 +1,17 @@
+[
+ {"note": "Toolbar customizing like Fusion survives a restart: Pin to Toolbar, Remove from Toolbar, drag to reorder. Toolbar buttons publish handles `toolbar:<command id>`. The workspace switcher spans the toolbar's height."},
+ {"expect": {"spans": {"inner": "workspace_switcher", "outer": "toolbar", "axis": "y", "tol": 6}}},
+ {"expect": {"shown_handles": ["toolbar:Extrude", "toolbar:Revolve"], "hidden_handles": ["toolbar:FusionShellBodyCommand"]}},
+ {"call": "ui.menu", "params": {"x": 400, "y": 80, "target": {"type": "toolbar_command", "id": "FusionShellBodyCommand"}}},
+ {"call": "ui.menuPick", "params": {"item": "Pin to Toolbar"}},
+ {"expect": {"shown_handles": ["toolbar:FusionShellBodyCommand"]}},
+ {"call": "ui.menu", "params": {"x": 400, "y": 80, "target": {"type": "toolbar_command", "id": "Revolve"}}},
+ {"call": "ui.menuPick", "params": {"item": "Remove from Toolbar"}},
+ {"expect": {"hidden_handles": ["toolbar:Revolve"]}},
+ {"drag": [{"handle": "toolbar:FusionShellBodyCommand"}, {"handle": "toolbar:Extrude"}], "steps": 12},
+ {"expect": {"handle_order": ["toolbar:FusionShellBodyCommand", "toolbar:Extrude"]}},
+ {"restart": "close"},
+ {"expect": {"shown_handles": ["toolbar:FusionShellBodyCommand"], "hidden_handles": ["toolbar:Revolve"]}},
+ {"expect": {"handle_order": ["toolbar:FusionShellBodyCommand", "toolbar:Extrude"]}},
+ {"expect": {"spans": {"inner": "workspace_switcher", "outer": "toolbar", "axis": "y", "tol": 6}}}
+]

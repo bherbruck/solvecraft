@@ -16,7 +16,10 @@
 //!   folder (Save pickers save there)
 //! - `{"shot": "name"}`: a screenshot when run in a window; headless, a render of the model
 //!   into `$SOLVECRAFT_SCENARIO_SHOTS` when that is set; `{"debug": 1}`
-//!   prints the UI state
+//!   prints the UI state (`"widgets"`: also every widget's text; `"handles"`: every published
+//!   handle, browser rows as `row:<label>` and their fold arrows as `fold:<label>`)
+//! - `{"camera": {"yaw": rad, "pitch": rad}}` puts the camera at an orbit; `{"view_anim": "top",
+//!   "max_deg": 10}` animates to a view and fails if any frame turns the view more than that
 //! - AT may also be `{"plane": "XY"}` (the middle of an origin plane's square), `{"axis": "Z"}`,
 //!   `{"dimension": "d1"}` or `{"handle": "arrow"}` (a manipulator handle: see [`publish_handle`])
 //! - `{"autosave": true}`: autosave into the scenario's recovery folder; `{"restart": "crash" |
@@ -40,26 +43,47 @@ thread_local! {
     /// Drag handles drawn this frame (name, screen point): manipulators publish theirs so
     /// scenarios (and the control channel's `ui.at {handle}`) can grab them.
     static HANDLES: RefCell<Vec<(String, egui::Pos2)>> = const { RefCell::new(Vec::new()) };
+    /// Painted parts with no widget of their own (the toolbar, the workspace switcher…): rects
+    /// and counts by name, for checks.
+    static RECTS: RefCell<Vec<(String, egui::Rect)>> = const { RefCell::new(Vec::new()) };
+    static COUNTS: RefCell<Vec<(String, f64)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// A manipulator's handle drawn this frame at `at` (screen), by name: "arrow" (a dialog's value
 /// arrow), "triad_x"… Call it from the code that draws the handle, every frame it shows.
 pub fn publish_handle(name: &str, at: egui::Pos2) {
-    HANDLES.with(|h| {
-        let mut h = h.borrow_mut();
-        h.retain(|(n, _)| n != name);
-        h.push((name.to_string(), at));
-    });
+    // The latest wins (lookups search from the end), so publishing is cheap for browser rows.
+    HANDLES.with(|h| h.borrow_mut().push((name.to_string(), at)));
 }
 
 /// Where a handle was drawn last frame.
 pub fn handle_at(name: &str) -> Option<egui::Pos2> {
-    HANDLES.with(|h| h.borrow().iter().find(|(n, _)| n == name).map(|x| x.1))
+    HANDLES.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
 }
 
-/// Forget last frame's handles (called as a frame starts).
+/// A painted part's rect this frame, by name ("toolbar", "workspace_switcher").
+pub fn publish_rect(name: &str, r: egui::Rect) {
+    RECTS.with(|h| h.borrow_mut().push((name.to_string(), r)));
+}
+
+pub fn rect_of(name: &str) -> Option<egui::Rect> {
+    RECTS.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
+}
+
+/// A number about this frame's drawing, by name ("cube_highlights": the view cube's lit patches).
+pub fn publish_count(name: &str, v: f64) {
+    COUNTS.with(|h| h.borrow_mut().push((name.to_string(), v)));
+}
+
+pub fn count_of(name: &str) -> Option<f64> {
+    COUNTS.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
+}
+
+/// Forget last frame's handles, rects and counts (called as a frame starts).
 pub fn clear_handles() {
     HANDLES.with(|h| h.borrow_mut().clear());
+    RECTS.with(|h| h.borrow_mut().clear());
+    COUNTS.with(|h| h.borrow_mut().clear());
 }
 
 /// A fresh folder for one scenario's files.
@@ -232,6 +256,36 @@ impl Harness {
         }
     }
 
+    /// Animate the view to `v` (as the view cube does), sampling the camera every frame: no
+    /// frame may turn the view (its right or back vector) by more than `max_deg`, the last
+    /// included, so the move ends without a jump.
+    fn view_anim(&mut self, v: &str, max_deg: f64) -> Result<(), String> {
+        let basis = |c: &solvecraft_engine::render::Camera| c.basis();
+        let mut prev = basis(&self.app.cam);
+        self.app.animate_view(v);
+        if self.app.cam_anim.is_none() {
+            return Err(format!("view_anim {v}: no animation started"));
+        }
+        let mut worst = (0.0f64, 0usize);
+        for i in 0..240 {
+            self.frame();
+            let now = basis(&self.app.cam);
+            let ang = |a: solvecraft_engine::geom::Vec3, b: solvecraft_engine::geom::Vec3| a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
+            let d = ang(prev.0, now.0).max(ang(prev.2, now.2));
+            if d > worst.0 {
+                worst = (d, i);
+            }
+            prev = now;
+            if self.app.cam_anim.is_none() {
+                if worst.0 > max_deg {
+                    return Err(format!("view_anim {v}: frame {} of {} turns the view {:.1}° (limit {max_deg}°)", worst.1 + 1, i + 1, worst.0));
+                }
+                return Ok(());
+            }
+        }
+        Err(format!("view_anim {v}: still animating after 240 frames"))
+    }
+
     /// Run one step.
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
@@ -279,6 +333,19 @@ impl Harness {
                     self.call("ui.render", json!({"path": path.to_string_lossy(), "width": 1000, "height": 700}));
                 }
                 return Ok(());
+            } else if let Some(c) = s.get("camera") {
+                // Put the camera at an orbit: {"yaw": rad, "pitch": rad}.
+                if let Some(y) = c.get("yaw").and_then(Value::as_f64) {
+                    self.app.cam.yaw = y;
+                }
+                if let Some(p) = c.get("pitch").and_then(Value::as_f64) {
+                    self.app.cam.pitch = p;
+                }
+                self.app.cam_anim = None;
+                self.frames(2);
+                return Ok(());
+            } else if let Some(v) = s.get("view_anim").and_then(Value::as_str) {
+                return self.view_anim(v, s.get("max_deg").and_then(Value::as_f64).unwrap_or(10.0));
             } else if s.get("autosave").is_some() {
                 self.start_autosave();
                 return Ok(());
@@ -288,6 +355,9 @@ impl Harness {
                 let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
                 if how == "close" {
                     crate::recovery_ui::close(&mut old);
+                    // The desktop saves its settings on close and loads them on the next start.
+                    let prefs = old.prefs();
+                    self.app.load_prefs(&prefs);
                 }
                 drop(old);
                 self.ctx = egui::Context::default();
@@ -329,6 +399,10 @@ impl Harness {
                         })
                         .collect();
                     eprintln!("widgets: {texts:?}");
+                }
+                if s["debug"] == json!("handles") {
+                    let names: Vec<String> = HANDLES.with(|h| h.borrow().iter().map(|(n, p)| format!("{n} @{:.0},{:.0}", p.x, p.y)).collect());
+                    eprintln!("handles: {names:?}");
                 }
                 return Ok(());
             } else if let Some(e) = s.get("until") {
@@ -415,6 +489,71 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                     .collect();
                 if v.as_u64() != Some(bad.len() as u64) {
                     return Err(format!("errors: {bad:?}"));
+                }
+            }
+            "shown_handles" | "hidden_handles" => {
+                // Published handles ("fold:Bodies", "row:Body1") drawn (or not) this frame.
+                for n in v.as_array().into_iter().flatten().filter_map(Value::as_str) {
+                    if handle_at(n).is_some() != (k == "shown_handles") {
+                        return Err(format!("{n}: want {}", if k == "shown_handles" { "shown" } else { "hidden" }));
+                    }
+                }
+            }
+            "handle_order" => {
+                // Published handles left to right in this order.
+                let xs: Vec<(String, Option<f32>)> =
+                    v.as_array().into_iter().flatten().filter_map(Value::as_str).map(|n| (n.to_string(), handle_at(n).map(|p| p.x))).collect();
+                if xs.iter().any(|x| x.1.is_none()) || xs.windows(2).any(|w| w[0].1 >= w[1].1) {
+                    return Err(format!("handle order: got {xs:?}"));
+                }
+            }
+            "count" => {
+                // {"count": {"name": n, "value": x}}: a published count.
+                let n = v["name"].as_str().unwrap_or_default();
+                let got = count_of(n);
+                if got != v["value"].as_f64() {
+                    return Err(format!("count {n}: got {got:?}, want {}", v["value"]));
+                }
+            }
+            "spans" => {
+                // {"spans": {"inner": a, "outer": b, "axis": "y", "tol": px}}: published rect a
+                // covers b's extent along the axis (within tol).
+                let (a, b) = (v["inner"].as_str().unwrap_or_default(), v["outer"].as_str().unwrap_or_default());
+                let (ra, rb) = (rect_of(a).ok_or(format!("no rect {a}"))?, rect_of(b).ok_or(format!("no rect {b}"))?);
+                let tol = v["tol"].as_f64().unwrap_or(4.0) as f32;
+                let (lo, hi) = if v["axis"] == "x" { (ra.x_range(), rb.x_range()) } else { (ra.y_range(), rb.y_range()) };
+                if (lo.min - hi.min).abs() > tol || (lo.max - hi.max).abs() > tol {
+                    return Err(format!("{a} {lo:?} does not span {b} {hi:?} (±{tol})"));
+                }
+            }
+            "dialog_docked" => {
+                // The command dialog: docked at the viewport's right, its width in [min, max].
+                let r = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_dialog"))).ok_or("no command dialog")?;
+                let vp = h.app.viewport.rect.unwrap_or(egui::Rect::NOTHING);
+                let (lo, hi) = (v["min"].as_f64().unwrap_or(260.0) as f32, v["max"].as_f64().unwrap_or(380.0) as f32);
+                if r.width() < lo - 0.5 || r.width() > hi + 0.5 {
+                    return Err(format!("dialog width {:.0}, want {lo}..{hi}", r.width()));
+                }
+                if (r.right() - vp.right()).abs() > 2.0 || r.top() < vp.top() || r.bottom() > vp.bottom() + 1.0 {
+                    return Err(format!("dialog {r:?} is not docked right inside the viewport {vp:?}"));
+                }
+            }
+            "windows_fit" => {
+                // Every open window lies on screen and is at most `max_width` wide.
+                let screen = h.ctx.content_rect();
+                let max_w = v["max_width"].as_f64().unwrap_or(720.0) as f32;
+                let rects: Vec<(egui::Id, egui::Rect)> = h.ctx.memory(|m| {
+                    m.areas()
+                        .visible_layer_ids()
+                        .into_iter()
+                        .filter(|l| l.order == egui::Order::Middle)
+                        .filter_map(|l| m.area_rect(l.id).map(|r| (l.id, r)))
+                        .collect()
+                });
+                for (id, r) in rects {
+                    if r.width() > max_w || !screen.expand(1.0).contains_rect(r) {
+                        return Err(format!("window {id:?} at {r:?} (width {:.0}) does not fit {screen:?} at ≤{max_w}", r.width()));
+                    }
                 }
             }
             "dialog" => {

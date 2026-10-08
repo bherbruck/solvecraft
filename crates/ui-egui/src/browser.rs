@@ -281,6 +281,7 @@ fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         };
         ui.painter().add(egui::Shape::convex_polygon(pts, t.text_dim, Stroke::NONE));
         out.fold = ui.interact(ar.expand(3.0), id.with("fold"), Sense::click()).clicked();
+        crate::scenario::publish_handle(&format!("fold:{}", row.label), ar.center());
     }
     x += 14.0;
     // Eye.
@@ -322,6 +323,7 @@ fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         badge(ui.painter(), br, b, t.text_dim);
         bx += 15.0;
     }
+    crate::scenario::publish_handle(&format!("row:{}", row.label), r.center());
     out.resp = Some(resp.clone());
     out.clicked = resp.clicked();
     out.double = resp.double_clicked();

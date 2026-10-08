@@ -72,4 +72,22 @@ macro_rules! pending {
 
 pending!(
     s31_sketch_on_face_projects: "user bug: a sketch on a face projects its loops as reference (solvecraft-sketch)",
+    s37_browser_chevrons: "every chevron works; the browser has no Joints folder (solvecraft-shell)",
+    s38_view_anim_no_jump: "the last frame of an animation to Top turns the view 22.5 degrees (solvecraft-ui)",
+    s39_view_cube_hover: "view cube edge and corner hover light 1 patch, Fusion lights 2 and 3 (solvecraft-ui)",
+    s40_toolbar_customize_persists: "toolbar Pin/Remove/reorder (toolbar:<id> handles, ui.menu toolbar_command) and a full-height workspace switcher (solvecraft-shell)",
 );
+
+/// A scenario file named by `SOLVECRAFT_SCENARIO_FILE` (for trying one out):
+/// `SOLVECRAFT_SCENARIO_FILE=x.json cargo test --test scenarios adhoc -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn adhoc() {
+    let Ok(path) = std::env::var("SOLVECRAFT_SCENARIO_FILE") else { return };
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let steps: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let mut h = Harness::new();
+    if let Err(e) = h.run(&steps) {
+        panic!("{path}: {e}");
+    }
+}

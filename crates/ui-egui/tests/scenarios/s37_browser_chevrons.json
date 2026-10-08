@@ -1,0 +1,523 @@
+[
+ {
+  "note": "Browser chevrons expand and collapse every kind of node (folders, components, groups, the origin, named views, document settings). Model: two components with a body each, a joint, a sketch, an offset plane, a named view."
+ },
+ {
+  "start": "FusionCreateNewComponentCommand"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    20,
+    20
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "text": "10"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "call": "ui.menu",
+  "params": {
+   "x": 100,
+   "y": 170,
+   "target": {
+    "type": "component",
+    "id": 0
+   }
+  }
+ },
+ {
+  "call": "ui.menuPick",
+  "params": {
+   "item": "Activate"
+  }
+ },
+ {
+  "start": "FusionCreateNewComponentCommand"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XZ"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    30,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    50,
+    10
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "click": {
+   "world": [
+    40,
+    0,
+    5
+   ]
+  }
+ },
+ {
+  "text": "20"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 2,
+   "errors": 0
+  }
+ },
+ {
+  "start": "JointAssembleCmdNew"
+ },
+ {
+  "click": {
+   "world": [
+    10,
+    10,
+    10
+   ]
+  }
+ },
+ {
+  "click": {
+   "world": [
+    40,
+    0,
+    5
+   ]
+  }
+ },
+ {
+  "widget": "Rigid"
+ },
+ {
+  "widget": "Revolute"
+ },
+ {
+  "widget": "OK"
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "ConstructionPlaneOffsetFromPlaneCommand",
+   "params": {
+    "base": "XY",
+    "offset": 30
+   }
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "call": "ui.menu",
+  "params": {
+   "x": 100,
+   "y": 300,
+   "target": {
+    "type": "named_views"
+   }
+  }
+ },
+ {
+  "call": "ui.menuPick",
+  "params": {
+   "item": "New Named View"
+  }
+ },
+ {
+  "note": "Each kind of node: its chevron hides its children, and shows them again."
+ },
+ {
+  "click": {
+   "handle": "fold:Document Settings"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Units: mm"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Document Settings"
+  }
+ },
+ {
+  "expect": {
+   "hidden_handles": [
+    "row:Units: mm"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Document Settings"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Units: mm"
+   ]
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Named View1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Named Views"
+  }
+ },
+ {
+  "expect": {
+   "hidden_handles": [
+    "row:Named View1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Named Views"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Named View1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Origin"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:XY"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Origin"
+  }
+ },
+ {
+  "expect": {
+   "hidden_handles": [
+    "row:XY"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Origin"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:XY"
+   ]
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Body2"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Bodies"
+  }
+ },
+ {
+  "expect": {
+   "hidden_handles": [
+    "row:Body2"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Bodies"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Body2"
+   ]
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Sketch2"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Sketches"
+  }
+ },
+ {
+  "expect": {
+   "hidden_handles": [
+    "row:Sketch2"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Sketches"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Sketch2"
+   ]
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Plane1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Construction"
+  }
+ },
+ {
+  "expect": {
+   "hidden_handles": [
+    "row:Plane1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Construction"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Plane1"
+   ]
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Sketch2"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Component2:1"
+  }
+ },
+ {
+  "expect": {
+   "hidden_handles": [
+    "row:Sketch2"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Component2:1"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Sketch2"
+   ]
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Sketch1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Component1:1"
+  }
+ },
+ {
+  "expect": {
+   "hidden_handles": [
+    "row:Sketch1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Component1:1"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Sketch1"
+   ]
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Origin"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Untitled"
+  }
+ },
+ {
+  "expect": {
+   "hidden_handles": [
+    "row:Origin"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Untitled"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "row:Origin"
+   ]
+  }
+ },
+ {
+  "note": "The joints folder lists the joint (Fusion's Joints folder in the root component)."
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "fold:Joints"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Joints"
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Joints"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "fold:Joints"
+   ]
+  }
+ }
+]

@@ -1771,11 +1771,21 @@ fn cpu_render(app: &mut SolveApp, ctx: &egui::Context, painter: &egui::Painter, 
     }
 }
 
+/// Where a point in view-cube units (faces at ±1) is drawn.
+pub(crate) fn cube_point(app: &SolveApp, rect: Rect, p: Vec3) -> Pos2 {
+    let (r, u, _) = app.cam.basis();
+    pos2(rect.right() - 80.0 + (p.dot(r) * CUBE_SCALE) as f32, rect.top() + 80.0 - (p.dot(u) * CUBE_SCALE) as f32)
+}
+
+/// Half a view cube face, in pixels.
+const CUBE_SCALE: f64 = 32.0;
+
 /// The view cube (top right): click a face for a standard view; the house resets.
 fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let t = Tokens::get();
     let c = pos2(rect.right() - 80.0, rect.top() + 80.0);
-    let s = 32.0f64;
+    let s = CUBE_SCALE;
+    let mut lit = 0;
     let (r, u, b) = app.cam.basis();
     let to2 = |p: Vec3| -> (Pos2, f64) { (pos2(c.x + (p.dot(r) * s) as f32, c.y - (p.dot(u) * s) as f32), p.dot(b)) };
     let faces: [(Vec3, &str, StandardView); 6] = [
@@ -1820,6 +1830,7 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             let ((a0, a1), (b0, b1)) = (lo(zi), lo(zj));
             let zp: Vec<Pos2> = [(a0, b0), (a1, b0), (a1, b1), (a0, b1)].iter().map(|(x, y)| to2(n + e1 * *x + e2 * *y).0).collect();
             painter.add(Shape::convex_polygon(zp, t.accent_soft, Stroke::NONE));
+            lit += 1;
         }
         let center = to2(n).0;
         if n.dot(b) > 0.35 {
@@ -1831,6 +1842,7 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             clicked = Some(n + e1 * zi as f64 + e2 * zj as f64);
         }
     }
+    crate::scenario::publish_count("cube_highlights", f64::from(lit));
     // Axis triad at the cube's corner.
     let o = Vec3::new(-1.0, -1.0, -1.0);
     for (d, col) in [(Vec3::X, colors::AXIS_X), (Vec3::Y, colors::AXIS_Y), (Vec3::Z, colors::AXIS_Z)] {
