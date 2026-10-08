@@ -269,7 +269,7 @@ fn behind(ps: &[Vec3], ns: &[Vec3], inputs: &[(&ModelBody, FaceIndex, Arc<Vec<St
             }
         }
     }
-    votes.sort_by(|a, b| b.1.cmp(&a.1));
+    votes.sort_by_key(|v| std::cmp::Reverse(v.1));
     votes.first().filter(|(_, k)| *k * 2 >= ps.len().max(1)).map(|(n, _)| n.clone())
 }
 
