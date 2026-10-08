@@ -11,13 +11,16 @@ fn rel(a: f64, b: f64) -> f64 {
 fn round_trip(b: &Body) -> StepImport {
     let text = step_export(&[b], "test").unwrap();
     step_validate(&text).unwrap();
+    assert_eq!(crate::step_orientation_errors(&text).unwrap(), Vec::<String>::new());
     let imp = step_import(&text).unwrap();
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
     assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
     let (m0, m1) = (measure(b).unwrap(), measure(&imp.bodies[0].body).unwrap());
     assert!(rel(m1.volume, m0.volume) < 1e-3, "volume {} vs {}", m1.volume, m0.volume);
     assert!(rel(m1.area, m0.area) < 1e-3, "area {} vs {}", m1.area, m0.area);
-    assert_eq!(imp.bodies[0].file_faces, b.face_count());
+    // Pieces of one analytic surface are written as one face (volume and area above check
+    // that nothing was lost).
+    assert!(imp.bodies[0].file_faces <= b.face_count());
     assert!(imp.bodies[0].closed);
     imp
 }
@@ -433,4 +436,50 @@ fn hostile_boundaries_mesh_in_bounded_time() {
         }
     }
     assert!(t0.elapsed().as_secs_f64() < 60.0, "took {:?}", t0.elapsed());
+}
+
+/// A cylinder written as a surface of revolution, oriented the ISO 10303-42 way (normal
+/// ∂S/∂angle × ∂S/∂profile, outward here, so `same_sense` .T.). Fusion reads such faces this
+/// way; reading them with truck's profile-first normal turned faces inside out.
+#[test]
+fn surface_of_revolution_sense_follows_iso() {
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS1_PLACEMENT('',#1,#2);\n";
+    t += "#5=CARTESIAN_POINT('',(5.,0.,0.));\n#6=VECTOR('',#2,1.);\n#7=LINE('',#5,#6);\n#8=SURFACE_OF_REVOLUTION('',#7,#4);\n";
+    t += "#10=CARTESIAN_POINT('',(5.,0.,10.));\n#11=VERTEX_POINT('',#5);\n#12=VERTEX_POINT('',#10);\n";
+    t += "#13=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n#14=CIRCLE('',#13,5.);\n#15=CARTESIAN_POINT('',(0.,0.,10.));\n#16=AXIS2_PLACEMENT_3D('',#15,#2,#3);\n#17=CIRCLE('',#16,5.);\n";
+    t += "#20=EDGE_CURVE('',#11,#11,#14,.T.);\n#21=EDGE_CURVE('',#12,#12,#17,.T.);\n#22=EDGE_CURVE('',#11,#12,#7,.T.);\n";
+    t += "#30=ORIENTED_EDGE('',*,*,#20,.T.);\n#31=ORIENTED_EDGE('',*,*,#22,.T.);\n#32=ORIENTED_EDGE('',*,*,#21,.F.);\n#33=ORIENTED_EDGE('',*,*,#22,.F.);\n";
+    t += "#34=EDGE_LOOP('',(#30,#31,#32,#33));\n#35=FACE_OUTER_BOUND('',#34,.T.);\n#36=ADVANCED_FACE('',(#35),#8,.T.);\n";
+    t += "#40=PLANE('',#13);\n#41=ORIENTED_EDGE('',*,*,#20,.F.);\n#42=EDGE_LOOP('',(#41));\n#43=FACE_OUTER_BOUND('',#42,.T.);\n#44=ADVANCED_FACE('',(#43),#40,.F.);\n";
+    t += "#50=PLANE('',#16);\n#51=ORIENTED_EDGE('',*,*,#21,.T.);\n#52=EDGE_LOOP('',(#51));\n#53=FACE_OUTER_BOUND('',#52,.T.);\n#54=ADVANCED_FACE('',(#53),#50,.T.);\n";
+    t += "#60=CLOSED_SHELL('',(#36,#44,#54));\n#61=MANIFOLD_SOLID_BREP('Cyl',#60);\n#62=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#61),#70);\n";
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    assert_eq!(step_orientation_errors(&t).unwrap(), Vec::<String>::new());
+    let imp = step_import(&t).unwrap();
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    let want = std::f64::consts::PI * 25.0 * 10.0;
+    assert!(rel(m.volume, want) < 1e-3, "{} vs {want}", m.volume);
+    // The same face with the opposite sense is inside out.
+    let flipped = t.replace("#36=ADVANCED_FACE('',(#35),#8,.T.);", "#36=ADVANCED_FACE('',(#35),#8,.F.);");
+    let bad = step_import(&flipped).unwrap();
+    let v = measure(&bad.bodies[0].body).map(|m| m.volume).unwrap_or(0.0);
+    assert!(!bad.warnings.is_empty() || rel(v, want) > 1e-2, "{v}");
+}
+
+/// A tube revolved about a line it touches (a horn torus, as a tight sweep makes) is written as
+/// one rational B-spline face whose loop passes the pole twice, with no zero-length edge there:
+/// no TOROIDAL_SURFACE (it would be degenerate) and no surface of revolution.
+#[test]
+fn horn_torus_written_as_one_spline_face() {
+    let prof = Region2 { outer: Loop2::circle(Vec2::new(5.0, 0.0), 5.0), holes: vec![] };
+    let b = revolve(&Plane::XZ, &[prof], Vec2::ZERO, Vec2::Y, std::f64::consts::FRAC_PI_2).unwrap().pop().unwrap();
+    let text = step_export(&[&b], "t").unwrap();
+    assert!(!text.contains("TOROIDAL_SURFACE") && !text.contains("SURFACE_OF_REVOLUTION"));
+    assert_eq!(text.matches("ADVANCED_FACE(").count(), 3, "{text}");
+    let imp = round_trip(&b);
+    let v = std::f64::consts::PI * 25.0 * std::f64::consts::TAU * 5.0 / 4.0;
+    assert!(rel(measure(&imp.bodies[0].body).unwrap().volume, v) < 1e-3);
 }

@@ -133,7 +133,7 @@ pub(crate) fn frame(cx: &Ctx, id: u64) -> R<Frame> {
 }
 
 /// AXIS1_PLACEMENT: origin and unit axis.
-fn axis1(cx: &Ctx, id: u64) -> R<(mt::Point3, mt::Vector3)> {
+pub(crate) fn axis1(cx: &Ctx, id: u64) -> R<(mt::Point3, mt::Vector3)> {
     let e = entity(cx, id)?;
     let p = e.params();
     let o = point(cx, p.get(1).and_then(Param::as_ref_id).ok_or("axis without location")?)?;
@@ -875,8 +875,10 @@ pub(crate) fn surface(cx: &Ctx, id: u64, extent: &[mt::Point3], seam: &[mt::Poin
                 CurveGeo::Line { p, d } => revolved_line(*p, *d, o, axis, extent)?,
                 _ => bounded_curve(&g, extent)?,
             };
-            // Reversed sense: turn the other way round the axis.
-            Ok(revolved(profile, o, axis * sign))
+            // ISO 10303-42 parameterises a surface of revolution by the angle u and the profile
+            // v, so its normal is ∂S/∂angle × ∂S/∂profile: the opposite of truck's revolution
+            // (profile first). Fusion reads it this way. Reversed sense turns it back.
+            Ok(revolved(profile, o, -axis * sign))
         }
         "SURFACE_OF_LINEAR_EXTRUSION" => {
             let g = curve(cx, p.get(1).and_then(Param::as_ref_id).ok_or("extrusion without profile")?, depth + 1)?;

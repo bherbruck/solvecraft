@@ -21,9 +21,10 @@ Only the writer (`out`) is used; SolveCraft reads STEP with its own reader.
 Changes:
 - `out/geometry.rs`: an `INTERSECTION_CURVE`'s second surface was written at the first
   surface's entity index, so every boolean-made edge produced duplicate entity ids.
-- `out/geometry.rs`: surfaces of revolution carry the right `same_sense`: truck's revolution
-  has the same parameterisation and normal as ISO 10303-42 (the writer flipped it), and a
-  mirroring transform reverses the normal.
+- `out/geometry.rs`: surfaces of revolution carry the right `same_sense` for inverted and
+  mirrored revolutions (ISO 10303-42 parameterises them by angle then profile, so their normal
+  is the opposite of truck's; a mirroring transform reverses it again), and the modeling-surface
+  wrapper passes the revolution's sense through instead of always `true`.
 - `lib.rs`: compiler warnings no longer fail the build. Example and test targets are dropped
   (their sources are not vendored).
 

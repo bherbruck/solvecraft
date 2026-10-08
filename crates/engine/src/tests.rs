@@ -927,6 +927,7 @@ fn step_round_trip(s: &mut Session, tag: &str) -> solvecraft_kernel::StepImport 
     let text = std::fs::read_to_string(&p).unwrap();
     let _ = std::fs::remove_file(&p);
     solvecraft_kernel::step_validate(&text).unwrap();
+    assert_eq!(solvecraft_kernel::step_orientation_errors(&text).unwrap(), Vec::<String>::new());
     assert!(text.contains("AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF"));
     let imp = solvecraft_kernel::step_import(&text).unwrap();
     assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
@@ -945,7 +946,7 @@ fn sample_plate_step_round_trip() {
         let (ma, mb) = (solvecraft_kernel::measure(&a.body).unwrap(), solvecraft_kernel::measure(&b.body).unwrap());
         assert!(rel(mb.volume, ma.volume) < 1e-4, "{} vs {}", mb.volume, ma.volume);
         assert!(rel(mb.area, ma.area) < 1e-4, "{} vs {}", mb.area, ma.area);
-        assert_eq!(b.file_faces, a.body.face_count());
+        assert!(b.file_faces <= a.body.face_count() && b.file_faces >= ma.merged.faces.min(a.body.face_count()));
         assert_eq!(mb.merged.faces, ma.merged.faces);
     }
 }

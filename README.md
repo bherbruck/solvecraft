@@ -30,7 +30,7 @@ storytold "craft" family.
   deleted.
 - **Parameters** with unit-aware expressions (`2 * width + 5 mm`, `angle / 2`).
 - **Files**: designs as JSON (`.solvecraft`), export to STEP (AP242 with body names, colours and
-  components as assemblies), 3MF, STL (binary/ASCII) and OBJ;
+  components as assemblies; revolved faces as native planes, cylinders, cones, spheres and tori), 3MF, STL (binary/ASCII) and OBJ;
   3MF and STL import as mesh bodies (they render, measure, move and export; solid features need
   B-rep bodies);
   STEP import (AP203/AP214/AP242 solids, assemblies, units, names, colours) as a base feature

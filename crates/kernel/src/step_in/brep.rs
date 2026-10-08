@@ -255,7 +255,22 @@ impl Builder {
                     })
                     .collect()
             }
-            _ => wires,
+            // A loop passing a vertex twice (a figure eight through a pole, as written for a
+            // torus whose tube touches its axis) starts at a vertex it passes once.
+            _ => wires
+                .into_iter()
+                .map(|w| {
+                    let edges: Vec<mt::Edge> = w.edge_iter().cloned().collect();
+                    let passes = |e: &mt::Edge| edges.iter().filter(|x| x.front().id() == e.front().id()).count();
+                    match edges.first().map(passes) {
+                        Some(n) if n > 1 => {
+                            let start = edges.iter().position(|e| passes(e) == 1).unwrap_or(0);
+                            edges.iter().skip(start).chain(edges.iter().take(start)).cloned().collect::<Vec<_>>().into()
+                        }
+                        _ => w,
+                    }
+                })
+                .collect(),
         };
         match mt::Face::try_new(wires.clone(), surface.clone()) {
             Ok(f) => Ok(f),

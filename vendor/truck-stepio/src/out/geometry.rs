@@ -738,11 +738,11 @@ impl<C: ConstStepLength> ConstStepLength for RevolutedCurve<C> {
     const LENGTH: usize = 4 + C::LENGTH;
 }
 
-// SolveCraft: truck revolves right-handed with u along the profile and v around the axis, the
-// parameterisation of ISO 10303-42 surface_of_revolution, so the normals agree (was `false`).
+// ISO 10303-42 parameterises surface_of_revolution by (angle, profile); truck by (profile,
+// angle), so the normals are opposite.
 impl<C> StepSurface for RevolutedCurve<C> {
     #[inline(always)]
-    fn same_sense(&self) -> bool { true }
+    fn same_sense(&self) -> bool { false }
 }
 
 impl<C> DisplayByStep for Processor<RevolutedCurve<C>, Matrix4>
@@ -774,10 +774,11 @@ impl<C: StepLength> StepLength for Processor<RevolutedCurve<C>, Matrix4> {
 }
 
 // SolveCraft: the written surface revolves the transformed profile about the transformed
-// axis; a mirroring transform reverses the turn, and with it the normal (was `!orientation`).
+// axis; a mirroring transform reverses the turn, and with it the normal (was `!orientation`,
+// right only without mirroring). The STEP normal is the opposite of truck's (see above).
 impl<C> StepSurface for Processor<RevolutedCurve<C>, Matrix4> {
     #[inline(always)]
-    fn same_sense(&self) -> bool { self.orientation() == (self.transform().determinant() >= 0.0) }
+    fn same_sense(&self) -> bool { self.orientation() != (self.transform().determinant() >= 0.0) }
 }
 
 impl DisplayByStep for ModelingSurface {

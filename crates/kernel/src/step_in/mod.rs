@@ -8,12 +8,13 @@
 //! failure wherever the rest of the file is still usable.
 
 mod brep;
-mod geom;
+pub(crate) mod geom;
 pub(crate) mod p21;
 mod split;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use mt::EuclideanSpace as _;
 use serde::{Deserialize, Serialize};
 use truck_modeling as mt;
 
@@ -588,6 +589,88 @@ impl<'a> Reader<'a> {
 /// Check a STEP file's structure: it parses, no entity id is defined twice, every reference
 /// names a defined entity, nothing but root entities (relationships, definitions,
 /// presentation) is left unreferenced, and ids are dense (`#1`…`#n`). Returns the entity count.
+/// Faces whose boundary runs the wrong way round their normal, as a strict reader (Fusion)
+/// sees them: each face's normal is its surface's own parametric normal (∂S/∂u × ∂S/∂v, ISO
+/// 10303-42), reversed when `same_sense` is false, and the outer loop must run counter-clockwise
+/// seen from that side. Checked on faces whose loop spans a clear direction (patches, not bands
+/// around a closed surface). Returns one message per bad face.
+pub fn step_orientation_errors(text: &str) -> std::result::Result<Vec<String>, String> {
+    use mt::{BoundedCurve, InnerSpace, ParametricCurve, ParametricSurface3D, SearchNearestParameter};
+    let imp = step_import(text).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for b in &imp.bodies {
+        let r = guard("orientation check", || {
+            let mut bad = Vec::new();
+            for (fi, f) in b.body.solid.face_iter().enumerate() {
+                let bounds = f.boundaries();
+                // Patches only: a face with several loops (a band between two rings, a face with
+                // holes) has no single loop direction to compare.
+                let [w] = bounds.as_slice() else { continue };
+                // A loop through a vertex twice (a figure eight round a pole) has no single direction.
+                let fronts: std::collections::HashSet<_> = w.edge_iter().map(|e| e.front().id()).collect();
+                if fronts.len() != w.len() {
+                    continue;
+                }
+                let pts: Vec<mt::Point3> = w
+                    .edge_iter()
+                    .flat_map(|e| {
+                        let c = e.oriented_curve();
+                        let (t0, t1) = c.range_tuple();
+                        (0..16).map(move |i| c.subs(t0 + (t1 - t0) * i as f64 / 16.0)).collect::<Vec<_>>()
+                    })
+                    .collect();
+                let n = pts.len();
+                if n < 3 {
+                    continue;
+                }
+                let mut newell = mt::Vector3::new(0.0, 0.0, 0.0);
+                let mut c = mt::Vector3::new(0.0, 0.0, 0.0);
+                let mut span: f64 = 0.0;
+                for i in 0..n {
+                    let (Some(a), Some(q)) = (pts.get(i), pts.get((i + 1) % n)) else { continue };
+                    newell += (a.to_vec()).cross(q.to_vec());
+                    c += a.to_vec();
+                    span = span.max((a - pts[0]).magnitude());
+                }
+                let c = mt::Point3::from_vec(c / n as f64);
+                // Bands round a closed surface have no clear loop direction.
+                if !(newell.magnitude() > 0.05 * span * span) {
+                    continue;
+                }
+                // The face normal averaged along the loop (each loop point is on the surface;
+                // the loop's centroid can be nearer the wrong side of a curved face).
+                let s = f.oriented_surface();
+                let mut normal = mt::Vector3::new(0.0, 0.0, 0.0);
+                let mut count = 0usize;
+                let mut prev = None;
+                for p in &pts {
+                    if let Some(uv) = s.search_nearest_parameter(*p, prev, 100) {
+                        prev = Some(uv);
+                        let n = s.normal(uv.0, uv.1);
+                        if n.x.is_finite() && n.y.is_finite() && n.z.is_finite() {
+                            normal += n;
+                            count += 1;
+                        }
+                    }
+                }
+                let _ = c;
+                // Only patches clearly to one side of their loop are judged: a loop on a closed
+                // surface (a sphere's cube-face square) bounds either part.
+                if count == 0 || normal.magnitude() < 0.7 * count as f64 {
+                    continue;
+                }
+                if normal.dot(newell) < 0.0 {
+                    bad.push(format!("{}: face {fi} runs clockwise around its normal", b.name));
+                }
+            }
+            Ok(bad)
+        })
+        .map_err(|e| e.to_string())?;
+        out.extend(r);
+    }
+    Ok(out)
+}
+
 pub fn step_validate(text: &str) -> std::result::Result<usize, String> {
     let ex = p21::parse(text)?;
     if let Some(d) = ex.duplicates.first() {
