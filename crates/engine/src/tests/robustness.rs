@@ -180,6 +180,24 @@ fn shell_after_a_drilled_hole() {
     }
 }
 
+/// Rounding an edge that runs into an earlier round of the same radius (filleting a box's
+/// edges one at a time): the same body as picking both at once. Another radius says so.
+#[test]
+fn fillet_into_an_earlier_round() {
+    let box_ = json!({"command": "solid.box", "params": {"length": 60, "width": 40, "height": 15}});
+    let both = script(json!([box_, {"command": "solid.fillet", "params": {"edges": [[30, 0, 15], [60, 0, 7]], "radius": 2}}]));
+    let one_by_one = script(json!([
+        box_,
+        {"command": "solid.fillet", "params": {"edges": [[30, 0, 15]], "radius": 2}},
+        {"command": "solid.fillet", "params": {"edges": [[60, 0, 7]], "radius": 2}}
+    ]));
+    let (a, b) = (total_volume(&both), total_volume(&one_by_one));
+    assert!((a - b).abs() < 1e-6 * a, "{a} vs {b}");
+    let mut s = script(json!([box_, {"command": "solid.fillet", "params": {"edges": [[30, 0, 15]], "radius": 2}}]));
+    let e = s.execute("solid.fillet", &json!({"edges": [[60, 0, 7]], "radius": 3})).unwrap_err();
+    assert!(e.to_string().contains("not supported yet: an edge running into an earlier round of another radius"), "{e}");
+}
+
 /// Seeds that run clean: no failure, no invalid body, no volume going the wrong way.
 #[test]
 fn fixed_seeds_run_clean() {
