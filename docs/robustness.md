@@ -81,6 +81,27 @@ fixes below (sound face pushes, no panics in the boolean's final assembly).
   `None` instead, and a test builds every sample with a panic counter. The runs count caught
   panics per design ("Caught panics" in the report), since each one would crash the web build.
 
+### The first tutorial (box, fillets, shell)
+
+Found by QA on new users' first steps, each with an engine test against the analytic volume
+(`crates/engine/src/tests/robustness.rs`):
+
+- **Shell of a filleted box** (vertical edges r5, bottom loop r3, 2 mm, top open): the bottom
+  round runs round the corners as spindle tori (the tube wider than its circle), which the
+  offset now takes. Volume within 1e-5 of the analytic one.
+- **Shell thicker than or equal to a round** (r2 rounds shelled 2 mm): the round's inside
+  collapses to a sharp edge, as in Fusion, instead of "a cylinder shrinks to nothing".
+- **Shell thinner than a round tangent to the open face** (1.5 mm): every face moves in
+  (tangencies keep) and the opening is the open face's copy swept out through the body.
+- **Shell after a drilled hole** (its tip a cone).
+- **Filleting a box's edges one at a time**: an edge that runs into an earlier round of the
+  same radius undoes that round and rounds both together, the same body as picking both at once.
+  Another radius says what to do; Fusion's corner patch for it is still missing.
+
+### Speed
+
+- Measuring a body of 5000 faces (a modelled thread): 13 s to 0.8 s.
+
 ### Known limitations (counted as "not supported", with a clear message)
 
 - A shell thicker than a wall or a step: the moved faces would cross and the cavity turn
