@@ -11,6 +11,10 @@ use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("PrimitiveCoil", "Coil", coil).at("SOLID", "CREATE").icon("coil").params(
+        "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
+         base?: [x,y,z]; axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; operation?, targets?, name?, body_name?",
+    ),
     CommandSpec::new("FusionRibCommand", "Rib", rib)
         .at("SOLID", "CREATE")
         .icon("rib")
@@ -33,6 +37,70 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("bodies: [names]; from: [x,y,z] | from_face: [x,y,z]; to: [x,y,z] | to_face: [x,y,z] (faces also turn to meet); flip?: bool"),
     CommandSpec::new("SoftDeleteCommand", "Remove", remove).at("SOLID", "MODIFY").icon("delete").params("bodies: [names] (removed from here on in the timeline)"),
 ];
+
+fn coil(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "PrimitiveCoil";
+    let base = p.get("base").and_then(vec3).unwrap_or(Vec3::ZERO);
+    let axis = match p.get("axis") {
+        None => Vec3::Z,
+        Some(Value::String(a)) => match a.to_ascii_uppercase().as_str() {
+            "X" => Vec3::X,
+            "Y" => Vec3::Y,
+            "Z" => Vec3::Z,
+            _ => return Err(bad(cmd, "`axis` must be X, Y, Z or [x, y, z]")),
+        },
+        Some(v) => vec3(v).and_then(|a| a.normalized()).ok_or_else(|| bad(cmd, "`axis` must be X, Y, Z or a non-zero [x, y, z]"))?,
+    };
+    let diameter = req_expr(cmd, p, "diameter")?;
+    check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
+    let turns = expr(p, "revolutions").or_else(|| expr(p, "turns"));
+    let (height, pitch) = (expr(p, "height"), expr(p, "pitch"));
+    let (turns, pitch) = match (turns, height, pitch) {
+        (Some(n), _, Some(pt)) => (n, pt),
+        (Some(n), Some(h), None) => (n.clone(), format!("({h}) / ({n})")),
+        (None, Some(h), Some(pt)) => (format!("({h}) / ({pt})"), pt),
+        _ => return Err(bad(cmd, "give two of `revolutions`, `height` and `pitch`")),
+    };
+    check_expr(s, &turns, Kind::Unitless, cmd, "revolutions")?;
+    check_expr(s, &pitch, Kind::Length, cmd, "pitch")?;
+    let section_size = req_expr(cmd, p, "section_size")?;
+    check_expr(s, &section_size, Kind::Length, cmd, "section_size")?;
+    let section = match str_(p, "section").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("circular" | "circle") => solvecraft_doc::CoilSection::Circular,
+        Some("square") => solvecraft_doc::CoilSection::Square,
+        Some(o) => return Err(bad(cmd, format!("unknown section `{o}` (circular or square)"))),
+    };
+    let position = match str_(p, "section_position").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("center" | "on" | "on_center") => 0,
+        Some("inside") => -1,
+        Some("outside") => 1,
+        Some(o) => return Err(bad(cmd, format!("unknown section position `{o}` (inside, center or outside)"))),
+    };
+    let start_angle = expr(p, "start_angle");
+    if let Some(a) = &start_angle {
+        check_expr(s, a, Kind::Angle, cmd, "start_angle")?;
+    }
+    let clockwise = bool_(p, "clockwise").unwrap_or(false);
+    let operation = super::features::operation(p, cmd)?;
+    add_feature(
+        s,
+        p,
+        FeatureKind::Coil {
+            base,
+            axis,
+            diameter,
+            pitch,
+            turns,
+            section_size,
+            section,
+            position,
+            start_angle,
+            clockwise,
+            operation,
+            targets: string_list(p, "targets"),
+        },
+    )
+}
 
 fn curves_param(p: &Value, cmd: &str) -> Result<Vec<String>> {
     let c = string_list(p, "curves");

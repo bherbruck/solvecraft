@@ -108,3 +108,32 @@ fn replace_face_align_remove() {
     run(&mut s, "SoftDeleteCommand", json!({"bodies": ["B"]}));
     assert_eq!(measure(&mut s)["body_count"], 1);
 }
+
+#[test]
+fn coil_and_loft_to_a_point() {
+    use std::f64::consts::{PI, TAU};
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveCoil", json!({"diameter": 40, "revolutions": 2, "pitch": 8, "section_size": 4}));
+    assert!(rel(volume(&mut s), PI * 4.0 * TAU * 20.0 * 2.0) < 1e-3, "{}", volume(&mut s));
+    // Height and revolutions give the pitch; a square section outside the diameter.
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "PrimitiveCoil",
+        json!({"diameter": 40, "revolutions": 1.5, "height": 15, "section": "square", "section_size": 2, "section_position": "outside", "axis": "X"}),
+    );
+    assert!(rel(volume(&mut s), 4.0 * TAU * 21.0 * 1.5) < 1e-3, "{}", volume(&mut s));
+    assert!(s.execute("PrimitiveCoil", &json!({"diameter": 40, "pitch": 1, "revolutions": 3, "section_size": 4})).is_err(), "runs into itself");
+    assert!(s.execute("PrimitiveCoil", &json!({"diameter": 40, "section_size": 4, "pitch": 8})).is_err(), "two of three");
+    // Pyramid: a square lofted to a point.
+    let mut s = Session::default();
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [-10, -10], "p1": [10, 10]}));
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "SketchCreate", json!({"plane": {"origin": [0, 0, 30], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Top"}));
+    run(&mut s, "DrawPoint", json!({"point": [0, 0], "id": "apex"}));
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "SolidLoft", json!({"sections": [{"sketch": "Base"}, {"sketch": "Top", "point": "apex"}]}));
+    assert!(rel(volume(&mut s), 400.0 * 30.0 / 3.0) < 1e-6);
+    assert!(s.execute("SolidLoft", &json!({"sections": [{"sketch": "Base"}, {"sketch": "Top", "point": "nope"}]})).is_err());
+}

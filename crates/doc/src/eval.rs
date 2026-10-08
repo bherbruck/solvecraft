@@ -943,6 +943,56 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
             let regions: Vec<Region2> = regions.iter().map(|r| grow_profile_for_coplanar(st, r, operation, &targets, &probe)).collect();
             Ok(kernel::revolve(&ss.plane, &regions, o, d, ang)?)
         }
+        FeatureKind::Loft { sections, .. } if sections.iter().any(|s| s.point.is_some()) => {
+            // A profile lofted to a sketch point (an apex).
+            let [a, b] = &sections[..] else { return Err(DocError::Invalid("not supported yet: a point section in a loft of more than two".into())) };
+            let (prof, pt) = if a.point.is_some() { (b, a) } else { (a, b) };
+            let ss = st.sketch(prof.sketch).ok_or_else(|| DocError::Unknown(format!("sketch {}", prof.sketch)))?;
+            let regions = solvecraft_sketch::merge_regions(&select_profiles(ss, &prof.profiles)?);
+            let [r] = &regions[..] else { return Err(DocError::Invalid("each loft section must be one profile".into())) };
+            let ps = st.sketch(pt.sketch).ok_or_else(|| DocError::Unknown(format!("sketch {}", pt.sketch)))?;
+            let id = pt.point.as_deref().unwrap_or_default();
+            let q = ps.sketch.points.iter().find(|p| p.id == id).ok_or_else(|| DocError::Unknown(format!("point `{id}` in {}", ps.name)))?;
+            Ok(vec![kernel::loft_to_point(&ss.plane, &r.outer, ps.plane.to_world(q.pos))?])
+        }
+        FeatureKind::Coil { base, axis, diameter, pitch, turns, section_size, section, position, start_angle, clockwise, .. } => {
+            let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
+            let (d, p, n, s) = (
+                val(vals, diameter, Kind::Length)?,
+                val(vals, pitch, Kind::Length)?,
+                val(vals, turns, Kind::Unitless)?,
+                val(vals, section_size, Kind::Length)?,
+            );
+            if !(d > 0.0 && s > 0.0 && n > 0.0) {
+                return Err(DocError::Invalid("the coil diameter, section size and revolutions must be positive".into()));
+            }
+            let r = d / 2.0 + f64::from(*position) * s / 2.0;
+            if r <= s / 2.0 {
+                return Err(DocError::Invalid("the section reaches the coil's axis".into()));
+            }
+            let a0 = match start_angle {
+                Some(e) => val(vals, e, Kind::Angle)?,
+                None => 0.0,
+            };
+            // Radial direction at the start; the section lies in the plane of the axis.
+            let x0 = if k.cross(Vec3::X).len() > 1e-6 { (Vec3::X - k * k.dot(Vec3::X)).normalized() } else { Some(k.any_perp()) };
+            let x0 = x0.ok_or_else(|| DocError::Invalid("coil axis".into()))?;
+            let x = x0 * a0.cos() + k.cross(x0) * a0.sin();
+            let plane = Plane { origin: *base, x, y: k };
+            let c = Vec2::new(r, 0.0);
+            let outer = match section {
+                crate::CoilSection::Circular => solvecraft_geom::Loop2::circle(c, s / 2.0),
+                crate::CoilSection::Square => {
+                    let h = s / 2.0;
+                    solvecraft_geom::Loop2::polygon(&[c + Vec2::new(-h, -h), c + Vec2::new(h, -h), c + Vec2::new(h, h), c + Vec2::new(-h, h)])
+                }
+            };
+            let region = Region2 { outer, holes: Vec::new() };
+            let axis = if *clockwise { k * -1.0 } else { k };
+            // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
+            let pitch = if *clockwise { -p } else { p };
+            Ok(vec![kernel::sweep_helix(&plane, &region, *base, axis, pitch, n)?])
+        }
         FeatureKind::Loft { sections, .. } => {
             let mut secs = Vec::new();
             for sec in sections {
@@ -1076,6 +1126,7 @@ fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
         FeatureKind::Hole { .. } => (Operation::Cut, Vec::new()),
         FeatureKind::Pipe { operation, targets, .. } => (*operation, targets.clone()),
         FeatureKind::Loft { operation, targets, .. } | FeatureKind::Sweep { operation, targets, .. } => (*operation, targets.clone()),
+        FeatureKind::Coil { operation, targets, .. } => (*operation, targets.clone()),
         _ => (Operation::NewBody, Vec::new()),
     }
 }
@@ -1342,6 +1393,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::Pipe { operation, targets, .. }
         | FeatureKind::Revolve { operation, targets, .. }
         | FeatureKind::Loft { operation, targets, .. }
+        | FeatureKind::Coil { operation, targets, .. }
         | FeatureKind::Sweep { operation, targets, .. } => {
             let tools = feature_tools(vals, f, st)?;
             apply_op(st, f, tools, *operation, targets)

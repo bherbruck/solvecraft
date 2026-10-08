@@ -22,7 +22,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("sweep")
         .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; operation?"),
-    CommandSpec::new("SolidLoft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?}] (2 or more, in order); operation?"),
+    CommandSpec::new("SolidLoft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2 or more, in order); operation?"),
     CommandSpec::new("PrimitiveBox", "Box", prim_box).at("SOLID", "CREATE").icon("box").params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z]; operation?"),
     CommandSpec::new("PrimitiveCylinder", "Cylinder", prim_cylinder).at("SOLID", "CREATE").icon("cylinder").params("radius | diameter, height: expr; base?: [x,y,z]; axis?: [x,y,z]; operation?"),
     CommandSpec::new("PrimitiveSphere", "Sphere", prim_sphere).at("SOLID", "CREATE").icon("sphere").params("radius | diameter: expr; center?: [x,y,z]; operation?"),
@@ -845,7 +845,16 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
     let mut sections = Vec::new();
     for sec in list {
         let sketch = sketch_id(s, sec.get("sketch"), cmd, "sections[].sketch")?;
-        sections.push(solvecraft_doc::LoftSection { sketch, profiles: profiles(sec, cmd)? });
+        // A sketch point closes the loft to an apex.
+        if let Some(pt) = str_(sec, "point") {
+            let st = s.model.state();
+            if !st.sketch(sketch).is_some_and(|ss| ss.sketch.points.iter().any(|q| q.id == pt)) {
+                return Err(bad(cmd, format!("no point `{pt}` in the section's sketch")));
+            }
+            sections.push(solvecraft_doc::LoftSection { sketch, profiles: solvecraft_doc::ProfileSel::All, point: Some(pt.to_string()) });
+            continue;
+        }
+        sections.push(solvecraft_doc::LoftSection { sketch, profiles: profiles(sec, cmd)?, point: None });
     }
     add_feature(s, p, FeatureKind::Loft { sections, operation: operation(p, cmd)?, targets: string_list(p, "targets") })
 }

@@ -379,6 +379,33 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
     },
+    /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
+    /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
+    Coil {
+        base: Vec3,
+        #[serde(default = "z_axis")]
+        axis: Vec3,
+        diameter: String,
+        pitch: String,
+        turns: String,
+        section_size: String,
+        #[serde(default)]
+        section: CoilSection,
+        /// -1 inside, 0 on the centre, 1 outside of the diameter.
+        #[serde(default, skip_serializing_if = "is_zero_i8")]
+        position: i8,
+        /// Start angle about the axis (expression; 0 = from the axis toward +x, or a
+        /// perpendicular direction when the axis is x).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start_angle: Option<String>,
+        /// Turn the other way (left-handed).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        clockwise: bool,
+        #[serde(default)]
+        operation: Operation,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<String>,
+    },
     /// Remove bodies from the model (from here on in the timeline).
     Remove {
         bodies: Vec<String>,
@@ -446,6 +473,22 @@ pub struct Component {
 pub struct LoftSection {
     pub sketch: u64,
     pub profiles: ProfileSel,
+    /// A sketch point instead of a profile (the loft closes to it, as a pyramid's apex).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub point: Option<String>,
+}
+
+/// Coil cross-sections.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoilSection {
+    #[default]
+    Circular,
+    Square,
+}
+
+fn is_zero_i8(v: &i8) -> bool {
+    *v == 0
 }
 
 /// Hole shapes.
@@ -563,6 +606,7 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
+            FeatureKind::Coil { .. } => "CoilFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
             FeatureKind::Rib { .. } => "WebFeature",
             FeatureKind::ReplaceFace { .. } => "ReplaceFaceFeature",
@@ -603,6 +647,7 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::Emboss { .. } => "Emboss",
+            FeatureKind::Coil { .. } => "Coil",
             FeatureKind::Rib { web: false, .. } => "Rib",
             FeatureKind::Rib { .. } => "Web",
             FeatureKind::ReplaceFace { .. } => "ReplaceFace",
@@ -683,6 +728,10 @@ impl FeatureKind {
                 }
             }
             FeatureKind::Emboss { depth, .. } => v.push(depth),
+            FeatureKind::Coil { diameter, pitch, turns, section_size, start_angle, .. } => {
+                v.extend([diameter.as_str(), pitch, turns, section_size]);
+                v.extend(start_angle.iter().map(String::as_str));
+            }
             FeatureKind::Rib { thickness, depth, .. } => {
                 v.push(thickness);
                 v.extend(depth.iter().map(String::as_str));

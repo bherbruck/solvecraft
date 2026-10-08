@@ -138,6 +138,15 @@ impl FeatureKind {
                 }
             }
             FeatureKind::Emboss { depth, .. } => v.push(("Depth", depth, L)),
+            FeatureKind::Coil { diameter, pitch, turns, section_size, start_angle, .. } => {
+                v.push(("Diameter", diameter, L));
+                v.push(("Pitch", pitch, L));
+                v.push(("Revolutions", turns, U));
+                v.push(("Section size", section_size, L));
+                if let Some(a) = start_angle {
+                    v.push(("Start angle", a, A));
+                }
+            }
             FeatureKind::Rib { thickness, depth, .. } => {
                 v.push(("Thickness", thickness, L));
                 if let Some(d) = depth {

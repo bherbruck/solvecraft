@@ -61,6 +61,8 @@ fn sketch_cmds(f: &Value, out: &mut Vec<Value>) -> Result<(), String> {
                 }
             }
             Some("point") => out.push(json!({"command": "DrawPoint", "params": {"point": parg(e.get("at").map(|a| json!({"at": a})).as_ref().or(Some(e))), "id": id}})),
+            // A 3D helix fit: the sweep along it becomes a coil (see `helix_path`).
+            Some("fitted_spline") if e.get("fit_points").and_then(Value::as_array).is_some_and(|a| a.iter().any(|p| p.get(2).is_some())) => {}
             Some(other) => return Err(format!("recipe: sketch entity type `{other}` is not supported yet")),
             None => return Err("recipe: sketch entity without type".into()),
         }
@@ -180,6 +182,106 @@ fn profile_sketch(f: &Value) -> Value {
         .unwrap_or(Value::Null)
 }
 
+fn sketch_entity<'a>(features: &'a [Value], sketch: &Value, id: &Value) -> Option<&'a Value> {
+    features
+        .iter()
+        .find(|x| x.get("op").and_then(Value::as_str) == Some("sketch") && x.get("name") == Some(sketch))?
+        .get("entities")?
+        .as_array()?
+        .iter()
+        .find(|e| e.get("id") == Some(id))
+}
+
+/// A sweep of a circle along a fitted 3D spline that is a helix about a Z-parallel axis:
+/// (base, diameter, pitch, turns, start angle, clockwise, section size).
+#[allow(clippy::type_complexity)]
+fn helix_path(features: &[Value], f: &Value) -> Option<([f64; 3], f64, f64, f64, f64, bool, f64)> {
+    let path = f.get("path")?;
+    let curve = sketch_entity(features, path.get("sketch")?, path.get("curves")?.as_array()?.first()?)?;
+    if curve.get("type")?.as_str()? != "fitted_spline" {
+        return None;
+    }
+    let pts: Vec<[f64; 3]> = curve
+        .get("fit_points")?
+        .as_array()?
+        .iter()
+        .filter_map(|p| {
+            let a = p.as_array()?;
+            Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+        })
+        .collect();
+    if pts.len() < 8 {
+        return None;
+    }
+    let n = pts.len() as f64;
+    let (cx, cy) = circle_fit(&pts)?;
+    let r: Vec<f64> = pts.iter().map(|p| (p[0] - cx).hypot(p[1] - cy)).collect();
+    let rm = r.iter().sum::<f64>() / n;
+    if rm <= 0.0 || r.iter().any(|x| (x - rm).abs() > 1e-3 * rm) {
+        return None;
+    }
+    // Unwrapped angle and height: both linear along a helix.
+    let mut total = 0.0;
+    let mut prev = (pts[0][1] - cy).atan2(pts[0][0] - cx);
+    let start = prev;
+    for p in pts.iter().skip(1) {
+        let a = (p[1] - cy).atan2(p[0] - cx);
+        let mut d = a - prev;
+        while d > std::f64::consts::PI {
+            d -= std::f64::consts::TAU;
+        }
+        while d < -std::f64::consts::PI {
+            d += std::f64::consts::TAU;
+        }
+        total += d;
+        prev = a;
+    }
+    let turns = total.abs() / std::f64::consts::TAU;
+    let rise = pts.last()?[2] - pts[0][2];
+    if turns < 1e-6 || rise.abs() < 1e-9 {
+        return None;
+    }
+    // The section: a circle in the profile sketch.
+    let prof = f.get("profile").or_else(|| f.get("profiles").and_then(|x| x.get(0)))?;
+    let loop0 = prof.get("loops")?.get(0)?.get("curves")?.get(0)?;
+    let circle = sketch_entity(features, prof.get("sketch")?, loop0)?;
+    let size = 2.0 * circle.get("radius")?.as_f64()?;
+    Some(([cx, cy, pts[0][2]], 2.0 * rm, rise.abs() / turns, turns, start, (total < 0.0) != (rise < 0.0), size))
+}
+
+/// Least-squares circle through the points' (x, y): x² + y² + D x + E y + F = 0 (Kåsa).
+fn circle_fit(pts: &[[f64; 3]]) -> Option<(f64, f64)> {
+    let mut m = [[0.0f64; 4]; 3];
+    for p in pts {
+        let row = [p[0], p[1], 1.0];
+        let rhs = -(p[0] * p[0] + p[1] * p[1]);
+        for i in 0..3 {
+            for j in 0..3 {
+                m[i][j] += row[i] * row[j];
+            }
+            m[i][3] += row[i] * rhs;
+        }
+    }
+    // Gauss-Jordan on the 3x4 normal equations.
+    for c in 0..3 {
+        let piv = (c..3).max_by(|a, b| m[*a][c].abs().total_cmp(&m[*b][c].abs()))?;
+        m.swap(c, piv);
+        if m[c][c].abs() < 1e-12 {
+            return None;
+        }
+        for r in 0..3 {
+            if r != c {
+                let f = m[r][c] / m[c][c];
+                for k in c..4 {
+                    m[r][k] -= f * m[c][k];
+                }
+            }
+        }
+    }
+    let (d, e) = (m[0][3] / m[0][0], m[1][3] / m[1][1]);
+    Some((-d / 2.0, -e / 2.0))
+}
+
 pub fn to_script(recipe: &Value) -> Result<Value, String> {
     let mut out: Vec<Value> = Vec::new();
     for p in recipe.get("parameters").and_then(Value::as_array).into_iter().flatten() {
@@ -244,9 +346,19 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
                     .and_then(Value::as_array)
                     .into_iter()
                     .flatten()
-                    .map(|sec| json!({"sketch": sec.get("sketch"), "profiles": [sec]}))
+                    .map(|sec| match sec.get("point") {
+                        Some(pt) => json!({"sketch": sec.get("sketch"), "point": pt}),
+                        None => json!({"sketch": sec.get("sketch"), "profiles": [sec]}),
+                    })
                     .collect();
                 out.push(json!({"command": "SolidLoft", "params": {"sections": sections, "operation": op(f), "name": name, "body_names": bodies}}));
+            }
+            Some("sweep") if helix_path(features, f).is_some() => {
+                // A swept circle along a fitted 3D helix: a coil (the true helix).
+                let Some((base, diameter, pitch, turns, start, cw, size)) = helix_path(features, f) else { continue };
+                out.push(json!({"command": "PrimitiveCoil", "params": {
+                    "base": base, "diameter": diameter, "pitch": pitch, "revolutions": turns, "section_size": size,
+                    "start_angle": format!("{start} rad"), "clockwise": cw, "operation": op(f), "name": name, "body_names": bodies}}));
             }
             Some("sweep") => {
                 let path = f.get("path").cloned().unwrap_or(Value::Null);

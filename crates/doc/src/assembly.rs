@@ -187,6 +187,10 @@ impl FeatureKind {
                 dir(direction);
             }
             FeatureKind::Thread { face, .. } => pt(face),
+            FeatureKind::Coil { base, axis, .. } => {
+                pt(base);
+                dir(axis);
+            }
             FeatureKind::ReplaceFace { faces, target, .. } => {
                 faces.iter_mut().for_each(pt);
                 map_plane_ref(m, target);

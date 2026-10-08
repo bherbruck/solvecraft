@@ -14,7 +14,7 @@ fn finite(x: f64, what: &str) -> Result<f64> {
 }
 
 /// A closed wire in 3D from a sketch loop.
-fn wire(plane: &Plane, lp: &Loop2) -> Result<mt::Wire> {
+pub(crate) fn wire(plane: &Plane, lp: &Loop2) -> Result<mt::Wire> {
     let n = lp.segs.len();
     if n == 0 || n > MAX_SEGS {
         return Err(KernelError::Invalid(format!("loop with {n} segments")));
@@ -410,7 +410,7 @@ fn revolve_touching_axis(plane: &Plane, lp: &Loop2, axis_origin: Vec2, d: Vec2) 
 }
 
 /// Close a ruled shell (side faces between matching wires) with planar caps into a body.
-fn cap_and_close(mut faces: Vec<mt::Face>, w0: &[mt::Wire], w1: &[mt::Wire]) -> Result<Body> {
+pub(crate) fn cap_and_close(mut faces: Vec<mt::Face>, w0: &[mt::Wire], w1: &[mt::Wire]) -> Result<Body> {
     let bottom =
         builder::try_attach_plane(&w0.iter().map(|w| w.inverse()).collect::<Vec<_>>()).map_err(|e| KernelError::Failed(format!("cap: {e}")))?;
     let top = builder::try_attach_plane(w1).map_err(|e| KernelError::Failed(format!("cap: {e}")))?;
@@ -662,7 +662,7 @@ pub(crate) fn interpolate_cubic(pts: &[Vec3]) -> Option<mt::BSplineCurve<mt::Poi
 
 /// A closed wire whose edges are cubic B-splines parameterised (nearly) by arc length, so that
 /// ruled surfaces between sections pair points proportionally along each edge.
-fn uniform_wire(plane: &Plane, lp: &Loop2) -> Result<mt::Wire> {
+pub(crate) fn uniform_wire(plane: &Plane, lp: &Loop2) -> Result<mt::Wire> {
     const SAMPLES: usize = 24;
     let n = lp.segs.len();
     let verts: Vec<mt::Vertex> = lp.segs.iter().map(|s| builder::vertex(p3(plane.to_world(s.start())))).collect();
