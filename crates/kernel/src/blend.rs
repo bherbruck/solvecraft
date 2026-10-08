@@ -425,7 +425,7 @@ fn loop_groups(cur: &Body, pts: &[Vec3]) -> Result<Option<Vec<Vec<Vec3>>>> {
             if all_sel || (some_sel && smooth_loop(&w)) {
                 covered.extend(wids.iter().copied());
                 // One point per loop edge, on it.
-                let pts: Vec<Vec3> = w.edge_iter().filter_map(|e| edge_mid(&e)).collect();
+                let pts: Vec<Vec3> = w.edge_iter().filter_map(edge_mid).collect();
                 groups.push(pts);
             }
         }
