@@ -317,7 +317,7 @@ impl SolveApp {
             }
             return;
         }
-        if !sketch_tools::pick_image(self, id) {
+        if !sketch_tools::start_hook(self, id) {
             return;
         }
         if id == "ChangeParameterCommand" {

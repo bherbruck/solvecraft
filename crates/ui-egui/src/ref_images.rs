@@ -1,55 +1,112 @@
-//! Canvases and decals: the design's reference images, drawn on their planes under the sketch
-//! overlays.
+//! Canvases and decals: the design's reference images. With the GPU viewport they are textured
+//! quads in the 3D pass (the model hides them); the CPU viewport draws them over its image.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use egui::{Color32, Mesh, Shape, TextureHandle, TextureId, pos2};
+use solvecraft_engine::doc::canvas::Canvas;
 use solvecraft_engine::geom::Vec2;
 
 use crate::SolveApp;
+use crate::gpu::GpuImage;
 use crate::viewport::Proj;
 
 /// Largest texture side; bigger images are scaled down for display.
 const MAX_SIDE: u32 = 2048;
-/// Grid cells per side, so perspective views bend the image only slightly.
+/// Grid cells per side, so perspective views bend the image only slightly (CPU path).
 const CELLS: usize = 8;
 
+/// Decoded pixels: (data length they came from, version, size, RGBA).
+type Decoded = (usize, u64, [u32; 2], Arc<Vec<u8>>);
+
 thread_local! {
-    /// Textures by canvas id, with the length of the data they were made from.
-    static TEX: RefCell<HashMap<u64, (usize, Option<TextureHandle>)>> = RefCell::new(HashMap::new());
+    static PIXELS: RefCell<HashMap<u64, Option<Decoded>>> = RefCell::new(HashMap::new());
+    /// egui textures for the CPU path, by canvas id, with the version they hold.
+    static TEX: RefCell<HashMap<u64, (u64, TextureHandle)>> = RefCell::new(HashMap::new());
+    static VERSION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-fn texture(ctx: &egui::Context, id: u64, data: &str, bytes: impl FnOnce() -> Option<Vec<u8>>) -> Option<TextureId> {
-    TEX.with(|t| {
-        let mut t = t.borrow_mut();
-        if let Some((len, h)) = t.get(&id)
-            && *len == data.len()
+fn pixels(c: &Canvas) -> Option<Decoded> {
+    PIXELS.with(|m| {
+        let mut m = m.borrow_mut();
+        if let Some(d) = m.get(&c.id)
+            && d.as_ref().is_none_or(|d| d.0 == c.data.len())
         {
-            return h.as_ref().map(|h| h.id());
+            return d.clone();
         }
-        let img = bytes().and_then(|b| image::load_from_memory(&b).ok()).map(|i| {
+        let d = c.bytes().and_then(|b| image::load_from_memory(&b).ok()).map(|i| {
             let i = if i.width() > MAX_SIDE || i.height() > MAX_SIDE { i.thumbnail(MAX_SIDE, MAX_SIDE) } else { i };
             let rgba = i.to_rgba8();
-            egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw())
+            let v = VERSION.with(|v| {
+                v.set(v.get() + 1);
+                v.get()
+            });
+            (c.data.len(), v, [rgba.width(), rgba.height()], Arc::new(rgba.into_raw()))
         });
-        let h = img.map(|img| ctx.load_texture(format!("sc_canvas_{id}"), img, egui::TextureOptions::LINEAR));
-        let out = h.as_ref().map(|h| h.id());
-        t.insert(id, (data.len(), h));
-        out
+        m.insert(c.id, d.clone());
+        d
     })
 }
 
-pub fn show(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
+fn forget_removed(app: &SolveApp) {
+    let doc = &app.session.doc;
+    PIXELS.with(|m| m.borrow_mut().retain(|id, _| doc.canvases.iter().any(|c| c.id == *id)));
+    TEX.with(|t| t.borrow_mut().retain(|id, _| doc.canvases.iter().any(|c| c.id == *id)));
+}
+
+/// The visible canvases as GPU quads.
+pub fn gpu_images(app: &SolveApp) -> Vec<GpuImage> {
+    forget_removed(app);
     let doc = &app.session.doc;
     if doc.canvases.is_empty() {
-        TEX.with(|t| t.borrow_mut().clear());
+        return Vec::new();
+    }
+    let (vals, _) = doc.param_values();
+    doc.canvases
+        .iter()
+        .filter(|c| c.visible && c.opacity > 0.0)
+        .filter_map(|c| {
+            let plane = doc.resolve_plane(&vals, &c.plane, 0).ok()?;
+            let (_, version, size, rgba) = pixels(c)?;
+            let corners = c.world_corners(&plane).map(|p| [p.x as f32, p.y as f32, p.z as f32]);
+            Some(GpuImage { id: c.id, version, size, rgba, corners, opacity: c.opacity.clamp(0.0, 1.0) as f32 })
+        })
+        .collect()
+}
+
+fn texture(ctx: &egui::Context, c: &Canvas) -> Option<TextureId> {
+    let (_, version, [w, h], rgba) = pixels(c)?;
+    TEX.with(|t| {
+        let mut t = t.borrow_mut();
+        if let Some((v, h)) = t.get(&c.id)
+            && *v == version
+        {
+            return Some(h.id());
+        }
+        let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+        let handle = ctx.load_texture(format!("sc_canvas_{}", c.id), img, egui::TextureOptions::LINEAR);
+        let id = handle.id();
+        t.insert(c.id, (version, handle));
+        Some(id)
+    })
+}
+
+/// CPU viewport only: the images over the rendered model.
+pub fn show(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    if app.viewport.gpu.is_some() {
+        return;
+    }
+    forget_removed(app);
+    let doc = &app.session.doc;
+    if doc.canvases.is_empty() {
         return;
     }
     let (vals, _) = doc.param_values();
     for c in doc.canvases.iter().filter(|c| c.visible) {
         let Ok(plane) = doc.resolve_plane(&vals, &c.plane, 0) else { continue };
-        let Some(tex) = texture(ui.ctx(), c.id, &c.data, || c.bytes()) else { continue };
+        let Some(tex) = texture(ui.ctx(), c) else { continue };
         let [bl, br, _, tl] = c.corners();
         let (u, v) = (br - bl, tl - bl);
         let tint = Color32::from_white_alpha((c.opacity.clamp(0.0, 1.0) * 255.0) as u8);
@@ -80,5 +137,4 @@ pub fn show(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj)
         }
         painter.add(Shape::mesh(mesh));
     }
-    TEX.with(|t| t.borrow_mut().retain(|id, _| doc.canvases.iter().any(|c| c.id == *id)));
 }

@@ -28,10 +28,20 @@ thread_local! {
     static COMBS: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
     /// The image file a Canvas or Decal tool places.
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The canvas whose panel is open.
+    static CANVAS_PANEL: Cell<Option<u64>> = const { Cell::new(None) };
+    /// The opacity slider while it is dragged: (canvas, value).
+    static OPACITY: Cell<Option<(u64, f64)>> = const { Cell::new(None) };
 }
 
-/// Canvas and Decal start by asking for the image; false when none was chosen.
-pub fn pick_image(app: &SolveApp, id: &str) -> bool {
+/// Commands that start with a step of their own: Canvas and Decal ask for the image first,
+/// Edit Canvas opens the canvas panel. False when the command should not go on.
+pub fn start_hook(app: &SolveApp, id: &str) -> bool {
+    if id == "canvas.edit" {
+        let first = app.session.doc.canvases.first().map(|c| c.id);
+        CANVAS_PANEL.with(|c| c.set(first));
+        return false;
+    }
     if !matches!(id, "FusionAddCanvasCommand" | "FusionAddEditDecalCommand") {
         return true;
     }
@@ -39,6 +49,73 @@ pub fn pick_image(app: &SolveApp, id: &str) -> bool {
     let ok = path.is_some();
     IMAGE.with(|i| *i.borrow_mut() = path);
     ok
+}
+
+/// The canvas panel: opacity, size, angle, flip, visibility of one canvas.
+fn canvas_panel(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(id) = CANVAS_PANEL.with(|c| c.get()) else { return };
+    let Some(c) = app.session.doc.canvases.iter().find(|c| c.id == id).cloned() else {
+        CANVAS_PANEL.with(|c| c.set(None));
+        return;
+    };
+    let ids: Vec<(u64, String)> = app.session.doc.canvases.iter().map(|c| (c.id, c.name.clone())).collect();
+    let mut open = true;
+    let mut edit: Option<Value> = None;
+    let mut delete = false;
+    egui::Window::new("Canvas").open(&mut open).collapsible(false).resizable(false).default_pos(egui::pos2(320.0, 160.0)).show(ctx, |ui| {
+        egui::ComboBox::from_id_salt("sc_canvas_pick").selected_text(&c.name).show_ui(ui, |ui| {
+            for (cid, name) in &ids {
+                if ui.selectable_label(*cid == id, name).clicked() {
+                    CANVAS_PANEL.with(|p| p.set(Some(*cid)));
+                }
+            }
+        });
+        egui::Grid::new("sc_canvas_grid").num_columns(2).show(ui, |ui| {
+            ui.label("Opacity");
+            let mut o = OPACITY.with(|v| v.get()).filter(|v| v.0 == id).map(|v| v.1).unwrap_or(c.opacity);
+            let r = ui.add(egui::Slider::new(&mut o, 0.0..=1.0).fixed_decimals(2));
+            OPACITY.with(|v| v.set(Some((id, o))));
+            if r.drag_stopped() || (r.changed() && !r.dragged()) {
+                edit = Some(json!({"canvas": id, "opacity": o}));
+            }
+            ui.end_row();
+            ui.label("Width");
+            let mut w = c.width;
+            if ui.add(egui::DragValue::new(&mut w).range(0.001..=1e6).suffix(" mm").speed(c.width * 0.005)).changed() {
+                edit = Some(json!({"canvas": id, "width": w}));
+            }
+            ui.end_row();
+            ui.label("Angle");
+            let mut a = c.angle.to_degrees();
+            if ui.add(egui::DragValue::new(&mut a).suffix("°").speed(0.5)).changed() {
+                edit = Some(json!({"canvas": id, "angle": a}));
+            }
+            ui.end_row();
+            let mut flip = c.flip;
+            if ui.checkbox(&mut flip, "Flip").changed() {
+                edit = Some(json!({"canvas": id, "flip": flip}));
+            }
+            let mut vis = c.visible;
+            if ui.checkbox(&mut vis, "Visible").changed() {
+                edit = Some(json!({"canvas": id, "visible": vis}));
+            }
+            ui.end_row();
+        });
+        if ui.button("Delete canvas").clicked() {
+            delete = true;
+        }
+    });
+    if let Some(p) = edit {
+        let _ = app.run("canvas.edit", p);
+        OPACITY.with(|v| v.set(None));
+    }
+    if delete {
+        let _ = app.run("canvas.delete", json!({"canvas": id}));
+        open = false;
+    }
+    if !open {
+        CANVAS_PANEL.with(|c| c.set(None));
+    }
 }
 
 fn v3(v: &Value) -> Option<Vec3> {
@@ -428,9 +505,10 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             } else {
                 json!({"path": path, "plane": plane, "at": [at.x, at.y, at.z]})
             };
-            if app.run(cmd, p).is_ok() {
+            if let Ok(v) = app.run(cmd, p) {
                 IMAGE.with(|i| *i.borrow_mut() = None);
                 app.tool = None;
+                CANVAS_PANEL.with(|c| c.set(v["canvas"].as_u64()));
             }
         }
         Mode::ModelRef => {
@@ -849,6 +927,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     snap_hint(app, painter, proj);
     combs(app, painter, proj);
     text_entry(app, ui.ctx());
+    canvas_panel(app, ui.ctx());
 }
 
 /// The text-entry box for a placed text.

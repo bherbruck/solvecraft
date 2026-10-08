@@ -81,6 +81,23 @@ impl GpuScene {
 
 pub type SceneSlot = Arc<Mutex<Option<GpuScene>>>;
 
+/// A reference image (canvas or decal): a textured quad, depth-tested against the model.
+#[derive(Clone)]
+pub struct GpuImage {
+    pub id: u64,
+    /// Changes when the pixels change (the texture is re-uploaded).
+    pub version: u64,
+    pub size: [u32; 2],
+    /// Straight RGBA8, `size[0] * size[1] * 4` bytes.
+    pub rgba: Arc<Vec<u8>>,
+    /// Bottom-left, bottom-right, top-right, top-left of the image.
+    pub corners: [[f32; 3]; 4],
+    pub opacity: f32,
+}
+
+/// Image vertex: position (3 × f32), uv (2 × f32), opacity (f32).
+const IMG_SIZE: usize = 24;
+
 /// Per-frame parameters.
 pub struct ViewportCallback {
     pub key: u64,
@@ -101,6 +118,8 @@ pub struct ViewportCallback {
     pub clip: [f32; 4],
     /// Colour of the inside of cut bodies (straight sRGBA, 0..1).
     pub cap: [f32; 4],
+    /// Canvases and decals.
+    pub images: Vec<GpuImage>,
 }
 
 struct Batch {
@@ -153,6 +172,13 @@ struct Resources {
     model: Batches,
     highlight: Batches,
     preview: Batches,
+    image: wgpu::RenderPipeline,
+    image_bgl: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    /// Textures by image id: (version, bind group).
+    textures: std::collections::HashMap<u64, (u64, wgpu::BindGroup)>,
+    /// This frame's quads: (image id, vertices).
+    quads: Vec<(u64, Batch)>,
 }
 
 const SHADER: &str = r#"
@@ -278,6 +304,35 @@ fn fs_line(i: LOut) -> @location(0) vec4<f32> {
     return out_color(i.c);
 }
 
+struct IOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) a: f32,
+    @location(2) wp: vec3<f32>,
+};
+
+@group(1) @binding(0) var img_t: texture_2d<f32>;
+@group(1) @binding(1) var img_s: sampler;
+
+@vertex
+fn vs_img(@location(0) p: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) a: f32) -> IOut {
+    var o: IOut;
+    o.pos = u.vp * vec4<f32>(p, 1.0);
+    // Pulled toward the eye like lines, so a decal on a face is not lost in it.
+    o.pos.z = o.pos.z - u.screen.z * o.pos.w;
+    o.uv = uv;
+    o.a = a;
+    o.wp = p;
+    return o;
+}
+
+@fragment
+fn fs_img(i: IOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    let c = textureSample(img_t, img_s, i.uv);
+    return out_color(vec4<f32>(c.rgb, c.a * i.a));
+}
+
 /// Lines the section never cuts (the grid, highlights drawn on top).
 @fragment
 fn fs_line_all(i: LOut) -> @location(0) vec4<f32> {
@@ -365,7 +420,70 @@ impl Resources {
             })
         };
         let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
+        let image_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("sc_image"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let image_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("sc_image"),
+            bind_group_layouts: &[Some(&bgl), Some(&image_bgl)],
+            immediate_size: 0,
+        });
+        const IA: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32];
+        let image = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("sc_image"),
+            layout: Some(&image_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_img"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: IMG_SIZE as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &IA,
+                })],
+                compilation_options: Default::default(),
+            },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+            depth_stencil: depth(wgpu::CompareFunction::LessEqual, false),
+            multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_img"),
+                targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
+                compilation_options: Default::default(),
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("sc_image"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         Resources {
+            image,
+            image_bgl,
+            sampler,
+            textures: Default::default(),
+            quads: Vec::new(),
             tri: pipeline("sc_tris", "vs_tri", "fs_solid", tri_layout(), depth(wgpu::CompareFunction::Less, true), None),
             tri_hl: pipeline("sc_tris_hl", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             trans: pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
@@ -419,6 +537,55 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         res.highlight.take(device, self.hl_key, &self.hl_slot);
         res.preview.take(device, self.pv_key, &self.pv_slot);
         queue.write_buffer(&res.uniform, 0, &uniform_bytes(self, self.size_px[0], self.size_px[1], res.linear_out));
+        // Images: upload new or changed textures, drop removed ones, rebuild the quads.
+        res.textures.retain(|id, _| self.images.iter().any(|i| i.id == *id));
+        res.quads.clear();
+        for img in &self.images {
+            let [w, h] = img.size;
+            if w == 0 || h == 0 || img.rgba.len() != (w as usize) * (h as usize) * 4 {
+                continue;
+            }
+            if res.textures.get(&img.id).is_none_or(|t| t.0 != img.version) {
+                let size = wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 };
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("sc_image"),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                    &img.rgba,
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * w), rows_per_image: Some(h) },
+                    size,
+                );
+                let view = tex.create_view(&Default::default());
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("sc_image"),
+                    layout: &res.image_bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&res.sampler) },
+                    ],
+                });
+                res.textures.insert(img.id, (img.version, bind));
+            }
+            let c = img.corners;
+            let uv = [[0.0_f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+            let mut bytes = Vec::with_capacity(6 * IMG_SIZE);
+            for k in [0, 1, 2, 0, 2, 3] {
+                for v in c[k].iter().chain(&uv[k]).chain(std::iter::once(&img.opacity)) {
+                    bytes.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+            if let Some(b) = upload(device, "sc_image_quad", &bytes, IMG_SIZE) {
+                res.quads.push((img.id, b));
+            }
+        }
         Vec::new()
     }
 
@@ -452,6 +619,14 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         lines(pass, &res.line, &m.lines);
         lines(pass, &res.line, &pv.lines);
         lines(pass, &res.line, &h.lines);
+        for (id, q) in &res.quads {
+            if let Some((_, bind)) = res.textures.get(id) {
+                pass.set_pipeline(&res.image);
+                pass.set_bind_group(1, bind, &[]);
+                pass.set_vertex_buffer(0, q.buffer.slice(..));
+                pass.draw(0..q.count, 0..1);
+            }
+        }
         tris(pass, &res.ghost, &pv.ghost);
         tris(pass, &res.trans, &m.trans);
         tris(pass, &res.trans, &h.trans);

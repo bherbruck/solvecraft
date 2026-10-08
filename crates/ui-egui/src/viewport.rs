@@ -1105,6 +1105,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             view_proj: proj.vp.to_f32(),
             back: proj.cam.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],
+            images: crate::ref_images::gpu_images(app),
         };
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
     } else {
