@@ -156,10 +156,17 @@ pub enum Kind {
         of: Vec<Sel>,
     },
     /// Move bodies by a distance along X, Y and Z.
+    /// Move/Copy (see `dialogs_move`): the move type, X/Y/Z distances (Point to Position: the
+    /// target), X/Y/Z angles (Free Move) and the angle (Rotate).
     Move {
+        mode: usize,
         x: String,
         y: String,
         z: String,
+        rx: String,
+        ry: String,
+        rz: String,
+        angle: String,
     },
     Hole {
         diameter: String,
@@ -367,9 +374,7 @@ impl Dialog {
                 Kind::Sweep { operation: usize::from(has_bodies) },
                 vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Path", CURVES, true)],
             ),
-            "FusionMoveCommand" => {
-                Dialog::new(Kind::Move { x: "0 mm".into(), y: "0 mm".into(), z: "10 mm".into() }, vec![SelInput::new("Bodies", BODIES, true)])
-            }
+            "FusionMoveCommand" => Dialog::new(crate::dialogs_move::kind(0), crate::dialogs_move::inputs(0)),
             "FusionHoleCommand" => Dialog::new(hole_defaults(), vec![SelInput::new("Face", PLANAR_FACES, true)]),
             "PrimitiveBox" => Dialog::new(
                 Kind::Primitive {
@@ -550,7 +555,7 @@ impl Dialog {
             Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Hole { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
-            Kind::Move { z, .. } => ("Z", ValueKind::Length, z),
+            Kind::Move { x, .. } => ("X", ValueKind::Length, x),
             Kind::PatternRect { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
             Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Section { offset, .. } => ("Distance", ValueKind::Length, offset),
@@ -891,6 +896,10 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
 /// Rows above the selection inputs: the pattern type and object type, the Hole placement (one
 /// face point, or sketch points).
 fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
+    if matches!(d.kind, Kind::Move { .. }) {
+        crate::dialogs_move::type_row(d, ui);
+        return;
+    }
     let current = match d.kind {
         Kind::PatternRect { .. } => Some(0),
         Kind::PatternCirc { .. } => Some(1),
@@ -1370,13 +1379,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         combo(ui, "sw_op", &OP_LABELS, operation);
                         ui.end_row();
                     }
-                    Kind::Move { x, y, z } => {
-                        for (l, v) in [("X distance", x), ("Y distance", y), ("Z distance", z)] {
-                            row_label(ui, l);
-                            enter |= field(ui, v);
-                            ui.end_row();
-                        }
-                    }
+                    k @ Kind::Move { .. } => enter |= crate::dialogs_move::rows(ui, k),
                     Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
                         row_label(ui, "Extents");
                         let mut ext = usize::from(opts.all);
@@ -2031,10 +2034,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             ("FusionHalfSectionViewCommand", json!({"plane": plane, "offset": offset, "flip": flip}))
         }
-        Kind::Move { x, y, z } => {
-            need(0, "bodies")?;
-            ("FusionMoveCommand", json!({"bodies": body_names(0), "translate": [x, y, z]}))
-        }
+        Kind::Move { .. } => return Ok(vec![("FusionMoveCommand".into(), crate::dialogs_move::params(app, d)?)]),
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
             need(0, if opts.multiple { "sketch points" } else { "a face position" })?;
             let ty = match *kind {
@@ -2709,17 +2709,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         }
         FeatureKind::Move { bodies, translate, rotate_axis, angle } => {
             let mut d = start("FusionMoveCommand")?;
-            let [x, y, z] = translate.clone();
-            d.kind = Kind::Move { x, y, z };
-            if let Some(inp) = d.inputs.first_mut() {
-                inp.items = bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect();
-            }
-            if let Some(a) = rotate_axis {
-                d.extra.insert("axis".into(), pt3(*a));
-            }
-            if let Some(a) = angle {
-                d.extra.insert("angle".into(), json!(a));
-            }
+            crate::dialogs_move::for_feature(&mut d, bodies, translate, *rotate_axis, angle.as_ref());
             d
         }
         other => {

@@ -48,7 +48,8 @@ scenarios!(
     s22_sheet_metal_fold,
     s23_configurations,
     s24_motion_study,
-    s25_autosave_recovery
+    s25_autosave_recovery,
+    s27_move_triad
 );
 
 /// Scenarios written ahead of their fixes or features (the user's open bugs): run with

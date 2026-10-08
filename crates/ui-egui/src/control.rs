@@ -280,6 +280,11 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 // Along an origin axis, on its solid part.
                 let size = crate::selection::origin_size(app.cam.half_height());
                 crate::viewport::origin_axes(app).into_iter().find(|(name, _)| *name == n).map(|(_, d)| d * (size * 0.8))
+            } else if let Some(n) = p.get("gizmo").and_then(Value::as_str) {
+                // A handle of the move triad ("x", "xy", "rz", "ball"), moved `by` [x,y,z] mm or
+                // turned `turn` degrees (rings).
+                let by = p.get("by").map(|b| solvecraft_engine::geom::Vec3::new(num(b, 0), num(b, 1), num(b, 2))).unwrap_or_default();
+                crate::gizmo::handle_point(n, by, p.get("turn").and_then(Value::as_f64).unwrap_or(0.0))
             } else {
                 None
             };

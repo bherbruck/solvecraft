@@ -52,7 +52,6 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         | Kind::OffsetFaces { .. } => (at, normal),
         // Shell thickness grows into the body.
         Kind::Shell { .. } => (at, normal.map(|n| -n)),
-        Kind::Move { .. } => (at, Some(Vec3::Z)),
         Kind::Sheet(_) => (at, crate::dialogs_sheet::arrow(app, d).or(normal)),
         Kind::Plastic(_) => (at, normal),
         Kind::PatternRect { .. } => (at, d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1)),
@@ -93,6 +92,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     }
     if let Kind::Measure { result: Some(r), .. } = &d.kind {
         measure_line(painter, proj, r);
+        app.dialog = Some(d);
+        return;
+    }
+    // Move: the triad at the pivot; dragging it sets the distances and angles.
+    if matches!(d.kind, Kind::Move { .. }) {
+        if let Some(t) = crate::dialogs_move::triad(app, &d)
+            && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::new("sc_move_triad"), &t, snap_step(app.cam.half_height()))
+        {
+            crate::dialogs_move::drag(app, &mut d, g);
+        }
         app.dialog = Some(d);
         return;
     }
