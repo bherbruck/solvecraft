@@ -23,11 +23,13 @@ pub struct ModelBody {
     /// Identity of this body's content for the evaluation cache: the key of the evaluation
     /// that produced it (kept while later features pass it through unchanged).
     key: u64,
+    /// Persistent face names (worked out on first use).
+    pub(crate) names: crate::naming::NameCell,
 }
 
 impl ModelBody {
     pub fn new(name: String, body: Body, feature: u64) -> Self {
-        ModelBody { name, body, feature, mesh: OnceLock::new(), key: 0 }
+        ModelBody { name, body, feature, mesh: OnceLock::new(), key: 0, names: Default::default() }
     }
     /// Display mesh (chord tolerance 1/1000 of the body size), computed once.
     pub fn mesh(&self) -> Arc<Mesh> {
@@ -216,14 +218,24 @@ impl ModelState {
 
     /// After a feature evaluated to this state from `before` with cache key `key`: bodies it
     /// made or changed, and sketches it made, take that key; the rest keep theirs.
-    fn stamp(&mut self, before: &ModelState, feature: u64, key: u64) {
+    fn stamp(&mut self, before: &Arc<ModelState>, f: &Feature, key: u64) {
+        let feature = f.id;
+        let depth = before.bodies.iter().filter_map(|b| b.names.origin.as_ref().map(|o| o.depth)).max().unwrap_or(0) + 1;
+        let origin = Arc::new(crate::naming::NamingOrigin { feature: f.clone(), before: before.clone(), depth });
         for b in &mut self.bodies {
-            let kept = before.bodies.iter().find(|x| x.name == b.name && x.body.same(&b.body)).map(|x| x.key);
-            b.key = kept.unwrap_or_else(|| {
-                let mut h = std::collections::hash_map::DefaultHasher::new();
-                (key, &b.name).hash(&mut h);
-                h.finish()
-            });
+            let kept = before.bodies.iter().find(|x| x.name == b.name && x.body.same(&b.body));
+            match kept {
+                Some(x) => {
+                    b.key = x.key;
+                    b.names = x.names.clone();
+                }
+                None => {
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    (key, &b.name).hash(&mut h);
+                    b.key = h.finish();
+                    b.names = crate::naming::NameCell::new(Some(origin.clone()));
+                }
+            }
         }
         if self.sketches.iter().any(|s| s.feature == feature) {
             self.sketch_keys.insert(feature, key);
@@ -516,7 +528,7 @@ impl Model {
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
             let error = match r {
                 Ok(()) => {
-                    next.stamp(&state, f.id, key);
+                    next.stamp(&state, f, key);
                     state = Arc::new(next);
                     None
                 }
@@ -900,6 +912,14 @@ pub fn edge_refs(st: &ModelState, body: &Option<String>, pts: &[Vec3]) -> Vec<Ed
             EdgeRef { dir: e.map(edge_dir).unwrap_or(Vec3::ZERO), min: bb.min, max: bb.max }
         })
         .collect()
+}
+
+/// Persistent names of the edges picked at `pts` on the body a blend would go on.
+pub fn edge_names_for(st: &ModelState, body: &Option<String>, pts: &[Vec3]) -> Vec<String> {
+    match blend_target(st, body, pts).ok().and_then(|i| st.bodies.get(i)) {
+        Some(b) => crate::naming::edge_names_at(b, pts),
+        None => Vec::new(),
+    }
 }
 
 /// Edge reference points re-found on the body: points on an edge stay; a point that moved off
@@ -1919,7 +1939,44 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let r = val(vals, radius, Kind::Length)?;
             let ti = blend_target(st, body, edges)?;
             let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
-            let edges = resolve_edges(&mb.body, edges, &f.edge_refs, warning)?;
+            let edges = if f.edge_names.iter().any(|n| !n.is_empty()) {
+                // By name first; a name that is gone falls back to the point, with a warning.
+                let (mut out, mut notes) = (Vec::new(), Vec::new());
+                for (i, p) in edges.iter().enumerate() {
+                    match f.edge_names.get(i).filter(|n| !n.is_empty()).map(|n| (n, crate::naming::find_edge(mb, n, *p))) {
+                        Some((_, Ok((q, false)))) => out.push(q),
+                        Some((n, Ok((q, true)))) => {
+                            notes.push(format!("edge `{n}` was split; using the piece nearest the picked point"));
+                            out.push(q);
+                        }
+                        Some((_, Err(_))) | None => {
+                            let mut w = None;
+                            let refs: Vec<EdgeRef> = f.edge_refs.get(i).cloned().into_iter().collect();
+                            if let Ok(q) = resolve_edges(&mb.body, &[*p], &refs, &mut w) {
+                                out.extend(q);
+                                notes.push(match f.edge_names.get(i) {
+                                    Some(n) if !n.is_empty() => format!("edge `{n}` no longer exists; using the edge at the picked point"),
+                                    _ => "an edge reference without a name was found by its point".into(),
+                                });
+                            } else {
+                                notes.push(format!(
+                                    "edge `{}` no longer exists and was skipped",
+                                    f.edge_names.get(i).map(String::as_str).unwrap_or("?")
+                                ));
+                            }
+                        }
+                    }
+                }
+                if out.is_empty() {
+                    return Err(DocError::Invalid("none of the selected edges exist any more".into()));
+                }
+                if !notes.is_empty() {
+                    *warning = Some(notes.join("; "));
+                }
+                out
+            } else {
+                resolve_edges(&mb.body, edges, &f.edge_refs, warning)?
+            };
             let nb = if matches!(f.kind, FeatureKind::Fillet { .. }) {
                 kernel::fillet(&mb.body, &edges, r)?
             } else {

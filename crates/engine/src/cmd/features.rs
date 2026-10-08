@@ -244,17 +244,17 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
     let mut kind = kind;
     super::component::to_active_frame(s, &mut kind);
     // Blends remember where their edges sat, to find them again after upstream edits.
-    let refs = match &kind {
+    let (refs, names) = match &kind {
         FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => {
-            solvecraft_doc::edge_refs(&s.model.state(), body, edges)
+            let st = s.model.state();
+            (solvecraft_doc::edge_refs(&st, body, edges), solvecraft_doc::edge_names_for(&st, body, edges))
         }
-        _ => Vec::new(),
+        _ => (Vec::new(), Vec::new()),
     };
     let id = s.doc_mut().add_feature(kind, name)?;
-    if !refs.is_empty()
-        && let Some(f) = s.doc_mut().feature_mut(id)
-    {
+    if let Some(f) = s.doc_mut().feature_mut(id) {
         f.edge_refs = refs;
+        f.edge_names = names;
     }
     s.doc_mut().name_feature_inputs(id);
     let comp = s.active_component;

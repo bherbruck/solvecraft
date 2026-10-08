@@ -228,11 +228,12 @@ fn model_edges(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.world_state();
     let b = body_of(&st, p, "model.edges")?;
     let tol = (b.body.size() * 2e-3).max(1e-3);
+    let names = solvecraft_doc::naming::edge_names(b);
     let edges: Vec<Value> = b
         .body
         .edges(tol)?
         .iter()
-        .map(|e| json!({"index": e.index, "mid": e.mid, "length": e.length, "start": e.points.first(), "end": e.points.last()}))
+        .map(|e| json!({"index": e.index, "name": names.get(e.index), "mid": e.mid, "length": e.length, "start": e.points.first(), "end": e.points.last()}))
         .collect();
     Ok(json!({"body": b.name, "edges": edges}))
 }
@@ -240,12 +241,13 @@ fn model_edges(s: &mut Session, p: &Value) -> Result<Value> {
 fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.world_state();
     let b = body_of(&st, p, "model.faces")?;
+    let names = solvecraft_doc::naming::face_names(b);
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let faces: Vec<Value> = b
         .body
         .faces(tol)?
         .iter()
-        .map(|f| json!({"index": f.index, "area": f.area, "centroid": f.centroid, "plane_normal": f.plane_normal}))
+        .map(|f| json!({"index": f.index, "name": names.get(f.index), "area": f.area, "centroid": f.centroid, "plane_normal": f.plane_normal}))
         .collect();
     Ok(json!({"body": b.name, "faces": faces}))
 }

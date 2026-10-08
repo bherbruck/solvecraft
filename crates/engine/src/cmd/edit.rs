@@ -189,7 +189,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     ) = (&nf.kind, &f.kind)
         && a != b
     {
-        nf.edge_refs = solvecraft_doc::edge_refs(&s.model.state_before(id), body, a);
+        let before = s.model.state_before(id);
+        nf.edge_refs = solvecraft_doc::edge_refs(&before, body, a);
+        nf.edge_names = solvecraft_doc::edge_names_for(&before, body, a);
     }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;

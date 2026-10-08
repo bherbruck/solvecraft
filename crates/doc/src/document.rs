@@ -1015,6 +1015,9 @@ pub struct Feature {
     /// is found again when earlier edits move or resize the body.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub edge_refs: Vec<crate::EdgeRef>,
+    /// Persistent names of the picked edges (resolved first; see `naming`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edge_names: Vec<String>,
     #[serde(flatten)]
     pub kind: FeatureKind,
 }
@@ -1275,7 +1278,17 @@ impl Document {
             Some(n) if !n.trim().is_empty() => n.trim().to_string(),
             _ => self.unique_name(kind.base_name()),
         };
-        let f = Feature { id, name, suppressed: false, body_names: Vec::new(), param_names: Vec::new(), component: 0, edge_refs: Vec::new(), kind };
+        let f = Feature {
+            id,
+            name,
+            suppressed: false,
+            body_names: Vec::new(),
+            param_names: Vec::new(),
+            component: 0,
+            edge_refs: Vec::new(),
+            edge_names: Vec::new(),
+            kind,
+        };
         match self.marker {
             Some(m) if m < self.features.len() => {
                 self.features.insert(m, f);

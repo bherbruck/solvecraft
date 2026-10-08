@@ -386,12 +386,12 @@ fn timeline_edits_reresolve_references() {
     let fillet = |l: f64| (9.0 - 9.0 * PI / 4.0) * l;
     let expect = |l: f64, h: f64| l * 30.0 * h - fillet(l) - PI * 9.0 * h;
     assert!(rel(volume(&mut s), expect(40.0, 20.0)) < 1e-3);
-    // Taller box: the fillet's edge point is now 5 mm below the edge (re-found, with a warning)
-    // and the hole moves up with the top face.
+    // Taller box: the fillet's edge point is now 5 mm below the edge; the edge is found by its
+    // name (no warning) and the hole moves up with the top face.
     run(&mut s, "timeline.edit", json!({"feature": "Base", "set": {"height": "25"}}));
     assert!(rel(volume(&mut s), expect(40.0, 25.0)) < 1e-3, "{}", volume(&mut s));
     let round = s.doc.find_feature("Round").map(|f| f.id).unwrap();
-    assert!(s.model.result(round).and_then(|r| r.warning.clone()).is_some_and(|w| w.contains("re-found")));
+    assert_eq!(s.model.result(round).and_then(|r| r.warning.clone()), None);
     // Longer box: the point still lies on the (longer) edge.
     run(&mut s, "timeline.edit", json!({"feature": "Base", "set": {"length": "60"}}));
     assert!(rel(volume(&mut s), expect(60.0, 25.0)) < 1e-3, "{}", volume(&mut s));
@@ -1165,4 +1165,105 @@ fn fillet_follows_its_edge_after_an_upstream_resize() {
     assert!((v(&mut s) - (18000.0 - strip)).abs() < 0.05, "{}", v(&mut s));
     let fillet = s.doc.features.last().map(|f| f.id).unwrap_or(0);
     assert!(s.model.result(fillet).and_then(|r| r.warning.clone()).is_none(), "followed without a warning");
+}
+
+mod naming {
+    use serde_json::{Value, json};
+
+    use super::run;
+    use crate::Session;
+
+    fn volume(s: &mut Session) -> f64 {
+        run(s, "MeasureCommand", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(0.0)
+    }
+
+    fn warning(s: &Session, name: &str) -> Option<String> {
+        let id = s.doc.find_feature(name).map(|f| f.id)?;
+        s.model.result(id).and_then(|r| r.warning.clone())
+    }
+
+    /// A 40 x 30 x 10 block (sketch S: l1…l4 counter-clockwise from the origin), a hole H, a
+    /// fillet on the right top edge.
+    fn block() -> Session {
+        let mut s = Session::default();
+        run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [40, 30]}));
+        run(&mut s, "SketchDimension", json!({"entities": ["l1"], "value": 40}));
+        run(&mut s, "SketchStop", json!({}));
+        run(&mut s, "Extrude", json!({"distance": 10, "name": "Block"}));
+        run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "H"}));
+        run(&mut s, "CircleCenterRadius", json!({"center": [12, 15], "radius": 4}));
+        run(&mut s, "SketchStop", json!({}));
+        run(&mut s, "Extrude", json!({"sketch": "H", "distance": 10, "operation": "cut", "name": "Hole"}));
+        run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [[40, 15, 10]], "radius": 2, "name": "Round"}));
+        s
+    }
+
+    const STRIP: f64 = (4.0 - std::f64::consts::PI) * 30.0;
+
+    #[test]
+    fn faces_and_edges_are_named_from_their_history() {
+        let mut s = block();
+        let f = run(&mut s, "model.faces", json!({"body": "Body1"}));
+        let names: Vec<&str> = f["faces"].as_array().into_iter().flatten().filter_map(|x| x["name"].as_str()).collect();
+        for want in ["F2:start", "F2:top", "F2:side:l1", "F2:side:l2", "F2:side:l3", "F2:side:l4"] {
+            assert!(names.contains(&want), "{want} in {names:?}");
+        }
+        assert!(names.iter().any(|n| n.starts_with("F4:side:c1")), "{names:?}");
+        assert!(names.iter().any(|n| n.starts_with("F5:blend:")), "{names:?}");
+        let round = s.doc.find_feature("Round").cloned().unwrap();
+        assert_eq!(round.edge_names, vec!["F2:side:l2|F2:top".to_string()]);
+    }
+
+    #[test]
+    fn a_resize_keeps_the_edge() {
+        let mut s = block();
+        let d = s.doc.find_feature("S").and_then(|f| f.param_names.first().cloned()).unwrap_or_else(|| "d1".into());
+        run(&mut s, "ChangeParameterCommand", json!({"name": d, "expression": "60"}));
+        assert!((volume(&mut s) - (18000.0 - std::f64::consts::PI * 16.0 * 10.0 - STRIP)).abs() < 0.1, "{}", volume(&mut s));
+        assert_eq!(warning(&s, "Round"), None);
+    }
+
+    #[test]
+    fn suppress_and_reorder_upstream_keep_the_edge() {
+        let mut s = block();
+        let v = volume(&mut s);
+        run(&mut s, "timeline.suppress", json!({"feature": "Hole", "suppressed": true}));
+        assert!((volume(&mut s) - (12000.0 - STRIP)).abs() < 0.1);
+        assert_eq!(warning(&s, "Round"), None);
+        run(&mut s, "timeline.suppress", json!({"feature": "Hole", "suppressed": false}));
+        assert!((volume(&mut s) - v).abs() < 1e-6);
+        // The hole after the fillet: same part, same edge.
+        run(&mut s, "timeline.reorder", json!({"feature": "Hole", "position": 4}));
+        assert!((volume(&mut s) - v).abs() < 0.1, "{} {v}", volume(&mut s));
+        assert_eq!(warning(&s, "Round"), None);
+    }
+
+    #[test]
+    fn a_split_edge_warns_and_takes_the_nearest_piece() {
+        let mut s = block();
+        // Upstream of the fillet, a notch through the middle of the filleted edge.
+        run(&mut s, "timeline.rollTo", json!({"feature": "Hole"}));
+        run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "N"}));
+        run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [36, 12], "p1": [44, 18]}));
+        run(&mut s, "SketchStop", json!({}));
+        run(&mut s, "Extrude", json!({"sketch": "N", "distance": 10, "operation": "cut", "name": "Notch"}));
+        run(&mut s, "timeline.rollTo", json!({}));
+        let w = warning(&s, "Round").unwrap_or_default();
+        assert!(w.contains("split"), "{w}");
+    }
+
+    #[test]
+    fn a_removed_segment_warns() {
+        let mut s = block();
+        // Replace the right side (l2) of the rectangle with a new line: the face it made is gone.
+        let sk = s.doc.find_feature("S").map(|f| f.id).unwrap();
+        run(&mut s, "SketchActivate", json!({"sketch": sk}));
+        run(&mut s, "sketch.delete", json!({"entities": ["l2"]}));
+        run(&mut s, "DrawPolyline", json!({"points": [[40, 0], [40, 30]], "ids": ["right"]}));
+        let r: Result<Value, _> = s.execute("SketchStop", &json!({}));
+        assert!(r.is_ok() || r.is_err());
+        let w = warning(&s, "Round").unwrap_or_default();
+        assert!(w.contains("no longer exists"), "{w}");
+    }
 }
