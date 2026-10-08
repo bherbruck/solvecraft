@@ -564,3 +564,58 @@ fn constraints_and_dimensions_can_be_selected_and_deleted_together() {
     run(&mut s, "selection.delete", json!({"items": items}));
     assert!(sketch(&s).constraints.is_empty());
 }
+
+// ---------------------------------------------------------------------------------------------
+// 3D sketch
+
+#[test]
+fn three_d_curves_need_the_option_and_move_joined() {
+    let mut s = new_sketch();
+    assert!(s.execute("sketch.line3d", &json!({"points": [[0, 0, 0], [0, 0, 10]]})).is_err());
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 10], [10, 0, 10]]}));
+    let ids = curve_ids(&r);
+    assert_eq!(ids.len(), 2);
+    run(&mut s, "sketch.point3d", json!({"point": [5, 5, 5]}));
+    let sp = run(&mut s, "sketch.spline3d", json!({"points": [[10, 0, 10], [15, 5, 12], [20, 0, 20]]}));
+    let sid = curve_ids(&sp)[0].clone();
+    let sk = sketch(&s);
+    let w = &sk.wires[sk.wire_index(&sid).expect("spline")];
+    assert!(w.pts.len() > 10);
+    assert!(w.pts.first().expect("p").dist(solvecraft_geom::Vec3::new(10.0, 0.0, 10.0)) < 1e-12);
+    assert!(w.pts.last().expect("p").dist(solvecraft_geom::Vec3::new(20.0, 0.0, 20.0)) < 1e-12);
+    // The shared corner moves for both lines (and the spline that starts there).
+    let r = run(&mut s, "sketch.move3d", json!({"wire": ids[1], "index": 1, "by": [0, 0, 5]}));
+    assert_eq!(r["moved"], 2);
+    let r = run(&mut s, "sketch.move3d", json!({"wire": ids[0], "index": 1, "to": [0, 3, 12]}));
+    assert_eq!(r["moved"], 2);
+    let sk = sketch(&s);
+    let fit = |id: &str| sk.wires[sk.wire_index(id).expect("w")].fit.clone();
+    assert_eq!(fit(&ids[0])[1], fit(&ids[1])[0]);
+    assert!(s.execute("sketch.move3d", &json!({"wire": "nope", "to": [0, 0, 0]})).is_err());
+    assert!(s.execute("sketch.line3d", &json!({"points": [[0, 0, 0], [0, 0, 0]]})).is_err());
+    assert!(s.execute("sketch.line3d", &json!({"points": [[0, 0, 0], [f64::NAN, 0, 0]]})).is_err());
+    // Deleting works like any sketch entity.
+    run(&mut s, "sketch.delete", json!({"entities": [sid]}));
+    assert!(sketch(&s).wire_index(&curve_ids(&sp)[0]).is_none());
+}
+
+#[test]
+fn pipe_and_sweep_follow_3d_sketch_curves() {
+    let mut s = Session::default();
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 30], [20, 0, 30]]}));
+    let mut path = curve_ids(&r);
+    let sp = run(&mut s, "sketch.spline3d", json!({"points": [[20, 0, 30], [35, 10, 35], [50, 0, 50]]}));
+    path.extend(curve_ids(&sp));
+    run(&mut s, "SketchStop", json!({}));
+    let p = run(&mut s, "PrimitivePipe", json!({"path_sketch": "Path", "path": path, "diameter": 4}));
+    let si = run(&mut s, "document.inspect", json!({"measure": true}));
+    let body = si["bodies"].as_array().and_then(|b| b.first()).cloned().unwrap_or_default();
+    // The tube runs from the first line's start to the spline's end (radius 2 around them).
+    let (lo, hi) = (&body["bbox"]["min"], &body["bbox"]["max"]);
+    let near = |v: &Value, x: f64| (v.as_f64().unwrap_or(f64::NAN) - x).abs() < 0.5;
+    assert!(near(&lo[0], -2.0) && near(&lo[2], 0.0) && near(&hi[0], 52.0) && near(&hi[2], 50.0), "{p} {body}");
+    assert!(body["volume_mm3"].as_f64().unwrap_or(0.0) > 4.0 * std::f64::consts::PI * 50.0 * 0.95, "{p} {body}");
+}

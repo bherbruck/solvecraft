@@ -29,6 +29,7 @@ mod preselect_tests;
 pub mod preview;
 pub mod ref_images;
 pub mod selection;
+pub mod sketch3d;
 pub mod sketch_dims;
 #[cfg(test)]
 mod sketch_edit_tests;

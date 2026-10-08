@@ -1138,9 +1138,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let sketching = app.session.active_sketch.is_some();
                 let on_dim = crate::dim_view::hit(p).filter(|_| sketching && !off("dimensions"));
                 let on_glyph = crate::sketch_tools::glyph_at(p).filter(|_| sketching && !off("constraints"));
-                match on_dim.or(on_glyph) {
-                    Some(id) => select(app, Some(Sel::SketchConstraint { id }), add),
-                    None => select(app, cand.and_then(|c| c.1), add),
+                if !crate::sketch3d::click(app, &proj, p) {
+                    match on_dim.or(on_glyph) {
+                        Some(id) => select(app, Some(Sel::SketchConstraint { id }), add),
+                        None => select(app, cand.and_then(|c| c.1), add),
+                    }
                 }
             }
         }
@@ -1190,12 +1192,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let (o, d) = proj.ray(p);
             ss.plane.intersect_ray(o, d).map(|w| ss.plane.to_local(w))
         };
-        // A dimension's text follows a drag that starts on it.
+        // The 3D triad, then a dimension's text, follow a drag that starts on them.
         if resp.drag_started_by(egui::PointerButton::Primary)
             && let Some(a) = ui.input(|i| i.pointer.press_origin())
+            && !crate::sketch3d::drag_start(app, &proj, a)
             && let Some(q) = on_plane(app, a)
         {
             crate::dim_view::drag_start(app, a, q);
+        }
+        if crate::sketch3d::dragging()
+            && (resp.dragged_by(egui::PointerButton::Primary) || resp.drag_stopped())
+            && let Some(p) = hover
+        {
+            crate::sketch3d::drag_to(app, &proj, p);
         }
         if crate::dim_view::dragging()
             && (resp.dragged_by(egui::PointerButton::Primary) || resp.drag_stopped())
@@ -1206,6 +1215,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // A point or a curve of the sketch being edited follows a drag that starts on it.
         if resp.drag_started_by(egui::PointerButton::Primary)
             && !crate::dim_view::dragging()
+            && !crate::sketch3d::dragging()
             && let Some(a) = ui.input(|i| i.pointer.press_origin())
         {
             let active = app.session.active_sketch;
@@ -1232,10 +1242,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         if resp.drag_stopped() {
             app.viewport.point_drag = None;
             crate::dim_view::drag_end();
+            crate::sketch3d::drag_end();
         }
     }
     // Box selection: a primary drag on the model when no navigation mode is on.
-    if app.tool.is_none() && app.viewport.nav.is_none() && app.viewport.point_drag.is_none() && !crate::dim_view::dragging() {
+    if app.tool.is_none()
+        && app.viewport.nav.is_none()
+        && app.viewport.point_drag.is_none()
+        && !crate::dim_view::dragging()
+        && !crate::sketch3d::dragging()
+    {
         let origin = ui.input(|i| i.pointer.press_origin());
         if resp.dragged_by(egui::PointerButton::Primary)
             && let (Some(a), Some(b)) = (origin, hover)
@@ -1255,6 +1271,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::ref_images::show(app, ui, &painter, &proj);
     overlays(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);
+    crate::sketch3d::show(app, &painter, &proj);
     hover_highlight(app, &painter, &proj);
     points_2d(app, &painter, &proj);
     if let Some(bx) = app.viewport.boxsel {

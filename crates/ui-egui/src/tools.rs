@@ -100,6 +100,7 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
 }
 
 pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
+    crate::sketch3d::on_hover(app, proj, pos);
     let h = sketch_point_at(app, proj, pos);
     if let Some(t) = app.tool.as_mut() {
         t.hover = h;
@@ -108,6 +109,11 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
 
 pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
     let Some(mut tool) = app.tool.take() else { return };
+    // In a 3D sketch the drawing tools take points off the plane.
+    if crate::sketch3d::on_click(app, &mut tool, proj, pos) {
+        app.tool = Some(tool);
+        return;
+    }
     match tool.kind {
         Kind::Draw(_) => {
             if let Some(mut p) = sketch_point_at(app, proj, pos) {
@@ -252,6 +258,9 @@ fn run_pick(app: &mut SolveApp, t: &Tool) {
 
 /// Right click / Esc: end the current chain (line) or cancel the tool.
 pub fn finish(app: &mut SolveApp) {
+    if crate::sketch3d::finish(app) {
+        return;
+    }
     if let Some(mut t) = app.tool.take_if(|t| t.kind == Kind::Ext) {
         if crate::sketch_tools::finish(app, &mut t) {
             app.tool = Some(t);
@@ -270,6 +279,9 @@ pub fn finish(app: &mut SolveApp) {
 
 /// Rubber-band preview of the shape being drawn.
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
+    if crate::sketch3d::preview(app, t, painter, proj) {
+        return;
+    }
     if t.kind == Kind::Ext {
         return crate::sketch_tools::preview(app, t, painter, proj);
     }

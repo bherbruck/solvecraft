@@ -95,8 +95,16 @@ pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool
         }
     }
     // 3D curves are in world coordinates already.
-    for w in sk.wires.iter().filter(|_| !sk.view.hide_projected) {
-        out.push((w.pts.clone(), colors::SKETCH_PROJECTED, false));
+    for w in sk.wires.iter().filter(|w| !w.fit.is_empty() || !sk.view.hide_projected) {
+        // Curves drawn in a 3D sketch look like the sketch's own; included ones are references.
+        let col = if w.fit.is_empty() {
+            colors::SKETCH_PROJECTED
+        } else if active {
+            colors::SKETCH
+        } else {
+            colors::SKETCH_DONE
+        };
+        out.push((w.pts.clone(), col, false));
     }
     out
 }

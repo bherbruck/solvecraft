@@ -21,6 +21,7 @@ mod parameters;
 mod plastic;
 mod sheet;
 mod sketch;
+mod sketch_3d;
 mod sketch_canvas;
 mod sketch_constraints;
 mod sketch_create;
@@ -130,6 +131,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_import::COMMANDS.iter());
     v.extend(sketch_inspect::COMMANDS.iter());
     v.extend(sketch_canvas::COMMANDS.iter());
+    v.extend(sketch_3d::COMMANDS.iter());
     v.extend(sketch_modify::COMMANDS.iter());
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());

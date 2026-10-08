@@ -207,6 +207,30 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             "dimension_selected": crate::dim_view::selected(app),
             "dimension_editing": crate::dim_view::editing(),
         })),
+        "ui.triad" => {
+            // Screen points of the 3D move triad's handles (x, y, z arrows and the plane square).
+            let Some(rect) = app.viewport.rect else { return err("no viewport") };
+            let proj = crate::viewport::projection(app, rect);
+            ok(json!(
+                crate::sketch3d::handle_points(app, &proj).into_iter().map(|(n, p)| json!({"handle": n, "x": p.x, "y": p.y})).collect::<Vec<_>>()
+            ))
+        }
+        "ui.worldToScreen" => {
+            let Some(rect) = app.viewport.rect else { return err("no viewport") };
+            let proj = crate::viewport::projection(app, rect);
+            let pts: Vec<Value> = p
+                .get("points")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .take(1000)
+                .map(|v| {
+                    let c = |i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
+                    proj.to_screen(solvecraft_engine::geom::Vec3::new(c(0), c(1), c(2))).map_or(Value::Null, |q| json!([q.x, q.y]))
+                })
+                .collect();
+            ok(json!(pts))
+        }
         "ui.sketchToScreen" => {
             // Screen points of active-sketch coordinates (for driving sketch interaction).
             let st = app.session.model.state();

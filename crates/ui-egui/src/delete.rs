@@ -31,7 +31,7 @@ fn is_empty(p: &Value) -> bool {
 /// Delete what is selected (the Delete key). A selected sketch dimension or constraint glyph
 /// goes first, as before.
 pub fn delete_selection(app: &mut SolveApp) {
-    if crate::sketch_tools::delete_glyph(app) {
+    if crate::sketch3d::delete_selected(app) || crate::sketch_tools::delete_glyph(app) {
         return;
     }
     request(app, selection_params(app));
