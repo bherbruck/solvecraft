@@ -15,8 +15,9 @@ fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
 
 /// Sweep a planar region's outer loop along a helix about `axis` through `axis_origin`:
 /// `turns` revolutions (right-handed about `axis`), rising `pitch` per turn. The profile keeps
-/// its attitude relative to the axis, as a screw motion does; between stations (3° apart) the
-/// walls are ruled.
+/// its attitude relative to the axis, as a screw motion does. The walls are B-spline surfaces
+/// (one per profile segment); if those cannot be built, ruled walls between stations 3° apart
+/// stand in.
 pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64) -> Result<Body> {
     let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
     if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= 200.0 && pitch.abs() < 1e7 && axis_origin.is_finite()) {
@@ -32,6 +33,10 @@ pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec
     let extent = along.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - along.iter().cloned().fold(f64::INFINITY, f64::min);
     if turns > 1.0 && pitch.abs() <= extent {
         return Err(KernelError::Invalid(format!("the coil runs into itself: the pitch must exceed the section ({extent:.3} mm)")));
+    }
+    // One smooth B-spline wall per profile segment; the ruled walls below are the fallback.
+    if let Ok(b) = smooth_helix(plane, &lp, axis_origin, k, pitch, turns) {
+        return Ok(b);
     }
     let n = ((turns * 120.0).ceil() as usize).clamp(4, 24_000);
     let total = std::f64::consts::TAU * turns;
@@ -52,6 +57,101 @@ pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec
         let (Some(first), Some(last)) = (wires.first(), wires.last()) else { return Err(KernelError::Failed("helix".into())) };
         cap_and_close(faces, std::slice::from_ref(first), std::slice::from_ref(last))
     })
+}
+
+/// Samples per profile segment and stations per turn of the smooth helical walls.
+const SEG_SAMPLES: usize = 12;
+const STATIONS_PER_TURN: f64 = 12.0;
+
+/// Helical walls as B-spline surfaces: each profile segment, sampled at every station of the
+/// screw motion, interpolated by cubics across the profile and then along the helix.
+fn smooth_helix(plane: &Plane, lp: &Loop2, o: Vec3, k: Vec3, pitch: f64, turns: f64) -> Result<Body> {
+    let nseg = lp.segs.len();
+    if nseg == 0 || nseg > 64 {
+        return Err(KernelError::Invalid("helix profile".into()));
+    }
+    let n = ((turns * STATIONS_PER_TURN).ceil() as usize).clamp(4, 4800);
+    let total = std::f64::consts::TAU * turns;
+    let at = |i: usize, q: solvecraft_geom::Vec2| {
+        let a = total * i as f64 / n as f64;
+        let w = plane.to_world(q);
+        o + rot(w - o, k, a) + k * (pitch * a / std::f64::consts::TAU)
+    };
+    let fail = |w: &str| KernelError::Failed(format!("smooth helix: {w}"));
+    // Per segment: the station curves (control points along v) and the surface net.
+    let mut faces_data = Vec::with_capacity(nseg);
+    for s in &lp.segs {
+        let mut station_curves = Vec::with_capacity(n + 1);
+        for i in 0..=n {
+            let pts: Vec<Vec3> = (0..SEG_SAMPLES).map(|j| at(i, s.point_at(j as f64 / (SEG_SAMPLES - 1) as f64))).collect();
+            station_curves.push(crate::build::interpolate_cubic(&pts).ok_or_else(|| fail("profile curve"))?);
+        }
+        let kv = station_curves.first().map(|c| c.knot_vec().clone()).ok_or_else(|| fail("no stations"))?;
+        // Along the helix: each control-point column interpolated across the stations.
+        let mut columns = Vec::with_capacity(SEG_SAMPLES);
+        for j in 0..SEG_SAMPLES {
+            let pts: Vec<Vec3> = station_curves
+                .iter()
+                .map(|c| {
+                    let p = c.control_point(j);
+                    Vec3::new(p.x, p.y, p.z)
+                })
+                .collect();
+            columns.push(crate::build::interpolate_cubic(&pts).ok_or_else(|| fail("helix curve"))?);
+        }
+        let ku = columns.first().map(|c| c.knot_vec().clone()).ok_or_else(|| fail("no columns"))?;
+        let net: Vec<Vec<mt::Point3>> = (0..=n).map(|m| columns.iter().map(|c| *c.control_point(m)).collect()).collect();
+        let surf = mt::BSplineSurface::try_new((ku, kv), net).map_err(|e| fail(&e.to_string()))?;
+        let (Some(first), Some(last)) = (station_curves.first().cloned(), station_curves.last().cloned()) else { return Err(fail("stations")) };
+        let seam = columns.first().cloned().ok_or_else(|| fail("seam"))?;
+        faces_data.push((first, last, seam, surf));
+    }
+    guard("smooth helix", || {
+        let start: Vec<mt::Vertex> = lp.segs.iter().map(|s| builder::vertex(p3(at(0, s.start())))).collect();
+        let end: Vec<mt::Vertex> = lp.segs.iter().map(|s| builder::vertex(p3(at(n, s.start())))).collect();
+        let mut e0 = Vec::with_capacity(nseg);
+        let mut e1 = Vec::with_capacity(nseg);
+        let mut seams = Vec::with_capacity(nseg);
+        for (j, (c0, c1, seam, _)) in faces_data.iter().enumerate() {
+            let (Some(a0), Some(b0), Some(a1), Some(b1)) = (start.get(j), start.get((j + 1) % nseg), end.get(j), end.get((j + 1) % nseg)) else {
+                return Err(fail("vertices"));
+            };
+            e0.push(mt::Edge::try_new(a0, b0, mt::Curve::BSplineCurve(c0.clone())).map_err(|e| fail(&e.to_string()))?);
+            e1.push(mt::Edge::try_new(a1, b1, mt::Curve::BSplineCurve(c1.clone())).map_err(|e| fail(&e.to_string()))?);
+            seams.push(mt::Edge::try_new(a0, a1, mt::Curve::BSplineCurve(seam.clone())).map_err(|e| fail(&e.to_string()))?);
+        }
+        let mut walls = Vec::with_capacity(nseg);
+        for (j, (_, _, _, surf)) in faces_data.iter().enumerate() {
+            let (Some(a), Some(b), Some(sa), Some(sb)) = (e0.get(j), e1.get(j), seams.get(j), seams.get((j + 1) % nseg)) else {
+                return Err(fail("edges"));
+            };
+            // Counter-clockwise in the surface's (u along the helix, v along the profile) space.
+            let w: mt::Wire = vec![sa.clone(), b.clone(), sb.inverse(), a.inverse()].into();
+            walls.push(mt::Face::try_new(vec![w], mt::Surface::BSplineSurface(surf.clone())).map_err(|e| fail(&e.to_string()))?);
+        }
+        let w0: mt::Wire = e0.iter().cloned().collect();
+        let w1: mt::Wire = e1.iter().cloned().collect();
+        // Either orientation of the walls; keep the one that measures as a proper solid.
+        let expected = lp_area_path(plane, lp, o, k, turns);
+        // A coarse mesh (within ~10%) is enough to tell a proper solid from an empty or inside-out one.
+        let section_tol = (lp.signed_area().abs().sqrt() * 0.05).max(1e-3);
+        for ws in [walls.clone(), walls.iter().map(|f| f.inverse()).collect()] {
+            if let Ok(b) = cap_and_close(ws, std::slice::from_ref(&w0), std::slice::from_ref(&w1))
+                && b.tessellate(section_tol).is_ok_and(|m| (m.measure().volume - expected).abs() <= 0.15 * expected.abs())
+            {
+                return Ok(b);
+            }
+        }
+        Err(fail("the walls do not close into the expected solid"))
+    })
+}
+
+/// Pappus estimate of a screw sweep's volume: section area × the centroid's path around the axis.
+fn lp_area_path(plane: &Plane, lp: &Loop2, o: Vec3, k: Vec3, turns: f64) -> f64 {
+    let c = plane.to_world(lp.centroid());
+    let d = c - o;
+    let r = (d - k * d.dot(k)).len();
+    lp.signed_area().abs() * std::f64::consts::TAU * r * turns
 }
 
 /// A solid from a planar loop of straight segments to an apex point off its plane (a pyramid).
@@ -109,6 +209,7 @@ mod tests {
         let region = Region2 { outer: Loop2::circle(Vec2::new(20.0, 0.0), 2.0), holes: vec![] };
         let b = sweep_helix(&pl, &region, Vec3::ZERO, Vec3::Z, 8.0, 3.0).unwrap();
         let v = crate::measure(&b).unwrap().volume;
+        assert_eq!(b.face_count(), 4, "two smooth walls and two caps");
         let want = std::f64::consts::PI * 4.0 * std::f64::consts::TAU * 20.0 * 3.0;
         assert!((v - want).abs() / want < 1e-3, "{v} vs {want}");
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::Z, 3.0, 3.0).is_err(), "pitch below the section");
