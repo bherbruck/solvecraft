@@ -1356,6 +1356,17 @@ mod naming {
     }
 
     #[test]
+    fn shell_inner_faces_are_named_after_the_walls() {
+        let mut s = Session::default();
+        run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20, "body_name": "B"}));
+        run(&mut s, "FusionShellBodyCommand", json!({"faces": [[20, 15, 20]], "thickness": 2}));
+        let n = face_names(&mut s, "B");
+        for want in ["F2:inner:F1:-z", "F2:inner:F1:+x", "F2:inner:F1:-x", "F2:inner:F1:+y", "F2:inner:F1:-y"] {
+            assert!(n.contains(&want.to_string()), "{want} in {n:?}");
+        }
+    }
+
+    #[test]
     fn shell_and_hole_faces_follow_by_name() {
         let mut s = Session::default();
         run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20, "name": "Base"}));

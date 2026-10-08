@@ -226,12 +226,72 @@ fn derive(b: &ModelBody, o: &NamingOrigin, nf: usize) -> Vec<String> {
         .enumerate()
         .map(|(fi, n)| {
             n.unwrap_or_else(|| {
-                role_name(&o.feature, &o.before, pts.get(fi).map(Vec::as_slice).unwrap_or(&[]), ns.get(fi).unwrap_or(&empty), fi, fid)
+                let (ps, nn) = (pts.get(fi).map(Vec::as_slice).unwrap_or(&[]), ns.get(fi).unwrap_or(&empty));
+                // A shell's inner face: the face its wall runs back to.
+                if matches!(o.feature.kind, FeatureKind::Shell { .. })
+                    && let Some(n) = behind(ps, nn, &inputs)
+                {
+                    return format!("F{fid}:inner:{}", strip_piece(&n));
+                }
+                role_name(&o.feature, &o.before, ps, nn, fi, fid)
             })
         })
         .collect();
     number_pieces(&mut names, &pts, '#');
     names
+}
+
+/// The input face a face looks back at through the material (along minus its normal): the
+/// face a shell wall's inner side offsets.
+fn behind(ps: &[Vec3], ns: &[Vec3], inputs: &[(&ModelBody, FaceIndex, Arc<Vec<String>>)]) -> Option<String> {
+    let n = ns.first().copied()?;
+    let d = n * -1.0;
+    let mut votes: Vec<(String, usize)> = Vec::new();
+    for p in ps {
+        let mut best: Option<(f64, String)> = None;
+        for (_, idx, nm) in inputs {
+            for (fi, (_, _, tris)) in idx.faces.iter().enumerate() {
+                for [a, b, c] in tris {
+                    if let Some(t) = ray_hit(*p, d, *a, *b, *c)
+                        && t > 1e-9
+                        && best.as_ref().is_none_or(|(bt, _)| t < *bt)
+                        && let Some(name) = nm.get(fi)
+                    {
+                        best = Some((t, name.clone()));
+                    }
+                }
+            }
+        }
+        if let Some((_, n)) = best {
+            match votes.iter_mut().find(|(v, _)| *v == n) {
+                Some(v) => v.1 += 1,
+                None => votes.push((n, 1)),
+            }
+        }
+    }
+    votes.sort_by(|a, b| b.1.cmp(&a.1));
+    votes.first().filter(|(_, k)| *k * 2 >= ps.len().max(1)).map(|(n, _)| n.clone())
+}
+
+fn ray_hit(o: Vec3, d: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f64> {
+    let (e1, e2) = (b - a, c - a);
+    let h = d.cross(e2);
+    let det = e1.dot(h);
+    if det.abs() < 1e-14 {
+        return None;
+    }
+    let f = 1.0 / det;
+    let s = o - a;
+    let u = f * s.dot(h);
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    let q = s.cross(e1);
+    let v = f * d.dot(q);
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+    Some(f * e2.dot(q))
 }
 
 /// The input face most of a face's sample points lie on (mapped by `map` first), if it holds
@@ -381,6 +441,27 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
                 })
                 .min_by(|a, b| a.0.total_cmp(&b.0));
             best.map(|(_, id)| format!("F{fid}:side:{id}")).unwrap_or_else(|| format!("F{fid}:face:{fi}"))
+        }
+        FeatureKind::Sweep { .. } | FeatureKind::Loft { .. } => {
+            let sk = match &f.kind {
+                FeatureKind::Sweep { sketch, .. } => Some(*sketch),
+                FeatureKind::Loft { sections, .. } => sections.first().map(|x| x.sketch),
+                _ => None,
+            };
+            let Some(ss) = sk.and_then(|k| before.sketch(k)) else { return format!("F{fid}:face:{fi}") };
+            let n = ss.plane.normal();
+            let h = |p: &Vec3| (*p - ss.plane.origin).dot(n);
+            let flat = !ns.is_empty() && ns.windows(2).all(|w| w[0].cross(w[1]).len() < 1e-6);
+            if flat && ps.iter().all(|p| h(p).abs() < 1e-6 * (1.0 + p.len())) {
+                return format!("F{fid}:start");
+            }
+            if flat && ns.iter().all(|m| m.cross(n).len() < 1e-6) {
+                return format!("F{fid}:end");
+            }
+            // A side: the profile curve under its sample nearest the start.
+            let Some(p0) = ps.iter().min_by(|a, b| h(a).abs().total_cmp(&h(b).abs())) else { return format!("F{fid}:face:{fi}") };
+            let q = ss.plane.to_local(*p0);
+            nearest_curve(ss, Vec2::new(q.x, q.y)).map(|id| format!("F{fid}:side:{id}")).unwrap_or_else(|| format!("F{fid}:face:{fi}"))
         }
         FeatureKind::Box { .. } => {
             let n = ns.first().copied().unwrap_or(Vec3::Z);
