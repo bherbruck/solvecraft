@@ -43,6 +43,30 @@ fn planes(b: &Body) -> Vec<(usize, PlaneFace)> {
 /// Push the planar faces of `b` lying in the plane (n, d) — n their outward normal — along n
 /// by `delta` (negative: inward). Their neighbours must stand perpendicular to the plane.
 fn push_faces(b: &Body, n: Vec3, d: f64, delta: f64) -> Result<Body> {
+    match push_faces_exact(b, n, d, delta) {
+        Ok(r) => Ok(r),
+        // Faces of planes and cylinders: every face follows (any neighbours).
+        Err(e) => {
+            let size = b.size();
+            let tol = (size * 1e-7).max(1e-9) * 10.0;
+            let planes: Vec<bool> = b
+                .solid
+                .face_iter()
+                .map(|f| match f.oriented_surface() {
+                    mt::Surface::Plane(p) => {
+                        let m = p.normal();
+                        let m = Vec3::new(m.x, m.y, m.z);
+                        m.dot(n) > 1.0 - 1e-9 && (n.dot(from_p3(p.origin())) - d).abs() < tol
+                    }
+                    _ => false,
+                })
+                .collect();
+            crate::offset::offset_body(b, |i, _| if planes.get(i).copied().unwrap_or(false) { delta } else { 0.0 }).map_err(|_| e)
+        }
+    }
+}
+
+fn push_faces_exact(b: &Body, n: Vec3, d: f64, delta: f64) -> Result<Body> {
     let size = b.size();
     let tol = (size * 1e-7).max(1e-9);
     let fail = |m: &str| KernelError::Failed(format!("pushing a face: {m}"));
@@ -257,4 +281,106 @@ pub(crate) fn boolean_apart(a: &Body, b: &Body, op: BoolOp) -> Option<Result<Opt
         Ok(Some(r))
     };
     Some(run())
+}
+
+/// Union of bodies that touch along one identical planar face, back to back (a body joined
+/// with its mirror image): the two faces go and the shells are stitched along their edges.
+/// `None` when no such pair of faces exists.
+pub(crate) fn glue(a: &Body, b: &Body) -> Option<Result<Body>> {
+    use mt::{BoundedCurve, ParametricCurve};
+    let size = a.size().max(b.size());
+    let tol = (size * 1e-7).max(1e-9) * 10.0;
+    let key = |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
+    let mid = |e: &mt::Edge| {
+        let c = e.curve();
+        let (t0, t1) = c.range_tuple();
+        from_p3(c.subs((t0 + t1) * 0.5))
+    };
+    // Matching faces: same plane, opposite normals, the same edges.
+    let (pa, pb) = (planes(a), planes(b));
+    let fa_list: Vec<&mt::Face> = a.solid.face_iter().collect();
+    let fb_list: Vec<&mt::Face> = b.solid.face_iter().collect();
+    for (ia, x) in &pa {
+        for (ib, y) in &pb {
+            if x.n.dot(y.n) > -1.0 + 1e-9 || (x.d + y.d).abs() > tol {
+                continue;
+            }
+            let (Some(fa), Some(fb)) = (fa_list.get(*ia), fb_list.get(*ib)) else { continue };
+            let ea: Vec<mt::Edge> = fa.edge_iter().collect();
+            let eb: Vec<mt::Edge> = fb.edge_iter().collect();
+            if ea.len() != eb.len() {
+                continue;
+            }
+            // B edge → the matching A edge.
+            let mut map: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
+            let mut vmap: HashMap<mt::VertexID, mt::Vertex> = HashMap::new();
+            let mut ok = true;
+            for e in &eb {
+                let ends = (key(from_p3(e.absolute_front().point())), key(from_p3(e.absolute_back().point())));
+                let m = key(mid(e));
+                let hit = ea.iter().find(|f| {
+                    let fe = (key(from_p3(f.absolute_front().point())), key(from_p3(f.absolute_back().point())));
+                    (fe == ends || fe == (ends.1, ends.0)) && key(mid(f)) == m
+                });
+                let Some(f) = hit else {
+                    ok = false;
+                    break;
+                };
+                let same = key(from_p3(f.absolute_front().point())) == ends.0;
+                map.insert(e.id(), if same { f.absolute_clone() } else { f.absolute_clone().inverse() });
+                let (fa_v, fb_v) = if same {
+                    (f.absolute_front().clone(), f.absolute_back().clone())
+                } else {
+                    (f.absolute_back().clone(), f.absolute_front().clone())
+                };
+                vmap.insert(e.absolute_front().id(), fa_v);
+                vmap.insert(e.absolute_back().id(), fb_v);
+            }
+            if !ok {
+                continue;
+            }
+            return Some(guard("glue", || {
+                let fail = |m: &str| KernelError::Failed(format!("joining touching faces: {m}"));
+                // B's other edges, rebuilt on A's vertices where they meet the seam.
+                let mut edges: HashMap<mt::EdgeID, mt::Edge> = map.clone();
+                for e in b.solid.edge_iter() {
+                    if edges.contains_key(&e.id()) {
+                        continue;
+                    }
+                    let (f0, f1) = (e.absolute_front(), e.absolute_back());
+                    if !vmap.contains_key(&f0.id()) && !vmap.contains_key(&f1.id()) {
+                        edges.insert(e.id(), e.absolute_clone());
+                        continue;
+                    }
+                    let v0 = vmap.get(&f0.id()).cloned().unwrap_or_else(|| f0.clone());
+                    let v1 = vmap.get(&f1.id()).cloned().unwrap_or_else(|| f1.clone());
+                    edges.insert(e.id(), mt::Edge::new(&v0, &v1, e.curve()));
+                }
+                let mut faces: Vec<mt::Face> = fa_list.iter().enumerate().filter(|(i, _)| i != ia).map(|(_, f)| (*f).clone()).collect();
+                for (i, f) in fb_list.iter().enumerate() {
+                    if i == *ib {
+                        continue;
+                    }
+                    let wires: Vec<mt::Wire> = f
+                        .absolute_boundaries()
+                        .iter()
+                        .map(|w| {
+                            w.edge_iter()
+                                .filter_map(|e| edges.get(&e.id()).map(|ne| if e.front() == e.absolute_front() { ne.clone() } else { ne.inverse() }))
+                                .collect::<Vec<_>>()
+                                .into()
+                        })
+                        .collect();
+                    let mut nf = mt::Face::try_new(wires, f.surface()).map_err(|e| fail(&e.to_string()))?;
+                    if !f.orientation() {
+                        nf.invert();
+                    }
+                    faces.push(nf);
+                }
+                let solid = Solid::try_new(vec![faces.into()]).map_err(|e| fail(&e.to_string()))?;
+                Body::new(crate::heal::heal(solid, size))
+            }));
+        }
+    }
+    None
 }

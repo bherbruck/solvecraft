@@ -1001,3 +1001,39 @@ fn every_edge_of_an_l_block() {
     assert!(rel(m.area, area) < 1e-4, "area {} vs {area}", m.area);
     assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (38, 74, 38));
 }
+
+#[test]
+fn overlapping_holes_and_mirror_joins() {
+    // Overlapping through holes in a plate: done on the plate's section, exactly.
+    let plate = box_solid(Vec3::new(-50.0, -50.0, 0.0), Vec3::new(50.0, 50.0, 5.0)).unwrap();
+    let hole = |x: f64, y: f64| {
+        let c = Loop2::circle(Vec2::new(x, y), 5.0);
+        extrude(&Plane::XY, &[Region2 { outer: c, holes: vec![] }], -1.0, 6.0).unwrap().pop().unwrap()
+    };
+    let mut cur = plate;
+    for (x, y) in [(30.0, 0.0), (25.0, 0.0)] {
+        cur = boolean(&cur, &hole(x, y), BoolOp::Cut).unwrap().unwrap();
+    }
+    // Two discs of radius 5, centres 5 apart: their union's area is 2·25π − (50π/3 − 25√3/2).
+    let lens = 50.0 * PI / 3.0 - 25.0 * 3f64.sqrt() / 2.0;
+    let want = 50000.0 - (50.0 * PI - lens) * 5.0;
+    assert!(rel(measure(&cur).unwrap().volume, want) < 1e-5, "{} vs {want}", measure(&cur).unwrap().volume);
+    // A bracket with rounded corners joined with its mirror image across the face they share.
+    let half = box_solid(Vec3::ZERO, Vec3::new(30.0, 40.0, 10.0)).unwrap();
+    let half = fillet(&half, &[Vec3::new(30.0, 0.0, 5.0), Vec3::new(30.0, 40.0, 5.0)], 5.0).unwrap();
+    let m = [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+    let other = transform_matrix(&half, m).unwrap();
+    let both = boolean(&half, &other, BoolOp::Union).unwrap().unwrap();
+    let v = measure(&half).unwrap().volume;
+    let mb = measure(&both).unwrap();
+    assert!(rel(mb.volume, 2.0 * v) < 1e-9, "{} vs {}", mb.volume, 2.0 * v);
+    // One body: the shared face is gone and the faces either side of it merged.
+    assert_eq!(mb.merged.faces, 10, "{:?}", mb.merged);
+    // Two equal cylinders on one axis, overlapping: one longer cylinder.
+    let c1 = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 30.0).unwrap();
+    let c2 = cylinder(Vec3::new(0.0, 0.0, 20.0), Vec3::Z, 10.0, 30.0).unwrap();
+    let u = measure(&boolean(&c1, &c2, BoolOp::Union).unwrap().unwrap()).unwrap();
+    let v1 = measure(&c1).unwrap().volume;
+    assert!(rel(u.volume, v1 * 5.0 / 3.0) < 2e-4, "{} (one: {v1})", u.volume);
+    assert_eq!(u.merged.faces, 3, "{:?}", u.merged);
+}

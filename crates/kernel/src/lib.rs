@@ -26,6 +26,7 @@ mod offset;
 mod ops;
 mod polybool;
 mod polyhedron;
+mod prism;
 mod sew;
 mod step;
 mod step_in;

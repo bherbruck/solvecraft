@@ -152,6 +152,35 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     }
     let mut last = String::new();
     // Coincident faces make the intersection fail after many retries; push them apart first.
+    // Prisms along one direction (plates with holes): exact, in 2D (so only the volume
+    // bounds are checked).
+    if let Some(Ok(r)) = crate::prism::prism_boolean(a, b, op) {
+        match &r {
+            Some(body) => {
+                let v = volume(body);
+                let bounds = match op {
+                    BoolOp::Union => v >= va.max(vb) - slack && v <= va + vb + slack,
+                    BoolOp::Cut => v >= va - vb - slack && v <= va + slack,
+                    BoolOp::Intersect => v <= va.min(vb) + slack,
+                };
+                if v > 0.0 && bounds {
+                    return Ok(r);
+                }
+            }
+            None => return Ok(None),
+        }
+    }
+    // Bodies touching along one whole face (a part joined with its mirror image).
+    if op == BoolOp::Union
+        && a.solid.boundaries().len() == 1
+        && b.solid.boundaries().len() == 1
+        && let Some(Ok(body)) = crate::coplanar::glue(a, b)
+    {
+        let v = volume(&body);
+        if v > 0.0 && plausible(v, &body) {
+            return Ok(Some(body));
+        }
+    }
     if !APART.with(|c| c.get()) && crate::coplanar::has_coincident_faces(a, b) {
         APART.with(|c| c.set(true));
         let r = crate::coplanar::boolean_apart(a, b, op);

@@ -9,7 +9,7 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 |---|---|
 | Where are we? | **M0 done; M1/M2 in progress.** Sketch with solver, extrude (taper, two-sided, through all), revolve, fillet/chamfer, holes, patterns, mirror, shell, draft, loft, sweep, split, construction planes, parameters that rebuild the timeline, STEP/STL export, desktop and browser (wasm) app with Fusion-style selection (hover/selected highlights, origin planes, click-to-pick sketch planes, multi-select, window/crossing box selection, animated view cube), CLI, MCP server, oracle harness. |
 | Command parity (in scope) | **139 / 541 (26%)** in-scope commands; SOLID + SKETCH **102 / 291 (35%)** — [docs/parity.md](docs/parity.md) |
-| Fusion oracle | **58 / 76 parts match** (batch 1: 29/29; batch 2 in progress) — [docs/oracle.md](docs/oracle.md) |
+| Fusion oracle | **60 / 76 parts match** (batch 1: 29/29; batch 2 in progress) — [docs/oracle.md](docs/oracle.md) |
 | Tests | 85 (solver, profiles, kernel booleans/blends/measures, expressions, timeline, file formats, camera, engine end-to-end, hostile-input fuzz over every command) |
 | Gates | `cargo xtask ci`: fmt, clippy -D warnings, tests, asset attribution, layering, wasm32 build — green |
 | Weighted parity estimate | **≈ 5%** of Fusion's Design workspace by importance (sketch + basic solids are the core, but surfaces, assemblies, sheet metal, CAM, drawings are untouched) |
@@ -62,10 +62,11 @@ headline counts in-scope tabs only and lists the deferred ones separately.
   rounded corners rounded again (sphere octants, tori at concave corners); every edge of a
   convex planar body or of an extruded part; fillets inside patterns. Edges between two curved
   faces are not supported yet.
-- Coincident planar faces are pushed apart exactly when their neighbours stand perpendicular
-  (extruded and box-like parts); other coincident configurations can still fail. Fully internal
-  voids are not supported. Spheres are built from six pole-free patches so they
-  combine reliably.
+- Booleans: prisms along one direction (plates with holes, slots, patterns of them, equal
+  sections stacked end to end) are combined exactly in 2D; bodies touching along one whole face
+  (a part and its mirror image) are stitched; coincident planar faces are pushed apart when
+  their neighbours are planes or cylinders. Other coincident curved configurations can still
+  fail. Fully internal voids are not supported. Spheres are built from six pole-free patches.
 - Mass properties come from fine tessellation (curved faces within ~1e-4 relative); triangles
   that cut through curved faces (trimmed faces after booleans) are split onto the surface first.
 - STEP import (our own reader, crates/kernel/src/step_in; all 29 Fusion STEP files pass
