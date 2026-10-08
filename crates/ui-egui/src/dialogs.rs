@@ -257,7 +257,8 @@ fn fits(a: Accept, s: &Sel) -> bool {
         Sel::Axis { .. } => a & AXES != 0,
         Sel::SketchCurve { .. } => a & (AXES | CURVES) != 0,
         Sel::Vertex { .. } => a & selection::VERTICES != 0,
-        Sel::Feature { .. } | Sel::SketchPoint { .. } | Sel::SketchConstraint { .. } => false,
+        Sel::Feature { .. } => a & selection::FEATURES != 0,
+        Sel::SketchPoint { .. } | Sel::SketchConstraint { .. } => false,
     }
 }
 
@@ -408,6 +409,14 @@ impl Dialog {
                 Dialog::new(kind, inputs)
             }
         };
+        // Patterns of features picked in the timeline: the objects are features.
+        if is_pattern(&d.kind)
+            && s.selection.iter().any(|x| matches!(x, Sel::Feature { .. }))
+            && let Some(inp) = d.inputs.first_mut()
+        {
+            inp.accept = selection::FEATURES;
+            inp.label = objects_label(inp.accept);
+        }
         // Pre-selection: what is selected now becomes the input (first input that takes it); a
         // face or edge stands for its body where bodies are wanted.
         for sel in &s.selection {
@@ -780,8 +789,34 @@ pub(crate) fn row_label(ui: &mut egui::Ui, text: &str) {
     });
 }
 
-/// Rows above the selection inputs: the pattern type, the Hole placement (one face point, or
-/// sketch points).
+/// The pattern objects' label: features are picked in the timeline.
+fn objects_label(accept: Accept) -> &'static str {
+    if accept == selection::FEATURES { "Features" } else { "Objects" }
+}
+
+fn is_pattern(k: &Kind) -> bool {
+    matches!(k, Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. })
+}
+
+/// The Object Type row of a pattern: bodies (picked in the view) or features (picked in the
+/// timeline, e.g. a hole).
+fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
+    let Some(inp) = d.inputs.first_mut() else { return };
+    row_label(ui, "Object Type");
+    let cur = usize::from(inp.accept == selection::FEATURES);
+    let mut ty = cur;
+    combo(ui, "pat_obj", &["Bodies", "Features"], &mut ty);
+    ui.end_row();
+    if ty != cur {
+        inp.accept = if ty == 1 { selection::FEATURES } else { BODIES };
+        inp.label = objects_label(inp.accept);
+        inp.items.clear();
+        d.active = 0;
+    }
+}
+
+/// Rows above the selection inputs: the pattern type and object type, the Hole placement (one
+/// face point, or sketch points).
 fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
     let current = match d.kind {
         Kind::PatternRect { .. } => Some(0),
@@ -811,14 +846,18 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
                     vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
                 ),
             };
+            let accept = d.inputs.first().map(|i| i.accept).unwrap_or(BODIES);
             if let Some(i) = inputs.first_mut() {
                 i.items = objects;
+                i.accept = accept;
+                i.label = objects_label(accept);
             }
             d.kind = kind;
             d.inputs = inputs;
             d.extra.clear();
             d.advance();
         }
+        object_type_row(d, ui);
         return;
     }
     let Kind::Hole { opts, .. } = &mut d.kind else { return };
@@ -1699,7 +1738,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 (None, Some(k)) => k,
                 (None, None) => return Err("select a direction (an axis or a sketch line) first".into()),
             };
-            let mut p = json!({"features": source_features(s, &body_names(0)), "dir1": pt(d1), "count1": count, "spacing1": spacing});
+            let mut p = json!({"features": pattern_features(s, sels(d, 0)), "dir1": pt(d1), "count1": count, "spacing1": spacing});
             if let Some((_, d2)) = sels(d, 2).first().and_then(|x| axis_of(app, x)) {
                 p["dir2"] = pt(d2);
                 p["count2"] = json!(count2);
@@ -1718,7 +1757,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 None => return Err("select an axis".into()),
             };
-            ("PatternCircular", json!({"features": source_features(s, &body_names(0)), "axis": axis, "count": count, "angle": angle}))
+            ("PatternCircular", json!({"features": pattern_features(s, sels(d, 0)), "axis": axis, "count": count, "angle": angle}))
         }
         Kind::Loft { operation } => {
             need(0, "profiles of two or more sketches")?;
@@ -1822,7 +1861,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(1, "the path")?;
             let path = curve_ids(d, 1);
             let sketch = curves_sketch(app, &path, None).ok_or("the path curves must be in one sketch")?;
-            ("PatternOnPath", json!({"bodies": body_names(0), "path_sketch": sketch, "path": path, "count": count, "spacing": spacing}))
+            let mut p = json!({"path_sketch": sketch, "path": path, "count": count, "spacing": spacing});
+            if sels(d, 0).iter().any(|x| matches!(x, Sel::Feature { .. })) {
+                p["features"] = json!(pattern_features(s, sels(d, 0)));
+            } else {
+                p["bodies"] = json!(body_names(0));
+            }
+            ("PatternOnPath", p)
         }
         Kind::Pipe { diameter, wall } => {
             need(0, "the path")?;
@@ -1999,6 +2044,27 @@ fn curve_ids(d: &Dialog, i: usize) -> Vec<String> {
 }
 
 /// The features that made these bodies (what patterns and mirrors copy).
+/// The features a pattern repeats: picked features as they are, picked bodies by the features
+/// that made them.
+fn pattern_features(s: &Session, objects: &[Sel]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let bodies: Vec<String> = objects.iter().filter_map(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None }).collect();
+    for x in objects {
+        if let Sel::Feature { id } = x
+            && let Some(f) = s.doc.feature(*id)
+            && !out.contains(&f.name)
+        {
+            out.push(f.name.clone());
+        }
+    }
+    for f in source_features(s, &bodies) {
+        if !out.contains(&f) {
+            out.push(f);
+        }
+    }
+    out
+}
+
 fn source_features(s: &Session, bodies: &[String]) -> Vec<String> {
     let st = s.model.state();
     let mut features: Vec<String> = Vec::new();
@@ -2381,8 +2447,16 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 // No dialog for a path pattern yet: edit it with timeline.redefine.
                 PatternKind::Path { .. } => return None,
             };
+            // Features that made no body of their own (a hole, a fillet) were picked as features.
+            let as_features = ids.iter().any(|id| !st.bodies.iter().any(|b| b.feature == *id));
             if let Some(inp) = d.inputs.first_mut() {
-                inp.items = bodies;
+                if as_features {
+                    inp.accept = selection::FEATURES;
+                    inp.label = objects_label(inp.accept);
+                    inp.items = ids.iter().map(|id| Sel::Feature { id: *id }).collect();
+                } else {
+                    inp.items = bodies;
+                }
             }
             d
         }

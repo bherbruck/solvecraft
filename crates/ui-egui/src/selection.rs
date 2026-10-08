@@ -25,6 +25,8 @@ pub const VERTICES: Accept = 128;
 pub const CURVES: Accept = 256;
 /// Sketch points of any visible sketch (hole centres); picked as "<sketch id>:<point id>".
 pub const POINTS: Accept = 512;
+/// Timeline features (pattern objects), picked in the timeline.
+pub const FEATURES: Accept = 1024;
 
 /// One selection input of a command dialog ("Profiles", "Edges", "Plane", ...).
 #[derive(Clone, Debug, PartialEq)]

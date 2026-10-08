@@ -131,3 +131,34 @@ fn hole_at_sketch_points() {
     let r = app.session.execute(&cmds[0].0, &cmds[0].1);
     assert!(r.is_ok(), "{r:?}");
 }
+
+#[test]
+fn a_hole_is_patterned_as_a_feature() {
+    let mut app = app_with(json!([
+        {"command": "PrimitiveBox", "params": {"length": 60, "width": 40, "height": 10}},
+        {"command": "FusionHoleCommand", "params": {"position": [10, 10, 10], "diameter": 5}}
+    ]));
+    let hole = app.session.doc.features.last().unwrap().id;
+    // Picked in the timeline before the command: the objects become features.
+    let mut d = start(&mut app, vec![Sel::Feature { id: hole }], "PatternRectangular");
+    assert_eq!(d.inputs[0].accept, crate::selection::FEATURES);
+    assert_eq!(d.inputs[0].items, vec![Sel::Feature { id: hole }]);
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    if let Kind::PatternRect { count, spacing, .. } = &mut d.kind {
+        *count = "4".into();
+        *spacing = "12 mm".into();
+    }
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["features"], json!(["Hole1"]));
+    let before = app.session.model.state().bodies[0].mesh().measure().volume;
+    for (id, p) in cmds {
+        app.session.execute(&id, &p).unwrap();
+    }
+    let after = app.session.model.state().bodies[0].mesh().measure().volume;
+    assert!(after < before - 500.0, "three more holes: {before} -> {after}");
+    // Edit Feature shows the hole as a feature again.
+    let pat = app.session.doc.features.last().unwrap().id;
+    let e = crate::dialogs::for_feature(&app, pat, None).unwrap();
+    assert_eq!(e.inputs[0].accept, crate::selection::FEATURES);
+    assert_eq!(e.inputs[0].items, vec![Sel::Feature { id: hole }]);
+}

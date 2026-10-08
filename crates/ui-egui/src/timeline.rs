@@ -138,7 +138,8 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
             let err = res.and_then(|r| r.error.clone());
             let warn = res.and_then(|r| r.warning.clone());
             let rolled = i >= marker;
-            let sel = app.session.selection.iter().any(|s| matches!(s, solvecraft_engine::Sel::Feature { id: f } if f == id));
+            let is_it = |s: &solvecraft_engine::Sel| matches!(s, solvecraft_engine::Sel::Feature { id: f } if f == id);
+            let sel = app.session.selection.iter().any(is_it) || app.dialog.as_ref().is_some_and(|d| d.items().iter().any(is_it));
             if resp.hovered() {
                 hovered = Some(*id);
             }
@@ -183,7 +184,16 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             let resp = resp.on_hover_text(tip);
             if resp.clicked() {
-                let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": id}]}));
+                // A dialog input that takes features (pattern objects) gets the click.
+                let takes = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::FEATURES != 0);
+                if takes {
+                    if let Some(mut d) = app.dialog.take() {
+                        d.pick(&app.session, solvecraft_engine::Sel::Feature { id: *id });
+                        app.dialog = Some(d);
+                    }
+                } else {
+                    let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": id}]}));
+                }
             }
             if resp.double_clicked() {
                 edit = Some(*id);
