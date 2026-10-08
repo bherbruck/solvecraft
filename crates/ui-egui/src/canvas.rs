@@ -37,7 +37,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         _ => return None,
     };
     Some(match d.kind {
-        Kind::Extrude { .. } | Kind::Fillet { .. } | Kind::Section { .. } => (at, normal),
+        Kind::Extrude { .. } | Kind::Fillet { .. } | Kind::Section { .. } | Kind::Hole { .. } => (at, normal),
         // Shell thickness grows into the body.
         Kind::Shell { .. } => (at, normal.map(|n| -n)),
         Kind::Move { .. } => (at, Some(Vec3::Z)),
@@ -131,6 +131,14 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         && let Some(l2) = app.session.doc.eval(distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
         drag_arrow(ui, painter, proj, base, bs, -n, l2, false, egui::Id::new("sc_manipulator2"), half_height, distance2);
+    }
+    // Holes: the depth arrow points into the material (empty depth: through all); the
+    // diameter is typed in the box.
+    let mut dir = dir;
+    if let (Kind::Hole { depth, .. }, Some(n)) = (&mut d.kind, dir) {
+        let l = app.session.doc.eval(depth, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+        drag_arrow(ui, painter, proj, base, bs, -n, l, false, egui::Id::new("sc_manipulator_depth"), half_height, depth);
+        dir = None;
     }
     let Some((label, kind, value)) = d.primary() else { return };
     let len = app.session.doc.eval(value, kind).ok().filter(|v| v.is_finite());
