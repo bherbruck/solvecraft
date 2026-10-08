@@ -1517,3 +1517,44 @@ fn unequal_chamfers() {
     assert!(rel(volume(&mut s), 24000.0 - 160.0 - 0.5 * 3.0 * d2 * 40.0) < 1e-6, "{}", volume(&mut s));
     assert!(s.execute("FusionChamferCommand", &json!({"edges": [[0, 15, 20]], "distance": 1, "distance2": 2, "angle": "30 deg"})).is_err());
 }
+
+/// An enclosure built in the usual order: shell, bosses, then the lip on the rim.
+#[test]
+fn lip_after_boss() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 80, "width": 50, "height": 30}));
+    run(&mut s, "FusionShellBodyCommand", json!({"faces": [[40, 25, 30]], "thickness": 2}));
+    run(&mut s, "FusionBossCommand", json!({"position": [10, 10, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}));
+    run(&mut s, "FusionBossCommand", json!({"position": [70, 40, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}));
+    let v0 = volume(&mut s);
+    run(&mut s, "FusionLipCommand", json!({"face": [1, 25, 30], "width": 1, "height": 2}));
+    let v = volume(&mut s);
+    assert!(v > v0 + 1.0, "{v0} {v}");
+    // Bosses up to the rim, with ribs, against a wall; lips, grooves and outside rims.
+    let bosses = [
+        json!({"position": [15, 15, 2], "diameter": 8, "height": 28, "hole_diameter": 3}),
+        // Ribs out to the inner walls (15 − 4 − 9 = 2), and short of them.
+        json!({"position": [15, 15, 2], "diameter": 8, "height": 12, "ribs": 4, "rib_thickness": 1.5, "rib_length": 9}),
+        json!({"position": [15, 15, 2], "diameter": 8, "height": 12, "ribs": 4, "rib_thickness": 1.5, "rib_length": 6}),
+        json!({"position": [5.5, 25, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}),
+        json!({"position": [40, 25, 2], "diameter": 8, "height": 20, "draft": "1 deg", "fillet": 1}),
+    ];
+    let lips = [
+        json!({"face": [1, 25, 30], "width": 1, "height": 2}),
+        json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": "groove"}),
+        json!({"face": [1, 25, 30], "width": 1, "height": 2, "side": "outside"}),
+    ];
+    for (i, b) in bosses.iter().enumerate() {
+        for (j, l) in lips.iter().enumerate() {
+            let mut s = Session::default();
+            run(&mut s, "PrimitiveBox", json!({"length": 80, "width": 50, "height": 30}));
+            run(&mut s, "FusionShellBodyCommand", json!({"faces": [[40, 25, 30]], "thickness": 2}));
+            let r = s.execute("FusionBossCommand", b);
+            assert!(r.is_ok(), "boss {i}: {r:?}");
+            let v0 = volume(&mut s);
+            let r = s.execute("FusionLipCommand", l);
+            assert!(r.is_ok(), "boss {i} lip {j}: {r:?}");
+            assert!((volume(&mut s) - v0).abs() > 1.0, "boss {i} lip {j}");
+        }
+    }
+}
