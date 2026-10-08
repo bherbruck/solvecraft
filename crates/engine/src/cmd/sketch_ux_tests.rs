@@ -198,3 +198,57 @@ fn projected_geometry_counts_as_fixed() {
     assert_eq!(r["result"]["changed"], 0);
     assert!(sketch(&s).curve_locked(ci));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Construction toggle
+
+fn profiles(s: &mut Session) -> i64 {
+    run(s, "sketch.solve", json!({}))["profiles"].as_i64().unwrap_or(-1)
+}
+
+fn curve_ids(v: &Value) -> Vec<String> {
+    v["curves"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
+}
+
+#[test]
+fn construction_toggle_takes_shapes_out_of_profiles_and_back() {
+    let mut s = new_sketch();
+    let rect = curve_ids(&run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [20, 10]})));
+    let slot = curve_ids(&run(&mut s, "ShapeSlotCenterToCenter", json!({"p0": [40, 5], "p1": [60, 5], "width": 6})));
+    let poly = curve_ids(&run(&mut s, "ShapePolygonInscribed", json!({"center": [0, 40], "radius": 8, "sides": 6})));
+    let circ = curve_ids(&run(&mut s, "CircleCenterRadius", json!({"center": [40, 40], "radius": 5})));
+    let ell = curve_ids(&run(&mut s, "CircleElipse", json!({"center": [70, 40], "major": [80, 40], "minor_radius": 4})));
+    assert_eq!(profiles(&mut s), 5);
+    for (shape, left) in [(&rect, 4), (&slot, 3), (&poly, 2), (&circ, 1), (&ell, 0)] {
+        let r = run(&mut s, "sketch.construction", json!({ "curves": shape }));
+        assert_eq!(r["construction"], true);
+        assert_eq!(profiles(&mut s), left, "{shape:?}");
+    }
+    // Back again in one go.
+    let all: Vec<String> = [rect, slot, poly, circ, ell].concat();
+    let r = run(&mut s, "sketch.construction", json!({ "curves": all }));
+    assert_eq!(r["construction"], false);
+    assert_eq!(profiles(&mut s), 5);
+    // A mixed selection becomes construction as a whole.
+    run(&mut s, "sketch.construction", json!({"curves": ["l1"]}));
+    let r = run(&mut s, "sketch.construction", json!({"curves": ["l1", "l2", "l3", "l4"]}));
+    assert_eq!(r["construction"], true);
+    assert!(sketch(&s).curves.iter().filter(|c| ["l1", "l2", "l3", "l4"].contains(&c.id.as_str())).all(|c| c.construction));
+    assert!(s.execute("sketch.construction", &json!({"curves": ["nope"]})).is_err());
+}
+
+#[test]
+fn projected_geometry_can_become_construction() {
+    let mut s = Session::default();
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Extrude", json!({"distance": 5}));
+    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    run(&mut s, "ProjectNewCmd", json!({"refs": [{"edge": [10, 0, 5]}]}));
+    let id = sketch(&s).curves.iter().find(|c| c.link.is_some()).map(|c| c.id.clone()).expect("projected");
+    let r = run(&mut s, "sketch.construction", json!({ "curves": [id.clone()] }));
+    assert_eq!(r["changed"], 1);
+    let sk = sketch(&s);
+    assert!(sk.curves.iter().any(|c| c.id == id && c.construction && c.link.is_some()));
+}

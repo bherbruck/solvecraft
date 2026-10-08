@@ -254,13 +254,53 @@ fn build_scene(app: &SolveApp) -> GpuScene {
                 }
             }
         }
+        // Construction curves are dashed, centerlines dash-dot (lengths follow the grid).
+        let unit = grid_step(app.cam.half_height()).0;
         for (pts, col, cons) in sketch_lines(&ss.sketch, &ss.plane, active, &ss.report.curve_determined) {
-            for w in pts.windows(2) {
-                sc.line(w[0].to_f32(), w[1].to_f32(), sketch_color(&tk, col), if cons { 1.2 } else { 2.0 }, active);
+            let segs = if !cons {
+                pts.windows(2).map(|w| (w[0], w[1])).collect()
+            } else if col == colors::SKETCH_CENTERLINE {
+                dashes(&pts, &[0.6 * unit, 0.15 * unit, 0.05 * unit, 0.15 * unit])
+            } else {
+                dashes(&pts, &[0.3 * unit, 0.2 * unit])
+            };
+            for (a, b) in segs {
+                sc.line(a.to_f32(), b.to_f32(), sketch_color(&tk, col), if cons { 1.2 } else { 2.0 }, active);
             }
         }
     }
     sc
+}
+
+/// The drawn pieces of a polyline in a dash pattern (on, off, on, off… lengths).
+pub(crate) fn dashes(pts: &[Vec3], pattern: &[f64]) -> Vec<(Vec3, Vec3)> {
+    let mut out = Vec::new();
+    if pattern.is_empty() || pattern.iter().any(|l| !(l.is_finite() && *l > 0.0)) {
+        return pts.windows(2).map(|w| (w[0], w[1])).collect();
+    }
+    let (mut k, mut left) = (0usize, pattern[0]);
+    for w in pts.windows(2) {
+        let (mut a, b) = (w[0], w[1]);
+        let mut len = (b - a).len();
+        // Cap the pieces per segment so a huge zoom-out can't explode the scene.
+        let mut guard = 0;
+        while len > 1e-12 && guard < 10_000 {
+            guard += 1;
+            let step = left.min(len);
+            let q = a + (b - a) * (step / len);
+            if k % 2 == 0 {
+                out.push((a, q));
+            }
+            left -= step;
+            len -= step;
+            a = q;
+            if left <= 1e-12 {
+                k = (k + 1) % pattern.len();
+                left = pattern.get(k).copied().unwrap_or(1.0);
+            }
+        }
+    }
+    out
 }
 
 /// Colour as straight (unpremultiplied) sRGBA bytes for the GPU.

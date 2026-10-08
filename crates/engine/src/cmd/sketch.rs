@@ -149,7 +149,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("construction")
         .key("X")
         .enabled(in_sketch)
-        .params("curves: [ids], value?: bool (default toggles)"),
+        .params("curves: [ids], value?: bool (default: construction unless all of them already are)"),
     CommandSpec::new("sketch.delete", "Delete Sketch Entities", sketch_delete)
         .enabled(in_sketch)
         .params("entities: [curve, point or constraint ids]"),
@@ -1283,17 +1283,23 @@ fn construction(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let want = bool_(p, "value");
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
+        let cs: Vec<usize> =
+            ids.iter().map(|id| sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))).collect::<Result<_>>()?;
+        // The selection switches together (a slot or polygon as a whole): to construction
+        // unless all of it already is. Projected curves may switch too.
+        let to = want.unwrap_or_else(|| !cs.iter().all(|c| sk.curves.get(*c).is_some_and(|c| c.construction)));
         let mut n = 0;
-        for id in &ids {
-            let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
-            if let Some(cu) = sk.curves.get_mut(c) {
-                cu.construction = want.unwrap_or(!cu.construction);
+        for c in cs {
+            if let Some(cu) = sk.curves.get_mut(c)
+                && cu.construction != to
+            {
+                cu.construction = to;
                 n += 1;
             }
         }
-        Ok(n)
+        Ok((n, to))
     })?;
-    Ok(json!({"changed": n, "sketch": info}))
+    Ok(json!({"changed": n.0, "construction": n.1, "sketch": info}))
 }
 
 fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
