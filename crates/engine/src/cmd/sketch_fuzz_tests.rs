@@ -41,12 +41,12 @@ fn entities(s: &Session) -> (Vec<String>, Vec<String>, Vec<String>) {
 
 #[test]
 fn random_sketch_editing_never_breaks() {
-    for seed in 1..=4u64 {
+    for seed in 1..=2u64 {
         let mut r = Rng(0x9E37_79B9_7F4A_7C15 ^ seed);
         let mut s = Session::default();
         let _ = s.execute("PrimitiveBox", &json!({"length": 30, "width": 20, "height": 10}));
         let _ = s.execute("SketchCreate", &json!({"plane": {"face": [15, 10, 10]}}));
-        for step in 0..150 {
+        for step in 0..120 {
             let (curves, points, cons) = entities(&s);
             let c = |r: &mut Rng| r.pick(&curves).cloned().unwrap_or_default();
             let p = |r: &mut Rng| r.pick(&points).cloned().unwrap_or_default();

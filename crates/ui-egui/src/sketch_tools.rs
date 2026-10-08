@@ -18,6 +18,30 @@ thread_local! {
     static TEXT: RefCell<Option<(Vec2, String)>> = const { RefCell::new(None) };
     /// Shift held this frame.
     static SHIFT: Cell<bool> = const { Cell::new(false) };
+    /// Glyphs drawn this frame (constraint id, screen centre) and the selected one.
+    static GLYPHS: RefCell<Vec<(String, Pos2)>> = const { RefCell::new(Vec::new()) };
+    static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// A click on a constraint glyph selects it (true: the click was used).
+pub fn click_glyph(app: &mut SolveApp, _proj: &Proj, pos: Pos2) -> bool {
+    if app.session.active_sketch.is_none() {
+        return false;
+    }
+    let hit = GLYPHS.with(|g| g.borrow().iter().find(|(_, c)| c.distance(pos) <= 7.0).map(|(id, _)| id.clone()));
+    let used = hit.is_some();
+    PICKED.with(|p| *p.borrow_mut() = hit.clone());
+    if let Some(id) = hit {
+        app.set_status(format!("Constraint {id} selected: Delete removes it"), false);
+    }
+    used
+}
+
+/// Delete the selected constraint glyph (true when one was selected).
+pub fn delete_glyph(app: &mut SolveApp) -> bool {
+    let Some(id) = PICKED.with(|p| p.borrow_mut().take()) else { return false };
+    let _ = app.run("sketch.delete", json!({"entities": [id]}));
+    true
 }
 
 /// What the extra tools do with clicks.
@@ -513,6 +537,8 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some(ss) = st.sketch(sid) else { return };
     let tk = crate::theme::Tokens::get();
     let mut placed: Vec<Pos2> = Vec::new();
+    let picked = PICKED.with(|p| p.borrow().clone());
+    let mut drawn: Vec<(String, Pos2)> = Vec::new();
     for c in &ss.sketch.constraints {
         if c.kind.is_dimension() {
             continue;
@@ -526,12 +552,21 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
         placed.push(sp);
         let failing = ss.report.failing.contains(&c.id);
-        let col = if failing { tk.error } else { tk.text_dim };
+        let selected = picked.as_deref() == Some(c.id.as_str());
+        let col = if failing {
+            tk.error
+        } else if selected {
+            tk.accent
+        } else {
+            tk.text_dim
+        };
+        drawn.push((c.id.clone(), sp));
         let r = egui::Rect::from_center_size(sp, egui::vec2(12.0, 12.0));
         painter.rect_filled(r, 2.0, tk.panel.gamma_multiply(0.85));
         painter.rect_stroke(r, 2.0, Stroke::new(0.8, col), egui::StrokeKind::Inside);
         painter.text(sp, egui::Align2::CENTER_CENTER, glyph_letter(c.kind.name()), egui::FontId::proportional(9.0), col);
     }
+    GLYPHS.with(|g| *g.borrow_mut() = drawn);
 }
 
 fn glyph_letter(name: &str) -> &'static str {
@@ -555,9 +590,19 @@ fn glyph_letter(name: &str) -> &'static str {
 
 fn glyph_anchor(sk: &solvecraft_engine::sketch::Sketch, k: &solvecraft_engine::sketch::ConstraintKind) -> Option<Vec2> {
     use solvecraft_engine::sketch::ConstraintKind::*;
+    // Half way along the curve.
     let mid = |c: usize| -> Option<Vec2> {
         let poly = sk.polyline(c);
-        poly.get(poly.len() / 2).copied()
+        let total: f64 = poly.windows(2).map(|w| w[0].dist(w[1])).sum();
+        let mut acc = 0.0;
+        for w in poly.windows(2) {
+            let l = w[0].dist(w[1]);
+            if acc + l >= total * 0.5 && l > 0.0 {
+                return Some(w[0].lerp(w[1], (total * 0.5 - acc) / l));
+            }
+            acc += l;
+        }
+        poly.first().copied()
     };
     match *k {
         Coincident { p, .. } | Fix { p } | Midpoint { p, .. } | PointOnCurve { p, .. } => sk.point(p),

@@ -774,6 +774,9 @@ pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, 
 }
 
 pub fn delete_selection(app: &mut SolveApp) {
+    if crate::sketch_tools::delete_glyph(app) {
+        return;
+    }
     let sel = app.session.selection.clone();
     if sel.is_empty() {
         return;
@@ -930,7 +933,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.dialog = Some(d);
                 }
             } else {
-                select(app, cand.and_then(|c| c.1), add);
+                if !crate::sketch_tools::click_glyph(app, &proj, p) {
+                    select(app, cand.and_then(|c| c.1), add);
+                }
             }
         }
         if resp.secondary_clicked() && delta == egui::Vec2::ZERO {

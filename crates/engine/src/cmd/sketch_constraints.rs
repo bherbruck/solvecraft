@@ -403,9 +403,19 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
 /// or at its point.
 fn anchor(sk: &Sketch, k: &ConstraintKind) -> Option<Vec2> {
     use ConstraintKind::*;
+    // Half way along the curve.
     let mid = |c: usize| -> Option<Vec2> {
         let poly = sk.polyline(c);
-        poly.get(poly.len() / 2).copied()
+        let total: f64 = poly.windows(2).map(|w| w[0].dist(w[1])).sum();
+        let mut acc = 0.0;
+        for w in poly.windows(2) {
+            let l = w[0].dist(w[1]);
+            if acc + l >= total * 0.5 && l > 0.0 {
+                return Some(w[0].lerp(w[1], (total * 0.5 - acc) / l));
+            }
+            acc += l;
+        }
+        poly.first().copied()
     };
     let pt = |p: usize| sk.point(p);
     match *k {
