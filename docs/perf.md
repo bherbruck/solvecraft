@@ -1,36 +1,25 @@
-# Performance
+# Viewport performance
 
-## Large sketches
+Measured with the control channel (`ui.inspect` `frame_ms`: CPU time of one UI frame, which
+includes picking under the cursor) on the sample plate patterned 20 × 20 (400 bodies, about
+600k triangles), 1600 × 1000 window under Xvfb, release build. Hover: 60 cursor moves across
+the model; orbit: a right-drag.
 
-Measured with `cargo test -p solvecraft-engine --release sketch_perf -- --ignored --nocapture`
-(`crates/engine/src/cmd/sketch_perf_tests.rs`). The sketch holds `n` rectangles (four lines,
-horizontal/vertical constraints and two length dimensions each) and `n` circles. All times are
-wall-clock milliseconds on the development machine while other builds were running (load
-average around 60), so treat them as upper bounds.
+| | hover median | hover p90 | orbit median |
+|---|---|---|---|
+| before | 18.7 ms | 37.5 ms | 21.0 ms |
+| after | 1.9 ms | 2.4 ms | 2.6 ms |
+| after, Browser hidden | 0.4 ms | — | 0.4 ms |
 
-| n | curves | points | constraints | solve | profiles | draw lists | snap query | add a line (command) | drag a point (command) |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 250 | 1 250 | 1 251 | 1 500 | 15 | 30 | 12 | 0.1 | 68 | 48 |
-| 500 | 2 500 | 2 501 | 3 000 | 35 | 47 | 10 | 0.1 | 123 | 100 |
-| 1000 | 5 000 | 5 001 | 6 000 | 65 | 134 | 1 | 0.3 | 232 | 100 |
+What changed:
+- **Picking culls by bounding box.** Per-body boxes are cached until the model changes. The
+  face raycast skips bodies whose box the ray misses or enters behind the nearest hit so far.
+  Edge and vertex tests skip bodies whose box, projected on screen, is not under the cursor.
+- **Picks are reused** while the cursor, camera and model are unchanged, and **no picking runs
+  while the view moves** (orbit, pan, zoom).
+- **The model extent is cached** (it sets the view's depth range and was recomputed from every
+  mesh several times per frame).
 
-"Add a line" and "drag a point" are whole commands: they copy the sketch, solve it, store it and
-re-evaluate the timeline (a second solve, plus profile finding). "Draw lists" is
-`view::sketch_lines`, the polylines the viewport draws.
-
-Before the 2026-10-08 changes the n = 1000 sketch took 1 280 ms to solve, 590 ms to find
-profiles and 5.1 s per command:
-
-- The solver built one dense Jacobian over every variable of the sketch, for each connected
-  component's iterations and again for the degree-of-freedom analysis (5 000 × 10 000 entries,
-  then reduced row echelon form). It now builds each component's Jacobian over that component's
-  own variables. The sketch's Jacobian is block diagonal, so its rank is the sum of the
-  components' ranks, and components were already solved separately.
-- Grouping variables into components searched a list per variable. It now uses a map.
-- Profile finding looked at every curve end for each crossing it found, and sorted profiles with
-  a linear id lookup in the comparison. It now uses the grid it already builds for crossings,
-  and sorts on precomputed keys.
-
-Projection (linked reference geometry) is cached per model state, so edits to a sketch with
-projected silhouettes or sections on a ~20 000-triangle model cost about 3 ms each instead of
-about 80 ms.
+With 49 bodies the frame was already 2.8 ms (hover) before these changes. The remaining frame
+time with the Browser shown is mostly the Browser listing every body row. GPU ID-buffer picking
+was not needed at this size.

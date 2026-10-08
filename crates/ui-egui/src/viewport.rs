@@ -24,6 +24,10 @@ pub enum NavMode {
 
 #[derive(Default)]
 pub struct ViewportState {
+    /// Per-body bounding boxes for fast picking, keyed by the model they were taken from.
+    pick_bounds: std::sync::Mutex<Option<(usize, std::sync::Arc<Vec<(String, solvecraft_engine::geom::Aabb3)>>)>>,
+    /// The last pick (its key and hits): reused while nothing it depends on changed.
+    last_pick: Option<(u64, Vec<Hit>)>,
     pub rect: Option<Rect>,
     pub gpu: Option<GpuTarget>,
     slot: SceneSlot,
@@ -122,7 +126,7 @@ fn rgba(c: Rgb) -> [u8; 4] {
 }
 
 pub fn scene_radius(app: &SolveApp) -> f64 {
-    let mut b = solvecraft_engine::view::bounds(&app.session);
+    let mut b = model_bounds(app);
     if !app.preview.bounds.is_empty() {
         b = b.union(&app.preview.bounds);
     }
@@ -342,9 +346,103 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
 
 /// Pick what is under `pos`: sketch points, sketch curves, vertices, edges and axes first, then
 /// the surfaces along the ray (profiles, faces, planes) nearest first.
+/// Bounding boxes of the shown model's bodies (cached until the model changes).
+fn body_bounds(
+    app: &SolveApp,
+    st: &std::sync::Arc<solvecraft_engine::doc::ModelState>,
+) -> std::sync::Arc<Vec<(String, solvecraft_engine::geom::Aabb3)>> {
+    let key = std::sync::Arc::as_ptr(st) as usize;
+    if let Ok(mut g) = app.viewport.pick_bounds.lock() {
+        if let Some((k, b)) = g.as_ref()
+            && *k == key
+        {
+            return b.clone();
+        }
+        let b = std::sync::Arc::new(st.bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect::<Vec<_>>());
+        *g = Some((key, b.clone()));
+        return b;
+    }
+    std::sync::Arc::new(Vec::new())
+}
+
+/// The model's extent: bodies (from the cached boxes) and sketches.
+pub fn model_bounds(app: &SolveApp) -> solvecraft_engine::geom::Aabb3 {
+    let st = app.session.world_state();
+    let mut b = body_bounds(app, &st).iter().fold(solvecraft_engine::geom::Aabb3::EMPTY, |a, (_, x)| a.union(x));
+    for ss in &st.sketches {
+        if let Some((lo, hi)) = ss.sketch.bounds() {
+            for p in [lo, hi] {
+                b.add(ss.plane.to_world(p));
+            }
+        }
+    }
+    b
+}
+
+/// Where a ray enters a box (None: it misses).
+fn ray_box(o: Vec3, d: Vec3, b: &solvecraft_engine::geom::Aabb3, pad: f64) -> Option<f64> {
+    let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (oo, dd, lo, hi) in [(o.x, d.x, b.min.x, b.max.x), (o.y, d.y, b.min.y, b.max.y), (o.z, d.z, b.min.z, b.max.z)] {
+        let (lo, hi) = (lo - pad, hi + pad);
+        if dd.abs() < 1e-15 {
+            if oo < lo || oo > hi {
+                return None;
+            }
+        } else {
+            let (a, c) = ((lo - oo) / dd, (hi - oo) / dd);
+            t0 = t0.max(a.min(c));
+            t1 = t1.min(a.max(c));
+        }
+    }
+    (t0 <= t1).then_some(t0)
+}
+
+/// A box's outline on screen, grown by `px` (None: behind the eye).
+fn screen_box(proj: &Proj, b: &solvecraft_engine::geom::Aabb3, px: f32) -> Option<Rect> {
+    let mut r = Rect::NOTHING;
+    for i in 0..8 {
+        let p = Vec3::new(
+            if i & 1 == 0 { b.min.x } else { b.max.x },
+            if i & 2 == 0 { b.min.y } else { b.max.y },
+            if i & 4 == 0 { b.min.z } else { b.max.z },
+        );
+        r.extend_with(proj.to_screen(p)?);
+    }
+    Some(r.expand(px))
+}
+
+/// What is under `pos`, reusing the last answer while the cursor, the camera and the model are
+/// unchanged.
+fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    pos.x.to_bits().hash(&mut h);
+    pos.y.to_bits().hash(&mut h);
+    for v in [app.cam.yaw, app.cam.pitch, app.cam.distance, app.cam.target.x, app.cam.target.y, app.cam.target.z] {
+        v.to_bits().hash(&mut h);
+    }
+    app.session.revision.hash(&mut h);
+    (std::sync::Arc::as_ptr(&app.session.world_state()) as usize).hash(&mut h);
+    app.session.active_sketch.hash(&mut h);
+    app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
+    app.ui.hidden_bodies.hash(&mut h);
+    app.ui.perspective.hash(&mut h);
+    (proj.rect.width().to_bits(), proj.rect.height().to_bits()).hash(&mut h);
+    let key = h.finish();
+    if let Some((k, hits)) = &app.viewport.last_pick
+        && *k == key
+    {
+        return hits.clone();
+    }
+    let hits = pick(app, proj, pos);
+    app.viewport.last_pick = Some((key, hits.clone()));
+    hits
+}
+
 pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     let s = &app.session;
     let st = s.world_state();
+    let bounds = body_bounds(app, &st);
+    let bound = |name: &str| bounds.iter().find(|(n, _)| n == name).map(|(_, b)| *b);
     let mut hits = Vec::new();
     let (o, d) = proj.ray(pos);
     // Sketch points of the active sketch (of every shown sketch while a command takes points).
@@ -392,6 +490,15 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
         if app.ui.hidden_bodies.contains(&b.name) {
             continue;
         }
+        // Bodies whose box the ray misses (or enters behind the best hit so far) are skipped.
+        if let Some(bb) = bound(&b.name) {
+            let pad = bb.diagonal() * 1e-6 + 1e-9;
+            match ray_box(o, d, &bb, pad) {
+                None => continue,
+                Some(t0) if bestf.as_ref().is_some_and(|(bt, _)| t0 > *bt) => continue,
+                _ => {}
+            }
+        }
         let m = b.mesh();
         if let Some((t, ti)) = m.raycast(o, d)
             && bestf.as_ref().is_none_or(|(bt, _)| t < *bt)
@@ -407,6 +514,12 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     let mut beste: Option<(f32, Hit)> = None;
     for b in &st.bodies {
         if app.ui.hidden_bodies.contains(&b.name) {
+            continue;
+        }
+        // Only bodies whose outline on screen is near the cursor can have an edge under it.
+        if let Some(bb) = bound(&b.name)
+            && screen_box(proj, &bb, 8.0).is_some_and(|r| !r.contains(pos))
+        {
             continue;
         }
         let m = b.mesh();
@@ -997,7 +1110,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 
     // ---- interaction ----
-    let hits = hover.filter(|_| inside && app.viewport.boxsel.is_none()).map(|p| pick(app, &proj, p)).unwrap_or_default();
+    // No picking while the view moves (orbit, pan, zoom): nothing can be hovered meanwhile.
+    let navigating = scroll != 0.0 || ((middle || secondary_down) && delta != egui::Vec2::ZERO) || (app.viewport.nav.is_some() && primary_down);
+    let hits = hover.filter(|_| inside && app.viewport.boxsel.is_none() && !navigating).map(|p| pick_cached(app, &proj, p)).unwrap_or_default();
     let cand = if app.tool.is_some() { hits.first().cloned().map(|h| (h, None)) } else { candidate(app, &hits).map(|(h, s)| (h, Some(s))) };
     app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     let add = mods.shift || mods.command || mods.ctrl;
