@@ -21,6 +21,62 @@ thread_local! {
     /// Glyphs drawn this frame (constraint id, screen centre) and the selected one.
     static GLYPHS: RefCell<Vec<(String, Pos2)>> = const { RefCell::new(Vec::new()) };
     static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The inference the cursor snapped to last (label, sketch point), for the hint.
+    static SNAP: RefCell<Option<(&'static str, Vec2)>> = const { RefCell::new(None) };
+    static PREV: Cell<Option<Vec2>> = const { Cell::new(None) };
+}
+
+/// Snap a cursor point on the sketch plane to what Fusion infers while drawing: a line's
+/// midpoint, or alignment (horizontal/vertical) with the previous point of the tool. None:
+/// nothing near, use the grid.
+pub fn refine_snap(
+    app: &SolveApp,
+    proj: &Proj,
+    sk: &solvecraft_engine::sketch::Sketch,
+    plane: &solvecraft_engine::geom::Plane,
+    lp: Vec2,
+) -> Option<Vec2> {
+    // Millimetres per pixel here.
+    let (a, b) = (proj.to_screen(plane.to_world(lp))?, proj.to_screen(plane.to_world(lp + Vec2::X))?);
+    let px = 1.0 / (a.distance(b) as f64).max(1e-9);
+    let tol = 7.0 * px;
+    let mut best: Option<(f64, &'static str, Vec2)> = None;
+    for (i, c) in sk.curves.iter().enumerate() {
+        if let solvecraft_engine::sketch::CurveKind::Line { .. } = c.kind
+            && let Some(solvecraft_engine::sketch::Shape::Line { a, b }) = sk.shape(i)
+        {
+            let m = (a + b) * 0.5;
+            let d = m.dist(lp);
+            if d < tol && best.is_none_or(|x| d < x.0) {
+                best = Some((d, "Mid", m));
+            }
+        }
+    }
+    // The tool's previous point (a click takes the tool out of the app while it runs, so the
+    // last hover's is kept).
+    let prev = match app.tool.as_ref() {
+        Some(t) => {
+            let p = t.pts.last().map(|p| p.0);
+            PREV.with(|c| c.set(p));
+            p
+        }
+        None => PREV.with(Cell::get),
+    };
+    if best.is_none()
+        && let Some(prev) = prev
+    {
+        let (dx, dy) = ((lp.x - prev.x).abs(), (lp.y - prev.y).abs());
+        // The free coordinate still follows the grid.
+        let step = solvecraft_engine::view::grid_step(app.cam.half_height()).0 / 10.0;
+        let g = |v: f64| (v / step).round() * step;
+        if dy < tol && dx > tol {
+            best = Some((dy, "H", Vec2::new(g(lp.x), prev.y)));
+        } else if dx < tol && dy > tol {
+            best = Some((dx, "V", Vec2::new(prev.x, g(lp.y))));
+        }
+    }
+    SNAP.with(|s| *s.borrow_mut() = best.map(|(_, l, p)| (l, p)));
+    best.map(|(_, _, p)| p)
 }
 
 /// A click on a constraint glyph selects it (true: the click was used).
@@ -619,10 +675,26 @@ fn glyph_anchor(sk: &solvecraft_engine::sketch::Sketch, k: &solvecraft_engine::s
     }
 }
 
+/// The inference label next to the snapped cursor (while a tool is active).
+fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    if app.tool.is_none() {
+        return;
+    }
+    let Some((label, p)) = SNAP.with(|s| *s.borrow()) else { return };
+    let st = app.session.model.state();
+    let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return };
+    let Some(sp) = proj.to_screen(ss.plane.to_world(p)) else { return };
+    let tk = crate::theme::Tokens::get();
+    let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
+    painter.rect_filled(r, 3.0, tk.accent_soft);
+    painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(10.0), tk.text);
+}
+
 /// Per frame, after the viewport is drawn: constraint glyphs and the text-entry box.
 pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
     SHIFT.with(|c| c.set(ui.input(|i| i.modifiers.shift)));
     glyphs(app, painter, proj);
+    snap_hint(app, painter, proj);
     text_entry(app, ui.ctx());
 }
 

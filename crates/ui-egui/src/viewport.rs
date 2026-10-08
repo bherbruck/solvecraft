@@ -798,6 +798,9 @@ pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, 
     let lp = ss.plane.to_local(w);
     let (minor, _) = grid_step(app.cam.half_height());
     let step = minor / 10.0;
+    if let Some(p) = crate::sketch_tools::refine_snap(app, proj, &ss.sketch, &ss.plane, lp) {
+        return Some((p, None));
+    }
     Some((Vec2::new((lp.x / step).round() * step, (lp.y / step).round() * step), None))
 }
 
