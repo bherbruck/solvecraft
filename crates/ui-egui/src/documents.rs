@@ -255,12 +255,11 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let t = Tokens::get();
     let info = tabs_info(app);
     let n = info.len();
-    let avail = (x1 - x0 - 34.0).max(80.0);
-    let w = (avail / n as f32).clamp(90.0, 220.0);
+    let (first, shown, w) = layout(n, app.docs.active, x1 - x0);
     let mut x = x0;
     let mut pick: Option<usize> = None;
     let mut shut: Option<usize> = None;
-    for (i, (name, dirty)) in info.iter().enumerate() {
+    for (i, (name, dirty)) in info.iter().enumerate().skip(first).take(shown) {
         let tr = Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(w - 2.0, r.height() - 5.0));
         let active = i == app.docs.active || app.docs.slots.is_empty();
         let resp = ui.interact(tr, ui.id().with(("doc_tab", i)), Sense::click_and_drag());
@@ -304,7 +303,41 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         }
         x += w;
     }
-    // New design.
+    // More tabs than fit: a chevron lists them all.
+    if shown < n {
+        let mr = Rect::from_center_size(pos2(x + 12.0, r.center().y + 2.0), vec2(20.0, 22.0));
+        let mresp = ui.interact(mr, ui.id().with("doc_more"), Sense::click());
+        if mresp.hovered() {
+            ui.painter().rect_filled(mr, 4.0, Color32::from_white_alpha(30));
+        }
+        ui.painter().text(mr.center(), egui::Align2::CENTER_CENTER, format!("»{}", n - shown), FontId::proportional(12.0), t.app_bar_text);
+        let id = egui::Id::new("sc_doc_more");
+        if mresp.clone().on_hover_text("All open designs").clicked() {
+            ui.ctx().data_mut(|d| d.insert_temp(id, !d.get_temp::<bool>(id).unwrap_or(false)));
+        }
+        if ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
+            let resp = egui::Area::new(id.with("area")).fixed_pos(pos2(mr.left(), r.bottom())).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+                crate::context_menu::menu_frame(ui, |ui| {
+                    for (i, (name, dirty)) in info.iter().enumerate() {
+                        let item = crate::context_menu::Item::action(
+                            "doc",
+                            &format!("{name}{}", if *dirty { " •" } else { "" }),
+                            if i == app.docs.active { "box" } else { "" },
+                        );
+                        if crate::context_menu::list_row(ui, &item).is_some() {
+                            pick = Some(i);
+                        }
+                    }
+                })
+            });
+            let pressed_outside = ui.ctx().input(|i| i.pointer.any_pressed()) && !resp.response.contains_pointer() && !mresp.contains_pointer();
+            if pick.is_some() || pressed_outside {
+                ui.ctx().data_mut(|d| d.insert_temp(id, false));
+            }
+        }
+        x += 26.0;
+    }
+    // New design: a new tab showing the start page.
     let pr = Rect::from_center_size(pos2(x + 14.0, r.center().y + 2.0), vec2(22.0, 22.0));
     let presp = ui.interact(pr, ui.id().with("doc_new"), Sense::click());
     if presp.hovered() {
@@ -316,12 +349,29 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     ui.painter().line_segment([c - vec2(0.0, 6.0), c + vec2(0.0, 6.0)], s);
     if presp.on_hover_text("New Design (Ctrl+N)").clicked() {
         new_design(app);
+        app.home.show(app.session.revision);
     }
     if let Some(i) = shut {
         close(app, i, false);
     } else if let Some(i) = pick {
         switch(app, i);
     }
+}
+
+/// Which tabs the strip shows in `room` points: (first, how many, tab width). Tabs shrink to
+/// `MIN_TAB`; past that a window of tabs around the active one is shown and the rest go in the »
+/// list.
+pub fn layout(n: usize, active: usize, room: f32) -> (usize, usize, f32) {
+    const MIN_TAB: f32 = 90.0;
+    let n = n.max(1);
+    let avail = (room - 34.0).max(MIN_TAB);
+    if avail / n as f32 >= MIN_TAB {
+        return (0, n, (avail / n as f32).min(220.0));
+    }
+    // Leave room for the » button.
+    let fit = (((avail - 26.0) / MIN_TAB).floor() as usize).max(1);
+    let first = active.saturating_sub(fit - 1).min(n - fit);
+    (first, fit, MIN_TAB)
 }
 
 /// The "save changes?" prompt for a tab being closed.
@@ -381,6 +431,16 @@ mod tests {
 
     /// Each tab keeps its own design, undo, selection and camera; closing asks when there are
     /// unsaved changes; the last tab closing leaves a blank design.
+    #[test]
+    fn the_tab_strip_overflows_into_a_list_keeping_the_active_tab() {
+        assert_eq!(layout(2, 0, 800.0), (0, 2, 220.0));
+        let (first, shown, w) = layout(12, 11, 600.0);
+        assert!(shown < 12 && w == 90.0);
+        assert!((first..first + shown).contains(&11), "the active tab stays visible");
+        assert!(shown as f32 * w + 26.0 + 34.0 <= 600.0 + 0.5);
+        assert_eq!(layout(12, 0, 600.0).0, 0);
+    }
+
     #[test]
     fn tabs_keep_their_own_design() {
         let mut a = app();
