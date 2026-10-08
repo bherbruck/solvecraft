@@ -30,13 +30,35 @@ const MOVES: [&str; 6] = ["JointAssembleCmdNew", "JointAsBuiltCmd", "FusionMoveJ
 
 #[derive(Clone, Debug)]
 pub enum Asm {
-    NewComponent { name: String, activate: bool },
+    NewComponent {
+        name: String,
+        activate: bool,
+    },
     Joint(Box<JointForm>),
-    JointOrigin { name: String, hover: Hover },
+    JointOrigin {
+        name: String,
+        hover: Hover,
+    },
     RigidGroup,
-    Drive { joint: usize, values: Vec<String> },
-    MotionLink { a: usize, b: usize, ia: usize, ib: usize, ratio: String, offset: String },
-    Interference { result: Option<Value>, overlaps: Vec<Mesh>, of: Vec<Sel> },
+    /// `focus`: the first value takes the keyboard (its text selected) on the next frame.
+    Drive {
+        joint: usize,
+        values: Vec<String>,
+        focus: bool,
+    },
+    MotionLink {
+        a: usize,
+        b: usize,
+        ia: usize,
+        ib: usize,
+        ratio: String,
+        offset: String,
+    },
+    Interference {
+        result: Option<Value>,
+        overlaps: Vec<Mesh>,
+        of: Vec<Sel>,
+    },
 }
 
 /// The snap under the cursor, remembered for the selection it was found for.
@@ -49,6 +71,7 @@ pub struct JointForm {
     /// Editing this joint (its origins stay; type, alignment and limits change).
     pub editing: Option<u64>,
     pub kind: usize,
+    /// Flip B relative to the mate (faces apart instead of together).
     pub flip: bool,
     pub angle: String,
     pub offset: [String; 3],
@@ -130,7 +153,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "RigidGroupCmd" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
         "FusionMoveJointsCommand" => {
             let joint = movable(s).first().copied().unwrap_or(0);
-            (Asm::Drive { joint, values: current_values(s, joint) }, vec![])
+            (Asm::Drive { joint, values: current_values(s, joint), focus: true }, vec![])
         }
         "FusionMotionRelationshipCommand" => {
             let b = usize::from(movable(s).len() > 1);
@@ -173,7 +196,7 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let mut f = JointForm::new(false);
     f.editing = Some(id);
     f.kind = TYPES.iter().position(|t| JointKind::parse(t) == Some(j.kind)).unwrap_or(0);
-    f.flip = j.flip;
+    f.flip = !j.flip;
     f.angle = num(j.angle.to_degrees(), "deg");
     f.offset[2] = num(j.offset, "mm");
     f.fit_limits();
@@ -189,7 +212,7 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
 /// The Drive Joints dialog on a joint (by id).
 pub fn drive_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let joint = app.session.doc.assembly.joints.iter().position(|j| j.id == id)?;
-    Some(Dialog::new(Kind::Assembly(Asm::Drive { joint, values: current_values(&app.session, joint) }), vec![]))
+    Some(Dialog::new(Kind::Assembly(Asm::Drive { joint, values: current_values(&app.session, joint), focus: true }), vec![]))
 }
 
 // ---- snaps ----
@@ -418,7 +441,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             ui.end_row();
         }
         Asm::RigidGroup => {}
-        Asm::Drive { joint, values } => {
+        Asm::Drive { joint, values, focus } => {
             let s = &app.session;
             let list = movable(s);
             if list.is_empty() {
@@ -445,7 +468,23 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 let unit_kind = if angle { ValueKind::Angle } else { ValueKind::Length };
                 let name = j.kind.dofs().get(i).copied().unwrap_or("value");
                 row_label(ui, &capital(name));
-                enter |= field(ui, v);
+                if i == 0 {
+                    // Typing replaces the value at once, as in the other dialogs' value boxes.
+                    let id = egui::Id::new("sc_drive_value");
+                    let r = ui.add(egui::TextEdit::singleline(v).id(id));
+                    crate::params_dialog::complete(ui, &r, v);
+                    if std::mem::take(focus) {
+                        r.request_focus();
+                        let n = v.chars().count();
+                        let mut st = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+                        st.cursor
+                            .set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
+                        st.store(ui.ctx(), id);
+                    }
+                    enter |= r.lost_focus() && ui.input(|x| x.key_pressed(egui::Key::Enter));
+                } else {
+                    enter |= field(ui, v);
+                }
                 ui.end_row();
                 // A slider over the limits (or a turn, or ±100 mm).
                 let (lo, hi) = match j.limits.get(i).copied().flatten() {
@@ -618,7 +657,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             let limits: Vec<Value> =
                 f.limits.iter().take(jk.dofs().len()).map(|(on, lo, hi)| if *on { json!([lo, hi]) } else { Value::Null }).collect();
             if let Some(id) = f.editing {
-                let mut out = cmd("joint.edit", json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2], "angle": f.angle}));
+                let mut out = cmd("joint.edit", json!({"joint": id, "type": kind, "flip": !f.flip, "offset": f.offset[2], "angle": f.angle}));
                 for (i, l) in limits.iter().enumerate() {
                     let p = match l.as_array() {
                         Some(a) => json!({"joint": id, "index": i, "min": a.first(), "max": a.get(1)}),
@@ -645,7 +684,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
             let (x, y) = (eval(&f.offset[0], ValueKind::Length)?, eval(&f.offset[1], ValueKind::Length)?);
             let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { shifted(&a, x, y) } else { a.param };
-            let p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            // Picked origins mate as in Fusion: B's z opposite A's (faces meet face to face, a pin
+            // goes into its hole); the dialog's Flip turns B the other way. The command's `flip`
+            // turns B over from frames that coincide.
+            let p = json!({"type": kind, "a": a_param, "b": b.param, "flip": !f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
             cmd("JointAssembleCmdNew", p)
         }
         Asm::JointOrigin { name, .. } => {
@@ -662,7 +704,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
             cmd("RigidGroupCmd", json!({ "occurrences": occs }))
         }
-        Asm::Drive { joint, values } => {
+        Asm::Drive { joint, values, .. } => {
             let j = s.doc.assembly.joints.get(*joint).ok_or("no joint that moves yet")?;
             cmd("FusionMoveJointsCommand", json!({"joint": j.id, "values": values}))
         }

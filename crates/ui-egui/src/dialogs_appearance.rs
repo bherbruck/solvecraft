@@ -131,8 +131,8 @@ fn apply_params(targets: &[Sel], color: [u8; 3], opacity: f32, look: Option<&str
     }
     if !faces.is_empty() {
         p["faces"] = json!(faces);
-        // Until faces have their own looks: their bodies.
-        if bodies.is_empty() {
+        // An engine without face looks: their bodies.
+        if bodies.is_empty() && solvecraft_engine::find_command("appearance.list").is_none() {
             let mut owners: Vec<String> =
                 targets.iter().filter_map(|x| if let Sel::Face { body, .. } = x { Some(body.clone()) } else { None }).collect();
             owners.dedup();
@@ -164,8 +164,18 @@ fn drop_target(app: &SolveApp, faces: bool) -> Vec<Sel> {
     }
 }
 
-/// The looks bodies have in this design (colour and how many bodies wear it).
-fn in_design(app: &SolveApp) -> Vec<([u8; 3], usize)> {
+/// The looks in this design (colour and how many items wear it): the engine's list when it has
+/// one, else the body colours.
+fn in_design(app: &mut SolveApp) -> Vec<([u8; 3], usize)> {
+    if let Ok(v) = app.session.execute("appearance.list", &json!({}))
+        && let Some(list) = v.get("in_design").and_then(Value::as_array)
+    {
+        let count = |x: &Value, k: &str| x.get(k).and_then(Value::as_array).map_or(0, Vec::len);
+        return list
+            .iter()
+            .filter_map(|x| Some((parse_color(x.get("color")?)?, count(x, "bodies") + count(x, "faces") + count(x, "components"))))
+            .collect();
+    }
     let mut out: Vec<([u8; 3], usize)> = Vec::new();
     for c in app.session.doc.appearances.values() {
         match out.iter_mut().find(|(x, _)| x == c) {
@@ -270,7 +280,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         let items: Vec<(usize, &([u8; 3], usize))> = used.iter().enumerate().collect();
         swatch_rows(ui, &items, |ui, (i, (c, n))| {
             let look = Look { name: hex(*c), category: "In This Design".into(), color: *c, opacity: 1.0 };
-            if swatch(ui, egui::Id::new(("ap_used", *i)), *c, 1.0, k.color == *c, &format!("{} · {n} bodies", hex(*c)), look).clicked() {
+            if swatch(ui, egui::Id::new(("ap_used", *i)), *c, 1.0, k.color == *c, &format!("{} · {n} item(s)", hex(*c)), look).clicked() {
                 k.color = *c;
                 k.look = None;
             }
@@ -382,7 +392,7 @@ mod tests {
             a.run(&id, p).unwrap();
         }
         assert_eq!(a.session.doc.appearances.get("Body2"), Some(&[196, 40, 36]));
-        assert_eq!(in_design(&a), vec![([196, 40, 36], 2)]);
+        assert_eq!(in_design(&mut a), vec![([196, 40, 36], 2)]);
     }
 
     /// A swatch dropped on a face in face mode targets the face; otherwise its body.

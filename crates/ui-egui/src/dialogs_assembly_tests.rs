@@ -203,3 +203,62 @@ fn ok_click_survives_a_busy_preview() {
     assert_eq!(app.session.doc.assembly.joints.len(), 1, "the click applied the joint");
     assert!(app.dialog.is_none());
 }
+
+/// Two top faces mate face to face as in Fusion: B ends up upside down on A, not inside it;
+/// Flip turns it back over (into A).
+#[test]
+fn face_snaps_mate_face_to_face() {
+    let mut app = two_boxes();
+    app.start("JointAssembleCmdNew");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 10.0)).unwrap());
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["flip"], true, "the mate turns B over");
+    for (id, p) in c {
+        app.run(&id, p).unwrap();
+    }
+    let st = app.session.world_state();
+    let b = st.body("Body2").unwrap().mesh().bounds();
+    assert!((b.min.z - 10.0).abs() < 1e-6 && (b.max.z - 20.0).abs() < 1e-6, "{b:?}");
+    // Edit Joint shows the mate unflipped; Flip puts B back into A's volume.
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut e = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut e.kind {
+        assert!(!f.flip);
+        f.flip = true;
+    }
+    for (id, p) in apply_commands(&app, &e).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let b = app.session.world_state().body("Body2").unwrap().mesh().bounds();
+    assert!((b.max.z - 10.0).abs() < 1e-6, "{b:?}");
+}
+
+/// Drive Joints takes the keyboard: typing a value and Enter drives the joint.
+#[test]
+fn drive_value_takes_the_keyboard() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "JointAssembleCmdNew",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}}),
+    )
+    .unwrap();
+    app.start("FusionMoveJointsCommand");
+    let ctx = egui::Context::default();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+        ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()))
+    };
+    frame(&mut app, vec![]);
+    frame(&mut app, vec![]);
+    frame(&mut app, vec![egui::Event::Text("90".into())]);
+    let key = |pressed| egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: Default::default() };
+    frame(&mut app, vec![key(true), key(false)]);
+    frame(&mut app, vec![]);
+    let j = &app.session.doc.assembly.joints[0];
+    assert!((j.values[0] - 90f64.to_radians()).abs() < 1e-9, "{:?}", j.values);
+    assert!(app.dialog.is_none());
+}
