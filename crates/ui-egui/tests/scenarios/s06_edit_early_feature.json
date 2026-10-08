@@ -1,0 +1,145 @@
+[
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    40,
+    30
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchDimension"
+ },
+ {
+  "click": {
+   "sketch": [
+    20,
+    0
+   ]
+  }
+ },
+ {
+  "text": "40"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "text": "10"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "start": "FusionFilletEdgesCommand"
+ },
+ {
+  "click": {
+   "world": [
+    40,
+    15,
+    10
+   ]
+  }
+ },
+ {
+  "text": "2"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "errors": 0,
+   "features": 3,
+   "volume": [
+    11974.25,
+    1e-05
+   ]
+  }
+ },
+ {
+  "call": "ui.editFeature",
+  "params": {
+   "feature": "Sketch1"
+  }
+ },
+ {
+  "expect": {
+   "sketching": true
+  }
+ },
+ {
+  "click": {
+   "dimension": "d1"
+  },
+  "double": true
+ },
+ {
+  "text": "60"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "param": {
+    "d1": 60
+   }
+  }
+ },
+ {
+  "shot": "s06_edit_sketch"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "expect": {
+   "sketching": false,
+   "errors": 0,
+   "bodies": 1
+  }
+ },
+ {
+  "shot": "s06_updated"
+ }
+]

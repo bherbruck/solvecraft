@@ -1,0 +1,222 @@
+[
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "start": "DrawPolyline"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    40,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    40,
+    25
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    25
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "expect": {
+   "dof": 2,
+   "sketch_status": "solved"
+  }
+ },
+ {
+  "start": "CircleCenterRadius"
+ },
+ {
+  "click": {
+   "sketch": [
+    20,
+    12
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    25,
+    12
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchDimension"
+ },
+ {
+  "click": {
+   "sketch": [
+    20,
+    0
+   ]
+  }
+ },
+ {
+  "text": "40"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "click": {
+   "sketch": [
+    40,
+    12
+   ]
+  }
+ },
+ {
+  "text": "25"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "click": {
+   "sketch": [
+    25,
+    12
+   ]
+  }
+ },
+ {
+  "text": "10"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "expect": {
+   "dof": 2
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    20,
+    12
+   ]
+  }
+ },
+ {
+  "expect": {
+   "selection": 1
+  }
+ },
+ {
+  "key": "Delete",
+  "fail": false
+ },
+ {
+  "expect": {
+   "dof": 0,
+   "selection": 0
+  }
+ },
+ {
+  "key": "Z",
+  "cmd": true
+ },
+ {
+  "expect": {
+   "dof": 2
+  }
+ },
+ {
+  "start": "ConstraintFix"
+ },
+ {
+  "click": {
+   "sketch": [
+    20,
+    12
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "expect": {
+   "dof": 0
+  }
+ },
+ {
+  "shot": "s11_constrained"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    12
+   ]
+  }
+ },
+ {
+  "key": "X"
+ },
+ {
+  "expect": {
+   "dof": 0
+  }
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "expect": {
+   "sketching": false,
+   "errors": 0
+  }
+ },
+ {
+  "shot": "s11_done"
+ }
+]

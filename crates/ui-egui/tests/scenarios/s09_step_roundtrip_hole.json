@@ -1,0 +1,126 @@
+[
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    40,
+    30
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "text": "15"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "volume": 18000
+  }
+ },
+ {
+  "click": [
+   127,
+   16
+  ]
+ },
+ {
+  "widget": "Export STEP\u2026"
+ },
+ {
+  "expect": {
+   "file": "Untitled.step"
+  }
+ },
+ {
+  "key": "N",
+  "cmd": true
+ },
+ {
+  "expect": {
+   "bodies": 0,
+   "features": 0
+  }
+ },
+ {
+  "choose_file": "Untitled.step"
+ },
+ {
+  "click": [
+   127,
+   16
+  ]
+ },
+ {
+  "widget": "Insert STEP\u2026"
+ },
+ {
+  "debug": 1
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "volume": 18000
+  }
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "FusionHoleCommand"
+ },
+ {
+  "click": {
+   "world": [
+    20,
+    15,
+    15
+   ]
+  }
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "errors": 0,
+   "dialog": null
+  }
+ },
+ {
+  "shot": "s09_hole_on_import"
+ }
+]

@@ -65,6 +65,11 @@ fn seg_dist(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     p.distance(a + ab * t)
 }
 
+/// The dimension whose value text is under a screen position (its id).
+pub fn hit_text(pos: Pos2) -> Option<String> {
+    DRAWN.with(|d| d.borrow().iter().find(|x| x.text.expand(2.0).contains(pos)).map(|x| x.id.clone()))
+}
+
 /// The dimension under a screen position (its id).
 pub fn hit(pos: Pos2) -> Option<String> {
     DRAWN.with(|d| {
@@ -86,6 +91,12 @@ pub fn selected(app: &SolveApp) -> Vec<String> {
         .filter_map(|s| if let Sel::SketchConstraint { id } = s { Some(id.clone()) } else { None })
         .filter(|id| dims.contains(id))
         .collect()
+}
+
+/// Where the dimension driven by parameter `param` (or with constraint id `param`) shows its
+/// value (screen), as drawn last frame.
+pub fn text_at(param: &str) -> Option<Pos2> {
+    DRAWN.with(|d| d.borrow().iter().find(|x| x.param.as_deref() == Some(param) || x.id == param).map(|x| x.text.center()))
 }
 
 /// Dimension text boxes drawn last frame (for box selection).

@@ -22,4 +22,17 @@ macro_rules! scenarios {
     };
 }
 
-scenarios!(s01_box_fillet_hole_shell, s02_revolve_on_xz, s03_sketch_on_face_cut, s04_mirror_body, s05_delete_and_undo);
+scenarios!(
+    s01_box_fillet_hole_shell,
+    s02_revolve_on_xz,
+    s03_sketch_on_face_cut,
+    s04_mirror_body,
+    s05_delete_and_undo,
+    s06_edit_early_feature,
+    s07_components_joint_drive,
+    s08_sheet_metal_flat_dxf,
+    s09_step_roundtrip_hole,
+    s10_parameters_drive_model,
+    s11_sketch_constraints,
+    s12_pattern_bodies
+);

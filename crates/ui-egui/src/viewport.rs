@@ -1170,7 +1170,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // Dimensions and constraint glyphs sit on top of the geometry.
                 let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
                 let sketching = app.session.active_sketch.is_some();
-                let on_dim = crate::dim_view::hit(p).filter(|_| sketching && !off("dimensions"));
+                // A dimension's text wins; its lines only where no sketch point or curve is (a
+                // diameter's line runs through the centre point).
+                let on_geometry = matches!(cand.as_ref().map(|c| &c.0), Some(Hit::SketchPoint { .. } | Hit::SketchCurve { .. }));
+                let on_dim = crate::dim_view::hit_text(p)
+                    .or_else(|| if on_geometry { None } else { crate::dim_view::hit(p) })
+                    .filter(|_| sketching && !off("dimensions"));
                 let on_glyph = crate::sketch_tools::glyph_at(p).filter(|_| sketching && !off("constraints"));
                 if !crate::sketch3d::click(app, &proj, p) {
                     match on_dim.or(on_glyph) {

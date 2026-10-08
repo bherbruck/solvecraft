@@ -246,6 +246,12 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
         "ui.at" => {
             // A scenario point: {world: [x,y,z]} | {sketch: [x,y]} | {plane: "XY"} (the middle of an
             // origin plane's square) → screen point.
+            if let Some(d) = p.get("dimension").and_then(Value::as_str) {
+                return match crate::dim_view::text_at(d) {
+                    Some(q) => ok(json!([q.x, q.y])),
+                    None => err(format!("dimension {d} is not shown")),
+                };
+            }
             let Some(rect) = app.viewport.rect else { return err("no viewport") };
             let proj = crate::viewport::projection(app, rect);
             let num = |v: &Value, i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
