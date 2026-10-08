@@ -9,7 +9,7 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 |---|---|
 | Where are we? | **M0 done; M1/M2 in progress.** Sketch with solver, extrude (taper, two-sided, through all), revolve, fillet/chamfer, holes, patterns, mirror, shell, draft, loft, sweep, split, construction planes, parameters that rebuild the timeline, STEP/STL export, desktop and browser (wasm) app with Fusion-style selection (hover/selected highlights, origin planes, click-to-pick sketch planes, multi-select, window/crossing box selection, animated view cube), CLI, MCP server, oracle harness. |
 | Command parity (in scope) | **139 / 541 (26%)** in-scope commands; SOLID + SKETCH **102 / 291 (35%)** — [docs/parity.md](docs/parity.md) |
-| Fusion oracle | **49 / 66 parts match** (batch 1: 29/29; batch 2 in progress) — [docs/oracle.md](docs/oracle.md) |
+| Fusion oracle | **52 / 66 parts match** (batch 1: 29/29; batch 2 in progress) — [docs/oracle.md](docs/oracle.md) |
 | Tests | 85 (solver, profiles, kernel booleans/blends/measures, expressions, timeline, file formats, camera, engine end-to-end, hostile-input fuzz over every command) |
 | Gates | `cargo xtask ci`: fmt, clippy -D warnings, tests, asset attribution, layering, wasm32 build — green |
 | Weighted parity estimate | **≈ 5%** of Fusion's Design workspace by importance (sketch + basic solids are the core, but surfaces, assemblies, sheet metal, CAM, drawings are untouched) |
@@ -19,7 +19,9 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 
 In scope, in priority order:
 1. SOLID and SKETCH (now).
-2. Parameters / functional constraints: user parameters with units and expressions (+-*/, ^,
+2. Parameters / functional constraints (done: see `parameters.*`, `expr.evaluate`; unit-aware,
+   cycles reported with their path, rename follows references, deletes list their users):
+   user parameters with units and expressions (+-*/, ^,
    parentheses, sin/cos/sqrt/min/max/floor/ceil/round, unit conversion), model parameters
    d1, d2… for every dimension and feature input, references between parameters with a
    dependency graph and cycle detection, re-evaluation on change, comments, favourites,
@@ -44,7 +46,7 @@ headline counts in-scope tabs only and lists the deferred ones separately.
 | M4 | Files: STEP import (done: all 29 Fusion STEP files — [docs/step-import.md](docs/step-import.md)), 3MF export and 3MF/STL import as mesh bodies (done), DXF sketches, OBJ import | in progress | 6 |
 | M5 | Persistent naming of faces and edges | planned | 20 |
 | M6 | UI depth: selection feedback and origin (done), timeline editing (done: edit feature, history marker drag, reorder with dependency checks, suppress, rename, delete with dependents, re-resolved references), right-docked dialogs (done), live previews for every feature dialog (done), keyboard-first commands with on-canvas value boxes and sketch inline dimensions (done), drag manipulators with automatic join/cut (done: extrude incl. two sides, fillet, shell, hole depth, move, pattern spacing, revolve rotator; taper handle open), dark theme (done), right-click menu with Repeat (done), measure tool (done), section analysis (done), selection filter (done), drag-solve of sketch points (done); appearances, preferences | in progress | 6 |
-| M7 | Sweep, loft, rib, web, emboss, thread, coil, pipe | planned | 24 |
+| M7 | Sweep, loft (incl. to a point), rib and web (to next / depth), emboss (planar faces), thread (cosmetic), coil (helical sweep, ruled), pipe, pattern on path, patterns of bodies and components, replace face (parallel), align, remove, feature copy/paste: done. Left: exact single-surface helical sweep, emboss on curved faces, thicken (needs surfaces), split face, modelled threads | in progress | 12 |
 | M8 | Surface workspace | deferred | — |
 | M9 | Components and assemblies (Fusion-style): New Component / Create Components from Bodies, active component, per-component origin/bodies/sketches/timeline entries, occurrences with transforms, Copy/Paste vs Paste New, nested Browser tree with visibility and isolate; Ground, Move/Copy of occurrences, joints (rigid, revolute, slider, cylindrical, pin-slot, planar, ball) by joint origins with limits and Drive Joints, As-built Joint, Rigid Group, contact sets later; interference, per-component physical properties; STEP with assembly structure. Groundwork done: component tree, occurrences with transforms (instances, Paste New), world placement, active component as authoring frame, ground, Capture/Revert Position, moving bodies and sketches | in progress | 32 |
 | M10 | Sheet metal: flange, contour flange, bend, unfold/refold, flat pattern + DXF, rules (thickness, K-factor, bend radius); then the PLASTIC enclosure subset (Boss, Rib, Web, Lip/Groove, Snap Fit) | planned | 36 |
