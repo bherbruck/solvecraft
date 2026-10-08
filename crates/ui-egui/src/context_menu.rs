@@ -40,6 +40,11 @@ pub enum Target {
     },
     /// The Origin folder.
     Origin,
+    /// The Named Views folder, and one view (saved or standard) in it.
+    NamedViews,
+    NamedView {
+        name: String,
+    },
     /// A canvas (reference image).
     Canvas {
         id: u64,
@@ -85,6 +90,9 @@ impl Item {
         self.params = Some(params);
         self
     }
+    pub fn on_if(self, enabled: bool) -> Item {
+        self.on(enabled)
+    }
     fn on(mut self, enabled: bool) -> Item {
         self.enabled &= enabled;
         self
@@ -101,7 +109,7 @@ fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let shortcut = match id {
         "UndoCommand" => "Ctrl+Z".to_string(),
         "RedoCommand" => "Ctrl+Y".to_string(),
-        _ => info.as_ref().and_then(|i| i.shortcut).map(str::to_string).unwrap_or_default(),
+        _ => crate::keymap::effective(app, id).unwrap_or_default(),
     };
     Item {
         id: id.into(),
@@ -145,6 +153,7 @@ pub enum RenameWhat {
     Component(u64),
     Group(u64),
     Canvas(u64),
+    View(String),
 }
 
 #[derive(Clone, Debug)]
@@ -204,7 +213,9 @@ pub fn target_bodies(app: &SolveApp, target: &Target) -> Vec<String> {
         Target::Body { name } => vec![name.clone()],
         Target::Component { id } => component_bodies(app, *id),
         Target::Group { id } => crate::browser::group_bodies(app, *id),
-        Target::Sketch { .. } | Target::Folder { .. } | Target::Canvas { .. } | Target::Origin => Vec::new(),
+        Target::Sketch { .. } | Target::Folder { .. } | Target::Canvas { .. } | Target::Origin | Target::NamedViews | Target::NamedView { .. } => {
+            Vec::new()
+        }
     }
 }
 
@@ -263,6 +274,8 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Folder { component, folder } => crate::browser::folder_items(app, *component, folder),
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
         Target::Origin => crate::browser::origin_items(app),
+        Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
+        Target::NamedView { name } => crate::browser::view_items(app, name),
     };
     // Several items of the folder selected: they can be grouped.
     if let Some(p) = crate::browser::selection_group(app, target) {
@@ -642,6 +655,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 RenameWhat::Group(g)
             } else if let Some(c) = id_of(&p, "canvas") {
                 RenameWhat::Canvas(c)
+            } else if let Some(v) = p.get("view").and_then(Value::as_str) {
+                RenameWhat::View(v.to_string())
             } else {
                 return;
             };
@@ -723,6 +738,17 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
+        "ui.newView" => drop(crate::browser::save_view(app, None)),
+        "ui.restoreView" => {
+            if let Some(v) = p.get("view").and_then(Value::as_str) {
+                crate::browser::restore_view(app, v);
+            }
+        }
+        "ui.updateView" => {
+            if let Some(v) = p.get("view").and_then(Value::as_str) {
+                crate::browser::save_view(app, Some(v));
+            }
+        }
         "ui.folderVisible" => {
             if let Some(f) = p.get("folder").and_then(Value::as_str) {
                 crate::browser::toggle_folder(app, id_of(&p, "component").unwrap_or(0), f);
@@ -883,6 +909,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::Component(c) => doc.components.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
         RenameWhat::Group(g) => crate::browser::group_name(app, *g).unwrap_or_default(),
         RenameWhat::Canvas(c) => doc.canvases.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
+        RenameWhat::View(v) => v.clone(),
     };
     app.menu.rename = Some(Rename { what, text, at, focused: false });
 }
@@ -906,6 +933,7 @@ fn commit_rename(app: &mut SolveApp, r: &Rename) {
         RenameWhat::Component(c) => drop(app.run("component.rename", json!({ "component": c, "name": name }))),
         RenameWhat::Group(g) => crate::browser::group_action(app, "ui.renameGroup", &json!({ "group": g, "name": name })),
         RenameWhat::Canvas(c) => drop(app.run("canvas.edit", json!({ "canvas": c, "name": name }))),
+        RenameWhat::View(v) => drop(app.run("view.rename", json!({ "view": v, "name": name }))),
     }
 }
 

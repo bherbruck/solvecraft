@@ -380,3 +380,25 @@ fn v_toggles_what_is_selected() {
     assert_eq!(app.ui.hidden_bodies, vec![b]);
     assert_eq!(find(&context_menu::items(&app, &Target::Body { name: body(&app) }), "Show/Hide").shortcut, "V");
 }
+
+#[test]
+fn named_views_save_restore_rename_and_delete() {
+    let mut app = sample_app();
+    act(&mut app, &Target::NamedViews, "New Named View");
+    assert_eq!(app.session.doc.named_views.len(), 1);
+    let saved = app.cam;
+    app.cam.set_view(solvecraft_engine::render::StandardView::Top);
+    let t = Target::NamedView { name: "Named View1".into() };
+    act(&mut app, &t, "Restore");
+    assert_eq!(app.cam_anim.map(|a| a.to), Some(saved), "animates back to the saved camera");
+    act(&mut app, &t, "Rename");
+    assert!(context_menu::finish_rename(&mut app, Some("Front detail"), true));
+    let t = Target::NamedView { name: "Front detail".into() };
+    act(&mut app, &t, "Delete");
+    assert!(app.session.doc.named_views.is_empty());
+    // Standard views restore but can't be renamed or deleted.
+    let top = context_menu::items(&app, &Target::NamedView { name: "Top".into() });
+    assert!(!find(&top, "Delete").enabled);
+    context_menu::run_item(&mut app, &find(&top, "Restore"), pos2(0.0, 0.0));
+    assert!(app.cam_anim.is_some());
+}

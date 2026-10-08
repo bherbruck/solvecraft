@@ -46,6 +46,7 @@ Commands never open dialogs when run this way. `solvecraft-cli commands` prints 
 | `ui.confirm` | `accept?`: bool | answers the Delete confirmation (shown when a delete takes other features with it or makes some fail); without `accept`, what it lists |
 | `ui.documents` | `action?`: `new`, `switch`, `close`; `index?`; `force?` (close without asking) | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt |
 | `ui.home` | `open?`: bool; `sample?`: index | the start page: show or hide it, open a built-in sample (once built); returns `open` and the recent designs |
+| `ui.shortcut` | `command`, `key?`, `replace?` | a command's key, or rebinds it (`""` clears; a key another command uses is refused unless `replace`) |
 | `ui.window` | `action`: minimize, maximize, restore, toggle, close | what the title bar's caption buttons do (on Windows and Linux the application bar is the title bar) |
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | — | |

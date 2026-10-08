@@ -24,6 +24,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("browser.rename_group", "Rename Group", rename_group).params("group: id, name"),
     CommandSpec::new("browser.move", "Move Browser Items", move_items)
         .params("folder, component?, items: [keys]; group?: id (into it; omit to take them out of groups); before?: key (position in the group)"),
+    CommandSpec::new("view.save", "New Named View", view_save)
+        .icon("camera")
+        .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?} (replaces a view of the same name)"),
+    CommandSpec::new("view.rename", "Rename Named View", view_rename).params("view: name, name"),
+    CommandSpec::new("view.delete", "Delete Named View", view_delete).params("view: name"),
+    CommandSpec::new("view.list", "List Named Views", view_list).noundo(),
     CommandSpec::new("browser.order", "Order Browser Items", order).params("folder, component?, order: [keys] (the folder's items in display order)"),
 ];
 
@@ -144,6 +150,59 @@ fn order(s: &mut Session, p: &Value) -> Result<Value> {
         d.browser_order.insert(key, order);
     }
     Ok(json!({}))
+}
+
+fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.save";
+    let c = p.get("camera").ok_or_else(|| bad(cmd, "`camera` is required"))?;
+    let mut v: solvecraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| bad(cmd, format!("bad camera: {e}")))?;
+    let ok = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov].iter().all(|x| x.is_finite()) && v.distance > 0.0;
+    if !ok {
+        return Err(bad(cmd, "the camera must be finite with a positive distance"));
+    }
+    let n = s.doc.named_views.len();
+    v.name = match str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
+        Some(n) if n.len() <= 128 => n.to_string(),
+        Some(_) => return Err(bad(cmd, "`name` is too long")),
+        None => (n + 1..).map(|k| format!("Named View{k}")).find(|x| !s.doc.named_views.iter().any(|v| v.name == *x)).unwrap_or_default(),
+    };
+    if n >= 1000 {
+        return Err(bad(cmd, "too many named views"));
+    }
+    let name = v.name.clone();
+    let d = s.doc_mut();
+    d.named_views.retain(|x| x.name != name);
+    d.named_views.push(v);
+    Ok(json!({ "view": name }))
+}
+
+fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+    let k = str_(p, "view").ok_or_else(|| bad(cmd, "`view` must be a view name"))?;
+    s.doc.named_views.iter().position(|v| v.name == k).ok_or_else(|| bad(cmd, format!("no named view `{k}`")))
+}
+
+fn view_rename(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.rename";
+    let i = view_index(s, p, cmd)?;
+    let name =
+        str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
+    if s.doc.named_views.iter().enumerate().any(|(j, v)| j != i && v.name == name) {
+        return Err(bad(cmd, format!("another view is called `{name}`")));
+    }
+    if let Some(v) = s.doc_mut().named_views.get_mut(i) {
+        v.name = name.to_string();
+    }
+    Ok(json!({ "view": name }))
+}
+
+fn view_delete(s: &mut Session, p: &Value) -> Result<Value> {
+    let i = view_index(s, p, "view.delete")?;
+    let v = s.doc_mut().named_views.remove(i);
+    Ok(json!({ "deleted": v.name }))
+}
+
+fn view_list(s: &mut Session, _p: &Value) -> Result<Value> {
+    Ok(json!({ "views": s.doc.named_views }))
 }
 
 /// Rename an item key in the browser's groups and orders of a folder.
@@ -301,6 +360,26 @@ mod tests {
         assert!(z > 9.0, "the profile stands up on XZ: {z}");
         assert!(s.execute("sketch.redefine", &json!({"sketch": sk, "plane": "nope"})).is_err());
         assert!(s.execute("sketch.redefine", &json!({"sketch": 999, "plane": "XY"})).is_err());
+    }
+
+    #[test]
+    fn named_views_are_saved_renamed_and_deleted() {
+        let mut s = Session::default();
+        let cam = json!({"target": [1, 2, 3], "yaw": 0.5, "pitch": 0.3, "distance": 100});
+        assert_eq!(run(&mut s, "view.save", json!({"camera": cam}))["view"], "Named View1");
+        run(&mut s, "view.save", json!({"camera": cam, "name": "Detail"}));
+        run(&mut s, "view.rename", json!({"view": "Named View1", "name": "Overview"}));
+        assert!(s.execute("view.rename", &json!({"view": "Overview", "name": "Detail"})).is_err());
+        let back: solvecraft_doc::Document = serde_json::from_str(&serde_json::to_string(&*s.doc).unwrap()).unwrap();
+        assert_eq!(back.named_views.len(), 2);
+        assert_eq!(back.named_views[0].target.z, 3.0);
+        run(&mut s, "view.delete", json!({"view": "Detail"}));
+        assert_eq!(run(&mut s, "view.list", json!({}))["views"].as_array().unwrap().len(), 1);
+        for p in [json!({}), json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": -1}}), json!({"camera": "x"})] {
+            assert!(s.execute("view.save", &p).is_err(), "{p}");
+        }
+        run(&mut s, "UndoCommand", json!({}));
+        assert_eq!(s.doc.named_views.len(), 2);
     }
 
     #[test]

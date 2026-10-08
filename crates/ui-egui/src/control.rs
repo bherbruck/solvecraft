@@ -22,6 +22,7 @@
 //!   `ui.rename {text?, commit?}` finishes the rename box
 //! - `ui.window {action: minimize|maximize|restore|toggle|close}`: what the title bar's buttons do
 //! - `ui.confirm {accept?}`: the Delete confirmation (without `accept`: what it lists)
+//! - `ui.shortcut {command, key?, replace?}`: a command's key, or bind one ("" clears)
 //! - `ui.resize {width, height}`, `app.quit`
 
 use std::sync::mpsc::Sender;
@@ -364,6 +365,16 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             }
             None => ok(json!({"pending": app.menu.confirm.as_ref().map(|c| c.report.clone())})),
         },
+        "ui.shortcut" => {
+            let Some(id) = s("command") else { return err("missing `command`") };
+            match s("key") {
+                Some(k) => match crate::keymap::bind(app, id, k, b("replace")) {
+                    Ok(()) => ok(json!({"command": id, "key": crate::keymap::effective(app, id)})),
+                    Err(e) => err(e),
+                },
+                None => ok(json!({"command": id, "key": crate::keymap::effective(app, id)})),
+            }
+        }
         "ui.menuPick" => {
             let Some(key) = s("item") else { return err("missing `item` (id or label)") };
             wrap(crate::context_menu::pick(app, key))

@@ -178,6 +178,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     app.dialog = Some(crate::dialogs::Dialog::preferences());
                     close = true;
                 }
+                if item(ui, "Keyboard Shortcuts…", "") {
+                    app.keymap.open = true;
+                    close = true;
+                }
                 if item(ui, "Quit", "") {
                     app.quit_requested = true;
                     close = true;
@@ -391,6 +395,10 @@ fn caret(p: &egui::Painter, c: egui::Pos2, col: Color32) {
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
+    // The Keyboard Shortcuts window is waiting for a key: it is not a shortcut.
+    if crate::keymap::capturing(app) {
+        return;
+    }
     if ctx.egui_wants_keyboard_input() {
         return;
     }
@@ -412,7 +420,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                         app.open_path(&p);
                     }
                 }
-                _ => {}
+                _ => {
+                    if let Some(id) = crate::keymap::command_for(app, &crate::keymap::key_name(k, mods)) {
+                        app.start(id);
+                    }
+                }
             }
             continue;
         }
@@ -430,14 +442,16 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     app.finish_sketch();
                 }
             }
-            Key::S => app.ui.palette_open = true,
+            Key::S if !mods.shift && !mods.alt => {
+                let at = ctx.input(|i| i.pointer.latest_pos());
+                crate::shortcut_box::open(app, at);
+            }
             Key::V => crate::context_menu::toggle_visibility(app),
             Key::F6 => app.animate_view("fit"),
             Key::Delete | Key::Backspace => crate::viewport::delete_selection(app),
             _ => {
-                let name = format!("{k:?}");
-                if let Some(c) = command_specs().into_iter().find(|c| c.shortcut == Some(name.as_str()) && c.info(&app.session).enabled) {
-                    app.start(c.id);
+                if let Some(id) = crate::keymap::command_for(app, &crate::keymap::key_name(k, mods)) {
+                    app.start(id);
                 }
             }
         }

@@ -530,6 +530,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     let d = depth + 1;
     if id == 0 {
         doc_settings(app, ui, d);
+        named_view_rows(app, ui, d, acts);
         origin_rows(app, ui, d);
         canvas_rows(app, ui, d, acts);
     }
@@ -619,6 +620,79 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
             pick_from_browser(app, x);
         }
     }
+}
+
+/// The standard views listed under Named Views: (label, view).
+pub const STANDARD_VIEWS: [(&str, &str); 4] = [("Top", "top"), ("Front", "front"), ("Right", "right"), ("Home", "home")];
+
+/// Named Views: the standard views, then the design's saved cameras. A double-click restores
+/// one (animated).
+fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
+    let key = "namedviews";
+    let open = is_open(app, key, false);
+    let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "folder", label: "Named Views", ..Default::default() });
+    if r.fold || r.clicked {
+        toggle(app, key, false);
+    }
+    if let Some(p) = r.secondary {
+        acts.menu = Some((p, Target::NamedViews));
+    }
+    if !open {
+        return;
+    }
+    for (label, view) in STANDARD_VIEWS {
+        let r = draw_row(ui, ui.id().with(("stdview", view)), &Row { depth: depth + 1, icon: "home", label, ..Default::default() });
+        if r.double {
+            app.animate_view(view);
+        }
+        if let Some(p) = r.secondary {
+            acts.menu = Some((p, Target::NamedView { name: label.to_string() }));
+        }
+    }
+    let names: Vec<String> = app.session.doc.named_views.iter().map(|v| v.name.clone()).collect();
+    for name in names {
+        let r = draw_row(ui, ui.id().with(("view", &name)), &Row { depth: depth + 1, icon: "perspective", label: &name, ..Default::default() });
+        if r.double {
+            restore_view(app, &name);
+        }
+        if let Some(p) = r.secondary {
+            acts.menu = Some((p, Target::NamedView { name }));
+        }
+    }
+}
+
+/// Turn the camera to a named view (a saved one or a standard one), animated.
+pub fn restore_view(app: &mut SolveApp, name: &str) {
+    if let Some((_, v)) = STANDARD_VIEWS.iter().find(|(l, _)| *l == name) {
+        app.animate_view(v);
+        return;
+    }
+    let Some(v) = app.session.doc.named_views.iter().find(|v| v.name == name) else { return };
+    let j = json!({ "target": v.target, "yaw": v.yaw, "pitch": v.pitch, "distance": v.distance, "fov": v.fov });
+    if let Ok(cam) = serde_json::from_value::<solvecraft_engine::render::Camera>(j) {
+        app.animate_to(cam);
+    }
+}
+
+/// Save the current camera as a named view.
+pub fn save_view(app: &mut SolveApp, name: Option<&str>) -> Option<String> {
+    let cam = serde_json::to_value(app.cam).ok()?;
+    let r = app.run("view.save", json!({ "name": name, "camera": cam })).ok()?;
+    app.tree.collapsed.remove("namedviews");
+    app.tree.expanded.insert("namedviews".into());
+    r.get("view").and_then(Value::as_str).map(str::to_string)
+}
+
+/// The menu of a named view.
+pub fn view_items(app: &SolveApp, name: &str) -> Vec<Item> {
+    let saved = app.session.doc.named_views.iter().any(|v| v.name == name);
+    vec![
+        Item::action("ui.restoreView", "Restore", "home").with(json!({ "view": name })),
+        Item::action("ui.updateView", "Update to Current View", "perspective").with(json!({ "view": name })).on_if(saved),
+        Item::sep(),
+        Item::action("ui.rename", "Rename", "").with(json!({ "view": name })).on_if(saved),
+        Item::action("view.delete", "Delete", "delete").with(json!({ "view": name })).on_if(saved),
+    ]
 }
 
 /// The Canvases folder (reference images) with an eye per canvas.

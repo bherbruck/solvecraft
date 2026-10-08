@@ -24,6 +24,7 @@ pub mod gpu;
 pub mod home;
 pub mod icons;
 pub mod inference;
+pub mod keymap;
 #[cfg(test)]
 mod menu_tests;
 pub mod palette;
@@ -34,6 +35,7 @@ pub mod preview;
 pub mod ref_images;
 pub mod scenario;
 pub mod selection;
+pub mod shortcut_box;
 pub mod sketch3d;
 pub mod sketch_dims;
 #[cfg(test)]
@@ -149,6 +151,10 @@ pub struct SolveApp {
     pub menu: context_menu::MenuState,
     /// Browser tree state (reveal, groups being edited, occurrence moves).
     pub tree: browser::TreeState,
+    /// The S box (command search at the cursor): recent and pinned commands.
+    pub sbox: shortcut_box::ShortcutBox,
+    /// Keyboard shortcuts the user changed.
+    pub keymap: keymap::Keymap,
     pub preview: preview::PreviewState,
     /// The last command started interactively (id, label), for Repeat.
     pub last_command: Option<(String, String)>,
@@ -192,6 +198,8 @@ impl SolveApp {
             palette: palette::Palette::default(),
             menu: context_menu::MenuState::default(),
             tree: browser::TreeState::default(),
+            sbox: shortcut_box::ShortcutBox::default(),
+            keymap: keymap::Keymap::default(),
             preview: preview::PreviewState::default(),
             last_command: None,
             esc_handled: false,
@@ -230,6 +238,8 @@ impl SolveApp {
             "browser_collapsed": self.tree.collapsed,
             "browser_expanded": self.tree.expanded,
             "recent": self.home.recent,
+            "shortcut_box": self.sbox.prefs(),
+            "shortcuts": self.keymap.prefs(),
         })
         .to_string()
     }
@@ -270,6 +280,12 @@ impl SolveApp {
             .and_then(Value::as_array)
             .map(|a| a.iter().filter_map(Value::as_str).take(home::MAX_RECENT).map(str::to_string).collect())
             .unwrap_or_default();
+        if let Some(s) = v.get("shortcut_box") {
+            self.sbox.load(s);
+        }
+        if let Some(s) = v.get("shortcuts") {
+            self.keymap.load(s);
+        }
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
@@ -651,7 +667,8 @@ impl SolveApp {
         if self.custom_titlebar {
             titlebar::resize_zones(ui);
         }
-        palette::popup(self, ui.ctx());
+        shortcut_box::show(self, ui.ctx());
+        keymap::show(self, ui.ctx());
         self.frame_ms = now_ms() - t0;
     }
 

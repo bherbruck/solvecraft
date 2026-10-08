@@ -1052,6 +1052,22 @@ pub struct Document {
     /// Browser item order per component folder (`"<component>/<folder>"` → item keys).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub browser_order: std::collections::BTreeMap<String, Vec<String>>,
+    /// Named views: saved cameras.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub named_views: Vec<NamedView>,
+}
+
+/// A saved camera (orbit camera: target, yaw, pitch, distance; `fov` 0 for orthographic).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NamedView {
+    #[serde(default)]
+    pub name: String,
+    pub target: solvecraft_geom::Vec3,
+    pub yaw: f64,
+    pub pitch: f64,
+    pub distance: f64,
+    #[serde(default)]
+    pub fov: f64,
 }
 
 /// A browser group: items of one folder (`bodies`, `sketches` or `construction`) of a
@@ -1103,6 +1119,7 @@ impl Document {
             param_comments: Default::default(),
             browser_groups: Vec::new(),
             browser_order: Default::default(),
+            named_views: Vec::new(),
         }
     }
 
