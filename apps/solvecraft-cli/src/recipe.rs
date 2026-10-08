@@ -250,6 +250,7 @@ fn helix_path(features: &[Value], f: &Value) -> Option<([f64; 3], f64, f64, f64,
 }
 
 /// Least-squares circle through the points' (x, y): x² + y² + D x + E y + F = 0 (Kåsa).
+#[allow(clippy::needless_range_loop)]
 fn circle_fit(pts: &[[f64; 3]]) -> Option<(f64, f64)> {
     let mut m = [[0.0f64; 4]; 3];
     for p in pts {

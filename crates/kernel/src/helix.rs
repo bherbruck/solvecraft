@@ -105,7 +105,7 @@ mod tests {
     fn coil_volume_is_section_times_helix_length() {
         // A 2 mm circle in a plane through the Z axis, 20 mm out, 3 turns, pitch 8: a screw
         // motion of an axial section sweeps π r² · 2πR · turns (Fusion's spline helix: 4738.1).
-        let pl = Plane::named("XZ").unwrap_or_else(|| Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z });
+        let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
         let region = Region2 { outer: Loop2::circle(Vec2::new(20.0, 0.0), 2.0), holes: vec![] };
         let b = sweep_helix(&pl, &region, Vec3::ZERO, Vec3::Z, 8.0, 3.0).unwrap();
         let v = crate::measure(&b).unwrap().volume;
