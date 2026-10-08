@@ -1359,3 +1359,27 @@ fn tapped_and_clearance_holes() {
     assert!(s.execute("FusionHoleCommand", &json!({"position": [20, 25, 10], "clearance": "M7"})).is_err());
     assert!(s.execute("FusionHoleCommand", &json!({"position": [20, 25, 10]})).is_err());
 }
+
+/// Press Pull on a fillet's face changes its radius; on another curved face it offsets it.
+#[test]
+fn press_pull_on_curved_faces() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [[40, 0, 10]], "radius": 3, "name": "Round"}));
+    let corner = |r: f64| (4.0 - PI) * r * r / 4.0 * 20.0;
+    assert!(rel(volume(&mut s), 24000.0 - corner(3.0)) < 1e-4);
+    // A point on the fillet: the arc's middle.
+    let c = Vec3::new(37.0, 3.0, 10.0);
+    let on = c + Vec3::new(1.0, -1.0, 0.0).normalized().unwrap() * 3.0;
+    let out = run(&mut s, "FusionPressPullCommand", json!({"face": [on.x, on.y, on.z], "distance": 2}));
+    assert_eq!(out["edited"], "Round", "{out}");
+    assert!(rel(volume(&mut s), 24000.0 - corner(5.0)) < 1e-4, "{}", volume(&mut s));
+    // A hole's wall: pulled along its normal (into the hole), the hole gets smaller.
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "FusionHoleCommand", json!({"position": [20, 15, 20], "diameter": 10}));
+    let v0 = volume(&mut s);
+    run(&mut s, "FusionPressPullCommand", json!({"face": [25, 15, 10], "distance": 1}));
+    let v1 = volume(&mut s);
+    assert!(rel(v1 - v0, PI * (25.0 - 16.0) * 20.0) < 1e-3, "{v0} {v1}");
+}

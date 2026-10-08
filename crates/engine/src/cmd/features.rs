@@ -458,6 +458,28 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
     if d.abs() < 1e-9 {
         return Err(bad(cmd, "the distance must not be zero"));
     }
+    // A fillet's or chamfer's face: its size changes by the distance (the feature is edited).
+    if let Some(fp) = vec3(face)
+        && super::face::face_is_planar(s, fp) == Some(false)
+    {
+        let name = solvecraft_doc::naming::face_names_at(&s.model.state(), &[fp]).into_iter().next().unwrap_or_default();
+        let fid = name.strip_prefix('F').and_then(|r| r.split(':').next()).and_then(|x| x.parse::<u64>().ok());
+        if name.contains(":blend") {
+            let f = fid.and_then(|id| s.doc.feature(id)).cloned().ok_or_else(|| bad(cmd, "the blend's feature is gone"))?;
+            let (key, old) = match &f.kind {
+                FeatureKind::Fillet { radius, .. } => ("radius", radius.clone()),
+                FeatureKind::Chamfer { distance, .. } => ("distance", distance.clone()),
+                _ => return Err(bad(cmd, "that face is not a fillet's or a chamfer's")),
+            };
+            let new = format!("({old}) + ({distance})");
+            let r = super::find_command("timeline.edit").ok_or_else(|| bad(cmd, "timeline.edit"))?;
+            let out = (r.run)(s, &json!({"feature": f.id, "set": {key: new}}))?;
+            return Ok(json!({"feature": f.id, "edited": f.name, key: new, "recomputed": out.get("recomputed")}));
+        }
+        // Another curved face moves along its normal.
+        let r = super::find_command("FusionOffsetFacesCommand").ok_or_else(|| bad(cmd, "FusionOffsetFacesCommand"))?;
+        return (r.run)(s, &json!({"faces": [face], "distance": distance}));
+    }
     let (dist, dir, op) = if d > 0.0 { (distance, "positive", "join") } else { (format!("-({distance})"), "negative", "cut") };
     extrude(s, &json!({"face": face, "distance": dist, "direction": dir, "operation": op}))
 }

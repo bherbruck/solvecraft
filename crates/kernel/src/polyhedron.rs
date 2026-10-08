@@ -442,5 +442,6 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
             _ => return Err(KernelError::Invalid(format!("no face at {:?}", [p.x, p.y, p.z]))),
         }
     }
+    let chosen = crate::offset::with_same_surface(&healed, &chosen);
     offset_planar(&healed, |fi, _| if chosen.contains(&fi) { distance } else { 0.0 })
 }

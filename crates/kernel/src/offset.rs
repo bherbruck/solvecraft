@@ -647,3 +647,43 @@ pub(crate) fn draft_walls(b: &Body, chosen: &[usize], neutral: &solvecraft_geom:
         Body::new(solid)
     })
 }
+
+/// The chosen faces and every face on the same surface joined to them (the halves of a hole's
+/// wall), as face indices.
+pub(crate) fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
+    let faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
+    let size = b.size();
+    let tol = (size * 1e-7).max(1e-9) * 100.0;
+    let surfs: Vec<Option<Surf>> = faces.iter().map(|f| surf_of(f, tol)).collect();
+    let same = |x: &Surf, y: &Surf| match (*x, *y) {
+        (Surf::Plane { n, d }, Surf::Plane { n: m, d: e }) => n.dot(m) > 1.0 - 1e-9 && (d - e).abs() < tol,
+        (Surf::Cylinder { o, a, r, convex }, Surf::Cylinder { o: o2, a: a2, r: r2, convex: c2 }) => {
+            a.dot(a2).abs() > 1.0 - 1e-9 && (r - r2).abs() < tol && convex == c2 && { (o2 - o - a * (o2 - o).dot(a)).len() < tol }
+        }
+        (Surf::Sphere { c, r, convex }, Surf::Sphere { c: c2, r: r2, convex: k2 }) => c.dist(c2) < tol && (r - r2).abs() < tol && convex == k2,
+        (Surf::Cone { v, a, half, convex }, Surf::Cone { v: v2, a: a2, half: h2, convex: k2 }) => {
+            v.dist(v2) < tol && a.dot(a2) > 1.0 - 1e-9 && (half - h2).abs() < 1e-9 && convex == k2
+        }
+        _ => false,
+    };
+    let mut out: Vec<usize> = chosen.to_vec();
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for (i, f) in faces.iter().enumerate() {
+            if out.contains(&i) {
+                continue;
+            }
+            let Some(Some(si)) = surfs.get(i) else { continue };
+            let joins = out.iter().any(|j| {
+                surfs.get(*j).and_then(|x| x.as_ref()).is_some_and(|sj| same(si, sj))
+                    && faces.get(*j).is_some_and(|g| g.edge_iter().any(|e| f.edge_iter().any(|x| x.id() == e.id())))
+            });
+            if joins {
+                out.push(i);
+                grew = true;
+            }
+        }
+    }
+    out
+}

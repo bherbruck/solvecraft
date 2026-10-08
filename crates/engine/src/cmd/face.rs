@@ -32,6 +32,25 @@ pub(super) fn face_normal(s: &Session, p: Vec3) -> Option<Vec3> {
         .find_map(|[a, b, c]| (b - a).cross(c - a).normalized())
 }
 
+/// Is the body face at `p` planar (`None`: no face there)?
+pub(super) fn face_is_planar(s: &Session, p: Vec3) -> Option<bool> {
+    let (m, f, d) = face_at(s, p)?;
+    let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
+    if d > tol * 10.0 {
+        return None;
+    }
+    let ns: Vec<Vec3> = m
+        .triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter(|(_, tf)| **tf == f)
+        .filter_map(|(t, _)| m.tri(t))
+        .filter_map(|[a, b, c]| (b - a).cross(c - a).normalized())
+        .collect();
+    let n0 = *ns.first()?;
+    Some(ns.iter().all(|n| n.dot(n0) > 1.0 - 1e-6))
+}
+
 /// The body face under a point: (mesh, face index, distance).
 fn face_at(s: &Session, p: Vec3) -> Option<(std::sync::Arc<Mesh>, u32, f64)> {
     let st = s.model.state();
