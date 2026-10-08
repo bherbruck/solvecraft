@@ -257,7 +257,10 @@ fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         return RowResp { rect: Some(r), ..Default::default() };
     }
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click_and_drag());
-    let mut out = RowResp { rect: Some(r), hovered: resp.hovered(), ..Default::default() };
+    // While something is dragged (an appearance swatch, drawn under the pointer) `hovered` is
+    // off; the row under the pointer still counts, so a drop lands on it.
+    let dragged_over = egui::DragAndDrop::has_any_payload(ui.ctx()) && ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p));
+    let mut out = RowResp { rect: Some(r), hovered: resp.hovered() || dragged_over, ..Default::default() };
     if row.selected {
         ui.painter().rect_filled(r, 3.0, t.accent_soft);
     } else if resp.hovered() {
@@ -1176,6 +1179,10 @@ fn drop_target(ui: &egui::Ui, resp: &egui::Response, accept: impl Fn(&Drag) -> b
             DropMark::Above => ui.painter().hline(r.x_range(), r.top(), Stroke::new(2.0, t.accent)),
             DropMark::Box => ui.painter().rect_stroke(r.shrink(0.5), 3.0, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside),
         };
+    }
+    // Taking a payload takes it whatever its type: leave other drags (appearance swatches) be.
+    if !egui::DragAndDrop::has_payload_of_type::<Drag>(ui.ctx()) {
+        return None;
     }
     resp.dnd_release_payload::<Drag>().filter(|d| accept(d))
 }

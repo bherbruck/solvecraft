@@ -902,6 +902,14 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.arrow((19.0, 6.0), (13.0, 11.0), a);
             pen.circle(19.0, 6.0, 3.0, pen.fill, a);
         }
+        // Appearance: a shaded ball with three paint dabs.
+        "appearance" => {
+            pen.circle(10.0, 13.0, 7.5, pen.fill, ink);
+            pen.arc(10.0, 13.0, 4.5, 1.8, 3.2, Color32::WHITE);
+            pen.circle(18.0, 5.0, 2.6, Color32::from_rgb(220, 70, 60), ink);
+            pen.circle(20.5, 11.0, 2.6, Color32::from_rgb(70, 150, 230), ink);
+            pen.circle(19.0, 17.5, 2.6, Color32::from_rgb(240, 200, 60), ink);
+        }
         "warning" => {
             pen.poly(&[(12.0, 3.0), (21.0, 20.0), (3.0, 20.0)], Color32::from_rgb(250, 200, 60), ink);
             pen.line(&[(12.0, 9.0), (12.0, 14.0)], ink);

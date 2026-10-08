@@ -14,6 +14,7 @@ pub mod context_menu;
 pub mod control;
 pub mod delete;
 pub mod dialogs;
+pub mod dialogs_appearance;
 pub mod dialogs_assembly;
 pub mod dialogs_plastic;
 pub mod dialogs_sheet;

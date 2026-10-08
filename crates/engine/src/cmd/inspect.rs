@@ -26,6 +26,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("AppearanceCommand", "Appearance", appearance)
         .at("SOLID", "MODIFY")
         .icon("appearance")
+        .key("A")
         .params("bodies: [names]; color: \"#rrggbb\" or [r, g, b] (0–255), or null to follow the material"),
     CommandSpec::new("material.list", "List Materials", material_list).noundo(),
     CommandSpec::new("engine.commands", "List Commands", commands).noundo(),

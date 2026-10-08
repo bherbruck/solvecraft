@@ -204,6 +204,8 @@ pub enum Kind {
     Sheet(crate::dialogs_sheet::Sm),
     /// Plastic features (`dialogs_plastic`).
     Plastic(crate::dialogs_plastic::Pl),
+    /// Appearance (`dialogs_appearance`).
+    Appearance(crate::dialogs_appearance::Ap),
 }
 
 /// The rest of the Hole dialog: placement, extents, tap type and drill point.
@@ -401,7 +403,8 @@ impl Dialog {
             _ => {
                 let (kind, inputs) = crate::dialogs_assembly::start(app, id)
                     .or_else(|| crate::dialogs_sheet::start(app, id))
-                    .or_else(|| crate::dialogs_plastic::start(app, id))?;
+                    .or_else(|| crate::dialogs_plastic::start(app, id))
+                    .or_else(|| crate::dialogs_appearance::start(app, id))?;
                 Dialog::new(kind, inputs)
             }
         };
@@ -743,6 +746,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Assembly(k) => k.title(),
         Kind::Sheet(k) => k.title(),
         Kind::Plastic(k) => k.title(),
+        Kind::Appearance(_) => "APPEARANCE",
     }
 }
 
@@ -1360,6 +1364,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
                     Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
                     Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
+                    Kind::Appearance(k) => enter |= crate::dialogs_appearance::rows(app, ui, k, &mut d.inputs),
                     Kind::ConfirmDelete { with, fail, .. } => {
                         if !with.is_empty() {
                             row_label(ui, "Also deletes");
@@ -1977,6 +1982,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
         Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
+        Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
     };
     let mut params = params;
     if let Value::Object(m) = &mut params {
