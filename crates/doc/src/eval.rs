@@ -10,7 +10,7 @@ use solvecraft_kernel::{self as kernel, Body, BoolOp};
 use solvecraft_sketch::{CurveKind, Profile, SolveReport, find_profiles, solve};
 
 use crate::expr::{self, Kind, Value};
-use crate::{AxisRef, DocError, Document, Feature, FeatureKind, HoleKind, Operation, ProfileSel, Result};
+use crate::{AxisRef, DocError, Document, Feature, FeatureKind, HoleKind, Operation, PlaneRef, ProfileSel, Result};
 
 /// A body in the evaluated model.
 #[derive(Clone, Debug)]
@@ -1399,6 +1399,41 @@ fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut 
 #[path = "eval_more.rs"]
 mod more;
 
+/// The plane of the body face a sketch sits on, found again: among planar faces with the
+/// picked plane's normal, the one nearest `at`. The picked frame moves along its normal onto it.
+fn face_plane(st: &ModelState, picked: &Plane, at: Vec3) -> (Plane, Option<String>) {
+    let n = picked.normal();
+    let mut best: Option<(f64, f64)> = None; // (distance from `at`, plane offset along n)
+    for b in &st.bodies {
+        let tol = (b.body.size() * 1e-3).max(1e-3);
+        let (Ok(faces), Ok(mesh)) = (b.body.faces(tol), b.body.tessellate(tol)) else { continue };
+        for f in faces {
+            let Some(fnrm) = f.plane_normal else { continue };
+            if fnrm.dot(n) < 1.0 - 1e-6 {
+                continue;
+            }
+            let d = mesh
+                .triangles
+                .iter()
+                .zip(&mesh.tri_face)
+                .filter(|(_, tf)| **tf as usize == f.index)
+                .filter_map(|(t, _)| mesh.tri(t))
+                .map(|[a, bb, c]| crate::project::closest_on_triangle(at, a, bb, c).dist(at))
+                .fold(f64::INFINITY, f64::min);
+            if best.is_none_or(|x| d < x.0) {
+                best = Some((d, f.centroid.dot(n)));
+            }
+        }
+    }
+    match best {
+        Some((_, off)) => {
+            let shift = off - picked.origin.dot(n);
+            (picked.offset(shift), None)
+        }
+        None => (*picked, Some("the face the sketch was on is gone; the sketch stays where it was".into())),
+    }
+}
+
 fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
         FeatureKind::SheetBase { .. }
@@ -1416,9 +1451,15 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::Align { .. }
         | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st),
         FeatureKind::Sketch { plane, sketch } => {
-            let plane = doc.resolve_plane(vals, plane, 0)?;
+            let (plane, face_warning) = match plane {
+                PlaneRef::Face { plane: picked, at } => face_plane(st, picked, *at),
+                other => (doc.resolve_plane(vals, other, 0)?, None),
+            };
             let mut sk = sketch.clone();
             let mut warns = crate::project::refresh_links(doc, vals, st, &plane, &mut sk);
+            if let Some(w) = face_warning {
+                warns.insert(0, w);
+            }
             doc.apply_dimension_values(vals, &mut sk)?;
             let report = solve(&mut sk);
             if !report.ok() {

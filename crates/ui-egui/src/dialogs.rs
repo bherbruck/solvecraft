@@ -2097,7 +2097,7 @@ pub(crate) fn face_sel(s: &Session, p: Vec3) -> Option<Sel> {
 fn plane_sel(s: &Session, pl: &PlaneRef) -> Option<Sel> {
     match pl {
         PlaneRef::Origin { name } | PlaneRef::Construction { name } => Some(Sel::Plane { name: name.clone() }),
-        PlaneRef::Custom { plane } => face_sel(s, plane.origin),
+        PlaneRef::Custom { plane } | PlaneRef::Face { plane, .. } => face_sel(s, plane.origin),
         _ => None,
     }
 }

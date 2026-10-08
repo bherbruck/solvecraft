@@ -347,7 +347,7 @@ pub(crate) fn nearest_edge(m: &Mesh, p: Vec3) -> Option<(usize, Vec3, f64)> {
     best
 }
 
-fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
+pub(crate) fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
     let n = (b - a).cross(c - a);
     let Some(nn) = n.normalized() else { return closest_on_segment(p, a, b) };
     let q = p - nn * (p - a).dot(nn);

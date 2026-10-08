@@ -977,3 +977,14 @@ fn components_export_as_step_assembly() {
     assert_eq!(xs.len(), 2);
     assert!(((xs[0] - xs[1]).abs() - 20.0).abs() < 1e-6, "{xs:?}");
 }
+
+/// A face extrude follows its face when earlier features change.
+#[test]
+fn face_extrude_follows_edits() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20, "name": "Base"}));
+    run(&mut s, "Extrude", json!({"face": [20, 15, 20], "distance": 10, "operation": "join", "name": "Pad"}));
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 30.0) < 1e-6);
+    run(&mut s, "timeline.edit", json!({"feature": "Base", "set": {"height": "25", "length": "50"}}));
+    assert!(rel(volume(&mut s), 50.0 * 30.0 * 35.0) < 1e-6, "{}", volume(&mut s));
+}

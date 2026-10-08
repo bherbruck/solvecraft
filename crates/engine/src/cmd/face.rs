@@ -99,10 +99,15 @@ pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str) -> Result<
         let spec = crate::find_command(id).ok_or_else(|| bad(cmd, id))?;
         (spec.run)(s, &p)
     };
-    let r = run(s, "SketchCreate", json!({"plane": {"face": [inside.x, inside.y, inside.z]}}))?;
+    let r = run(s, "SketchCreate", json!({"plane": {"face": [inside.x, inside.y, inside.z]}, "project_edges": true}))?;
     let sid = r.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start a sketch on the face"))?;
     s.refresh();
     let plane = s.model.state().sketch(sid).map(|ss| ss.plane).ok_or_else(|| bad(cmd, "could not start a sketch on the face"))?;
+    // The face's edges came in as linked projections: they follow the face when earlier
+    // features change, so nothing is copied.
+    if r.get("projected").is_some_and(|x| !x.is_null()) {
+        return Ok((sid, plane.to_local(inside)));
+    }
     for e in &edges {
         let pts: Vec<Vec2> = e.iter().map(|p| plane.to_local(*p)).collect();
         let (Some(first), Some(last)) = (pts.first().copied(), pts.last().copied()) else { continue };

@@ -43,6 +43,10 @@ pub enum PlaneRef {
     AtAngle { base: Box<PlaneRef>, axis_origin: Vec3, axis_dir: Vec3, angle: String },
     /// A construction plane feature (by name).
     Construction { name: String },
+    /// A planar body face: found again on each evaluation (the face with this plane's normal
+    /// nearest `at`), so sketches on it follow when earlier features change; `plane` is the
+    /// plane as picked (its frame, and the fallback when the face is gone).
+    Face { plane: Plane, at: Vec3 },
 }
 
 /// Which closed profiles of a sketch a feature uses.
@@ -1369,7 +1373,9 @@ impl Document {
         }
         match p {
             PlaneRef::Origin { name } => Plane::named(name).ok_or_else(|| DocError::Unknown(format!("plane `{name}`"))),
-            PlaneRef::Custom { plane } => Plane::new(plane.origin, plane.x, plane.y).ok_or_else(|| DocError::Invalid("degenerate plane".into())),
+            PlaneRef::Custom { plane } | PlaneRef::Face { plane, .. } => {
+                Plane::new(plane.origin, plane.x, plane.y).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
+            }
             PlaneRef::Offset { base, distance } => {
                 let b = self.resolve_plane(vals, base, depth + 1)?;
                 Ok(b.offset(Self::eval_in(vals, distance, Kind::Length)?))

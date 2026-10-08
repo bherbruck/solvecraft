@@ -132,6 +132,10 @@ fn map_plane(m: &Mat, p: &Plane) -> Plane {
 fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
     match p {
         PlaneRef::Custom { plane } => *plane = map_plane(m, plane),
+        PlaneRef::Face { plane, at } => {
+            *plane = map_plane(m, plane);
+            *at = apply_point(m, *at);
+        }
         PlaneRef::Offset { base, .. } => map_plane_ref(m, base),
         PlaneRef::AtAngle { base, axis_origin, axis_dir, .. } => {
             map_plane_ref(m, base);

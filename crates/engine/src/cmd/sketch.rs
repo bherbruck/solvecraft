@@ -318,7 +318,7 @@ pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
                     }
                 }
                 let pl = found.ok_or_else(|| bad(cmd, "no planar face at that point"))?;
-                PlaneRef::Custom { plane: pl }
+                PlaneRef::Face { plane: pl, at: fp }
             } else {
                 let origin = v.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
                 let x = v.get("x_dir").and_then(vec3).ok_or_else(|| bad(cmd, "plane needs x_dir"))?;
