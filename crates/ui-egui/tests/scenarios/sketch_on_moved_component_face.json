@@ -1,0 +1,112 @@
+[
+ {
+  "pending": "a root-active sketch on a face of a moved component lands in body-local coordinates (solvecraft-dialogs)"
+ },
+ {
+  "note": "A box in a new component, the component moved +100 in x, the root active: a sketch on the box's top face projects the face's edges where the face is (x 100-140), not at the body's own coordinates (x 0-40)."
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "FusionCreateNewComponentCommand",
+   "params": {}
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "PrimitiveBox",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "corner": [
+     0,
+     0,
+     0
+    ]
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "component.activate",
+   "params": {
+    "component": 0
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "occurrence.move",
+   "params": {
+    "occurrence": 2,
+    "translate": [
+     100,
+     0,
+     0
+    ]
+   }
+  }
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "fit"
+  }
+ },
+ {
+  "expect": {
+   "bbox": {
+    "body": "Body1",
+    "min": [
+     100,
+     0,
+     0
+    ],
+    "max": [
+     140,
+     30,
+     10
+    ]
+   }
+  }
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "world": [
+    120,
+    15,
+    10
+   ]
+  }
+ },
+ {
+  "expect": {
+   "sketching": true
+  }
+ },
+ {
+  "expect": {
+   "linked_world_range": {
+    "x": [
+     100,
+     140
+    ],
+    "y": [
+     0,
+     30
+    ],
+    "z": [
+     10,
+     10
+    ]
+   }
+  }
+ }
+]

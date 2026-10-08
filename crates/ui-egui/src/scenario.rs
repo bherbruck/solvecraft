@@ -686,6 +686,24 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 let got = m["bodies"][0]["volume_mm3"].as_f64().unwrap_or(f64::NAN);
                 approx(got, &v["volume"], &format!("{name} volume"))?;
             }
+            "linked_world_range" => {
+                // {"x"|"y"|"z": [min, max]}: where the active sketch's projected (linked) points lie
+                // in the world (±1e-3 mm).
+                let si = h.call("engine.execute", json!({"command": "sketch.inspect", "params": {}}))["result"].clone();
+                let pts: Vec<Value> = si["points"].as_array().into_iter().flatten().filter(|p| !p["link"].is_null()).cloned().collect();
+                if pts.is_empty() {
+                    return Err("the sketch has no projected points".into());
+                }
+                for (i, axis) in ["x", "y", "z"].iter().enumerate() {
+                    let Some(want) = v.get(*axis) else { continue };
+                    let xs: Vec<f64> = pts.iter().filter_map(|p| p["world"][i].as_f64()).collect();
+                    let (lo, hi) = xs.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &x| (a.min(x), b.max(x)));
+                    let (wl, wh) = (want[0].as_f64().unwrap_or(f64::NAN), want[1].as_f64().unwrap_or(f64::NAN));
+                    if (lo - wl).abs() > 1e-3 || (hi - wh).abs() > 1e-3 {
+                        return Err(format!("projected points span {axis} {lo:.3}..{hi:.3}, want {wl}..{wh}"));
+                    }
+                }
+            }
             "sketch_world" => {
                 // {sketch, point, at: [x,y,z]}: where a sketch point is in the world (±1e-3 mm).
                 let si = h.call("engine.execute", json!({"command": "sketch.inspect", "params": {"sketch": v["sketch"]}}))["result"].clone();
