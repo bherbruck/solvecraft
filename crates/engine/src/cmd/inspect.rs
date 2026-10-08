@@ -354,6 +354,16 @@ fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.is_empty() && faces.is_empty() && comps.is_empty() {
         return Err(bad(cmd, "give `bodies`, `faces` or `components`"));
     }
+    // Persistent names of the picked faces.
+    let st_names: Vec<(String, solvecraft_geom::Vec3, Option<String>)> = faces
+        .iter()
+        .map(|(b, pt)| {
+            let n = st.body(b).and_then(|mb| {
+                solvecraft_doc::appearance::face_index_at(mb, *pt).and_then(|i| solvecraft_doc::naming::face_names(mb).get(i).cloned())
+            });
+            (b.clone(), *pt, n)
+        })
+        .collect();
     let a = &mut s.doc_mut().appearances;
     for b in &bodies {
         match &look {
@@ -368,7 +378,8 @@ fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
             if a.faces.len() >= 100_000 {
                 return Err(bad(cmd, "too many face appearances"));
             }
-            a.faces.push(FaceLook { body: body.clone(), point: *pt, look: l.clone() });
+            let name = st_names.iter().find(|(b, p, _)| b == body && p.dist(*pt) < 1e-12).and_then(|(_, _, n)| n.clone());
+            a.faces.push(FaceLook { body: body.clone(), point: *pt, look: l.clone(), name });
         }
     }
     for c in &comps {

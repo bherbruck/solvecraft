@@ -42,6 +42,9 @@ pub struct FaceLook {
     pub body: String,
     pub point: Vec3,
     pub look: Look,
+    /// The face's persistent name (found first).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// The design's appearances.
@@ -123,7 +126,21 @@ impl Document {
     /// assignment to the same face wins.
     pub fn face_colors(&self, b: &crate::ModelBody) -> Vec<(usize, Look)> {
         let mut out: Vec<(usize, Look)> = Vec::new();
-        for (p, look) in self.face_looks(&b.name) {
+        let names = crate::naming::face_names(b);
+        for f in self.appearances.faces.iter().filter(|f| f.body == b.name) {
+            let (p, look) = (f.point, f.look.clone());
+            // By name (every piece of a split face), else by the point.
+            if let Some(n) = &f.name {
+                let stem = crate::naming::strip_piece(n);
+                let hits: Vec<usize> = (0..names.len()).filter(|i| names.get(*i).is_some_and(|x| crate::naming::strip_piece(x) == stem)).collect();
+                if !hits.is_empty() {
+                    for i in hits {
+                        out.retain(|(j, _)| *j != i);
+                        out.push((i, look.clone()));
+                    }
+                    continue;
+                }
+            }
             if let Some(i) = face_index_at(b, p) {
                 out.retain(|(j, _)| *j != i);
                 out.push((i, look));

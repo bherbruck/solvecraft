@@ -30,11 +30,20 @@ pub enum Snap {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<Vec3>,
     },
-    /// The centre of the planar face nearest `pick`, z along its outward normal.
-    FaceCenter { pick: Vec3 },
+    /// The centre of the planar face nearest `pick`, z along its outward normal. `face` is the
+    /// face's persistent name (found first).
+    FaceCenter {
+        pick: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        face: Option<String>,
+    },
     /// The centre of the circular end nearest `pick` of the cylindrical face there, z along its
     /// axis (pointing out of the face's end).
-    CircleCenter { pick: Vec3 },
+    CircleCenter {
+        pick: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        face: Option<String>,
+    },
     /// A point, z along `z` (default +Z).
     Point {
         point: Vec3,
@@ -225,12 +234,24 @@ fn component_of(doc: &Document, occ: u64) -> Result<u64> {
 }
 
 /// Resolve a joint origin to a frame in its component's coordinates.
+/// A snap's pick point moved onto its named face (an error when the face is gone: a joint must
+/// not quietly attach elsewhere).
+fn named_pick(st: &ModelState, pick: Vec3, face: Option<&str>) -> Result<Vec3> {
+    match face {
+        Some(n) => crate::naming::point_on_face(st, n, pick)
+            .map(|(q, _)| q)
+            .ok_or_else(|| DocError::Invalid(format!("joint origin: the face `{n}` no longer exists (edit the joint to pick again)"))),
+        None => Ok(pick),
+    }
+}
+
 pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat> {
     let bad = || DocError::Invalid("joint origin: degenerate frame".into());
     match &o.snap {
         Snap::Frame { origin, z, x } => frame(*origin, *z, *x).ok_or_else(bad),
         Snap::Point { point, z } => frame(*point, z.unwrap_or(Vec3::Z), None).ok_or_else(bad),
-        Snap::FaceCenter { pick } => {
+        Snap::FaceCenter { pick, face } => {
+            let pick = &named_pick(st, *pick, face.as_deref())?;
             let comp = component_of(doc, o.occurrence)?;
             let mut best: Option<(f64, Vec3, Vec3)> = None;
             for b in component_bodies(doc, st, comp) {
@@ -246,7 +267,8 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
             let (_, c, n) = best.ok_or_else(|| DocError::Invalid("joint origin: no planar face there".into()))?;
             frame(c, n, None).ok_or_else(bad)
         }
-        Snap::CircleCenter { pick } => {
+        Snap::CircleCenter { pick, face } => {
+            let pick = &named_pick(st, *pick, face.as_deref())?;
             let comp = component_of(doc, o.occurrence)?;
             let cyl = component_bodies(doc, st, comp)
                 .into_iter()

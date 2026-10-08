@@ -131,8 +131,11 @@ fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointOrigin
     let local = |p: Vec3| solvecraft_doc::apply_point(&inv, p);
     let local_dir = |d: Vec3| solvecraft_doc::apply_vector(&inv, d);
     let snap = match what {
-        "face" => Snap::FaceCenter { pick: local(world) },
-        "circle" => Snap::CircleCenter { pick: local(world) },
+        "face" | "circle" => {
+            let pick = local(world);
+            let face = solvecraft_doc::naming::face_names_at(&s.model.state(), &[pick]).into_iter().next().filter(|n| !n.is_empty());
+            if what == "face" { Snap::FaceCenter { pick, face } } else { Snap::CircleCenter { pick, face } }
+        }
         "point" => Snap::Point { point: local(world), z: v.get("z").and_then(vec3).map(local_dir) },
         _ => {
             let f = v.get("frame").cloned().unwrap_or_default();
