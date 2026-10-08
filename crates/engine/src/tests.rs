@@ -1412,3 +1412,18 @@ fn press_pull_on_curved_faces() {
     let v1 = volume(&mut s);
     assert!(rel(v1 - v0, PI * (25.0 - 16.0) * 20.0) < 1e-3, "{v0} {v1}");
 }
+
+/// Chamfers with two distances or a distance and an angle.
+#[test]
+fn unequal_chamfers() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
+    // Top front edge: 2 along the top (the face facing up), 4 down the front.
+    run(&mut s, "FusionChamferCommand", json!({"edges": [[20, 0, 20]], "distance": 2, "distance2": 4}));
+    assert!(rel(volume(&mut s), 24000.0 - 0.5 * 2.0 * 4.0 * 40.0) < 1e-6, "{}", volume(&mut s));
+    // Bottom back edge: 3 along the bottom, at 30° from it (down the back face 3·tan 30°).
+    run(&mut s, "FusionChamferCommand", json!({"edges": [[20, 30, 0]], "distance": 3, "angle": "30 deg", "flip": true}));
+    let d2 = 3.0 * (30f64).to_radians().tan();
+    assert!(rel(volume(&mut s), 24000.0 - 160.0 - 0.5 * 3.0 * d2 * 40.0) < 1e-6, "{}", volume(&mut s));
+    assert!(s.execute("FusionChamferCommand", &json!({"edges": [[0, 15, 20]], "distance": 1, "distance2": 2, "angle": "30 deg"})).is_err());
+}

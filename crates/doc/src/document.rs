@@ -176,6 +176,15 @@ pub enum FeatureKind {
     Chamfer {
         edges: Vec<Vec3>,
         distance: String,
+        /// Unequal chamfers: the distance along the second face…
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        distance2: Option<String>,
+        /// …or the angle the chamfer makes with the first face.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<String>,
+        /// Swap which face is the first (by default the one facing up most).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<String>,
     },
@@ -923,7 +932,11 @@ impl FeatureKind {
             }
             FeatureKind::Revolve { angle, .. } => v.push(angle),
             FeatureKind::Fillet { radius, .. } => v.push(radius),
-            FeatureKind::Chamfer { distance, .. } => v.push(distance),
+            FeatureKind::Chamfer { distance, distance2, angle, .. } => {
+                v.push(distance);
+                v.extend(distance2.iter().map(String::as_str));
+                v.extend(angle.iter().map(String::as_str));
+            }
             FeatureKind::Box { length, width, height, .. } => v.extend([length.as_str(), width, height]),
             FeatureKind::Cylinder { radius, height, .. } => v.extend([radius.as_str(), height]),
             FeatureKind::Sphere { radius, .. } => v.push(radius),

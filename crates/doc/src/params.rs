@@ -49,7 +49,15 @@ impl FeatureKind {
             }
             FeatureKind::Revolve { angle, .. } => v.push(("Angle", angle, A)),
             FeatureKind::Fillet { radius, .. } => v.push(("Radius", radius, L)),
-            FeatureKind::Chamfer { distance, .. } => v.push(("Distance", distance, L)),
+            FeatureKind::Chamfer { distance, distance2, angle, .. } => {
+                v.push(("Distance", distance, L));
+                if let Some(d) = distance2 {
+                    v.push(("Distance 2", d, L));
+                }
+                if let Some(a) = angle {
+                    v.push(("Angle", a, A));
+                }
+            }
             FeatureKind::Box { length, width, height, .. } => {
                 v.push(("Length", length, L));
                 v.push(("Width", width, L));

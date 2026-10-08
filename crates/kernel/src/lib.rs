@@ -35,7 +35,7 @@ mod step_out;
 mod sweep_path;
 mod topo;
 
-pub use blend::{chamfer, fillet};
+pub use blend::{ChamferSide, chamfer, chamfer_sides, fillet};
 pub use body::{Body, EdgeInfo, FaceInfo, FacePaint, Paint};
 pub use build::{PathSeg, box_solid, cylinder, extrude, extrude_tapered, loft, revolve, sphere, sweep, torus};
 pub use helix::{loft_to_point, sweep_helix};
