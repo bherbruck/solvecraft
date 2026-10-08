@@ -438,6 +438,12 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.iso_box(2.0, 13.0, 9.0, 6.0, 6.0);
             pen.iso_box(9.0, 6.0, 5.0, 4.0, 4.0);
         }
+        // Canvas: a framed picture (sky and a hill).
+        "canvas" => {
+            pen.poly(&[(3.0, 5.0), (21.0, 5.0), (21.0, 19.0), (3.0, 19.0)], Color32::from_rgb(170, 205, 240), ink);
+            pen.poly(&[(4.0, 18.0), (10.0, 11.0), (14.0, 15.0), (16.0, 13.0), (20.0, 18.0)], Color32::from_rgb(110, 170, 100), ink);
+            pen.circle(16.5, 9.0, 1.6, Color32::from_rgb(250, 210, 80), Color32::from_rgb(250, 210, 80));
+        }
         "folder" => pen.poly(&[(3.0, 7.0), (9.0, 7.0), (11.0, 9.0), (21.0, 9.0), (21.0, 19.0), (3.0, 19.0)], Color32::from_rgb(236, 200, 110), ink),
         "origin" => {
             pen.arrow((6.0, 18.0), (20.0, 18.0), Color32::from_rgb(210, 60, 60));

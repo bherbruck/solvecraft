@@ -34,6 +34,8 @@ pub struct TreeState {
     pub picked_components: Vec<u64>,
     /// Canvases picked in the tree.
     pub picked_canvases: Vec<u64>,
+    /// The Edit Canvas / Calibrate panel.
+    pub canvas_panel: Option<CanvasPanel>,
     /// The last row clicked (for Shift ranges).
     anchor: Option<String>,
     /// Row keys in drawing order this frame (for Shift ranges).
@@ -403,6 +405,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::context_menu::open_for(app, at, target);
     }
     occurrence_panel(app, ui.ctx());
+    canvas_panel(app, ui.ctx());
     redefine_panel(app, ui.ctx());
 }
 
@@ -487,6 +490,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     if id == 0 {
         doc_settings(app, ui, d);
         origin_rows(app, ui, d);
+        canvas_rows(app, ui, d, acts);
     }
     let _ = t;
     for folder in ["bodies", "sketches", "construction"] {
@@ -568,6 +572,183 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
             pick_from_browser(app, x);
         }
     }
+}
+
+/// The Canvases folder (reference images) with an eye per canvas.
+fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
+    let canvases: Vec<(u64, String, bool)> = app.session.doc.canvases.iter().map(|c| (c.id, c.name.clone(), c.visible)).collect();
+    if canvases.is_empty() {
+        return;
+    }
+    let key = "canvases";
+    let open = is_open(app, key, true);
+    let any = canvases.iter().any(|c| c.2);
+    let r =
+        draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), eye: Some(any), icon: "folder", label: "Canvases", ..Default::default() });
+    if r.fold || r.clicked {
+        toggle(app, key, true);
+    }
+    if r.eye {
+        for (id, _, _) in &canvases {
+            let _ = app.run("canvas.edit", json!({ "canvas": id, "visible": !any }));
+        }
+    }
+    if !open {
+        return;
+    }
+    for (id, name, visible) in canvases {
+        let selected = app.tree.picked_canvases.contains(&id);
+        let r = draw_row(
+            ui,
+            ui.id().with(("canvas", id)),
+            &Row { depth: depth + 1, eye: Some(visible), icon: "canvas", label: &name, selected, dim: !visible, ..Default::default() },
+        );
+        if r.eye {
+            let _ = app.run("canvas.edit", json!({ "canvas": id, "visible": !visible }));
+        }
+        if r.clicked {
+            if !ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                app.tree.picked_canvases.clear();
+                app.tree.picked_components.clear();
+                let _ = app.run("select.clear", json!({}));
+            }
+            if selected {
+                app.tree.picked_canvases.retain(|c| *c != id);
+            } else {
+                app.tree.picked_canvases.push(id);
+            }
+        }
+        if r.double {
+            app.tree.canvas_panel = Some(CanvasPanel::new(app, id, false));
+        }
+        if let Some(p) = r.secondary {
+            if !selected {
+                app.tree.picked_canvases = vec![id];
+            }
+            acts.menu = Some((p, Target::Canvas { id }));
+        }
+    }
+}
+
+/// The menu of a canvas.
+pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
+    let visible = app.session.doc.canvases.iter().find(|c| c.id == id).is_some_and(|c| c.visible);
+    vec![
+        Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })),
+        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })),
+        Item::sep(),
+        Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })),
+        Item::action("ui.rename", "Rename", "").with(json!({ "canvas": id })),
+        Item::sep(),
+        Item::action("ui.canvasVisible", if visible { "Hide" } else { "Show" }, "eye").with(json!({ "canvas": id, "visible": !visible })),
+    ]
+}
+
+/// Editing a canvas (position, size, angle, opacity, flip) or calibrating it (two points on
+/// the image and their true distance). Live edits of one opening are one undo step.
+#[derive(Clone, Debug)]
+pub struct CanvasPanel {
+    pub canvas: u64,
+    pub calibrate: bool,
+    /// Undo depth when the panel opened.
+    depth: usize,
+    pub a: [f64; 2],
+    pub b: [f64; 2],
+    pub distance: f64,
+}
+
+impl CanvasPanel {
+    pub fn new(app: &SolveApp, canvas: u64, calibrate: bool) -> Self {
+        // Calibration starts from the image's left and right edge midpoints.
+        let (a, b, d) = app
+            .session
+            .doc
+            .canvases
+            .iter()
+            .find(|c| c.id == canvas)
+            .map(|c| ([c.center.x - c.width / 2.0, c.center.y], [c.center.x + c.width / 2.0, c.center.y], c.width))
+            .unwrap_or(([0.0, 0.0], [100.0, 0.0], 100.0));
+        CanvasPanel { canvas, calibrate, depth: app.session.undo.len(), a, b, distance: d }
+    }
+}
+
+fn canvas_panel(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(mut m) = app.tree.canvas_panel.clone() else { return };
+    let Some(c) = app.session.doc.canvases.iter().find(|c| c.id == m.canvas).cloned() else {
+        app.tree.canvas_panel = None;
+        return;
+    };
+    let mut open = true;
+    let mut edit: Option<Value> = None;
+    let mut done = false;
+    let title = if m.calibrate { format!("Calibrate: {}", c.name) } else { format!("Edit Canvas: {}", c.name) };
+    egui::Window::new(title)
+        .id(egui::Id::new("sc_canvas_panel"))
+        .default_pos(panel_pos(app))
+        .open(&mut open)
+        .resizable(false)
+        .collapsible(false)
+        .show(ctx, |ui| {
+            egui::Grid::new("sc_canvas_grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                if m.calibrate {
+                    for (label, p) in [("Point A", &mut m.a), ("Point B", &mut m.b)] {
+                        ui.label(label);
+                        ui.horizontal(|ui| {
+                            ui.add(egui::DragValue::new(&mut p[0]).speed(0.5).suffix(" mm"));
+                            ui.add(egui::DragValue::new(&mut p[1]).speed(0.5).suffix(" mm"));
+                        });
+                        ui.end_row();
+                    }
+                    ui.label("Distance");
+                    ui.add(egui::DragValue::new(&mut m.distance).speed(0.5).range(0.001..=1e6).suffix(" mm"));
+                    ui.end_row();
+                } else {
+                    let (mut x, mut y, mut w, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.angle.to_degrees(), c.opacity, c.flip);
+                    ui.label("Center X");
+                    let r1 = ui.add(egui::DragValue::new(&mut x).speed(0.5).suffix(" mm"));
+                    ui.end_row();
+                    ui.label("Center Y");
+                    let r2 = ui.add(egui::DragValue::new(&mut y).speed(0.5).suffix(" mm"));
+                    ui.end_row();
+                    ui.label("Width");
+                    let r3 = ui.add(egui::DragValue::new(&mut w).speed(0.5).range(0.01..=1e6).suffix(" mm"));
+                    ui.end_row();
+                    ui.label("Angle");
+                    let r4 = ui.add(egui::DragValue::new(&mut ang).speed(1.0).suffix(" deg"));
+                    ui.end_row();
+                    ui.label("Opacity");
+                    let r5 = ui.add(egui::Slider::new(&mut op, 0.0..=1.0));
+                    ui.end_row();
+                    ui.label("Flip");
+                    let r6 = ui.checkbox(&mut flip, "");
+                    ui.end_row();
+                    if [r1, r2, r3, r4, r5, r6].iter().any(|r| r.changed()) {
+                        edit = Some(json!({ "canvas": c.id, "center": [x, y], "width": w, "angle": ang, "opacity": op, "flip": flip }));
+                    }
+                }
+            });
+            ui.add_space(6.0);
+            if ui.button(if m.calibrate { "Calibrate" } else { "OK" }).clicked() {
+                done = true;
+            }
+        });
+    if let Some(p) = edit
+        && app.run("canvas.edit", p).is_ok()
+    {
+        // One undo step for the whole edit.
+        if app.session.undo.len() > m.depth + 1 {
+            let keep = app.session.undo.get(m.depth).cloned();
+            app.session.undo.truncate(m.depth);
+            app.session.undo.extend(keep);
+        }
+    }
+    if done && m.calibrate {
+        if app.run("canvas.calibrate", json!({ "canvas": c.id, "a": m.a, "b": m.b, "distance": m.distance })).is_ok() {
+            app.tree.canvas_panel = None;
+        }
+        return;
+    }
+    app.tree.canvas_panel = if done || !open { None } else { Some(m) };
 }
 
 /// A browser click on a plane or axis: it goes to the open dialog's input if that takes it,

@@ -252,3 +252,31 @@ fn menu_delete_items_use_the_same_path() {
     act(&mut app, &Target::Sketch { id }, "Delete");
     assert!(app.menu.confirm.is_some());
 }
+
+#[test]
+fn canvas_menu_hides_renames_calibrates_and_deletes() {
+    let mut app = sample_app();
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(400u32.to_be_bytes());
+    png.extend(200u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    let data = solvecraft_engine::doc::canvas::base64_encode(&png);
+    let id = app.run("FusionAddCanvasCommand", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let t = Target::Canvas { id };
+    act(&mut app, &t, "Hide");
+    assert!(!app.session.doc.canvases[0].visible);
+    act(&mut app, &t, "Rename");
+    assert!(context_menu::finish_rename(&mut app, Some("Photo"), true));
+    assert_eq!(app.session.doc.canvases[0].name, "Photo");
+    act(&mut app, &t, "Calibrate");
+    let p = app.tree.canvas_panel.clone().unwrap();
+    assert!(p.calibrate && (p.distance - 80.0).abs() < 1e-9, "starts from the image's width");
+    act(&mut app, &t, "Delete");
+    assert!(app.session.doc.canvases.is_empty());
+    app.run("UndoCommand", json!({})).unwrap();
+    assert_eq!(app.session.doc.canvases.len(), 1);
+    // A canvas picked in the browser goes with the Delete key.
+    app.tree.picked_canvases = vec![id];
+    crate::delete::delete_selection(&mut app);
+    assert!(app.session.doc.canvases.is_empty());
+}

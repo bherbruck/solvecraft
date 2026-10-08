@@ -38,6 +38,10 @@ pub enum Target {
     Group {
         id: u64,
     },
+    /// A canvas (reference image).
+    Canvas {
+        id: u64,
+    },
     /// A component's Bodies, Sketches or Construction folder.
     Folder {
         component: u64,
@@ -138,6 +142,7 @@ pub enum RenameWhat {
     Feature(u64),
     Component(u64),
     Group(u64),
+    Canvas(u64),
 }
 
 #[derive(Clone, Debug)]
@@ -197,7 +202,7 @@ pub fn target_bodies(app: &SolveApp, target: &Target) -> Vec<String> {
         Target::Body { name } => vec![name.clone()],
         Target::Component { id } => component_bodies(app, *id),
         Target::Group { id } => crate::browser::group_bodies(app, *id),
-        Target::Sketch { .. } | Target::Folder { .. } => Vec::new(),
+        Target::Sketch { .. } | Target::Folder { .. } | Target::Canvas { .. } => Vec::new(),
     }
 }
 
@@ -254,6 +259,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Component { id } => component_items(app, *id),
         Target::Group { id } => crate::browser::group_items(app, *id),
         Target::Folder { component, folder } => crate::browser::folder_items(app, *component, folder),
+        Target::Canvas { id } => crate::browser::canvas_items(app, *id),
     };
     // Several items of the folder selected: they can be grouped.
     if let Some(p) = crate::browser::selection_group(app, target) {
@@ -566,6 +572,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 RenameWhat::Component(c)
             } else if let Some(g) = id_of(&p, "group") {
                 RenameWhat::Group(g)
+            } else if let Some(c) = id_of(&p, "canvas") {
+                RenameWhat::Canvas(c)
             } else {
                 return;
             };
@@ -646,6 +654,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.tree.occurrence_move = Some(crate::browser::OccMove::new(o));
             }
         }
+        "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
+        "ui.editCanvas" | "ui.calibrateCanvas" => {
+            if let Some(c) = id_of(&p, "canvas") {
+                app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, c, item.id == "ui.calibrateCanvas"));
+            }
+        }
         "ui.newGroup" | "ui.ungroup" | "ui.groupSelected" => crate::browser::group_action(app, &item.id, &p),
         id if item.params.is_some() => {
             let _ = app.run(id, p);
@@ -689,6 +703,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::Component(0) => doc.name.clone(),
         RenameWhat::Component(c) => doc.components.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
         RenameWhat::Group(g) => crate::browser::group_name(app, *g).unwrap_or_default(),
+        RenameWhat::Canvas(c) => doc.canvases.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
     };
     app.menu.rename = Some(Rename { what, text, at, focused: false });
 }
@@ -711,6 +726,7 @@ fn commit_rename(app: &mut SolveApp, r: &Rename) {
         RenameWhat::Feature(f) => drop(app.run("FusionRenameTimelineEntryCommand", json!({ "feature": f, "name": name }))),
         RenameWhat::Component(c) => drop(app.run("component.rename", json!({ "component": c, "name": name }))),
         RenameWhat::Group(g) => crate::browser::group_action(app, "ui.renameGroup", &json!({ "group": g, "name": name })),
+        RenameWhat::Canvas(c) => drop(app.run("canvas.edit", json!({ "canvas": c, "name": name }))),
     }
 }
 
