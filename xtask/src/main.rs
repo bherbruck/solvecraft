@@ -160,6 +160,9 @@ fn cmd_oracle() -> Result<(), String> {
         if let Some(e) = r["error"].as_str() {
             notes.push(e.replace('|', "/"));
         }
+        if let Some(n) = r["note"].as_str() {
+            notes.push(n.replace('|', "/"));
+        }
         md += &format!("| {} | {status} | {} |\n", r["case"].as_str().unwrap_or(""), notes.join("; "));
     }
     std::fs::write(root().join("docs/oracle.md"), md).map_err(|e| format!("docs/oracle.md: {e}"))?;

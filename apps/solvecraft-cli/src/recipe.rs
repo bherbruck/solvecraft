@@ -85,6 +85,14 @@ fn sketch_cmds(f: &Value, out: &mut Vec<Value>) -> Result<(), String> {
 
 /// Extent parameters for the Extrude command.
 fn extent(f: &Value, p: &mut Value) {
+    // Where Fusion's own result differs from the geometric meaning (its through-all is sized
+    // from vertices), the recipe records the extent Fusion actually used: replay that.
+    if let Some(fx) = f.get("fusion_effective_extent").filter(|x| x.get("type").and_then(Value::as_str) == Some("distance")) {
+        let dir = fx.get("direction").and_then(Value::as_str).unwrap_or("positive");
+        p["distance"] = fx.get("distance").cloned().unwrap_or(Value::Null);
+        p["direction"] = json!(if dir.starts_with("negative") { "negative" } else { "positive" });
+        return;
+    }
     let e = f.get("extent").cloned().unwrap_or(Value::Null);
     let ty = e.get("type").and_then(Value::as_str).unwrap_or("distance");
     let dist = e.get("distance").cloned().or_else(|| f.get("distance").cloned()).unwrap_or(Value::Null);

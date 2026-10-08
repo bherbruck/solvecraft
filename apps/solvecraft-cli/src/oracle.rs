@@ -65,6 +65,19 @@ fn check_case(dir: &str) -> Value {
     if let Some((_, _, why)) = approx {
         out["note"] = json!(why);
     }
+    let effective: Vec<String> = recipe["features"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|f| f.get("fusion_effective_extent").is_some())
+        .map(|f| f["name"].as_str().unwrap_or("?").to_string())
+        .collect();
+    if !effective.is_empty() {
+        out["note"] = json!(format!(
+            "known Fusion difference: {} replayed with the extent Fusion actually used (its through-all is sized as 1.1 × the farthest vertex, so curved tops stop it short; SolveCraft's through-all goes truly through)",
+            effective.join(", ")
+        ));
+    }
     out
 }
 
