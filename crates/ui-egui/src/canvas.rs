@@ -254,6 +254,7 @@ fn drag_arrow(
     let min = 40.0 * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
     let shown = if l.abs() < min { min * if l < 0.0 { -1.0 } else { 1.0 } } else { l };
     let ts = proj.to_screen(base + n * shown)?;
+    crate::scenario::publish_handle(if id == egui::Id::new("sc_manipulator") { "arrow" } else { "arrow2" }, ts);
     let r = ui.interact(egui::Rect::from_center_size(ts, vec2(20.0, 20.0)), id, egui::Sense::drag());
     let hot = r.hovered() || r.dragged();
     let col = if hot { t.accent } else { t.manipulator };

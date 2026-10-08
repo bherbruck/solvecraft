@@ -683,6 +683,7 @@ impl SolveApp {
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let t0 = now_ms();
+        scenario::clear_handles();
         toolbar::app_bar(self, ui);
         documents::prompt(self, ui.ctx());
         if self.home.open {

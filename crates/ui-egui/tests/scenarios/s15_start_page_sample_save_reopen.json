@@ -6,12 +6,12 @@
   {"expect": {"errors": 0, "bodies": 1, "name": "Sample Plate", "param": {"width": 80}}},
   {"shot": "s15_sample"},
   {"start": "ChangeParameterCommand"},
-  {"widget": "8 mm"},
+  {"widget": "80 mm"},
   {"key": "A", "cmd": true},
-  {"text": "10 mm"},
+  {"text": "100 mm"},
   {"key": "Enter"},
   {"widget": "Close window"},
-  {"expect": {"param": {"thickness": 10}, "errors": 0}},
+  {"expect": {"param": {"width": 100}, "errors": 0}},
   {"key": "S", "cmd": true},
   {"expect": {"file": "Sample Plate.solvecraft"}},
   {"key": "N", "cmd": true},
@@ -19,6 +19,6 @@
   {"choose_file": "Sample Plate.solvecraft"},
   {"key": "O", "cmd": true},
   {"debug": 1},
-  {"expect": {"bodies": 1, "errors": 0, "param": {"thickness": 10}}},
+  {"expect": {"bodies": 1, "errors": 0, "param": {"width": 100}}},
   {"shot": "s15_reopened"}
 ]

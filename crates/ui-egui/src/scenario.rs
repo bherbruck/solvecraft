@@ -17,7 +17,10 @@
 //! - `{"shot": "name"}`: a screenshot when run in a window; headless, a render of the model
 //!   into `$SOLVECRAFT_SCENARIO_SHOTS` when that is set; `{"debug": 1}`
 //!   prints the UI state
-//! - AT may also be `{"plane": "XY"}`: the middle of an origin plane's square
+//! - AT may also be `{"plane": "XY"}` (the middle of an origin plane's square), `{"axis": "Z"}`,
+//!   `{"dimension": "d1"}` or `{"handle": "arrow"}` (a manipulator handle: see [`publish_handle`])
+//! - `{"autosave": true}`: autosave into the scenario's recovery folder; `{"restart": "crash" |
+//!   "close"}`: the app dies (or closes) and a new one starts on the same folders
 //! - `{"note": "…"}`: a comment
 //! - `{"expect": {…}}`: checks, see [`check`]; `{"until": {…}}` waits (frames) until they pass
 //!
@@ -32,6 +35,32 @@ use solvecraft_engine::Session;
 
 use crate::control::{ControlRequest, Outcome, handle};
 use crate::{Services, SolveApp};
+
+thread_local! {
+    /// Drag handles drawn this frame (name, screen point): manipulators publish theirs so
+    /// scenarios (and the control channel's `ui.at {handle}`) can grab them.
+    static HANDLES: RefCell<Vec<(String, egui::Pos2)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A manipulator's handle drawn this frame at `at` (screen), by name: "arrow" (a dialog's value
+/// arrow), "triad_x"… Call it from the code that draws the handle, every frame it shows.
+pub fn publish_handle(name: &str, at: egui::Pos2) {
+    HANDLES.with(|h| {
+        let mut h = h.borrow_mut();
+        h.retain(|(n, _)| n != name);
+        h.push((name.to_string(), at));
+    });
+}
+
+/// Where a handle was drawn last frame.
+pub fn handle_at(name: &str) -> Option<egui::Pos2> {
+    HANDLES.with(|h| h.borrow().iter().find(|(n, _)| n == name).map(|x| x.1))
+}
+
+/// Forget last frame's handles (called as a frame starts).
+pub fn clear_handles() {
+    HANDLES.with(|h| h.borrow_mut().clear());
+}
 
 /// A fresh folder for one scenario's files.
 fn scratch_dir() -> PathBuf {
@@ -83,15 +112,24 @@ impl Harness {
             time: 0.0,
             size: egui::vec2(1600.0, 1000.0),
         };
-        // File pickers answer like a person would: save into the scenario's folder, open the
-        // file the scenario chose.
-        let dir = h.dir.clone();
-        h.app.services.pick_save = Some(Box::new(move |name, _| Some(dir.join(name).to_string_lossy().into_owned())));
-        let next = h.next_file.clone();
-        h.app.services.pick_open = Some(Box::new(move || next.borrow_mut().take()));
+        h.install();
         h.ctx.enable_accesskit();
         h.frames(3);
         h
+    }
+
+    /// File pickers answer like a person would: save into the scenario's folder, open the file
+    /// the scenario chose.
+    fn install(&mut self) {
+        let dir = self.dir.clone();
+        self.app.services.pick_save = Some(Box::new(move |name, _| Some(dir.join(name).to_string_lossy().into_owned())));
+        let next = self.next_file.clone();
+        self.app.services.pick_open = Some(Box::new(move || next.borrow_mut().take()));
+    }
+
+    /// Autosave into the scenario's recovery folder (as the desktop app does into the user's).
+    fn start_autosave(&mut self) {
+        crate::recovery_ui::start(&mut self.app, &self.dir.join("recovery"), std::time::Duration::ZERO);
     }
 
     /// Lay out and draw one frame (feeding queued pointer and key events).
@@ -161,16 +199,21 @@ impl Harness {
     /// Centres of the visible widgets whose label or value is `text`, last drawn first.
     fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
         let Some(tree) = self.output.accesskit_update.as_ref() else { return Vec::new() };
+        let centre =
+            |n: &egui::accesskit::Node| n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]);
+        let exact: Vec<[f64; 2]> =
+            tree.nodes.iter().rev().filter(|(_, n)| n.label() == Some(text) || n.value() == Some(text)).filter_map(|(_, n)| centre(n)).collect();
+        if !exact.is_empty() {
+            return exact;
+        }
+        // A menu button's label ends with its shortcut ("Save Ctrl+S").
         tree.nodes
             .iter()
             .rev()
-            // A menu button's label ends with its shortcut ("Save Ctrl+S").
             .filter(|(_, n)| {
-                n.label().is_some_and(|l| l == text || l.strip_prefix(text).is_some_and(|r| r.starts_with(' '))) || n.value() == Some(text)
+                n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.strip_prefix(text).is_some_and(|r| r.starts_with(' ')))
             })
-            .filter_map(|(_, n)| n.bounds())
-            .filter(|b| b.x1 > b.x0 && b.y1 > b.y0)
-            .map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0])
+            .filter_map(|(_, n)| centre(n))
             .collect()
     }
 
@@ -235,6 +278,23 @@ impl Harness {
                     let path = std::path::Path::new(&dir).join(format!("{name}.png"));
                     self.call("ui.render", json!({"path": path.to_string_lossy(), "width": 1000, "height": 700}));
                 }
+                return Ok(());
+            } else if s.get("autosave").is_some() {
+                self.start_autosave();
+                return Ok(());
+            } else if let Some(how) = s.get("restart").and_then(Value::as_str) {
+                // "crash": the app dies (its autosave lock goes with it, the entry stays);
+                // "close": it closes normally. Then a new app starts on the same folders.
+                let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
+                if how == "close" {
+                    crate::recovery_ui::close(&mut old);
+                }
+                drop(old);
+                self.ctx = egui::Context::default();
+                self.ctx.enable_accesskit();
+                self.install();
+                self.start_autosave();
+                self.frames(3);
                 return Ok(());
             } else if let Some(f) = s.get("make_image").and_then(Value::as_str) {
                 // A picture to insert (a 200 x 100 checkerboard PNG in the scenario's folder).
@@ -458,6 +518,48 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                         if (w - g).abs() > 1e-3 {
                             return Err(format!("{name} bbox {side}[{i}]: got {g}, want {w}"));
                         }
+                    }
+                }
+            }
+            "sketch_curves" => {
+                // {sketch?, linked?, own?}: curves projected (linked) and drawn in a sketch.
+                let mut params = json!({});
+                if let Some(n) = v.get("sketch") {
+                    params["sketch"] = n.clone();
+                }
+                let si = h.call("engine.execute", json!({"command": "sketch.inspect", "params": params}))["result"].clone();
+                let curves = si["curves"].as_array().cloned().unwrap_or_default();
+                let linked = curves.iter().filter(|c| !c["link"].is_null()).count();
+                let own = curves.len() - linked;
+                for (k, got) in [("linked", linked), ("own", own)] {
+                    if let Some(w) = v.get(k).and_then(Value::as_u64)
+                        && w != got as u64
+                    {
+                        return Err(format!("sketch curves {k}: got {got}, want {w}"));
+                    }
+                }
+            }
+            "body_volume" => {
+                // {body, volume}: one body's volume.
+                let name = v["body"].as_str().unwrap_or_default();
+                let m = h.call("engine.execute", json!({"command": "MeasureCommand", "params": {"bodies": [name]}}))["result"].clone();
+                let got = m["bodies"][0]["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+                approx(got, &v["volume"], &format!("{name} volume"))?;
+            }
+            "sketch_world" => {
+                // {sketch, point, at: [x,y,z]}: where a sketch point is in the world (±1e-3 mm).
+                let si = h.call("engine.execute", json!({"command": "sketch.inspect", "params": {"sketch": v["sketch"]}}))["result"].clone();
+                let p = si["points"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|p| p["id"] == v["point"])
+                    .cloned()
+                    .ok_or_else(|| format!("no point {}", v["point"]))?;
+                for i in 0..3 {
+                    let (g, w) = (p["world"][i].as_f64().unwrap_or(f64::NAN), v["at"][i].as_f64().unwrap_or(f64::NAN));
+                    if (g - w).abs() > 1e-3 {
+                        return Err(format!("{} of {} is at {}, want {}", v["point"], v["sketch"], p["world"], v["at"]));
                     }
                 }
             }

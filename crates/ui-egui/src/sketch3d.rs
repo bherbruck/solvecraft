@@ -346,6 +346,9 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if !active(app) {
         return;
     }
+    for (name, tip) in handle_points(app, proj) {
+        crate::scenario::publish_handle(&format!("triad_{name}"), tip);
+    }
     for (axis, tip, base) in handles(app, proj) {
         match axis {
             Some(a) => {

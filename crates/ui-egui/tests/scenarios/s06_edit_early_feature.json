@@ -136,7 +136,11 @@
   "expect": {
    "sketching": false,
    "errors": 0,
-   "bodies": 1
+   "bodies": 1,
+   "volume": [
+    17974.25,
+    1e-05
+   ]
   }
  },
  {

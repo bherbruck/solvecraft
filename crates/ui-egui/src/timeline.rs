@@ -133,6 +133,7 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             xs.push(x);
             let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
+            crate::scenario::publish_handle(&format!("timeline:{name}"), br.center());
             let resp = ui.interact(br, ui.id().with(("feat", *id)), Sense::click_and_drag());
             let res = app.session.model.result(*id);
             let err = res.and_then(|r| r.error.clone());

@@ -1,32 +1,126 @@
 [
-  {"note": "Target: a configuration table switches the design (FusionStartDesignConfigModeCmd, config.row/column/activate by solvecraft-params; panel by solvecraft-dialogs). Adjust the panel steps when it lands."},
-  {"start": "SketchCreate"},
-  {"click": {"plane": "XY"}},
-  {"start": "ShapeRectangleTwoPoint"},
-  {"click": {"sketch": [0, 0]}},
-  {"click": {"sketch": [40, 20]}},
-  {"key": "Escape"},
-  {"start": "SketchDimension"},
-  {"click": {"sketch": [20, 0]}},
-  {"text": "40"},
-  {"key": "Enter"},
-  {"key": "Escape"},
-  {"start": "SketchStop"},
-  {"start": "Extrude"},
-  {"text": "10"},
-  {"key": "Enter"},
-  {"expect": {"volume": 8000}},
-  {"start": "FusionStartDesignConfigModeCmd"},
-  {"widget": "Add Column"},
-  {"widget": "d1"},
-  {"widget": "Add Row"},
-  {"widget": "40 mm", "near": "Configuration2"},
-  {"key": "A", "cmd": true},
-  {"text": "60 mm"},
-  {"key": "Enter"},
-  {"widget": "Activate", "near": "Configuration2"},
-  {"expect": {"param": {"d1": 60}, "volume": 12000, "errors": 0}},
-  {"widget": "Activate", "near": "Default"},
-  {"expect": {"param": {"d1": 40}, "volume": 8000}},
-  {"shot": "s23_configs"}
+ {
+  "note": "Configurations: a parameter column (d1) in the configuration table switches the design (FusionStartDesignConfigModeCmd)."
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    40,
+    20
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchDimension"
+ },
+ {
+  "click": {
+   "sketch": [
+    20,
+    0
+   ]
+  }
+ },
+ {
+  "text": "40"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "text": "10"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "volume": 8000
+  }
+ },
+ {
+  "start": "FusionStartDesignConfigModeCmd"
+ },
+ {
+  "widget": "Add Column"
+ },
+ {
+  "widget": "d1"
+ },
+ {
+  "widget": "Add Row"
+ },
+ {
+  "widget": "40 mm",
+  "near": "Configuration2"
+ },
+ {
+  "key": "A",
+  "cmd": true
+ },
+ {
+  "text": "60 mm"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "widget": "Activate",
+  "near": "Configuration2"
+ },
+ {
+  "expect": {
+   "param": {
+    "d1": 60
+   },
+   "volume": 12000,
+   "errors": 0
+  }
+ },
+ {
+  "widget": "Activate",
+  "near": "Default"
+ },
+ {
+  "expect": {
+   "param": {
+    "d1": 40
+   },
+   "volume": 8000
+  }
+ },
+ {
+  "shot": "s23_configs"
+ }
 ]

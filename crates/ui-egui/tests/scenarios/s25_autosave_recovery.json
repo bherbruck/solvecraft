@@ -1,17 +1,85 @@
 [
-  {"note": "Target: unsaved work is autosaved and offered back after a crash (autosave, Recover unsaved design?, doc.recovery_list/doc.recover by solvecraft-params). The harness needs a 'restart' step (drop the app without saving, start a new one on the same recovery folder) once the recovery folder can be pointed at the scenario's folder."},
-  {"start": "SketchCreate"},
-  {"click": {"plane": "XY"}},
-  {"start": "ShapeRectangleTwoPoint"},
-  {"click": {"sketch": [0, 0]}},
-  {"click": {"sketch": [30, 20]}},
-  {"key": "Escape"},
-  {"start": "SketchStop"},
-  {"start": "Extrude"},
-  {"text": "10"},
-  {"key": "Enter"},
-  {"expect": {"bodies": 1, "volume": 6000}},
-  {"restart": "crash"},
-  {"widget": "Recover"},
-  {"expect": {"bodies": 1, "volume": 6000, "errors": 0}}
+ {
+  "note": "Autosave and recovery: unsaved work is autosaved; after a crash the next launch offers it back."
+ },
+ {
+  "autosave": true
+ },
+ {
+  "start": "SketchCreate"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "click": {
+   "sketch": [
+    30,
+    20
+   ]
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "start": "SketchStop"
+ },
+ {
+  "start": "Extrude"
+ },
+ {
+  "text": "10"
+ },
+ {
+  "key": "Enter"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "volume": 6000
+  }
+ },
+ {
+  "restart": "crash"
+ },
+ {
+  "expect": {
+   "bodies": 0
+  }
+ },
+ {
+  "widget": "Recover"
+ },
+ {
+  "expect": {
+   "bodies": 1,
+   "volume": 6000,
+   "errors": 0
+  }
+ },
+ {
+  "restart": "close"
+ },
+ {
+  "expect": {
+   "bodies": 0
+  }
+ },
+ {
+  "note": "a clean close leaves nothing to offer"
+ }
 ]

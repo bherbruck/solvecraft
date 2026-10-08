@@ -1,0 +1,22 @@
+[
+  {"note": "User bug 3 (owner solvecraft-ui): Move opens at 0, and dragging its X arrow moves only along X. The X arrow must be published as handle move_x (scenario::publish_handle)."},
+  {"start": "SketchCreate"},
+  {"click": {"plane": "XY"}},
+  {"start": "ShapeRectangleTwoPoint"},
+  {"click": {"sketch": [0, 0]}},
+  {"click": {"sketch": [20, 20]}},
+  {"key": "Escape"},
+  {"start": "SketchStop"},
+  {"call": "ui.view", "params": {"view": "iso"}},
+  {"start": "Extrude"},
+  {"text": "10"},
+  {"key": "Enter"},
+  {"call": "ui.menu", "params": {"x": 100, "y": 250, "target": {"type": "body", "name": "Body1"}}},
+  {"call": "ui.menuPick", "params": {"item": "Move/Copy"}},
+  {"expect": {"dialog": "z: \"0 mm\""}},
+  {"expect": {"dialog": "x: \"0 mm\""}},
+  {"drag": [{"handle": "move_x"}, {"world": [30, 0, 10]}], "steps": 10},
+  {"key": "Enter"},
+  {"expect": {"errors": 0, "bbox": {"body": "Body1", "min": [null, 0, 0], "max": [null, 20, 10]}}},
+  {"shot": "s28_moved"}
+]

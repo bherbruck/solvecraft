@@ -1,6 +1,6 @@
 [
  {
-  "note": "Motion study: key a revolute joint and play it (FusionMotionStudyCommand, motion.play)."
+  "note": "User bug 2 (owner solvecraft-params): with two components, a cut made in the active one leaves the other untouched."
  },
  {
   "start": "FusionCreateNewComponentCommand"
@@ -23,15 +23,15 @@
   "click": {
    "sketch": [
     0,
-    0
+    10
    ]
   }
  },
  {
   "click": {
    "sketch": [
-    20,
-    20
+    40,
+    30
    ]
   }
  },
@@ -93,7 +93,7 @@
  {
   "click": {
    "sketch": [
-    30,
+    42,
     0
    ]
   }
@@ -101,7 +101,7 @@
  {
   "click": {
    "sketch": [
-    50,
+    52,
     10
    ]
   }
@@ -122,105 +122,121 @@
   "start": "Extrude"
  },
  {
-  "click": {
-   "world": [
-    40,
-    0,
-    5
-   ]
-  }
- },
- {
   "text": "20"
  },
  {
   "key": "Enter"
  },
  {
-  "start": "JointAssembleCmdNew"
+  "expect": {
+   "bodies": 2,
+   "body_volume": {
+    "body": "Body1",
+    "volume": 8000
+   }
+  }
+ },
+ {
+  "expect": {
+   "body_volume": {
+    "body": "Body2",
+    "volume": 2000
+   }
+  }
+ },
+ {
+  "note": "Component2 (Body2) is active: cut a slot across both boxes, sketched on XY seen from the top"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "top"
+  }
+ },
+ {
+  "start": "SketchCreate"
  },
  {
   "click": {
-   "world": [
-    10,
-    10,
-    10
+   "plane": "XY"
+  }
+ },
+ {
+  "expect": {
+   "sketching": true
+  }
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "top"
+  }
+ },
+ {
+  "start": "ShapeRectangleTwoPoint"
+ },
+ {
+  "click": {
+   "sketch": [
+    30,
+    -15
    ]
   }
  },
  {
   "click": {
-   "world": [
-    40,
-    -20,
-    5
+   "sketch": [
+    48,
+    25
    ]
   }
  },
  {
-  "widget": "Rigid"
+  "key": "Escape"
  },
  {
-  "widget": "Revolute"
+  "expect": {
+   "sketch_curves": {
+    "own": 4
+   }
+  }
  },
  {
-  "widget": "OK"
+  "start": "SketchStop"
  },
  {
-  "start": "FusionMotionStudyCommand"
+  "start": "Extrude"
  },
  {
-  "widget": "Add Key"
+  "widget": "New Body"
  },
  {
-  "widget": "0 deg",
-  "near": "Value"
+  "widget": "Cut"
  },
  {
-  "key": "A",
-  "cmd": true
- },
- {
-  "text": "90"
+  "text": "10"
  },
  {
   "key": "Enter"
  },
  {
-  "widget": "OK"
- },
- {
   "expect": {
-   "dialog": null,
-   "errors": 0
-  }
- },
- {
-  "call": "engine.execute",
-  "params": {
-   "command": "motion.play",
-   "params": {
-    "study": 1,
-    "step": 100
+   "errors": 0,
+   "body_volume": {
+    "body": "Body1",
+    "volume": 8000
    }
   }
  },
  {
   "expect": {
-   "query": {
-    "command": "joint.list",
-    "path": [
-     "joints",
-     0,
-     "values",
-     0,
-     "value"
-    ],
-    "value": 90
+   "body_volume": {
+    "body": "Body2",
+    "volume": 1100
    }
   }
  },
  {
-  "shot": "s24_motion_end"
+  "shot": "s27_cut"
  }
 ]

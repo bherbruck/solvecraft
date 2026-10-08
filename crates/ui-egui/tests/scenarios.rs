@@ -47,11 +47,12 @@ scenarios!(
     s26_drive_joint_typed,
     s22_sheet_metal_fold,
     s23_configurations,
-    s24_motion_study
+    s24_motion_study,
+    s25_autosave_recovery
 );
 
-/// Scenarios written ahead of their features (the commands are in solvecraft-params' unpushed
-/// work, their dialogs follow): run with `--ignored`, enabled once the features land.
+/// Scenarios written ahead of their fixes or features (the user's open bugs): run with
+/// `--ignored`; each moves to the list above once its fix lands.
 macro_rules! pending {
     ($($name:ident: $why:literal),* $(,)?) => {
         $(#[test]
@@ -63,5 +64,9 @@ macro_rules! pending {
 }
 
 pending!(
-    s25_autosave_recovery: "waits for autosave and Recover unsaved design",
+    s31_sketch_on_face_projects: "user bug: a sketch on a face projects its loops as reference (solvecraft-sketch)",
+    s32_cut_in_active_component: "user bug: a cut in the active component leaves others alone (solvecraft-params)",
+    s33_move_x_arrow: "user bug: Move opens at 0 and its X arrow moves along X only (solvecraft-ui)",
+    s34_component_move_carries_sketches: "user bug: moving a component carries its sketches (solvecraft-repo)",
+    s30_pattern_a_hole: "a hole patterned as a feature gives one hole, not three (solvecraft-ui)",
 );
