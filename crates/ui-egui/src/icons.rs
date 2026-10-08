@@ -712,6 +712,128 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.dot(8.0, 15.0, ink);
             pen.dot(16.0, 9.0, ink);
         }
+        // Assembly: joints (accent: the joint itself).
+        "joint" => {
+            pen.iso_box(2.0, 13.0, 7.0, 5.0, 5.0);
+            pen.iso_box(12.0, 4.0, 7.0, 5.0, 5.0);
+            pen.line(&[(9.0, 15.0), (15.0, 9.0)], a);
+            pen.circle(12.0, 12.0, 2.6, pen.fill, a);
+        }
+        "as_built" => {
+            pen.iso_box(1.0, 10.0, 8.0, 5.0, 8.0);
+            pen.iso_box(10.0, 10.0, 8.0, 5.0, 8.0);
+            pen.circle(13.0, 15.0, 2.6, pen.fill, a);
+        }
+        "joint_origin" => {
+            pen.arrow((8.0, 17.0), (20.0, 17.0), ink);
+            pen.arrow((8.0, 17.0), (14.0, 11.0), ink);
+            pen.arrow((8.0, 17.0), (8.0, 3.0), a);
+            pen.circle(8.0, 17.0, 2.4, pen.fill, a);
+        }
+        "rigid_group" => {
+            pen.iso_box(3.0, 13.0, 5.0, 3.0, 4.0);
+            pen.iso_box(13.0, 13.0, 5.0, 3.0, 4.0);
+            pen.iso_box(8.0, 4.0, 5.0, 3.0, 4.0);
+            pen.closed(&[(2.0, 3.0), (22.0, 3.0), (22.0, 21.0), (2.0, 21.0)], a);
+        }
+        "drive" => {
+            pen.circle(12.0, 12.0, 4.0, pen.fill, ink);
+            pen.dot(12.0, 12.0, ink);
+            pen.arc(12.0, 12.0, 8.5, 0.3, 4.6, a);
+            pen.arrow((11.0, 20.4), (14.5, 20.3), a);
+        }
+        "motion_link" => {
+            pen.circle(7.0, 14.0, 4.5, pen.fill, ink);
+            pen.circle(17.5, 9.0, 3.0, pen.fill, ink);
+            pen.line(&[(7.0, 14.0), (17.5, 9.0)], a);
+            pen.dot(7.0, 14.0, a);
+            pen.dot(17.5, 9.0, a);
+        }
+        "interference" => {
+            pen.closed(&[(3.0, 5.0), (14.0, 5.0), (14.0, 16.0), (3.0, 16.0)], ink);
+            pen.poly(&[(9.0, 10.0), (14.0, 10.0), (14.0, 16.0), (9.0, 16.0)], Color32::from_rgb(225, 70, 60), Color32::from_rgb(225, 70, 60));
+            pen.closed(&[(9.0, 10.0), (21.0, 10.0), (21.0, 20.0), (9.0, 20.0)], ink);
+        }
+        // Sheet metal: thin plates (fill), the made or changed part in the accent.
+        "flange" => {
+            pen.poly(&[(2.0, 17.0), (12.0, 13.0), (18.0, 16.0), (8.0, 20.0)], pen.fill, ink);
+            pen.poly(&[(12.0, 13.0), (12.0, 5.0), (18.0, 8.0), (18.0, 16.0)], pen.fill.gamma_multiply(0.8), a);
+            pen.arrow((20.5, 15.0), (20.5, 4.0), a);
+        }
+        "hem" => {
+            pen.line(&[(2.0, 16.0), (16.0, 16.0)], ink);
+            pen.line(&[(2.0, 13.0), (16.0, 13.0)], ink);
+            pen.arc(16.0, 11.5, 4.5, -1.57, 1.57, a);
+            pen.line(&[(16.0, 7.0), (8.0, 7.0)], a);
+        }
+        "unfold" => {
+            pen.line(&[(3.0, 18.0), (12.0, 18.0), (12.0, 7.0)], ink);
+            pen.line(&[(12.0, 18.0), (22.0, 18.0)], a);
+            pen.arc(12.0, 18.0, 7.0, 0.3, 1.4, a);
+            pen.arrow((17.5, 14.0), (19.0, 16.0), a);
+        }
+        "refold" => {
+            pen.line(&[(3.0, 18.0), (12.0, 18.0), (21.0, 18.0)], ink);
+            pen.line(&[(12.0, 18.0), (12.0, 6.0)], a);
+            pen.arc(12.0, 18.0, 7.0, 0.3, 1.4, a);
+            pen.arrow((15.0, 11.5), (13.5, 10.5), a);
+        }
+        "flat" => {
+            pen.poly(&[(3.0, 6.0), (21.0, 6.0), (21.0, 18.0), (3.0, 18.0)], pen.fill, ink);
+            for x in [9.0, 15.0] {
+                for k in 0..3 {
+                    let y = 7.5 + k as f32 * 4.0;
+                    pen.line(&[(x, y), (x, y + 2.2)], a);
+                }
+            }
+        }
+        "convert_sheet" => {
+            pen.iso_box(2.0, 9.0, 6.0, 4.0, 6.0);
+            pen.arrow((11.0, 12.0), (15.0, 12.0), a);
+            pen.poly(&[(15.0, 15.0), (21.0, 12.0), (23.0, 13.0), (17.0, 16.0)], pen.fill, a);
+        }
+        "sheet_rules" => {
+            pen.poly(&[(2.0, 15.0), (11.0, 11.0), (17.0, 14.0), (8.0, 18.0)], pen.fill, ink);
+            for y in [5.0, 9.0, 13.0] {
+                pen.line(&[(14.0, y), (22.0, y)], a);
+            }
+        }
+        // Plastic: a wall or plate (fill) with the feature in the accent.
+        "boss" => {
+            pen.poly(&[(2.0, 16.0), (13.0, 12.0), (22.0, 16.0), (11.0, 20.0)], pen.fill, ink);
+            pen.poly(&[(9.0, 7.0), (15.0, 7.0), (15.0, 16.0), (9.0, 16.0)], pen.fill.gamma_multiply(0.85), a);
+            pen.circle(12.0, 7.0, 3.0, pen.fill, a);
+            pen.circle(12.0, 7.0, 1.2, ink, ink);
+        }
+        "lip" => {
+            pen.poly(&[(4.0, 21.0), (4.0, 9.0), (10.0, 9.0), (10.0, 21.0)], pen.fill, ink);
+            pen.poly(&[(4.0, 9.0), (4.0, 4.0), (7.0, 4.0), (7.0, 9.0)], pen.fill, a);
+            pen.poly(&[(14.0, 21.0), (14.0, 6.0), (20.0, 6.0), (20.0, 21.0)], pen.fill, ink);
+            pen.closed(&[(17.0, 6.0), (17.0, 11.0), (20.0, 11.0), (20.0, 6.0)], a);
+        }
+        "snap" => {
+            pen.poly(&[(2.0, 20.0), (2.0, 16.0), (22.0, 16.0), (22.0, 20.0)], pen.fill, ink);
+            pen.poly(&[(9.0, 16.0), (9.0, 4.0), (12.0, 4.0), (12.0, 16.0)], pen.fill, a);
+            pen.poly(&[(12.0, 4.0), (16.0, 8.0), (12.0, 8.0)], a, a);
+        }
+        "rest" => {
+            pen.poly(&[(2.0, 16.0), (13.0, 12.0), (22.0, 16.0), (11.0, 20.0)], pen.fill, ink);
+            pen.poly(&[(7.0, 14.0), (13.0, 11.5), (17.0, 13.5), (11.0, 16.0)], a, a);
+            pen.line(&[(7.0, 14.0), (7.0, 11.5), (13.0, 9.0), (17.0, 11.0), (17.0, 13.5)], a);
+        }
+        "plastic_rule" => {
+            pen.circle(7.0, 8.0, 3.2, pen.fill, a);
+            pen.circle(11.0, 13.0, 3.2, pen.fill, a);
+            pen.circle(5.5, 16.0, 3.2, pen.fill, a);
+            for y in [6.0, 11.0, 16.0] {
+                pen.line(&[(15.0, y), (22.0, y)], ink);
+            }
+        }
+        "plastic_assign" => {
+            pen.iso_box(2.0, 12.0, 7.0, 5.0, 6.0);
+            pen.arrow((19.0, 6.0), (13.0, 11.0), a);
+            pen.circle(19.0, 6.0, 3.0, pen.fill, a);
+        }
         "warning" => {
             pen.poly(&[(12.0, 3.0), (21.0, 20.0), (3.0, 20.0)], Color32::from_rgb(250, 200, 60), ink);
             pen.line(&[(12.0, 9.0), (12.0, 14.0)], ink);

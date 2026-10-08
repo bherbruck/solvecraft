@@ -392,6 +392,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     component_rows(app, ui, 0, 0, &mut acts);
+                    crate::dialogs_assembly::browser_joints(app, ui);
                 });
         });
     app.viewport.hover_bodies = acts.hover_bodies;

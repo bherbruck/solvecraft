@@ -11,6 +11,9 @@ pub const TABS: &[&str] = &["SOLID", "SURFACE", "MESH", "SHEET METAL", "PLASTIC"
 
 /// Panels shown on each tab (in order). Commands come from the registry by (tab, panel).
 fn panels(tab: &str) -> &'static [&'static str] {
+    if let Some(p) = crate::workspace::panels(tab) {
+        return p;
+    }
     match tab {
         "SOLID" => &["CREATE", "MODIFY", "ASSEMBLE", "CONSTRUCT", "INSPECT", "INSERT", "SELECT"],
         "SKETCH" => &["CREATE", "MODIFY", "CONSTRAINTS", "INSPECT", "INSERT", "SELECT", "FINISH SKETCH"],
@@ -261,8 +264,11 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut px = r.left() + 112.0;
         let top = r.top() + 26.0;
         for panel in panels(&tab) {
-            let cmds: Vec<_> = specs.iter().filter(|c| c.tab == tab && c.panel == *panel).collect();
-            let n = promoted(&tab, panel).min(cmds.len()).max(if cmds.is_empty() { 1 } else { 0 });
+            let (cmds, promote) = match crate::workspace::layout(&tab, panel, &specs) {
+                Some(l) => l,
+                None => (specs.iter().filter(|c| c.tab == tab && c.panel == *panel).copied().collect(), promoted(&tab, panel)),
+            };
+            let n = promote.min(cmds.len()).max(if cmds.is_empty() { 1 } else { 0 });
             let width = (n as f32 * 40.0).max(64.0) + 8.0;
             let enabled_panel = !cmds.is_empty() || *panel == "SELECT";
             for (i, c) in cmds.iter().take(n).enumerate() {

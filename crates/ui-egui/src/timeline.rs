@@ -31,7 +31,7 @@ fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Split { .. } => "split",
         FeatureKind::Move { .. } => "move",
         FeatureKind::Import { .. } | FeatureKind::MeshImport { .. } => "import",
-        _ => "feature",
+        other => crate::workspace::feature_icon(other).unwrap_or("feature"),
     }
 }
 
@@ -241,6 +241,7 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
             p.rect_filled(mr, 1.0, col);
             resp.on_hover_text("History marker: drag to roll the model back; new features go here");
         }
+        crate::dialogs_assembly::timeline_joints(app, ui, &p, end + 10.0, r);
         // Drag feedback, and the drop.
         if let (Some(dg), Some(pp)) = (drag, pointer) {
             let slot = slot_at(&xs, end, pp.x);

@@ -14,6 +14,9 @@ pub mod context_menu;
 pub mod control;
 pub mod delete;
 pub mod dialogs;
+pub mod dialogs_assembly;
+pub mod dialogs_plastic;
+pub mod dialogs_sheet;
 pub mod dim_view;
 pub mod gpu;
 pub mod icons;
@@ -36,6 +39,7 @@ pub mod titlebar;
 pub mod toolbar;
 pub mod tools;
 pub mod viewport;
+pub mod workspace;
 
 use std::sync::mpsc::Receiver;
 

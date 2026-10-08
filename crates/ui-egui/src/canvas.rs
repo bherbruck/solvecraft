@@ -53,6 +53,8 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // Shell thickness grows into the body.
         Kind::Shell { .. } => (at, normal.map(|n| -n)),
         Kind::Move { .. } => (at, Some(Vec3::Z)),
+        Kind::Sheet(_) => (at, crate::dialogs_sheet::arrow(app, d).or(normal)),
+        Kind::Plastic(_) => (at, normal),
         Kind::PatternRect { .. } => (at, d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1)),
         _ => (at, None),
     })
@@ -80,6 +82,15 @@ fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
     let Some(mut d) = app.dialog.take() else { return };
+    if matches!(d.kind, Kind::Assembly(_)) {
+        crate::dialogs_assembly::overlay(app, painter, proj, &mut d);
+        app.dialog = Some(d);
+        return;
+    }
+    if crate::dialogs_sheet::overlay(painter, proj.rect, &d) {
+        app.dialog = Some(d);
+        return;
+    }
     if let Kind::Measure { result: Some(r), .. } = &d.kind {
         measure_line(painter, proj, r);
         app.dialog = Some(d);

@@ -108,7 +108,7 @@ impl PreviewState {
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
-    let cmds = match app.dialog.as_ref().filter(|d| d.previews()).map(|d| crate::dialogs::apply_commands(app, d)) {
+    let cmds = match app.dialog.as_ref().filter(|d| d.previews()).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
         // A parameter being edited in Change Parameters.
         _ if app.params.as_ref().and_then(|p| p.preview_commands()).is_some() => {
@@ -176,6 +176,10 @@ fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, V
 /// show their result in place of the bodies they change. When the feature fails (a boolean the
 /// kernel can't do yet), the tool body is still shown, with the error.
 pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
+    // Joints and drives move occurrences: shown on the placed model.
+    if let Some(job) = crate::dialogs_assembly::world_preview(s, cmds, colors) {
+        return job;
+    }
     let real = s.preview(cmds);
     let guard = |f: &dyn Fn() -> Built| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| "the preview failed".to_string());
     match as_new_body(cmds) {

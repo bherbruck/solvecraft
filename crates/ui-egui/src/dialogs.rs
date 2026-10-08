@@ -198,6 +198,12 @@ pub enum Kind {
         with: Vec<String>,
         fail: Vec<String>,
     },
+    /// Joints and components (`dialogs_assembly`).
+    Assembly(crate::dialogs_assembly::Asm),
+    /// Sheet metal (`dialogs_sheet`).
+    Sheet(crate::dialogs_sheet::Sm),
+    /// Plastic features (`dialogs_plastic`).
+    Plastic(crate::dialogs_plastic::Pl),
 }
 
 /// The rest of the Hole dialog: placement, extents, tap type and drill point.
@@ -254,7 +260,7 @@ fn fits(a: Accept, s: &Sel) -> bool {
 }
 
 impl Dialog {
-    fn new(kind: Kind, inputs: Vec<SelInput>) -> Dialog {
+    pub(crate) fn new(kind: Kind, inputs: Vec<SelInput>) -> Dialog {
         Dialog { kind, inputs, active: 0, error: None, editing: None, focus: true, collapsed: false, extra: serde_json::Map::new() }
     }
 
@@ -392,7 +398,12 @@ impl Dialog {
                 vec![SelInput::new("Target Body", BODIES, false), SelInput::new("Tool Bodies", BODIES, true)],
             ),
             "ChangeParameterCommand" => Dialog::new(Kind::Params { new_name: String::new(), new_expr: String::new() }, vec![]),
-            _ => return None,
+            _ => {
+                let (kind, inputs) = crate::dialogs_assembly::start(app, id)
+                    .or_else(|| crate::dialogs_sheet::start(app, id))
+                    .or_else(|| crate::dialogs_plastic::start(app, id))?;
+                Dialog::new(kind, inputs)
+            }
         };
         // Pre-selection: what is selected now becomes the input (first input that takes it); a
         // face or edge stands for its body where bodies are wanted.
@@ -479,6 +490,12 @@ impl Dialog {
 
     /// Does this dialog make a feature that can be previewed live?
     pub fn previews(&self) -> bool {
+        match &self.kind {
+            Kind::Assembly(k) => return k.previews(),
+            Kind::Sheet(k) => return k.previews(),
+            Kind::Plastic(k) => return k.previews(),
+            _ => {}
+        }
         matches!(
             self.kind,
             Kind::Extrude { .. }
@@ -531,6 +548,8 @@ impl Dialog {
             Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Scale { factor } => ("Scale", ValueKind::Unitless, factor),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
+            Kind::Sheet(k) => return k.primary(&self.inputs),
+            Kind::Plastic(k) => return k.primary(),
             _ => return None,
         })
     }
@@ -660,13 +679,13 @@ fn plane_value(s: &Session, sel: Option<&Sel>) -> Option<Value> {
 }
 
 /// A value field; true when Enter was pressed in it.
-fn field(ui: &mut egui::Ui, s: &mut String) -> bool {
+pub(crate) fn field(ui: &mut egui::Ui, s: &mut String) -> bool {
     let r = ui.text_edit_singleline(s);
     crate::params_dialog::complete(ui, &r, s);
     r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
 }
 
-fn combo(ui: &mut egui::Ui, id: &str, labels: &[&str], sel: &mut usize) {
+pub(crate) fn combo(ui: &mut egui::Ui, id: &str, labels: &[&str], sel: &mut usize) {
     egui::ComboBox::from_id_salt(id).selected_text(labels.get(*sel).copied().unwrap_or("")).width(FIELD_W).show_ui(ui, |ui| {
         for (i, l) in labels.iter().enumerate() {
             ui.selectable_value(sel, i, *l);
@@ -721,6 +740,9 @@ fn title(k: &Kind) -> &'static str {
         Kind::EditParam { .. } => "EDIT DIMENSION",
         Kind::Rename { .. } => "RENAME",
         Kind::ConfirmDelete { .. } => "DELETE FEATURE",
+        Kind::Assembly(k) => k.title(),
+        Kind::Sheet(k) => k.title(),
+        Kind::Plastic(k) => k.title(),
     }
 }
 
@@ -747,7 +769,7 @@ fn hint(inp: &SelInput) -> &'static str {
 const LABEL_W: f32 = 92.0;
 
 /// A row label in the dialog's label column.
-fn row_label(ui: &mut egui::Ui, text: &str) {
+pub(crate) fn row_label(ui: &mut egui::Ui, text: &str) {
     ui.allocate_ui_with_layout(vec2(LABEL_W, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.set_width(LABEL_W);
         ui.add(egui::Label::new(text).truncate()).on_hover_text(text);
@@ -1335,6 +1357,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         r.request_focus();
                         ui.end_row();
                     }
+                    Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
+                    Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
+                    Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
                     Kind::ConfirmDelete { with, fail, .. } => {
                         if !with.is_empty() {
                             row_label(ui, "Also deletes");
@@ -1525,6 +1550,15 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     if let Some((id, _)) = d.editing {
         let (cmd, params) = cmds.into_iter().next().ok_or("nothing to apply")?;
         return Ok(vec![("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params}))]);
+    }
+    Ok(cmds)
+}
+
+/// The commands the live preview runs: OK's, with a joint's motion while it animates.
+pub fn preview_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
+    let mut cmds = apply_commands(app, d)?;
+    if let Kind::Assembly(k) = &d.kind {
+        crate::dialogs_assembly::animate(app, k, &mut cmds);
     }
     Ok(cmds)
 }
@@ -1935,6 +1969,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Rename { feature, name } => ("FusionRenameTimelineEntryCommand", json!({"feature": feature, "name": name})),
         Kind::ConfirmDelete { feature, .. } => ("FusionDeleteCommand", json!({ "features": [feature.to_string()] })),
         Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::Preferences => return Ok(Vec::new()),
+        Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
+        Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),
+        Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
     };
     let mut params = params;
     if let Value::Object(m) = &mut params {
@@ -2003,7 +2040,7 @@ pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
 }
 
 /// Which profiles of a sketch a profile selection means.
-fn profile_indices(ss: &solvecraft_engine::doc::SolvedSketch, sel: &ProfileSel) -> Vec<usize> {
+pub(crate) fn profile_indices(ss: &solvecraft_engine::doc::SolvedSketch, sel: &ProfileSel) -> Vec<usize> {
     let ps = &ss.profiles;
     match sel {
         ProfileSel::All => (0..ps.len()).collect(),
@@ -2025,7 +2062,7 @@ fn profile_indices(ss: &solvecraft_engine::doc::SolvedSketch, sel: &ProfileSel) 
 }
 
 /// The edge of a visible body through (or nearest) a point.
-fn edge_sel(s: &Session, p: Vec3) -> Option<Sel> {
+pub(crate) fn edge_sel(s: &Session, p: Vec3) -> Option<Sel> {
     let st = s.model.state();
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
@@ -2041,7 +2078,7 @@ fn edge_sel(s: &Session, p: Vec3) -> Option<Sel> {
 }
 
 /// The body face containing a point (nearest triangle).
-fn face_sel(s: &Session, p: Vec3) -> Option<Sel> {
+pub(crate) fn face_sel(s: &Session, p: Vec3) -> Option<Sel> {
     let st = s.model.state();
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
@@ -2511,7 +2548,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        _ => return None,
+        other => {
+            let (kind, inputs, extra) = crate::dialogs_sheet::for_feature(app, other).or_else(|| crate::dialogs_plastic::for_feature(app, other))?;
+            let mut d = Dialog::new(kind, inputs);
+            d.extra = extra;
+            d
+        }
     };
     d.editing = Some((id, marker));
     d.active = 0;

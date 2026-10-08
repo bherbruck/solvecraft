@@ -13,30 +13,30 @@ use crate::params::{bad, bool_, num, str_, string_list, vec3};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("JointOrigin", "Joint Origin", joint_origin).at("SOLID", "CREATE").icon("joint").params(
+    CommandSpec::new("JointOrigin", "Joint Origin", joint_origin).at("SOLID", "CREATE").icon("joint_origin").params(
         "name?, occurrence?: id|name (default: from the pick), face: [x,y,z] (centre of a planar face) | circle: [x,y,z] (centre of a round end) | point: [x,y,z], z?: [x,y,z]",
     ),
     CommandSpec::new("JointAssembleCmdNew", "Joint", joint).at("SOLID", "ASSEMBLE").icon("joint").key("J").params(
         "type: rigid|revolute|slider|cylindrical|pin_slot|planar|ball; a, b: joint origins ({occurrence, face|circle|point: [x,y,z] in world} | origin name); \
          values?: [angles in deg or expressions, distances]; limits?: [[min, max] | null…]; flip?: bool; offset?; angle?; name?",
     ),
-    CommandSpec::new("JointAsBuiltCmd", "As-Built Joint", as_built).at("SOLID", "ASSEMBLE").icon("joint").params(
+    CommandSpec::new("JointAsBuiltCmd", "As-Built Joint", as_built).at("SOLID", "ASSEMBLE").icon("as_built").params(
         "type, a: occurrence, b: occurrence (stay where they are); at?: joint origin (default: b's origin) — the joint's frame",
     ),
-    CommandSpec::new("RigidGroupCmd", "Rigid Group", rigid_group).at("SOLID", "ASSEMBLE").icon("joint").params("occurrences: [ids or names] (move together, as they are)"),
-    CommandSpec::new("FusionMoveJointsCommand", "Drive Joints", drive).at("SOLID", "ASSEMBLE").icon("joint").params(
+    CommandSpec::new("RigidGroupCmd", "Rigid Group", rigid_group).at("SOLID", "ASSEMBLE").icon("rigid_group").params("occurrences: [ids or names] (move together, as they are)"),
+    CommandSpec::new("FusionMoveJointsCommand", "Drive Joints", drive).at("SOLID", "ASSEMBLE").icon("drive").params(
         "joint: id|name; value | values: [angles in deg or expressions, distances] (clamped to the limits)",
     ),
     CommandSpec::new("FusionMotionRelationshipCommand", "Motion Link", motion_link)
         .at("SOLID", "ASSEMBLE")
-        .icon("joint")
+        .icon("motion_link")
         .params("a, b: joints; ratio (b = ratio · a + offset); offset?; ia?, ib?: value indices (default 0)"),
     CommandSpec::new("joint.limits", "Joint Limits", limits).params("joint; index?: value index (default 0); min?, max? (omit both to clear)"),
     CommandSpec::new("joint.edit", "Edit Joint", edit).params("joint; type?, flip?, offset?, angle?, suppressed?, name?"),
     CommandSpec::new("joint.delete", "Delete Joint", delete).params("joint: id|name (or origin: name, link: index)"),
     CommandSpec::new("joint.list", "List Joints", list).noundo().params("→ joints (type, occurrences, values, limits), origins, links, degrees of freedom, conflicts"),
     CommandSpec::new("joint.solve", "Solve Joints", solve_cmd).params("re-place the occurrences from the joints → conflicts, errors, dof"),
-    CommandSpec::new("InterferenceCheckCommand", "Interference", interference).at("SOLID", "INSPECT").icon("measure").noundo().params(
+    CommandSpec::new("InterferenceCheckCommand", "Interference", interference).at("SOLID", "INSPECT").icon("interference").noundo().params(
         "bodies?: [names] (default: all, in world placement) → pairs that overlap with the overlap volume, area, bounding box and centre",
     ),
 ];

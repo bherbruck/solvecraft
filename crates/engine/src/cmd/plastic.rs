@@ -26,12 +26,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         "position: [x,y,z] on a face (the rest's centre); direction? (default: out of the face); width (round: the diameter); length? (a rectangle, along `along`); along?: [x,y,z]; \
          height; draft? (angle; default: the body's plastic rule); thickness? (wall of a hollow rest); body?",
     ),
-    CommandSpec::new("FusionManagePlasticRuleCommand", "Manage Plastic Rules", manage_rules).at("PLASTIC", "SETUP").icon("params").params(
+    CommandSpec::new("FusionManagePlasticRuleCommand", "Manage Plastic Rules", manage_rules).at("PLASTIC", "SETUP").icon("plastic_rule").params(
         "name (library or new rule; a new one starts from `from`, default ABS (1.5mm)); from?; material?; thickness?, nominal_radius?, clearance?, knife_edge?, \
          reveal_height?, thickness_variation?, draft?, max_thickness?, min_thickness?, min_draft? (expressions; `Thickness` is the rule's); active?: bool (rule for bodies without one); \
          delete?: bool (a design rule; a library rule goes back to the library values)",
     ),
-    CommandSpec::new("FusionAssignPlasticRuleCommand", "Assign Plastic Rule", assign_rule).at("PLASTIC", "SETUP").icon("params").params(
+    CommandSpec::new("FusionAssignPlasticRuleCommand", "Assign Plastic Rule", assign_rule).at("PLASTIC", "SETUP").icon("plastic_assign").params(
         "bodies: [names]; rule: name (empty: no rule) — plastic features on these bodies take its draft and clearance as defaults",
     ),
     CommandSpec::new("plastic.rules", "List Plastic Rules", list_rules).noundo().params("→ rules with their expressions and values, the active rule and the rules assigned to bodies"),
