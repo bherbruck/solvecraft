@@ -38,6 +38,7 @@ Commands never open dialogs when run this way. `solvecraft-cli commands` prints 
 | `ui.text` | `text` | typed text |
 | `ui.screenshot` | `path?` | PNG of the window (needs a presented frame) |
 | `ui.render` | `path`, `width?`, `height?` | CPU render of the model with the current camera (no window needed) |
+| `ui.window` | `action`: minimize, maximize, restore, toggle, close | what the title bar's caption buttons do (on Windows and Linux the application bar is the title bar) |
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | — | |
 

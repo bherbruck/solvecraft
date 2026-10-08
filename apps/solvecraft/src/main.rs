@@ -58,6 +58,10 @@ fn services() -> Services {
     }
 }
 
+/// Windows and Linux: no OS title bar; the application bar is the title bar
+/// (`solvecraft_ui_egui::titlebar`). macOS keeps its traffic lights over the integrated bar.
+const CUSTOM_TITLEBAR: bool = !cfg!(target_os = "macos");
+
 const DEPTH_BITS: u8 = 24;
 const MSAA: u16 = 4;
 
@@ -87,6 +91,10 @@ fn main() -> eframe::Result {
             .with_inner_size([1600.0, 1000.0])
             .with_min_inner_size([960.0, 600.0])
             .with_drag_and_drop(true)
+            .with_decorations(!CUSTOM_TITLEBAR)
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false)
             .with_app_id("ai.storyteller.solvecraft"),
         depth_buffer: DEPTH_BITS,
         multisampling: MSAA,
@@ -97,6 +105,8 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let mut app = SolveApp::new(Session::default(), services());
+            app.custom_titlebar = CUSTOM_TITLEBAR;
+            app.integrated_titlebar = cfg!(target_os = "macos");
             if let Some(p) = cc.storage.and_then(|s| s.get_string(PREFS_KEY)) {
                 app.load_prefs(&p);
             }

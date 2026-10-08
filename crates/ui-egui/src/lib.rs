@@ -27,6 +27,7 @@ mod sketch_edit_tests;
 pub mod sketch_tools;
 pub mod theme;
 pub mod timeline;
+pub mod titlebar;
 pub mod toolbar;
 pub mod tools;
 pub mod viewport;
@@ -134,6 +135,10 @@ pub struct SolveApp {
     pub last_command: Option<(String, String)>,
     pub status: Option<(String, f64, bool)>,
     pub quit_requested: bool,
+    /// The application bar is the window's title bar (Windows, Linux: no OS decorations).
+    pub custom_titlebar: bool,
+    /// macOS: the traffic lights sit over the application bar's left end.
+    pub integrated_titlebar: bool,
     pub frame_ms: f64,
     pub synthetic: Vec<egui::Event>,
     control_rx: Option<Receiver<ControlRequest>>,
@@ -166,6 +171,8 @@ impl SolveApp {
             last_command: None,
             status: None,
             quit_requested: false,
+            custom_titlebar: false,
+            integrated_titlebar: false,
             frame_ms: 0.0,
             synthetic: Vec::new(),
             control_rx: None,
@@ -569,6 +576,9 @@ impl SolveApp {
         dialogs::show(self, ui.ctx());
         params_dialog::show(self, ui.ctx());
         context_menu::show(self, ui.ctx());
+        if self.custom_titlebar {
+            titlebar::resize_zones(ui);
+        }
         palette::popup(self, ui.ctx());
         self.frame_ms = now_ms() - t0;
     }

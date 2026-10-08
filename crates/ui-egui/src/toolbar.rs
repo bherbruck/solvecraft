@@ -38,11 +38,16 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     egui::Panel::top("sc_appbar").exact_size(34.0).frame(egui::Frame::NONE.fill(t.app_bar)).show(ui, |ui| {
         let r = ui.max_rect();
+        // The bar is the window's title bar: its empty space moves the window.
+        if app.custom_titlebar || app.integrated_titlebar {
+            crate::titlebar::drag_area(ui, r);
+        }
+        let left = r.left() + if app.integrated_titlebar { crate::titlebar::TRAFFIC_LIGHTS } else { 0.0 };
         // Brand mark: a small solid block drawn in code.
-        let logo = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(20.0, 20.0));
+        let logo = Rect::from_center_size(pos2(left + 20.0, r.center().y), vec2(20.0, 20.0));
         icons::paint(ui.painter(), logo, "box", Color32::from_rgb(220, 226, 236), Color32::from_rgb(90, 160, 240), Color32::WHITE);
-        ui.painter().text(pos2(r.left() + 36.0, r.center().y), Align2::LEFT_CENTER, "SolveCraft", FontId::proportional(14.0), t.app_bar_text);
-        let mut x = r.left() + 128.0;
+        ui.painter().text(pos2(left + 36.0, r.center().y), Align2::LEFT_CENTER, "SolveCraft", FontId::proportional(14.0), t.app_bar_text);
+        let mut x = left + 128.0;
         let mut click = |ui: &mut egui::Ui, icon: &str, tip: &str| -> bool {
             let br = Rect::from_center_size(pos2(x, r.center().y), vec2(26.0, 26.0));
             x += 30.0;
@@ -91,13 +96,17 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let tab = Rect::from_min_size(pos2(r.center().x - 110.0, r.top() + 5.0), vec2(220.0, r.height() - 5.0));
         ui.painter().rect_filled(tab, egui::CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 }, t.toolbar);
         ui.painter().text(tab.center(), Align2::CENTER_CENTER, name, FontId::proportional(13.0), t.text);
+        let captions = if app.custom_titlebar { crate::titlebar::WIDTH } else { 0.0 };
         ui.painter().text(
-            pos2(r.right() - 12.0, r.center().y),
+            pos2(r.right() - 12.0 - captions, r.center().y),
             Align2::RIGHT_CENTER,
             format!("v{}", env!("CARGO_PKG_VERSION")),
             FontId::proportional(11.0),
             Color32::from_rgb(160, 168, 182),
         );
+        if app.custom_titlebar {
+            crate::titlebar::caption_buttons(app, ui, r);
+        }
     });
     file_menu(app, ui.ctx());
 }
@@ -108,67 +117,70 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let mut close = false;
-    let resp = egui::Area::new(egui::Id::new("sc_file_area")).fixed_pos(pos2(100.0, 34.0)).order(egui::Order::Foreground).show(ctx, |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
-            ui.set_min_width(190.0);
-            let item = |ui: &mut egui::Ui, label: &str, key: &str| {
-                ui.add(egui::Button::new(label).shortcut_text(key).frame(false).min_size(vec2(180.0, 22.0))).clicked()
-            };
-            if item(ui, "New Design", "Ctrl+N") {
-                let _ = app.run("NewDocumentCommand", json!({}));
-                app.fit_view();
-                close = true;
-            }
-            if item(ui, "Open…", "Ctrl+O") {
-                if let Some(p) = app.services.pick_open.as_ref().and_then(|f| f()) {
-                    app.open_path(&p);
+    let resp = egui::Area::new(egui::Id::new("sc_file_area"))
+        .fixed_pos(pos2(100.0 + if app.integrated_titlebar { crate::titlebar::TRAFFIC_LIGHTS } else { 0.0 }, 34.0))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_min_width(190.0);
+                let item = |ui: &mut egui::Ui, label: &str, key: &str| {
+                    ui.add(egui::Button::new(label).shortcut_text(key).frame(false).min_size(vec2(180.0, 22.0))).clicked()
+                };
+                if item(ui, "New Design", "Ctrl+N") {
+                    let _ = app.run("NewDocumentCommand", json!({}));
+                    app.fit_view();
+                    close = true;
                 }
-                close = true;
-            }
-            if item(ui, "Insert STEP…", "") {
-                app.start("FusionImportCommandFromToolbar");
-                close = true;
-            }
-            if item(ui, "Insert Mesh…", "") {
-                app.start("ParaMeshInsertAlignCommand");
-                close = true;
-            }
-            if item(ui, "Save", "Ctrl+S") {
-                save(app);
-                close = true;
-            }
-            if item(ui, "Save As…", "") {
-                save_as(app);
-                close = true;
-            }
-            ui.separator();
-            if item(ui, "Export STL…", "") {
-                export(app, "stl");
-                close = true;
-            }
-            if item(ui, "Export STEP…", "") {
-                export(app, "step");
-                close = true;
-            }
-            if item(ui, "Export 3MF…", "") {
-                export(app, "3mf");
-                close = true;
-            }
-            if item(ui, "Export OBJ…", "") {
-                export(app, "obj");
-                close = true;
-            }
-            ui.separator();
-            if item(ui, "Preferences…", "") {
-                app.dialog = Some(crate::dialogs::Dialog::preferences());
-                close = true;
-            }
-            if item(ui, "Quit", "") {
-                app.quit_requested = true;
-                close = true;
-            }
+                if item(ui, "Open…", "Ctrl+O") {
+                    if let Some(p) = app.services.pick_open.as_ref().and_then(|f| f()) {
+                        app.open_path(&p);
+                    }
+                    close = true;
+                }
+                if item(ui, "Insert STEP…", "") {
+                    app.start("FusionImportCommandFromToolbar");
+                    close = true;
+                }
+                if item(ui, "Insert Mesh…", "") {
+                    app.start("ParaMeshInsertAlignCommand");
+                    close = true;
+                }
+                if item(ui, "Save", "Ctrl+S") {
+                    save(app);
+                    close = true;
+                }
+                if item(ui, "Save As…", "") {
+                    save_as(app);
+                    close = true;
+                }
+                ui.separator();
+                if item(ui, "Export STL…", "") {
+                    export(app, "stl");
+                    close = true;
+                }
+                if item(ui, "Export STEP…", "") {
+                    export(app, "step");
+                    close = true;
+                }
+                if item(ui, "Export 3MF…", "") {
+                    export(app, "3mf");
+                    close = true;
+                }
+                if item(ui, "Export OBJ…", "") {
+                    export(app, "obj");
+                    close = true;
+                }
+                ui.separator();
+                if item(ui, "Preferences…", "") {
+                    app.dialog = Some(crate::dialogs::Dialog::preferences());
+                    close = true;
+                }
+                if item(ui, "Quit", "") {
+                    app.quit_requested = true;
+                    close = true;
+                }
+            });
         });
-    });
     let just_opened = ctx.data(|d| d.get_temp::<u64>(egui::Id::new("sc_file_menu_opened"))) == Some(ctx.cumulative_pass_nr());
     if close || (!just_opened && resp.response.clicked_elsewhere()) {
         ctx.data_mut(|d| d.insert_temp(id, false));

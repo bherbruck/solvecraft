@@ -19,6 +19,7 @@
 //!   menu, or a browser menu with `target: {type: body|sketch|component, …}`); without a point,
 //!   the open menu and its items. `ui.menuPick {item}` runs an item by id or label;
 //!   `ui.rename {text?, commit?}` finishes the rename box
+//! - `ui.window {action: minimize|maximize|restore|toggle|close}`: what the title bar's buttons do
 //! - `ui.resize {width, height}`, `app.quit`
 
 use std::sync::mpsc::Sender;
@@ -252,6 +253,10 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 err("no rename in progress")
             }
         }
+        "ui.window" => match crate::titlebar::window_action(app, ctx, s("action").unwrap_or("")) {
+            Ok(()) => ok(json!({"custom_titlebar": app.custom_titlebar, "maximized": ctx.input(|i| i.viewport().maximized)})),
+            Err(e) => err(e),
+        },
         "ui.resize" => {
             let (Some(w), Some(h)) = (f("width"), f("height")) else { return err("missing width/height") };
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w.clamp(320.0, 8192.0) as f32, h.clamp(240.0, 8192.0) as f32)));
