@@ -285,6 +285,9 @@ pub enum FeatureKind {
         /// A cosmetic thread in the holes (e.g. "M6x1").
         #[serde(default, skip_serializing_if = "Option::is_none")]
         thread: Option<String>,
+        /// To Object: drill down to the face (or point) here instead of `depth`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<Vec3>,
     },
     /// A cosmetic thread on a cylindrical face (no geometry change; drawn and exported as an
     /// annotation). `designation` is an ISO metric size such as "M8" or "M8x1".
@@ -1013,7 +1016,8 @@ impl FeatureKind {
             | FeatureKind::Draft { faces, .. }
             | FeatureKind::OffsetFace { faces, .. }
             | FeatureKind::ReplaceFace { faces, .. } => faces.iter_mut().collect(),
-            FeatureKind::Hole { position, points: None, .. } => vec![position],
+            FeatureKind::Hole { position, points: None, to, .. } => std::iter::once(position).chain(to.iter_mut()).collect(),
+            FeatureKind::Hole { to: Some(t), .. } => vec![t],
             FeatureKind::Extrude { extent, .. } => extent.to.iter_mut().chain(extent.from.iter_mut()).collect(),
             FeatureKind::Revolve { to: Some(p), .. } => vec![p],
             _ => Vec::new(),

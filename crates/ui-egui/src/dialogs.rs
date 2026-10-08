@@ -2470,7 +2470,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("pull".into(), pt3(*pull));
             d
         }
-        FeatureKind::Hole { position, direction, diameter, depth, hole, points, thread } => {
+        FeatureKind::Hole { position, direction, diameter, depth, hole, points, thread, .. } => {
             let mut d = start("solid.hole")?;
             let mut k = hole_defaults();
             if let Kind::Hole { diameter: dia, depth: dep, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = &mut k {

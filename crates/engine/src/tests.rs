@@ -1742,3 +1742,33 @@ fn shell_directions_and_tangent_chain() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
     assert!(s.execute("solid.shell", &json!({"faces": [[20, 15, 20]], "thickness": 2, "direction": "sideways"})).is_err());
 }
+
+/// Hole To Object (a face it meets, or a point) and holes at every point of a sketch.
+#[test]
+fn hole_to_object_and_at_sketch_points() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    // A pocket from below: its ceiling is at z = 10.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pocket"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Pocket", "distance": 10, "operation": "cut"}));
+    let v0 = volume(&mut s);
+    run(&mut s, "solid.hole", json!({"position": [20, 15, 20], "diameter": 4, "to": [25, 15, 10]}));
+    assert!(rel(v0 - volume(&mut s), PI * 4.0 * 10.0) < 1e-3, "{}", v0 - volume(&mut s));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "solid.hole", json!({"position": [5, 5, 20], "diameter": 4, "to": [5, 5, 12]}));
+    assert!(rel(v0 - volume(&mut s), PI * 4.0 * 8.0) < 1e-3, "{}", v0 - volume(&mut s));
+    // Every point of a sketch: three points (the rectangle's corners are not hole points).
+    let mut t = Session::default();
+    run(&mut t, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    run(&mut t, "sketch.create", json!({"plane": {"face": [20, 15, 10]}, "name": "Spots"}));
+    for x in [10, 20, 30] {
+        run(&mut t, "sketch.point", json!({"point": [x, 15]}));
+    }
+    run(&mut t, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [6, 6]}));
+    run(&mut t, "sketch.finish", json!({}));
+    let w0 = volume(&mut t);
+    let r = run(&mut t, "solid.hole", json!({"sketch": "Spots", "diameter": 3}));
+    assert!(rel(w0 - volume(&mut t), 3.0 * PI * 2.25 * 10.0) < 1e-3, "{r} {}", w0 - volume(&mut t));
+}

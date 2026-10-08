@@ -51,7 +51,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch); direction?: [x,y,z] (default: into the face); diameter | thread (a tapped hole: the tap drill, major − pitch) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\" (cosmetic)"),
+        .params("position: [x,y,z] on a face | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch) | sketch alone (every sketch point: standalone points and circle centres); direction?: [x,y,z] (default: into the face); diameter | thread (a tapped hole: the tap drill, major − pitch) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\" (cosmetic)"),
     CommandSpec::new("solid.pipe", "Pipe", pipe)
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -885,10 +885,12 @@ fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
 fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.hole";
     // At sketch points: the holes go perpendicular to the sketch and follow its points.
-    let points = match (p.get("sketch"), p.get("points")) {
-        (Some(_), Some(_)) => {
+    let points = match (p.get("sketch"), p.get("points"), p.get("position")) {
+        (Some(_), Some(_), _) | (Some(_), None, None) => {
             let sketch = feature_sketch(s, p, cmd)?;
-            let ids = string_list(p, "points");
+            // No points named: every sketch point (standalone points and circle centres, not
+            // line or arc ends, not the origin).
+            let ids = if p.get("points").is_some() { string_list(p, "points") } else { sketch_hole_points(s, sketch) };
             if ids.is_empty() || ids.len() > 10_000 {
                 return Err(bad(cmd, "`points` must list 1…10000 sketch point ids"));
             }
@@ -976,7 +978,28 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         },
         other => return Err(bad(cmd, format!("unknown hole type `{other}`"))),
     };
-    add_feature(s, p, FeatureKind::Hole { position, direction, diameter, depth, hole: kind, points: points.map(|x| x.0), thread })
+    let to = match p.get("to") {
+        Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`to` must be a point [x, y, z] on the face to drill to"))?),
+        None => None,
+    };
+    add_feature(s, p, FeatureKind::Hole { position, direction, diameter, depth, hole: kind, points: points.map(|x| x.0), thread, to })
+}
+
+/// The points of a sketch a hole drills at when only the sketch is given.
+fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
+    let st = s.model.state();
+    let Some(ss) = st.sketch(sketch) else { return Vec::new() };
+    let mut ends: Vec<usize> = Vec::new();
+    for c in &ss.sketch.curves {
+        match &c.kind {
+            solvecraft_sketch::CurveKind::Circle { .. } => {}
+            solvecraft_sketch::CurveKind::Arc { a, b, .. } | solvecraft_sketch::CurveKind::Line { a, b } => ends.extend([*a, *b]),
+            solvecraft_sketch::CurveKind::Ellipse { m, .. } => ends.push(*m),
+            solvecraft_sketch::CurveKind::Spline { pts, .. } => ends.extend(pts.iter().copied()),
+            solvecraft_sketch::CurveKind::Conic { a, b, apex, .. } => ends.extend([*a, *b, *apex]),
+        }
+    }
+    ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
 }
 
 fn face_points(p: &Value, cmd: &str) -> Result<Vec<Vec3>> {

@@ -1143,6 +1143,28 @@ fn hole_spots(st: &ModelState, f: &Feature) -> Result<(Vec<Vec3>, Vec3)> {
     Ok((spots.into_iter().map(|p| hole_on_surface(st, p, dir)).collect(), dir))
 }
 
+/// A hole's depth: down to the To Object (where the hole's axis meets the face there, else the
+/// point's depth along the axis), else as given.
+fn hole_depth_to(st: &ModelState, at: &Vec3, dir: Vec3, to: &Option<Vec3>, depth: &Option<String>) -> Result<Option<String>> {
+    let Some(t) = to else { return Ok(depth.clone()) };
+    let mut d = (*t - *at).dot(dir);
+    // The face at the To point, met along the axis.
+    for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+        let Some(fi) = crate::appearance::face_index_at(b, *t) else { continue };
+        let m = b.mesh();
+        if let Some((h, tri)) = m.raycast(*at + dir * 1e-6, dir)
+            && m.tri_face.get(tri).is_some_and(|x| *x as usize == fi)
+        {
+            d = h + 1e-6;
+        }
+        break;
+    }
+    if !(d > 1e-6) {
+        return Err(DocError::Invalid("the hole's To object is not ahead of the hole".into()));
+    }
+    Ok(Some(format!("{d} mm")))
+}
+
 /// A hole's spots as given (not yet moved onto the surface) and its direction.
 fn hole_spots_raw(st: &ModelState, f: &Feature) -> Result<(Vec<Vec3>, Vec3)> {
     let FeatureKind::Hole { position, direction, points, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
@@ -1481,14 +1503,15 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
         FeatureKind::Torus { center, major, minor, .. } => {
             Ok(vec![kernel::torus(*center, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?])
         }
-        FeatureKind::Hole { diameter, depth, hole, .. } => {
+        FeatureKind::Hole { diameter, depth, hole, to, .. } => {
             let (spots, dir) = hole_spots(st, f)?;
             if spots.is_empty() || spots.len() > 10_000 {
                 return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
             }
             let mut tools = Vec::new();
             for at in spots {
-                tools.extend(hole_tools(vals, st, &at, dir, diameter, depth, hole)?);
+                let depth = hole_depth_to(st, &at, dir, to, depth)?;
+                tools.extend(hole_tools(vals, st, &at, dir, diameter, &depth, hole)?);
             }
             Ok(tools)
         }
@@ -1863,7 +1886,7 @@ fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut 
         }
         let (op, targets) = feature_op(src);
         let mut copies = Vec::new();
-        if let FeatureKind::Hole { diameter, depth, hole, .. } = &src.kind {
+        if let FeatureKind::Hole { diameter, depth, hole, to, .. } = &src.kind {
             // A hole is drilled again at each copy of its spot (found on the surface there), so
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
             // original hole under the original spot.
@@ -1872,7 +1895,9 @@ fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut 
                 let d = crate::apply_vector(m, dir).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
                 for p in &spots {
                     let at = hole_on_surface(st, crate::apply_point(m, *p), d);
-                    copies.extend(hole_tools(vals, st, &at, d, diameter, depth, hole)?);
+                    let to = to.map(|t| crate::apply_point(m, t));
+                    let depth = hole_depth_to(st, &at, d, &to, depth)?;
+                    copies.extend(hole_tools(vals, st, &at, d, diameter, &depth, hole)?);
                 }
             }
         } else {
