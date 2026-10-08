@@ -111,7 +111,7 @@ where
             let v1 = vmap.get(&edge.absolute_back().id()).unwrap();
             let curve = edge.curve();
             let poly = bounded_polyline(&curve, curve.range_tuple(), tol);
-            (id, Edge::debug_new(v0, v1, poly))
+            (id, Edge::new_unchecked(v0, v1, poly))
         })
         .collect();
     let create_edge = |edge: &Edge<Point3, C>| -> Edge<_, _> {
@@ -161,7 +161,7 @@ where
             let v1 = vmap.entry_or_insert(vb).clone();
             let curve = edge.curve();
             let poly = bounded_polyline(&curve, curve.range_tuple(), tol);
-            Edge::debug_new(&v0, &v1, poly)
+            Edge::new_unchecked(&v0, &v1, poly)
         },
     );
     let mut create_edge = move |edge: &'a Edge<Point3, C>| -> Edge<_, _> {
@@ -260,7 +260,9 @@ fn shell_create_polygon<S: PreMeshableSurface>(
         let boundary = PolyBoundary::new(preboundary?, &surface, tol);
         Some(trimming_tessellation(surface, &boundary, tol, cap))
     })();
-    let mut new_face = Face::debug_new(wires, polygon);
+    // SolveCraft: faces with seam edges (a loop running along an edge both ways, as STEP
+    // writes cylinders) are valid here; `debug_new` asserts simple loops in debug builds.
+    let mut new_face = Face::new_unchecked(wires, polygon);
     if !orientation {
         new_face.invert();
     }

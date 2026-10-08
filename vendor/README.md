@@ -34,6 +34,9 @@ Changes:
 ## truck-meshalgo 0.4.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
 
 Changes:
+- `tessellation/triangulation.rs`: meshed faces and edges are built unchecked: faces whose loop
+  runs along a seam edge both ways and closed edges (a full circle on one vertex) are valid,
+  but the debug-build checks rejected them (debug builds could not mesh them).
 - `tessellation/triangulation.rs`: parameter searches that land outside a surface's bounded,
   non-periodic domain are rejected (a hinted B-spline search can run off and extrapolate to
   thousands of parameter units, and meshing that grid never finishes); the last-resort nearest
