@@ -101,6 +101,40 @@ pub enum Kind {
         designation: String,
         length: String,
     },
+    /// A rib (one wall along open curves) or a web (a wall per curve).
+    Rib {
+        web: bool,
+        thickness: String,
+        depth: String,
+        flip: bool,
+    },
+    /// Raise or sink profiles of a sketch on a face.
+    Emboss {
+        depth: String,
+        deboss: bool,
+    },
+    /// Move planar faces onto a target plane or face.
+    ReplaceFace,
+    /// Move bodies so a face or point meets another.
+    Align {
+        flip: bool,
+    },
+    /// Remove bodies from here on in the timeline.
+    Remove,
+    /// Pattern bodies along a path of sketch curves.
+    PathPattern {
+        count: String,
+        spacing: String,
+    },
+    /// A pipe (round, optionally hollow) along sketch curves.
+    Pipe {
+        diameter: String,
+        wall: String,
+    },
+    /// A stock block around bodies.
+    Stock {
+        margin: String,
+    },
     /// Application preferences (applied as they change; kept between runs).
     Preferences,
     /// Physical material (and with it the appearance) of bodies.
@@ -231,6 +265,30 @@ impl Dialog {
             "MirrorCommand" => {
                 Dialog::new(Kind::Mirror, vec![SelInput::new("Bodies", BODIES, true), SelInput::new("Mirror plane", PLANES | PLANAR_FACES, false)])
             }
+            "FusionRibCommand" | "FusionWebCommand" => Dialog::new(
+                Kind::Rib { web: id == "FusionWebCommand", thickness: "2 mm".into(), depth: String::new(), flip: false },
+                vec![SelInput::new("Curves", CURVES, true)],
+            ),
+            "EmbossCmd" => Dialog::new(Kind::Emboss { depth: "1 mm".into(), deboss: false }, vec![SelInput::new("Profiles", PROFILES, true)]),
+            "FusionReplaceFaceCommand" => Dialog::new(
+                Kind::ReplaceFace,
+                vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
+            ),
+            "AlignCmd" => Dialog::new(
+                Kind::Align { flip: false },
+                vec![
+                    SelInput::new("Bodies", BODIES, true),
+                    SelInput::new("From", FACES | selection::VERTICES, false),
+                    SelInput::new("To", FACES | selection::VERTICES, false),
+                ],
+            ),
+            "SoftDeleteCommand" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
+            "PatternOnPath" => Dialog::new(
+                Kind::PathPattern { count: "4".into(), spacing: "20 mm".into() },
+                vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
+            ),
+            "PrimitivePipe" => Dialog::new(Kind::Pipe { diameter: "5 mm".into(), wall: String::new() }, vec![SelInput::new("Path", CURVES, true)]),
+            "StockModelCommand" => Dialog::new(Kind::Stock { margin: "2 mm".into() }, vec![SelInput::new("Bodies (all if none)", BODIES, true)]),
             "ConstructionPlaneOffsetFromPlaneCommand" => {
                 Dialog::new(Kind::OffsetPlane { offset: "10 mm".into() }, vec![SelInput::new("Plane", PLANES, false)])
             }
@@ -246,10 +304,9 @@ impl Dialog {
             "FusionOffsetFacesCommand" => {
                 Dialog::new(Kind::OffsetFaces { distance: "2 mm".into() }, vec![SelInput::new("Faces", PLANAR_FACES, true)])
             }
-            "FusionThreadCommand" => Dialog::new(
-                Kind::Thread { designation: String::new(), length: String::new() },
-                vec![SelInput::new("Cylindrical face", FACES, false)],
-            ),
+            "FusionThreadCommand" => {
+                Dialog::new(Kind::Thread { designation: String::new(), length: String::new() }, vec![SelInput::new("Cylindrical face", FACES, false)])
+            }
             "PhysicalMaterialCommand" => Dialog::new(Kind::Material { index: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
             "FusionHalfSectionViewCommand" => {
                 Dialog::new(Kind::Section { offset: "0 mm".into(), flip: false }, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)])
@@ -366,6 +423,14 @@ impl Dialog {
                 | Kind::Draft { .. }
                 | Kind::Mirror
                 | Kind::Split
+                | Kind::Rib { .. }
+                | Kind::Emboss { .. }
+                | Kind::ReplaceFace
+                | Kind::Align { .. }
+                | Kind::Remove
+                | Kind::PathPattern { .. }
+                | Kind::Pipe { .. }
+                | Kind::Stock { .. }
                 | Kind::Scale { .. }
                 | Kind::OffsetFaces { .. }
                 | Kind::PatternRect { .. }
@@ -393,6 +458,11 @@ impl Dialog {
             Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Section { offset, .. } => ("Distance", ValueKind::Length, offset),
             Kind::OffsetPlane { offset } => ("Distance", ValueKind::Length, offset),
+            Kind::Rib { thickness, .. } => ("Thickness", ValueKind::Length, thickness),
+            Kind::Emboss { depth, .. } => ("Depth", ValueKind::Length, depth),
+            Kind::PathPattern { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
+            Kind::Pipe { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
+            Kind::Stock { margin } => ("Margin", ValueKind::Length, margin),
             Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Scale { factor } => ("Scale", ValueKind::Unitless, factor),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
@@ -552,6 +622,15 @@ fn title(k: &Kind) -> &'static str {
         Kind::Material { .. } => "PHYSICAL MATERIAL",
         Kind::Preferences => "PREFERENCES",
         Kind::OffsetPlane { .. } => "OFFSET PLANE",
+        Kind::Rib { web: false, .. } => "RIB",
+        Kind::Rib { web: true, .. } => "WEB",
+        Kind::Emboss { .. } => "EMBOSS",
+        Kind::ReplaceFace => "REPLACE FACE",
+        Kind::Align { .. } => "ALIGN",
+        Kind::Remove => "REMOVE",
+        Kind::PathPattern { .. } => "PATTERN ON PATH",
+        Kind::Pipe { .. } => "PIPE",
+        Kind::Stock { .. } => "STOCK",
         Kind::AnglePlane { .. } => "PLANE AT ANGLE",
         Kind::Split => "SPLIT BODY",
         Kind::Scale { .. } => "SCALE",
@@ -852,7 +931,55 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         enter |= field(ui, angle);
                         ui.end_row();
                     }
-                    Kind::Split => {}
+                    Kind::Split | Kind::ReplaceFace | Kind::Remove => {}
+                    Kind::Rib { thickness, depth, flip, .. } => {
+                        ui.label("Thickness");
+                        enter |= field(ui, thickness);
+                        ui.end_row();
+                        ui.label("Depth");
+                        let r = ui.add(egui::TextEdit::singleline(depth).hint_text("to the next face"));
+                        enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        ui.end_row();
+                        ui.label("Flip");
+                        ui.checkbox(flip, "");
+                        ui.end_row();
+                    }
+                    Kind::Emboss { depth, deboss } => {
+                        ui.label("Depth");
+                        enter |= field(ui, depth);
+                        ui.end_row();
+                        ui.label("Type");
+                        let mut i = usize::from(*deboss);
+                        combo(ui, "emb_mode", &["Emboss", "Deboss"], &mut i);
+                        *deboss = i == 1;
+                        ui.end_row();
+                    }
+                    Kind::Align { flip } => {
+                        ui.label("Flip");
+                        ui.checkbox(flip, "");
+                        ui.end_row();
+                    }
+                    Kind::PathPattern { count, spacing } => {
+                        for (l, v) in [("Quantity", count), ("Spacing", spacing)] {
+                            ui.label(l);
+                            enter |= field(ui, v);
+                            ui.end_row();
+                        }
+                    }
+                    Kind::Pipe { diameter, wall } => {
+                        ui.label("Diameter");
+                        enter |= field(ui, diameter);
+                        ui.end_row();
+                        ui.label("Wall");
+                        let r = ui.add(egui::TextEdit::singleline(wall).hint_text("solid"));
+                        enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        ui.end_row();
+                    }
+                    Kind::Stock { margin } => {
+                        ui.label("Margin");
+                        enter |= field(ui, margin);
+                        ui.end_row();
+                    }
                     Kind::Scale { factor } => {
                         ui.label("Scale factor");
                         enter |= field(ui, factor);
@@ -1368,6 +1495,74 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             ("ConstructionPlaneAtAngleCommand", json!({"base": base, "axis": axis, "angle": angle}))
         }
+        Kind::Rib { web, thickness, depth, flip } => {
+            need(0, "open sketch curves")?;
+            let curves = curve_ids(d, 0);
+            let sketch = curves_sketch(app, &curves, None).ok_or("the curves must be in one sketch")?;
+            let mut p = json!({"sketch": sketch, "curves": curves, "thickness": thickness, "flip": flip});
+            if !depth.trim().is_empty() {
+                p["depth"] = json!(depth);
+            }
+            (if *web { "FusionWebCommand" } else { "FusionRibCommand" }, p)
+        }
+        Kind::Emboss { depth, deboss } => {
+            need(0, "profiles")?;
+            let (sketch, idx) = profiles();
+            ("EmbossCmd", json!({"sketch": sketch, "profiles": idx, "depth": depth, "mode": if *deboss { "deboss" } else { "emboss" }}))
+        }
+        Kind::ReplaceFace => {
+            need(0, "faces to move")?;
+            need(1, "the target")?;
+            let mut p = json!({"faces": face_points(0)});
+            match sels(d, 1).first() {
+                Some(Sel::Plane { name }) => p["target"] = json!(name),
+                Some(Sel::Face { point, .. }) => p["target_face"] = pt(*point),
+                _ => return Err("pick a plane or planar face".into()),
+            }
+            ("FusionReplaceFaceCommand", p)
+        }
+        Kind::Align { flip } => {
+            need(0, "bodies")?;
+            need(1, "what to move from")?;
+            need(2, "where to move it to")?;
+            let mut p = json!({"bodies": body_names(0), "flip": flip});
+            for (i, key) in [(1, "from"), (2, "to")] {
+                match sels(d, i).first() {
+                    Some(Sel::Face { point, .. }) => p[format!("{key}_face")] = pt(*point),
+                    Some(Sel::Vertex { point, .. }) => p[key] = pt(*point),
+                    _ => return Err("pick faces or vertices".into()),
+                }
+            }
+            ("AlignCmd", p)
+        }
+        Kind::Remove => {
+            need(0, "bodies")?;
+            ("SoftDeleteCommand", json!({"bodies": body_names(0)}))
+        }
+        Kind::PathPattern { count, spacing } => {
+            need(0, "objects")?;
+            need(1, "the path")?;
+            let path = curve_ids(d, 1);
+            let sketch = curves_sketch(app, &path, None).ok_or("the path curves must be in one sketch")?;
+            ("PatternOnPath", json!({"bodies": body_names(0), "path_sketch": sketch, "path": path, "count": count, "spacing": spacing}))
+        }
+        Kind::Pipe { diameter, wall } => {
+            need(0, "the path")?;
+            let path = curve_ids(d, 0);
+            let sketch = curves_sketch(app, &path, None).ok_or("the path curves must be in one sketch")?;
+            let mut p = json!({"path_sketch": sketch, "path": path, "diameter": diameter});
+            if !wall.trim().is_empty() {
+                p["wall"] = json!(wall);
+            }
+            ("PrimitivePipe", p)
+        }
+        Kind::Stock { margin } => {
+            let mut p = json!({"margin": margin});
+            if !sels(d, 0).is_empty() {
+                p["bodies"] = json!(body_names(0));
+            }
+            ("StockModelCommand", p)
+        }
         Kind::Split => {
             need(0, "the body to split")?;
             need(1, "the splitting plane")?;
@@ -1485,6 +1680,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
     }
     Ok(vec![(cmd.to_string(), params)])
+}
+
+/// Sketch curve ids picked in an input.
+fn curve_ids(d: &Dialog, i: usize) -> Vec<String> {
+    sels(d, i).iter().filter_map(|x| if let Sel::SketchCurve { id } = x { Some(id.clone()) } else { None }).collect()
 }
 
 /// The features that made these bodies (what patterns and mirrors copy).

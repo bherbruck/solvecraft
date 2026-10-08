@@ -39,9 +39,12 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         _ => return None,
     };
     Some(match d.kind {
-        Kind::Extrude { .. } | Kind::Fillet { .. } | Kind::Section { .. } | Kind::Hole { .. } | Kind::OffsetPlane { .. } | Kind::OffsetFaces { .. } => {
-            (at, normal)
-        }
+        Kind::Extrude { .. }
+        | Kind::Fillet { .. }
+        | Kind::Section { .. }
+        | Kind::Hole { .. }
+        | Kind::OffsetPlane { .. }
+        | Kind::OffsetFaces { .. } => (at, normal),
         // Shell thickness grows into the body.
         Kind::Shell { .. } => (at, normal.map(|n| -n)),
         Kind::Move { .. } => (at, Some(Vec3::Z)),
@@ -126,7 +129,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     };
     let symmetric = matches!(d.kind, Kind::Extrude { direction: 2, .. });
     // Extrudes and moves go either way; radii and thicknesses stay positive.
-    let signed = matches!(d.kind, Kind::Extrude { .. } | Kind::Move { .. } | Kind::Section { .. } | Kind::OffsetPlane { .. } | Kind::OffsetFaces { .. });
+    let signed =
+        matches!(d.kind, Kind::Extrude { .. } | Kind::Move { .. } | Kind::Section { .. } | Kind::OffsetPlane { .. } | Kind::OffsetFaces { .. });
     let focus = std::mem::take(&mut d.focus);
     let half_height = app.cam.half_height();
     let axis = revolve_axis(app, d);
@@ -144,7 +148,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         let v = n.cross(u);
         let h = half_height * 0.25;
         let c = base + n * off;
-        let q: Vec<Pos2> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().filter_map(|(a, b)| proj.to_screen(c + u * (a * h) + v * (b * h))).collect();
+        let q: Vec<Pos2> =
+            [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().filter_map(|(a, b)| proj.to_screen(c + u * (a * h) + v * (b * h))).collect();
         if q.len() == 4 {
             painter.add(egui::Shape::convex_polygon(q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
         }
