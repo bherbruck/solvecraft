@@ -34,7 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.align", "Align", align)
         .at("SOLID", "MODIFY")
         .icon("move")
-        .params("bodies: [names]; from: [x,y,z] | from_face: [x,y,z]; to: [x,y,z] | to_face: [x,y,z] (faces also turn to meet); flip?: bool"),
+        .params("bodies: [names]; from: [x,y,z] | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z]; to: (the same) | to_face: [x,y,z] (faces also turn to meet); flip?: bool"),
     CommandSpec::new("solid.remove", "Remove", remove).at("SOLID", "MODIFY").icon("delete").params("bodies: [names] (removed from here on in the timeline)"),
 ];
 
@@ -202,6 +202,12 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             let n = super::face::face_normal(s, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face")))?;
             return Ok((fp, Some(n)));
         }
+        // A snap point: {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]}.
+        if let Some(o) = p.get(pk).filter(|v| v.is_object()) {
+            let at = o.get("at").and_then(vec3).ok_or_else(|| bad(cmd, format!("`{pk}.at` must be [x, y, z]")))?;
+            let kind = o.get("snap").and_then(Value::as_str).unwrap_or("vertex");
+            return snap_point(s, kind, at).map(|q| (q, None)).ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")));
+        }
         p.get(pk).and_then(vec3).map(|v| (v, None)).ok_or_else(|| bad(cmd, format!("give `{pk}` or `{fk}` as [x, y, z]")))
     };
     let (from, from_normal) = pick(s, "from", "from_face")?;
@@ -230,3 +236,38 @@ fn remove(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 #[path = "features_more_tests.rs"]
 mod tests;
+
+/// A snap point near `at` on the model: the nearest vertex, edge midpoint, planar face's centre
+/// or circular edge's centre (the end of a cylindrical face).
+pub(super) fn snap_point(s: &Session, kind: &str, at: Vec3) -> Option<Vec3> {
+    let st = s.world_state();
+    let near = |pts: Vec<Vec3>| pts.into_iter().min_by(|a, b| a.dist(at).total_cmp(&b.dist(at)));
+    match kind {
+        "vertex" => near(
+            st.bodies
+                .iter()
+                .flat_map(|b| b.mesh().edges.iter().flat_map(|e| [e.first().copied(), e.last().copied()]).flatten().collect::<Vec<_>>())
+                .collect(),
+        ),
+        "edge_mid" => {
+            let d = |e: &solvecraft_doc::kernel::EdgeInfo| e.points.windows(2).map(|w| at.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min);
+            st.bodies
+                .iter()
+                .filter_map(|b| b.body.edges((b.body.size() * 2e-3).max(1e-3)).ok())
+                .flatten()
+                .min_by(|a, b| d(a).total_cmp(&d(b)))
+                .map(|e| e.mid)
+        }
+        "face_center" => st.bodies.iter().find_map(|b| {
+            let i = solvecraft_doc::appearance::face_index_at(b, at)?;
+            b.body.faces((b.body.size() * 2e-3).max(1e-3)).ok()?.into_iter().find(|f| f.index == i).map(|f| f.centroid)
+        }),
+        "circle_center" => st.bodies.iter().find_map(|b| {
+            let c = solvecraft_doc::kernel::cylinder_face_at(&b.body, at)?;
+            let along = (at - c.axis_point).dot(c.axis);
+            let end = if (along - c.start).abs() <= (c.end - along).abs() { c.start } else { c.end };
+            Some(c.axis_point + c.axis * end)
+        }),
+        _ => None,
+    }
+}

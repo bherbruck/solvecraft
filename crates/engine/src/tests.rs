@@ -1789,3 +1789,22 @@ fn combine_keep_tools_and_new_component() {
     assert_eq!(s.doc.body_component("A", a.feature), comp);
     assert!(rel(solvecraft_kernel::measure(&a.body).unwrap().volume, 4000.0) < 1e-9);
 }
+
+/// Align with snap points: a box's vertex onto another's face centre, an edge midpoint onto a
+/// hole's circle centre.
+#[test]
+fn align_with_snap_points() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "body_name": "Base"}));
+    run(&mut s, "solid.box", json!({"corner": [100, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    // Cube's corner (100, 0, 0) onto Base's top face centre (20, 20, 10).
+    run(
+        &mut s,
+        "solid.align",
+        json!({"bodies": ["Cube"], "from": {"snap": "vertex", "at": [100.4, 0.3, 0.2]}, "to": {"snap": "face_center", "at": [5, 5, 10]}}),
+    );
+    let m = run(&mut s, "inspect.measure", json!({"bodies": ["Cube"]}));
+    let min = |i: usize| m["bodies"][0]["bbox"]["min"][i].as_f64().unwrap_or(f64::NAN);
+    assert!((min(0) - 20.0).abs() < 1e-6 && (min(1) - 20.0).abs() < 1e-6 && (min(2) - 10.0).abs() < 1e-6, "{m}");
+    assert!(s.execute("solid.align", &json!({"bodies": ["Cube"], "from": {"snap": "nope", "at": [0, 0, 0]}, "to": [0, 0, 0]})).is_err());
+}
