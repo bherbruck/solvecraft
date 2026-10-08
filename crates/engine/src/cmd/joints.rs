@@ -64,7 +64,7 @@ fn sol_json(sol: &joints::Solution) -> Value {
     })
 }
 
-fn occurrence_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
+pub(crate) fn occurrence_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
     let key = match v {
         Some(Value::Number(n)) => n.to_string(),
         Some(Value::String(x)) => x.clone(),
@@ -145,7 +145,7 @@ fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointOrigin
     Ok(o)
 }
 
-fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
+pub(crate) fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
     let key = match v {
         Some(Value::Number(n)) => n.to_string(),
         Some(Value::String(x)) => x.clone(),
@@ -155,7 +155,7 @@ fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
 }
 
 /// A joint value: numbers are degrees for angles and mm for distances; text is an expression.
-fn value(s: &Session, v: &Value, angle: bool, cmd: &str) -> Result<f64> {
+pub(crate) fn value(s: &Session, v: &Value, angle: bool, cmd: &str) -> Result<f64> {
     let kind = if angle { Kind::Angle } else { Kind::Length };
     let e = match v {
         Value::Number(n) => n.as_f64().filter(|x| x.is_finite() && x.abs() < 1e9).map(|x| x.to_string()),
@@ -344,11 +344,13 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     joints::clamp(j, &mut q);
-    j.values = q.clone();
-    let sol = resolve(s);
+    // Moved as far toward `q` as contact sets allow.
+    let r = super::motion::drive_joint(s, id, q)?;
+    let sol = joints::solve(&s.doc, &s.model.state());
     let mut out = sol_json(&sol);
     out["joint"] = json!(id);
-    out["values"] = json!(q);
+    out["values"] = json!(s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.values.clone()));
+    out["stopped_by_contact"] = r["stopped_by_contact"].clone();
     Ok(out)
 }
 

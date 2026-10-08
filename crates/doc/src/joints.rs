@@ -148,11 +148,30 @@ pub struct Assembly {
     pub origins: Vec<NamedOrigin>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<MotionLink>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contact_sets: Vec<crate::motion::ContactSet>,
+    /// Contact sets take effect.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub contact_enabled: bool,
+    /// Every occurrence is in contact with every other (Enable All Contact).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub contact_all: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub studies: Vec<crate::motion::MotionStudy>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exploded: Vec<crate::motion::ExplodedView>,
 }
 
 impl Assembly {
     pub fn is_empty(&self) -> bool {
-        self.joints.is_empty() && self.origins.is_empty() && self.links.is_empty()
+        self.joints.is_empty()
+            && self.origins.is_empty()
+            && self.links.is_empty()
+            && self.contact_sets.is_empty()
+            && !self.contact_enabled
+            && !self.contact_all
+            && self.studies.is_empty()
+            && self.exploded.is_empty()
     }
 }
 

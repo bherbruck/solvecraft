@@ -14,6 +14,7 @@ mod eval;
 pub mod expr;
 pub mod format;
 pub mod joints;
+pub mod motion;
 mod params;
 pub mod plastic;
 pub mod project;

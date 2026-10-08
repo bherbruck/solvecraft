@@ -15,6 +15,7 @@ mod file;
 mod inspect;
 pub(crate) mod joints;
 mod measure_sel;
+pub(crate) mod motion;
 mod section;
 pub(crate) use measure_sel::measure_items;
 mod parameters;
@@ -142,6 +143,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(plastic::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
+    v.extend(motion::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
