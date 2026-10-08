@@ -119,7 +119,7 @@ fn prism_of(b: &Body, d: Vec3, plane: &Plane, tol: f64) -> Option<Prism> {
         for w in f.boundaries() {
             let mut segs = Vec::new();
             for e in w.edge_iter() {
-                segs.extend(seg2(&e, plane, tol)?);
+                segs.extend(seg2(e, plane, tol)?);
             }
             loops.push(Loop2 { segs });
         }
