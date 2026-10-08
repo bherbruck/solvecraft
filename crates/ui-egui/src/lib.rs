@@ -55,6 +55,10 @@ pub struct UiState {
     pub palette_open: bool,
     /// Dark theme (the default); a preference kept between runs.
     pub dark: bool,
+    /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
+    pub pick_off: Vec<String>,
+    /// A click on a face picks its whole body.
+    pub pick_bodies: bool,
 }
 
 impl Default for UiState {
@@ -71,6 +75,8 @@ impl Default for UiState {
             show_sketches: true,
             palette_open: false,
             dark: true,
+            pick_off: Vec::new(),
+            pick_bodies: false,
         }
     }
 }

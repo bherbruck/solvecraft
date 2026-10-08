@@ -449,12 +449,20 @@ pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
     if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
         return hits.iter().find_map(|h| d.candidate(&app.session, h).map(|s| (h.clone(), s)));
     }
+    let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
     hits.iter()
         .filter(|h| match h {
-            Hit::SketchCurve { sketch, .. } => app.session.active_sketch == Some(*sketch),
-            _ => true,
+            Hit::SketchCurve { sketch, .. } => app.session.active_sketch == Some(*sketch) && !off("sketch"),
+            Hit::SketchPoint { .. } | Hit::Profile { .. } => !off("sketch"),
+            Hit::Vertex { .. } => !off("vertices") && !app.ui.pick_bodies,
+            Hit::Edge { .. } => !off("edges") && !app.ui.pick_bodies,
+            Hit::Face { .. } => !off("faces") || app.ui.pick_bodies,
+            Hit::Plane { .. } | Hit::Axis { .. } => true,
         })
-        .find_map(|h| hit_sel(h).map(|s| (h.clone(), s)))
+        .find_map(|h| match h {
+            Hit::Face { body, .. } if app.ui.pick_bodies => Some((h.clone(), Sel::Body { name: body.clone() })),
+            _ => hit_sel(h).map(|s| (h.clone(), s)),
+        })
 }
 
 /// The edge a selection refers to now: by index if it still passes through the stored point,
@@ -535,6 +543,7 @@ fn highlight_key(app: &SolveApp) -> u64 {
     serde_json::to_string(&app.highlighted()).unwrap_or_default().hash(&mut h);
     format!("{:?}", app.viewport.hover).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
+    app.ui.pick_bodies.hash(&mut h);
     crate::theme::is_dark().hash(&mut h);
     app.preview.replaced.hash(&mut h);
     app.origin_visible().hash(&mut h);
@@ -649,6 +658,17 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
     }
     // Hover (pre-highlight).
     match hover {
+        // Body selection: the whole body lights up.
+        Some(Hit::Face { body, .. }) if app.ui.pick_bodies && app.dialog.is_none() && app.tool.is_none() => {
+            if let Some(b) = st.body(body) {
+                let k = t.hover_face_lift;
+                let c = (t.body.r(), t.body.g(), t.body.b());
+                let m = b.mesh();
+                for f in 0..b.body.face_count() {
+                    face_tris(&mut sc, &m, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
+                }
+            }
+        }
         Some(Hit::Face { body, index, .. })
             if !app.preview.replaced.contains(body)
                 && !sel.iter().any(|x| matches!(x, Sel::Face { body: b, index: i, .. } if b == body && i == index)) =>

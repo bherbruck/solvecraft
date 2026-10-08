@@ -248,7 +248,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let cmds: Vec<_> = specs.iter().filter(|c| c.tab == tab && c.panel == *panel).collect();
             let n = promoted(&tab, panel).min(cmds.len()).max(if cmds.is_empty() { 1 } else { 0 });
             let width = (n as f32 * 40.0).max(64.0) + 8.0;
-            let enabled_panel = !cmds.is_empty();
+            let enabled_panel = !cmds.is_empty() || *panel == "SELECT";
             for (i, c) in cmds.iter().take(n).enumerate() {
                 let br = Rect::from_min_size(pos2(px + 4.0 + i as f32 * 40.0, top + 2.0), vec2(38.0, 38.0));
                 let info = c.info(&app.session);
@@ -305,7 +305,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let area = egui::Area::new(popup_id).fixed_pos(lr.left_bottom()).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                         ui.set_min_width(200.0);
-                        if cmds.is_empty() {
+                        if *panel == "SELECT" {
+                            selection_filter(app, ui);
+                        } else if cmds.is_empty() {
                             ui.label(egui::RichText::new("Not available yet").color(t.text_dim));
                         }
                         for c in &cmds {
@@ -333,6 +335,22 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         painter.line_segment([pos2(r.left(), r.bottom() - 0.5), pos2(r.right(), r.bottom() - 0.5)], Stroke::new(1.0, t.border));
     });
+}
+
+/// The SELECT panel: what a click in the view picks.
+fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    ui.label(egui::RichText::new("Selection filter").color(t.text_dim).size(11.0));
+    ui.checkbox(&mut app.ui.pick_bodies, "Select bodies (a face picks its body)");
+    for (k, label) in [("faces", "Faces"), ("edges", "Edges"), ("vertices", "Vertices"), ("sketch", "Sketch geometry and profiles")] {
+        let mut on = !app.ui.pick_off.iter().any(|x| x == k);
+        if ui.checkbox(&mut on, label).changed() {
+            app.ui.pick_off.retain(|x| x != k);
+            if !on {
+                app.ui.pick_off.push(k.to_string());
+            }
+        }
+    }
 }
 
 /// A small drop-down caret.
