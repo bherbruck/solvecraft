@@ -32,6 +32,7 @@ pub mod keymap;
 mod menu_tests;
 pub mod palette;
 pub mod params_dialog;
+pub mod prefs;
 #[cfg(test)]
 mod preselect_tests;
 pub mod preview;
@@ -129,6 +130,8 @@ impl Default for UiState {
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str, &[&str]) -> Option<String>>>,
+    /// Where the host reads the anti-aliasing preference at start (a small JSON file).
+    pub graphics_path: Option<String>,
 }
 
 pub struct SolveApp {
@@ -161,6 +164,9 @@ pub struct SolveApp {
     pub keymap: keymap::Keymap,
     /// The Help menu and the About window.
     pub help: help::HelpState,
+    /// Preferences kept between runs, and their window.
+    pub preferences: prefs::Prefs,
+    pub prefs_window: prefs::PrefsWindow,
     pub preview: preview::PreviewState,
     /// The last command started interactively (id, label), for Repeat.
     pub last_command: Option<(String, String)>,
@@ -215,6 +221,8 @@ impl SolveApp {
             sbox: shortcut_box::ShortcutBox::default(),
             keymap: keymap::Keymap::default(),
             help: help::HelpState::default(),
+            preferences: prefs::Prefs::default(),
+            prefs_window: prefs::PrefsWindow::default(),
             preview: preview::PreviewState::default(),
             last_command: None,
             esc_handled: false,
@@ -262,6 +270,7 @@ impl SolveApp {
             "shortcut_box": self.sbox.prefs(),
             "shortcuts": self.keymap.prefs(),
             "autosave_minutes": self.autosave_minutes,
+            "preferences": self.preferences,
         })
         .to_string()
     }
@@ -310,6 +319,9 @@ impl SolveApp {
         }
         if let Some(s) = v.get("shortcuts") {
             self.keymap.load(s);
+        }
+        if let Some(p) = v.get("preferences").and_then(|p| serde_json::from_value::<prefs::Prefs>(p.clone()).ok()) {
+            self.preferences = p;
         }
     }
 
@@ -698,6 +710,7 @@ impl SolveApp {
         }
         shortcut_box::show(self, ui.ctx());
         keymap::show(self, ui.ctx());
+        prefs::show(self, ui.ctx());
         self.frame_ms = now_ms() - t0;
     }
 

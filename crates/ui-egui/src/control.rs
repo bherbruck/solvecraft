@@ -24,6 +24,8 @@
 //! - `ui.confirm {accept?}`: the Delete confirmation (without `accept`: what it lists)
 //! - `ui.shortcut {command, key?, replace?}`: a command's key, or bind one ("" clears)
 //! - `ui.help {item?: about|shortcuts|report}`: the Help menu; returns the version and diagnostics
+//! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_cursor, msaa,
+//!   length_decimals, angle_decimals); returns them all
 //! - `ui.resize {width, height}`, `app.quit`
 
 use std::sync::mpsc::Sender;
@@ -376,6 +378,7 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 None => ok(json!({"command": id, "key": crate::keymap::effective(app, id)})),
             }
         }
+        "ui.prefs" => wrap(crate::prefs::set(app, p)),
         "ui.help" => match s("item") {
             Some(i @ ("about" | "shortcuts" | "report")) => {
                 crate::help::run(app, ctx, i);

@@ -48,6 +48,7 @@ Commands never open dialogs when run this way. `solvecraft-cli commands` prints 
 | `ui.home` | `open?`: bool; `sample?`: index | the start page: show or hide it, open a built-in sample (once built); returns `open` and the recent designs |
 | `ui.shortcut` | `command`, `key?`, `replace?` | a command's key, or rebinds it (`""` clears; a key another command uses is refused unless `replace`) |
 | `ui.help` | `item?`: `about`, `shortcuts` (read only), `report` (copies diagnostics) | the version, commit, build date and diagnostic text |
+| `ui.prefs` | any of `default_units`, `nav` (`fusion`, `solidworks`, `inventor`), `zoom_reverse`, `orbit_cursor`, `msaa`, `length_decimals`, `angle_decimals` | sets preferences (kept between runs), returns them all |
 | `ui.window` | `action`: minimize, maximize, restore, toggle, close | what the title bar's caption buttons do (on Windows and Linux the application bar is the title bar) |
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | — | |

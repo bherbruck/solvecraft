@@ -45,6 +45,8 @@ pub struct ViewportState {
     pub hover_feature: Option<u64>,
     /// Bodies whose browser row is under the cursor: highlighted the same way.
     pub hover_bodies: Vec<String>,
+    /// The model point an orbit turns around (Preferences: orbit around the cursor).
+    pub orbit_pivot: Option<Vec3>,
     pub build_ms: f64,
     /// The right-click menu, open at this screen position.
     pub context_menu: Option<Pos2>,
@@ -1057,7 +1059,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // ---- navigation ----
     let h = rect.height().max(1.0) as f64;
     if inside && scroll != 0.0 {
-        let f = (-scroll as f64 * 0.0015).exp();
+        let f = (-scroll as f64 * 0.0015 * crate::prefs::zoom_sign(app)).exp();
         let anchor = hover.map(|p| {
             let proj = projection(app, rect);
             let (o, d) = proj.ray(p);
@@ -1071,10 +1073,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let dragging = resp.dragged() || (inside && (middle || secondary_down));
     if dragging && delta != egui::Vec2::ZERO {
         let (dx, dy) = (delta.x as f64, delta.y as f64);
-        let mode = if middle && (mods.shift) || (secondary_down && !middle) {
-            Some(NavMode::Orbit)
-        } else if middle {
-            Some(NavMode::Pan)
+        let mode = if middle || secondary_down {
+            crate::prefs::nav_mode(app, middle, secondary_down, mods)
         } else if primary_down {
             app.viewport.nav
         } else {
@@ -1084,11 +1084,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.cancel_view_animation();
         }
         match mode {
-            Some(NavMode::Orbit) => app.cam.orbit(dx, dy),
+            Some(NavMode::Orbit) => {
+                let press = ui.input(|i| i.pointer.press_origin());
+                crate::prefs::orbit(app, rect, dx, dy, press);
+            }
             Some(NavMode::Pan) => app.cam.pan(dx, dy, h),
             Some(NavMode::Zoom) => app.cam.zoom_at((dy * 0.01).exp(), None),
             None => {}
         }
+    }
+    if !dragging {
+        app.viewport.orbit_pivot = None;
     }
     if !app.cam.is_valid() {
         app.cam = Camera::default();

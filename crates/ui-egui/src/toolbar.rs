@@ -185,7 +185,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 ui.separator();
                 if item(ui, "Preferences…", "") {
-                    app.dialog = Some(crate::dialogs::Dialog::preferences());
+                    app.prefs_window.open = true;
                     close = true;
                 }
                 if item(ui, "Keyboard Shortcuts…", "") {

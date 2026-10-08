@@ -58,7 +58,25 @@ fn services() -> Services {
         pick_save: Some(Box::new(|name: &str, exts: &[&str]| {
             rfd::FileDialog::new().set_file_name(name).add_filter("File", exts).save_file().map(|p| p.to_string_lossy().to_string())
         })),
+        graphics_path: graphics_path().map(|p| p.to_string_lossy().to_string()),
     }
+}
+
+/// The anti-aliasing preference, kept next to eframe's storage (it is needed before the
+/// window opens).
+fn graphics_path() -> Option<std::path::PathBuf> {
+    eframe::storage_dir("SolveCraft").map(|d| d.join("graphics.json"))
+}
+
+/// Anti-aliasing samples from Preferences (4 when unset).
+fn msaa() -> u16 {
+    graphics_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("msaa").and_then(serde_json::Value::as_u64))
+        .and_then(|m| u16::try_from(m).ok())
+        .filter(|m| [1, 2, 4, 8].contains(m))
+        .unwrap_or(MSAA)
 }
 
 /// Windows and Linux: no OS title bar; the application bar is the title bar
@@ -69,6 +87,7 @@ const DEPTH_BITS: u8 = 24;
 const MSAA: u16 = 4;
 
 fn main() -> eframe::Result {
+    let samples = msaa();
     let mut control_port: Option<u16> = std::env::var("SOLVECRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok());
     let mut files = Vec::new();
     let mut sample = false;
@@ -100,7 +119,7 @@ fn main() -> eframe::Result {
             .with_title_shown(false)
             .with_app_id("ai.storyteller.solvecraft"),
         depth_buffer: DEPTH_BITS,
-        multisampling: MSAA,
+        multisampling: samples,
         ..Default::default()
     };
     eframe::run_native(
@@ -114,7 +133,7 @@ fn main() -> eframe::Result {
                 app.load_prefs(&p);
             }
             if let Some(rs) = &cc.wgpu_render_state {
-                app.set_wgpu(rs, DEPTH_BITS, u32::from(MSAA));
+                app.set_wgpu(rs, DEPTH_BITS, u32::from(samples));
             }
             if let Some(port) = control_port {
                 let rx = control_server::start(port, cc.egui_ctx.clone());
