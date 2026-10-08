@@ -411,7 +411,7 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
             match (sa.search_nearest_parameter(q, None, 50), sb.search_nearest_parameter(q, None, 50)) {
                 (Some((u, v)), Some((s, t))) => {
                     let (x, y) = (sa.normal(u, v), sb.normal(s, t));
-                    x.x * y.x + x.y * y.y + x.z * y.z > 1.0 - 1e-4
+                    x.x * y.x + x.y * y.y + x.z * y.z > 1.0 - 1e-3
                 }
                 _ => false,
             }

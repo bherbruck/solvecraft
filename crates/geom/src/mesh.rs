@@ -227,3 +227,122 @@ impl Mesh {
         best
     }
 }
+
+/// Point-in-mesh queries in bulk: for each of `Mesh::contains`'s three ray directions, the
+/// triangles binned on a grid in the plane square to it, so a ray tests only the triangles
+/// whose shadow covers its cell. Answers exactly as `Mesh::contains` does.
+pub struct InsideIndex<'a> {
+    mesh: &'a Mesh,
+    rays: Vec<RayGrid>,
+}
+
+struct RayGrid {
+    dir: Vec3,
+    u: Vec3,
+    v: Vec3,
+    min: (f64, f64),
+    cell: f64,
+    n: (usize, usize),
+    cells: Vec<Vec<u32>>,
+}
+
+const RAY_DIRS: [Vec3; 3] = [Vec3::new(0.5773, 0.5774, 0.5776), Vec3::new(-0.6123, 0.3141, 0.7254), Vec3::new(0.2718, -0.8414, 0.4673)];
+
+impl Mesh {
+    /// An index for many `contains` queries on this mesh.
+    pub fn inside_index(&self) -> InsideIndex<'_> {
+        let rays = RAY_DIRS
+            .iter()
+            .map(|d| {
+                let u = d.any_perp();
+                let v = d.cross(u);
+                let tris: Vec<[(f64, f64); 3]> = self
+                    .triangles
+                    .iter()
+                    .map(|t| match self.tri(t) {
+                        Some([a, b, c]) => [(a.dot(u), a.dot(v)), (b.dot(u), b.dot(v)), (c.dot(u), c.dot(v))],
+                        None => [(0.0, 0.0); 3],
+                    })
+                    .collect();
+                let (mut lo, mut hi) = ((f64::INFINITY, f64::INFINITY), (f64::NEG_INFINITY, f64::NEG_INFINITY));
+                for t in &tris {
+                    for p in t {
+                        lo = (lo.0.min(p.0), lo.1.min(p.1));
+                        hi = (hi.0.max(p.0), hi.1.max(p.1));
+                    }
+                }
+                let span = (hi.0 - lo.0).max(hi.1 - lo.1).max(1e-9);
+                let side = ((tris.len() as f64).sqrt().ceil() as usize).clamp(1, 256);
+                let cell = span / side as f64 * (1.0 + 1e-9);
+                let n = (side + 1, side + 1);
+                let mut cells = vec![Vec::new(); n.0 * n.1];
+                if lo.0.is_finite() {
+                    for (i, t) in tris.iter().enumerate() {
+                        let (x0, x1) = (t.iter().map(|p| p.0).fold(f64::INFINITY, f64::min), t.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max));
+                        let (y0, y1) = (t.iter().map(|p| p.1).fold(f64::INFINITY, f64::min), t.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max));
+                        let c = |x: f64, o: f64, m: usize| (((x - o) / cell).floor().max(0.0) as usize).min(m - 1);
+                        for gx in c(x0, lo.0, n.0)..=c(x1, lo.0, n.0) {
+                            for gy in c(y0, lo.1, n.1)..=c(y1, lo.1, n.1) {
+                                if let Some(slot) = cells.get_mut(gx * n.1 + gy) {
+                                    slot.push(i as u32);
+                                }
+                            }
+                        }
+                    }
+                }
+                RayGrid { dir: *d, u, v, min: lo, cell, n, cells }
+            })
+            .collect();
+        InsideIndex { mesh: self, rays }
+    }
+}
+
+impl InsideIndex<'_> {
+    fn crossings(&self, g: &RayGrid, o: Vec3) -> usize {
+        let (x, y) = (o.dot(g.u), o.dot(g.v));
+        if !(g.min.0.is_finite()) {
+            return 0;
+        }
+        let (fx, fy) = ((x - g.min.0) / g.cell, (y - g.min.1) / g.cell);
+        if fx < 0.0 || fy < 0.0 {
+            return 0;
+        }
+        let (gx, gy) = (fx.floor() as usize, fy.floor() as usize);
+        if gx >= g.n.0 || gy >= g.n.1 {
+            return 0;
+        }
+        let Some(list) = g.cells.get(gx * g.n.1 + gy) else { return 0 };
+        let dir = g.dir;
+        let mut n = 0;
+        for &i in list {
+            let Some(t) = self.mesh.triangles.get(i as usize) else { continue };
+            let Some([a, b, c]) = self.mesh.tri(t) else { continue };
+            let (e1, e2) = (b - a, c - a);
+            let p = dir.cross(e2);
+            let det = e1.dot(p);
+            if det.abs() < 1e-14 {
+                continue;
+            }
+            let inv = 1.0 / det;
+            let s = o - a;
+            let u = s.dot(p) * inv;
+            if !(0.0..1.0).contains(&u) {
+                continue;
+            }
+            let q = s.cross(e1);
+            let v = dir.dot(q) * inv;
+            if v < 0.0 || u + v >= 1.0 {
+                continue;
+            }
+            if e2.dot(q) * inv > 0.0 {
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// Same answer as `Mesh::contains`.
+    pub fn contains(&self, p: Vec3) -> bool {
+        self.rays.iter().filter(|g| self.crossings(g, p) % 2 == 1).count() >= 2
+    }
+}

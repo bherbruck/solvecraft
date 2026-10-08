@@ -11,7 +11,7 @@ mod plane;
 mod profile;
 mod vec;
 
-pub use mesh::{Aabb3, Mesh, MeshMeasure};
+pub use mesh::{Aabb3, InsideIndex, Mesh, MeshMeasure};
 pub use plane::Plane;
 pub use profile::{Loop2, MAX_BEZIER_DEGREE, Region2, Seg2, bezier};
 pub use vec::{Vec2, Vec3};

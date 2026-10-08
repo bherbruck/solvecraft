@@ -49,19 +49,20 @@ fn mismatch(a: &solvecraft_geom::Mesh, b: &solvecraft_geom::Mesh, result: &solve
     if lo.x < hi.x && lo.y < hi.y && lo.z < hi.z {
         boxes.push((solvecraft_geom::Aabb3 { min: lo, max: hi }, 900));
     }
+    let (ia_idx, ib_idx, ir_idx) = (a.inside_index(), b.inside_index(), result.inside_index());
     let (mut n, mut bad) = (0usize, 0usize);
     for (bx, count) in boxes {
         let s = bx.size();
         for i in 1..=count {
             let p = bx.min + Vec3::new(s.x * halton(i, 2), s.y * halton(i, 3), s.z * halton(i, 5));
-            let (ia, ib) = (a.contains(p), b.contains(p));
+            let (ia, ib) = (ia_idx.contains(p), ib_idx.contains(p));
             let want = match op {
                 BoolOp::Union => ia || ib,
                 BoolOp::Cut => ia && !ib,
                 BoolOp::Intersect => ia && ib,
             };
             n += 1;
-            if result.contains(p) != want {
+            if ir_idx.contains(p) != want {
                 bad += 1;
             }
         }
@@ -75,23 +76,24 @@ fn overlap(a: &solvecraft_geom::Mesh, b: &solvecraft_geom::Mesh) -> Option<(f64,
     if a.triangles.len() + b.triangles.len() > 80_000 {
         return None;
     }
-    let frac = |inner: &solvecraft_geom::Mesh, outer: &solvecraft_geom::Mesh| -> Option<f64> {
+    let (ia, ib) = (a.inside_index(), b.inside_index());
+    let frac = |inner: &solvecraft_geom::Mesh, inner_i: &solvecraft_geom::InsideIndex, outer_i: &solvecraft_geom::InsideIndex| -> Option<f64> {
         let bx = inner.bounds();
         let s = bx.size();
         let (mut n, mut hit) = (0usize, 0usize);
         for i in 1..=2000 {
             let p = bx.min + Vec3::new(s.x * halton(i, 2), s.y * halton(i, 3), s.z * halton(i, 5));
-            if !inner.contains(p) {
+            if !inner_i.contains(p) {
                 continue;
             }
             n += 1;
-            if outer.contains(p) {
+            if outer_i.contains(p) {
                 hit += 1;
             }
         }
         (n >= 50).then(|| hit as f64 / n as f64)
     };
-    Some((frac(b, a)?, frac(a, b)?))
+    Some((frac(b, &ib, &ia)?, frac(a, &ia, &ib)?))
 }
 
 /// Booleans that need no intersection: one body clear of the other, or inside it. These are
@@ -163,22 +165,32 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     a.require_brep("a boolean")?;
     b.require_brep("a boolean")?;
     let size = a.size().max(b.size());
-    let (va, vb) = (volume(a), volume(b));
-    let slack = 2e-3 * (va + vb) + 1e-9;
     let tol_m = size * 5e-4;
     let meshes = (a.tessellate(tol_m).ok(), b.tessellate(tol_m).ok());
-    let plausible = |v: f64, r: &Body| {
-        let bounds = match op {
-            BoolOp::Union => v >= va.max(vb) - slack && v <= va + vb + slack,
-            BoolOp::Cut => v >= va - vb - slack && v <= va + slack,
-            BoolOp::Intersect => v <= va.min(vb) + slack,
-        };
-        // Membership check against the operands (catches misclassified pieces).
-        let consistent = match (&meshes, r.tessellate(tol_m)) {
-            ((Some(ma), Some(mb)), Ok(mr)) => mismatch(ma, mb, &mr, op).is_none_or(|f| f < 0.004),
+    let (va, vb) = match &meshes {
+        (Some(ma), Some(mb)) => (ma.measure().volume, mb.measure().volume),
+        _ => (volume(a), volume(b)),
+    };
+    let slack = 2e-3 * (va + vb) + 1e-9;
+    // Volume bounds, then membership against the operands (catches misclassified pieces), on
+    // one mesh of the result. Returns (plausible, volume).
+    let check = |r: &Body| -> (bool, f64) {
+        let Ok(mr) = r.tessellate(tol_m) else { return (false, f64::NAN) };
+        let v = mr.measure().volume;
+        let bounds = v > 0.0
+            && match op {
+                BoolOp::Union => v >= va.max(vb) - slack && v <= va + vb + slack,
+                BoolOp::Cut => v >= va - vb - slack && v <= va + slack,
+                BoolOp::Intersect => v <= va.min(vb) + slack,
+            };
+        if !bounds {
+            return (false, v);
+        }
+        let consistent = match &meshes {
+            (Some(ma), Some(mb)) => mismatch(ma, mb, &mr, op).is_none_or(|f| f < 0.004),
             _ => true,
         };
-        bounds && consistent
+        (consistent, v)
     };
     // One body clear of or inside the other: no intersection needed.
     if let (Some(ma), Some(mb)) = &meshes
@@ -212,8 +224,8 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         && b.solid.boundaries().len() == 1
         && let Some(Ok(body)) = crate::coplanar::glue(a, b)
     {
-        let v = volume(&body);
-        if v > 0.0 && plausible(v, &body) {
+        let (ok, _) = check(&body);
+        if ok {
             return Ok(Some(body));
         }
     }
@@ -222,8 +234,8 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         let r = crate::coplanar::boolean_apart(a, b, op);
         APART.with(|c| c.set(false));
         if let Some(Ok(Some(body))) = r {
-            let v = volume(&body);
-            if v > 0.0 && plausible(v, &body) {
+            let (ok, _) = check(&body);
+            if ok {
                 return Ok(Some(body));
             }
         }
@@ -231,7 +243,7 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     let mut empty_votes = 0;
     for (attempt, j) in JITTER.iter().enumerate() {
         let shift = mt::Vector3::new(j[0], j[1], j[2]) * (size * 0.01);
-        for k in [5e-4, 2e-3] {
+        for k in [2e-3, 5e-4] {
             let tol = (size * k).max(1e-5);
             let r = guard("boolean", || {
                 let (mut sa, mut sb) = (a.deep_copy(), b.deep_copy());
@@ -257,8 +269,8 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
                 }
                 Ok(s) => match Body::new(crate::heal::heal(s, size)) {
                     Ok(body) => {
-                        let v = volume(&body);
-                        if v > 0.0 && plausible(v, &body) {
+                        let (ok, v) = check(&body);
+                        if ok {
                             return Ok(Some(body));
                         }
                         last = format!("implausible result volume {v:.4}");
@@ -279,8 +291,8 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         APART.with(|c| c.set(false));
         match r {
             Some(Ok(Some(body))) => {
-                let v = volume(&body);
-                if v > 0.0 && plausible(v, &body) {
+                let (ok, v) = check(&body);
+                if ok {
                     return Ok(Some(body));
                 }
                 last = format!("{last}; faces pushed apart gave an implausible volume {v:.4}");
@@ -294,8 +306,8 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     // polygon fallback.
     match crate::polybool::planar_boolean(a, b, op) {
         Ok(Some(body)) => {
-            let v = volume(&body);
-            if v > 0.0 && plausible(v, &body) {
+            let (ok, v) = check(&body);
+            if ok {
                 return Ok(Some(body));
             }
             last = format!("planar fallback gave an implausible volume {v:.4}");
@@ -313,8 +325,8 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         APART.with(|c| c.set(false));
         match r {
             Ok(Some(body)) => {
-                let v = volume(&body);
-                if v > 0.0 && plausible(v, &body) {
+                let (ok, v) = check(&body);
+                if ok {
                     return Ok(Some(body));
                 }
                 last = format!("{last}; the nudged tool gave an implausible volume {v:.4}");
