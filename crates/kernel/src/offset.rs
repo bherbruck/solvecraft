@@ -290,7 +290,9 @@ fn torus_of(f: &mt::Face, s: &[(Vec3, Vec3)], tol: f64) -> Option<Surf> {
     }
     let x = crate::polyhedron::solve3_pub(m, rhs)?;
     let (big, h, r) = (x[0], x[1], x[2]);
-    if !(big > 1e-9 && r.abs() > 1e-9 && r.abs() < big) {
+    // (A tube wider than its circle, a spindle torus, is fine: blends use its outer part, where
+    // each point's tube centre is the one on its own side of the axis.)
+    if !(big > 1e-9 && r.abs() > 1e-9) {
         return None;
     }
     let t = Surf::Torus { o, a, big, h, r: r.abs(), convex: r > 0.0 };
@@ -453,12 +455,11 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
     let mut old = Vec::with_capacity(faces.len());
     let mut new = Vec::with_capacity(faces.len());
     let mut shifts = Vec::with_capacity(faces.len());
+    // Faces moved to nothing (a round thinner than the move): they go, their neighbours meet.
+    let mut collapsed: Vec<bool> = Vec::with_capacity(faces.len());
     for (i, f) in faces.iter().enumerate() {
         let sf = surf_of(f, tol * 100.0).ok_or_else(|| {
             let at = samples(f).first().map(|(p, _)| format!(" (a face at [{:.2}, {:.2}, {:.2}])", p.x, p.y, p.z)).unwrap_or_default();
-            if std::env::var("DBG_OFFSET").is_ok() {
-                eprintln!("unrecognised face: {:?}", f.surface());
-            }
             fail(&format!("only bodies with planes, cylinders, cones, spheres and tori{at}"))
         })?;
         let n = match sf {
@@ -468,7 +469,16 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
         };
         let s = shift(i, n);
         old.push(sf);
-        new.push(sf.moved(s).ok_or_else(|| fail("a cylinder shrinks to nothing"))?);
+        match sf.moved(s) {
+            Some(x) => {
+                new.push(x);
+                collapsed.push(false);
+            }
+            None => {
+                new.push(sf);
+                collapsed.push(true);
+            }
+        }
         shifts.push(s);
     }
     let pick = |ids: &[usize]| -> (Vec<Surf>, Vec<f64>, Vec<Surf>) {
@@ -495,11 +505,102 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
             }
         }
     }
+    let is_collapsed = |i: usize| collapsed.get(i).copied().unwrap_or(false);
+    let any_collapsed = collapsed.iter().any(|c| *c);
+    // A collapsed face's place is taken by the faces around it (through other collapsed ones).
+    let mut nbrs: HashMap<usize, Vec<usize>> = HashMap::new();
+    for fs in efaces.values() {
+        for a in fs {
+            for b2 in fs {
+                if a != b2 {
+                    let e = nbrs.entry(*a).or_default();
+                    if !e.contains(b2) {
+                        e.push(*b2);
+                    }
+                }
+            }
+        }
+    }
+    let expand = |fs: &[usize]| -> Vec<usize> {
+        let mut out: Vec<usize> = fs.iter().copied().filter(|i| !is_collapsed(*i)).collect();
+        let mut queue: Vec<usize> = fs.iter().copied().filter(|i| is_collapsed(*i)).collect();
+        let mut seen = queue.clone();
+        while let Some(c) = queue.pop() {
+            for nb in nbrs.get(&c).into_iter().flatten() {
+                if is_collapsed(*nb) {
+                    if !seen.contains(nb) {
+                        seen.push(*nb);
+                        queue.push(*nb);
+                    }
+                } else if !out.contains(nb) {
+                    out.push(*nb);
+                }
+            }
+        }
+        out
+    };
+    // Each edge's ends and middle, and the faces either side.
+    let edge_pts: Vec<(Vec<usize>, [Vec3; 3])> = b
+        .solid
+        .edge_iter()
+        .filter_map(|e| {
+            use mt::{BoundedCurve, ParametricCurve};
+            let c = e.curve();
+            let (t0, t1) = c.range_tuple();
+            Some((
+                efaces.get(&e.id())?.clone(),
+                [from_p3(e.absolute_front().point()), from_p3(e.absolute_back().point()), from_p3(c.subs((t0 + t1) / 2.0))],
+            ))
+        })
+        .collect();
     let mut newpos: HashMap<mt::VertexID, Vec3> = HashMap::new();
     for v in b.solid.vertex_iter() {
-        let fs = vfaces.get(&v.id()).ok_or_else(|| fail("vertex"))?;
-        let (o, s, n) = pick(fs);
+        let at = vfaces.get(&v.id()).ok_or_else(|| fail("vertex"))?;
         let p = from_p3(v.point());
+        let fs: Vec<usize> = if at.iter().any(|i| is_collapsed(*i)) {
+            // On a collapsed round: its own faces, then the faces along the rounds it is on,
+            // nearest first, until they fix a point.
+            let group = expand(at);
+            let mut own: Vec<usize> = at.iter().copied().filter(|i| !is_collapsed(*i)).collect();
+            let mut cand: Vec<(f64, usize)> = group
+                .iter()
+                .copied()
+                .filter(|nb| !own.contains(nb))
+                .map(|nb| {
+                    let d = edge_pts
+                        .iter()
+                        .filter(|(fs, _)| fs.contains(&nb) && fs.iter().any(|i| is_collapsed(*i)))
+                        .flat_map(|(_, q)| q.iter().map(|x| x.dist(p)))
+                        .fold(f64::INFINITY, f64::min);
+                    (d, nb)
+                })
+                .collect();
+            cand.sort_by(|x, y| x.0.total_cmp(&y.0));
+            let rank = |ids: &[usize]| -> usize {
+                let mut basis: Vec<Vec3> = Vec::new();
+                for i in ids {
+                    let Some(nv) = old.get(*i).and_then(|sf| sf.normal(p)) else { continue };
+                    let mut w = nv;
+                    for e in &basis {
+                        w = w - *e * w.dot(*e);
+                    }
+                    if let Some(u) = w.normalized().filter(|_| w.len() > 1e-6) {
+                        basis.push(u);
+                    }
+                }
+                basis.len()
+            };
+            for (_, c) in cand {
+                if rank(&own) >= 3 {
+                    break;
+                }
+                own.push(c);
+            }
+            own
+        } else {
+            at.clone()
+        };
+        let (o, s, n) = pick(&fs);
         // A cone's apex goes with the cone (its normal is not defined there).
         let apex = o.iter().zip(&n).find_map(|(a, b)| match (a, b) {
             (Surf::Cone { v: va, .. }, Surf::Cone { v: vb, .. }) if va.dist(p) < size * 1e-6 => Some(*vb),
@@ -513,7 +614,11 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
     }
     // An edge turned round: faces crossed over (a wall thinner than the move), which would
     // leave the body inside out.
+    let edge_collapsed = |e: &mt::Edge| efaces.get(&e.id()).is_some_and(|fs| fs.iter().any(|i| is_collapsed(*i)));
     for e in b.solid.edge_iter() {
+        if edge_collapsed(&e) {
+            continue;
+        }
         let (f0, f1) = (e.absolute_front(), e.absolute_back());
         let (Some(q0), Some(q1)) = (newpos.get(&f0.id()), newpos.get(&f1.id())) else { continue };
         let (old_v, new_v) = (from_p3(f1.point()) - from_p3(f0.point()), *q1 - *q0);
@@ -522,15 +627,63 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
         }
     }
     guard("offset", || {
-        let verts: HashMap<mt::VertexID, mt::Vertex> = newpos.iter().map(|(k, p)| (*k, builder::vertex(p3(*p)))).collect();
-        let mut edges: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
+        // Vertices of collapsed faces that land together become one.
+        let on_collapsed: std::collections::HashSet<mt::VertexID> = faces
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| is_collapsed(*i))
+            .flat_map(|(_, f)| f.vertex_iter().map(|v| v.id()).collect::<Vec<_>>())
+            .collect();
+        let mut verts: HashMap<mt::VertexID, mt::Vertex> = HashMap::new();
+        let mut welded: Vec<(Vec3, mt::Vertex)> = Vec::new();
+        for v in b.solid.vertex_iter() {
+            let Some(p) = newpos.get(&v.id()).copied() else { continue };
+            let nv = if any_collapsed && on_collapsed.contains(&v.id()) {
+                match welded.iter().find(|(q, _)| q.dist(p) < size * 1e-6) {
+                    Some((_, w)) => w.clone(),
+                    None => {
+                        let w = builder::vertex(p3(p));
+                        welded.push((p, w.clone()));
+                        w
+                    }
+                }
+            } else {
+                builder::vertex(p3(p))
+            };
+            verts.insert(v.id(), nv);
+        }
+        // Old edge → new edge, and whether it runs the other way (merged with its twin).
+        let mut edges: HashMap<mt::EdgeID, (mt::Edge, bool)> = HashMap::new();
+        let mut merged: HashMap<(mt::VertexID, mt::VertexID), mt::Edge> = HashMap::new();
         for e in b.solid.edge_iter() {
             if edges.contains_key(&e.id()) {
                 continue;
             }
             let (Some(a), Some(c)) = (verts.get(&e.absolute_front().id()), verts.get(&e.absolute_back().id())) else { return Err(fail("edge")) };
-            if from_p3(a.point()).dist(from_p3(c.point())) < size * 1e-9 {
+            let touches = edge_collapsed(&e);
+            if a == c || from_p3(a.point()).dist(from_p3(c.point())) < size * 1e-9 {
+                if touches {
+                    continue;
+                }
                 return Err(fail("an edge vanishes (the offset is too large)"));
+            }
+            if efaces.get(&e.id()).is_some_and(|fs| fs.iter().all(|i| is_collapsed(*i))) {
+                continue;
+            }
+            if touches {
+                // Along a collapsed round: a straight edge, shared with its twin from the
+                // round's other side.
+                let ne = match merged.get(&(a.id(), c.id())).or_else(|| merged.get(&(c.id(), a.id()))) {
+                    Some(x) => x.clone(),
+                    None => {
+                        let x = builder::line(a, c);
+                        merged.insert((a.id(), c.id()), x.clone());
+                        x
+                    }
+                };
+                let flipped = ne.front() != a;
+                edges.insert(e.id(), (ne, flipped));
+                continue;
             }
             let Some(kind) = arc_mid(&e, size * 1e-6) else {
                 // Another curve (where two cylinders meet): its points moved onto the moved
@@ -550,7 +703,7 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
                 }
                 pts.push(from_p3(c.point()));
                 let curve = crate::build::interpolate_cubic(&pts).ok_or_else(|| fail("edge curve"))?;
-                edges.insert(e.id(), mt::Edge::new(a, c, mt::Curve::BSplineCurve(curve)));
+                edges.insert(e.id(), (mt::Edge::new(a, c, mt::Curve::BSplineCurve(curve)), false));
                 continue;
             };
             let ne = match kind {
@@ -563,16 +716,21 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
                     builder::circle_arc(a, c, p3(m2))
                 }
             };
-            edges.insert(e.id(), ne);
+            edges.insert(e.id(), (ne, false));
         }
         let mut out = Vec::new();
         for (i, f) in faces.iter().enumerate() {
+            if is_collapsed(i) {
+                continue;
+            }
             let wires: Vec<mt::Wire> = f
                 .absolute_boundaries()
                 .iter()
                 .map(|w| {
                     w.edge_iter()
-                        .filter_map(|e| edges.get(&e.id()).map(|ne| if e.front() == e.absolute_front() { ne.clone() } else { ne.inverse() }))
+                        .filter_map(|e| {
+                            edges.get(&e.id()).map(|(ne, flip)| if (e.front() == e.absolute_front()) != *flip { ne.clone() } else { ne.inverse() })
+                        })
                         .collect::<Vec<_>>()
                         .into()
                 })
@@ -606,11 +764,14 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
             }
             out.push(nf);
         }
-        // One shell per shell of the body (pieces, voids).
+        // One shell per shell of the body (pieces, voids), less the collapsed faces.
         let mut shells: Vec<mt::Shell> = Vec::new();
         let mut it = out.into_iter();
+        let mut k = 0;
         for sh in b.solid.boundaries() {
-            shells.push(it.by_ref().take(sh.len()).collect::<Vec<_>>().into());
+            let keep = (k..k + sh.len()).filter(|i| !is_collapsed(*i)).count();
+            k += sh.len();
+            shells.push(it.by_ref().take(keep).collect::<Vec<_>>().into());
         }
         let solid = Solid::try_new(shells).map_err(|e| fail(&e.to_string()))?;
         Body::new(solid)

@@ -110,6 +110,76 @@ fn samples_build_without_panics() {
     assert!(failed.is_empty(), "{failed:?}");
 }
 
+fn total_volume(s: &Session) -> f64 {
+    s.model.state().bodies.iter().map(|b| solvecraft_kernel::measure(&b.body).map(|m| m.volume).unwrap_or(0.0)).sum()
+}
+
+/// Volume of a box L×W×H with its vertical edges rounded (R) and its bottom loop filleted
+/// (ρ ≤ R): the straight runs lose (1 − π/4)ρ² each, the corners a quarter turn of that
+/// (Pappus, about the corner's axis).
+fn rounded_box(l: f64, w: f64, h: f64, r: f64, rho: f64) -> f64 {
+    use std::f64::consts::PI;
+    let a = (1.0 - PI / 4.0) * rho * rho;
+    let xbar = rho * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
+    l * w * h - (4.0 - PI) * r * r * h - a * (2.0 * (l - 2.0 * r) + 2.0 * (w - 2.0 * r)) - 2.0 * PI * (r - xbar) * a
+}
+
+/// Box, fillets, shell: a 60×40×30 box with its vertical edges rounded r5 and its bottom loop
+/// r3, shelled 2 mm with the top open. The bottom round runs round the corners as spindle tori
+/// (the tube wider than its circle), which the offset now takes.
+#[test]
+fn shell_of_a_filleted_box() {
+    let s = script(json!([
+        {"command": "solid.box", "params": {"length": 60, "width": 40, "height": 30}},
+        {"command": "solid.fillet", "params": {"edges": [[0, 0, 15], [60, 0, 15], [60, 40, 15], [0, 40, 15]], "radius": 5}},
+        {"command": "solid.fillet", "params": {"edges": [[30, 0, 0], [60, 20, 0], [30, 40, 0], [0, 20, 0]], "radius": 3}},
+        {"command": "solid.shell", "params": {"faces": [[30, 20, 30]], "thickness": 2}}
+    ]));
+    let want = rounded_box(60.0, 40.0, 30.0, 5.0, 3.0) - rounded_box(56.0, 36.0, 28.0, 3.0, 1.0);
+    let v = total_volume(&s);
+    assert!((v - want).abs() < 1e-4 * want, "{v} vs {want}");
+}
+
+/// The first tutorial part: a 60×40×15 plate with its top front edge and front right edge
+/// rounded r2, shelled with the top open. At 2 mm the rounds' inner sides collapse to sharp
+/// edges (as in Fusion); at 1.5 mm the top's round, tangent to the open top, keeps its
+/// tangency (every face moves in, the opening is swept out through the top).
+#[test]
+fn shell_of_the_tutorial_plate() {
+    let base = json!([
+        {"command": "solid.box", "params": {"length": 60, "width": 40, "height": 15}},
+        {"command": "solid.fillet", "params": {"edges": [[30, 0, 15], [60, 0, 7]], "radius": 2}}
+    ]);
+    let s0 = script(base.clone());
+    let body = total_volume(&s0);
+    // 2 mm: the cavity is a sharp 56 × 36 box from z = 2 up through the top.
+    let mut steps = base.as_array().cloned().unwrap_or_default();
+    steps.push(json!({"command": "solid.shell", "params": {"faces": [[30, 20, 15]], "thickness": 2}}));
+    let v = total_volume(&script(Value::Array(steps)));
+    let want = body - 56.0 * 36.0 * 13.0;
+    assert!((v - want).abs() < 1e-4 * want, "{v} vs {want}");
+    // 1.5 mm: a 57 × 37 × 12 cavity with r0.5 rounds, opened by its top face (57 × 36.5)
+    // swept up through the top (estimated: the rounds' mitre is left out, hence 1e-3).
+    let mut steps = base.as_array().cloned().unwrap_or_default();
+    steps.push(json!({"command": "solid.shell", "params": {"faces": [[30, 20, 15]], "thickness": 1.5}}));
+    let v = total_volume(&script(Value::Array(steps)));
+    let a = (1.0 - std::f64::consts::PI / 4.0) * 0.25;
+    let want = body - (57.0 * 37.0 * 12.0 - a * (57.0 + 12.0)) - 57.0 * 36.5 * 1.5;
+    assert!((v - want).abs() < 1e-3 * want, "{v} vs {want}");
+}
+
+/// Shell after a drilled hole (its tip a cone): the cone moves like the other faces.
+#[test]
+fn shell_after_a_drilled_hole() {
+    for open in [[30.0, 0.0, 7.5], [10.0, 10.0, 15.0]] {
+        script(json!([
+            {"command": "solid.box", "params": {"length": 60, "width": 40, "height": 15}},
+            {"command": "solid.hole", "params": {"position": [30, 20, 15], "diameter": 5, "depth": 8, "type": "drilled"}},
+            {"command": "solid.shell", "params": {"faces": [open], "thickness": 2}}
+        ]));
+    }
+}
+
 /// Seeds that run clean: no failure, no invalid body, no volume going the wrong way.
 #[test]
 fn fixed_seeds_run_clean() {

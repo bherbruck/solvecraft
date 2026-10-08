@@ -361,8 +361,20 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
         return Err(KernelError::Invalid("select at least one face to remove".into()));
     }
     let margin = thickness + size * 0.05;
-    let cavity = offset_planar(&healed, |fi, _| if opened.contains(&fi) { margin } else { -thickness })?;
-    match crate::ops::boolean(&healed, &cavity, crate::BoolOp::Cut) {
+    // Open faces pushed out past the body: the simple way, unless a face tangent to an open
+    // one (a fillet along its edge) can't follow; then every face moves in (tangencies keep)
+    // and the opening is the open face's copy swept out through the body.
+    let cavity = match offset_planar(&healed, |fi, _| if opened.contains(&fi) { margin } else { -thickness }) {
+        Ok(c) => c,
+        Err(e) => return shell_by_opening(&healed, &opened, thickness, margin).map_err(|_| e),
+    };
+    let r = crate::ops::boolean(&healed, &cavity, crate::BoolOp::Cut);
+    if r.is_err()
+        && let Ok(x) = shell_by_opening(&healed, &opened, thickness, margin)
+    {
+        return Ok(x);
+    }
+    match r {
         Ok(Some(r)) => Ok(r),
         Ok(None) => Err(KernelError::Failed("the shell removed everything".into())),
         // Healing can leave faces the boolean dislikes (revolved patches): the body as it was,
@@ -391,6 +403,33 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
                 .ok_or_else(|| KernelError::Failed("the shell removed everything".into()))
         }
     }
+}
+
+/// A shell made from the cavity with every face moved in by the thickness (open faces too),
+/// joined with each open face's moved copy swept out through the body.
+fn shell_by_opening(b: &Body, opened: &[usize], thickness: f64, reach: f64) -> Result<Body> {
+    let closed = offset_planar(b, |_, _| -thickness)?;
+    let faces: Vec<mt::Face> = closed.solid.face_iter().cloned().collect();
+    let mut cavity = closed.clone();
+    for fi in opened {
+        let f = faces.get(*fi).ok_or_else(|| KernelError::Failed("shell: open face".into()))?;
+        let mt::Surface::Plane(pl) = f.oriented_surface() else {
+            return Err(unsupported_shell("the open face must be planar here"));
+        };
+        let n = pl.normal();
+        let n = Vec3::new(n.x, n.y, n.z).normalized().ok_or_else(|| KernelError::Failed("shell: open face normal".into()))?;
+        let prism = guard("shell opening", || {
+            let solid: Solid = builder::tsweep(f, v3(n * (thickness + reach)));
+            Ok(solid)
+        })?;
+        let prism = Body::new(prism)?;
+        cavity = crate::ops::boolean(&cavity, &prism, crate::BoolOp::Union)?.ok_or_else(|| KernelError::Failed("shell: opening".into()))?;
+    }
+    crate::ops::boolean(b, &cavity, crate::BoolOp::Cut)?.ok_or_else(|| KernelError::Failed("the shell removed everything".into()))
+}
+
+fn unsupported_shell(m: &str) -> KernelError {
+    KernelError::Failed(format!("not supported yet: {m}"))
 }
 
 fn point_tri(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
