@@ -182,6 +182,15 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "edit sketch geometry with the sketch commands"));
     }
+    // New edges for a blend: remember where they sit now (in the model before the feature).
+    if let (
+        FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. },
+        FeatureKind::Fillet { edges: b, .. } | FeatureKind::Chamfer { edges: b, .. },
+    ) = (&nf.kind, &f.kind)
+        && a != b
+    {
+        nf.edge_refs = solvecraft_doc::edge_refs(&s.model.state_before(id), body, a);
+    }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
     }

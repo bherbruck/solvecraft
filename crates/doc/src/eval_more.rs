@@ -710,7 +710,7 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 let i = st.bodies.iter().position(|b| b.name == target).ok_or_else(|| DocError::Invalid("boss body".into()))?;
                 let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("boss body".into())) };
                 let mut warn = None;
-                let edges = resolve_edges(&mb.body, &[*position + x * r0], &mut warn)?;
+                let edges = resolve_edges(&mb.body, &[*position + x * r0], &[], &mut warn)?;
                 let nb = kernel::fillet(&mb.body, &edges, rf)?;
                 if let Some(slot) = st.bodies.get_mut(i) {
                     *slot = ModelBody::new(mb.name, nb, mb.feature);

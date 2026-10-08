@@ -1144,3 +1144,25 @@ fn cached_evaluation_matches_from_scratch() {
         }
     }
 }
+
+/// A fillet keeps its edge when an earlier sketch dimension resizes the body (QA s06).
+#[test]
+fn fillet_follows_its_edge_after_an_upstream_resize() {
+    let mut s = Session::default();
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let bottom = r["curves"][0].as_str().unwrap_or_default().to_string();
+    let d = run(&mut s, "SketchDimension", json!({"entities": [bottom], "value": 40}));
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Extrude", json!({"distance": 10}));
+    run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [[40, 15, 10]], "radius": 2}));
+    let v = |s: &mut Session| run(s, "MeasureCommand", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(0.0);
+    let strip = (4.0 - std::f64::consts::PI) * 30.0;
+    assert!((v(&mut s) - (12000.0 - strip)).abs() < 0.05, "{}", v(&mut s));
+    let name = d["param"].as_str().or_else(|| d["name"].as_str()).map(str::to_string).unwrap_or_else(|| "d1".into());
+    run(&mut s, "ChangeParameterCommand", json!({"name": name, "expression": "60"}));
+    // The right top edge, now at x = 60: 18000 less the same 30 mm strip.
+    assert!((v(&mut s) - (18000.0 - strip)).abs() < 0.05, "{}", v(&mut s));
+    let fillet = s.doc.features.last().map(|f| f.id).unwrap_or(0);
+    assert!(s.model.result(fillet).and_then(|r| r.warning.clone()).is_none(), "followed without a warning");
+}

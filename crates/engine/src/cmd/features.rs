@@ -243,7 +243,19 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
     // Commands speak world coordinates; the feature is authored in the active component.
     let mut kind = kind;
     super::component::to_active_frame(s, &mut kind);
+    // Blends remember where their edges sat, to find them again after upstream edits.
+    let refs = match &kind {
+        FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => {
+            solvecraft_doc::edge_refs(&s.model.state(), body, edges)
+        }
+        _ => Vec::new(),
+    };
     let id = s.doc_mut().add_feature(kind, name)?;
+    if !refs.is_empty()
+        && let Some(f) = s.doc_mut().feature_mut(id)
+    {
+        f.edge_refs = refs;
+    }
     s.doc_mut().name_feature_inputs(id);
     let comp = s.active_component;
     if comp != 0

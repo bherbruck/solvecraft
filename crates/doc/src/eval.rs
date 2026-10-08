@@ -869,15 +869,71 @@ fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3) -> Vec3 {
     best.unwrap_or(p)
 }
 
+/// Where a picked edge sat in its body: its direction (zero for curved edges) and the body's
+/// bounding box at the time.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct EdgeRef {
+    pub dir: Vec3,
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+fn edge_dir(e: &kernel::EdgeInfo) -> Vec3 {
+    let (Some(a), Some(b)) = (e.points.first(), e.points.last()) else { return Vec3::ZERO };
+    let straight = e.points.iter().all(|p| p.dist_to_segment(*a, *b) < 1e-6 * (1.0 + e.length));
+    if straight && a.dist(*b) > 1e-9 { (*b - *a).normalized().unwrap_or(Vec3::ZERO) } else { Vec3::ZERO }
+}
+
+/// References for edges picked at `pts` on the body a blend would go on (the state before it).
+pub fn edge_refs(st: &ModelState, body: &Option<String>, pts: &[Vec3]) -> Vec<EdgeRef> {
+    let Ok(ti) = blend_target(st, body, pts) else { return Vec::new() };
+    let Some(mb) = st.bodies.get(ti) else { return Vec::new() };
+    let size = mb.body.size();
+    let Ok(edges) = mb.body.edges((size * 1e-3).max(1e-3)) else { return Vec::new() };
+    let bb = mb.mesh().bounds();
+    pts.iter()
+        .map(|p| {
+            let e = edges.iter().min_by(|x, y| {
+                let d = |e: &kernel::EdgeInfo| e.points.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
+                d(x).total_cmp(&d(y))
+            });
+            EdgeRef { dir: e.map(edge_dir).unwrap_or(Vec3::ZERO), min: bb.min, max: bb.max }
+        })
+        .collect()
+}
+
 /// Edge reference points re-found on the body: points on an edge stay; a point that moved off
-/// (an upstream edit) goes to the nearest edge with a warning; points with no edge near are
-/// dropped with a warning.
-fn resolve_edges(b: &Body, pts: &[Vec3], warning: &mut Option<String>) -> Result<Vec<Vec3>> {
+/// (an upstream edit) is carried with the body (its place in the body's bounding box then and
+/// now) to an edge running the same way; failing that it goes to the nearest edge with a
+/// warning; points with no edge near are dropped with a warning.
+fn resolve_edges(b: &Body, pts: &[Vec3], refs: &[EdgeRef], warning: &mut Option<String>) -> Result<Vec<Vec3>> {
     let size = b.size();
     let edges = b.edges((size * 1e-3).max(1e-3))?;
     let tight = (size * 2e-3).max(1e-3);
+    let dist = |p: Vec3, e: &kernel::EdgeInfo| e.points.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
+    let now = b.tessellate((size * 1e-2).max(1e-2)).map(|m| m.bounds()).ok();
     let (mut out, mut moved, mut lost) = (Vec::new(), 0, 0);
-    for p in pts {
+    for (i, p) in pts.iter().enumerate() {
+        let on = edges.iter().any(|e| dist(*p, e) <= tight);
+        if !on && let (Some(r), Some(nb)) = (refs.get(i), now.as_ref()) {
+            // The same place in the body as it is now.
+            let map = |v: f64, a0: f64, a1: f64, b0: f64, b1: f64| {
+                if (a1 - a0).abs() > 1e-9 { b0 + (v - a0) * (b1 - b0) / (a1 - a0) } else { v + (b0 - a0) }
+            };
+            let q = Vec3::new(
+                map(p.x, r.min.x, r.max.x, nb.min.x, nb.max.x),
+                map(p.y, r.min.y, r.max.y, nb.min.y, nb.max.y),
+                map(p.z, r.min.z, r.max.z, nb.min.z, nb.max.z),
+            );
+            let fits = |e: &kernel::EdgeInfo| {
+                let d = edge_dir(e);
+                dist(q, e) <= tight && (r.dir.len() < 0.5 || d.cross(r.dir).len() < 1e-3)
+            };
+            if edges.iter().any(fits) {
+                out.push(q);
+                continue;
+            }
+        }
         let best = edges
             .iter()
             .map(|e| (e.points.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min), e.mid))
@@ -1863,7 +1919,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let r = val(vals, radius, Kind::Length)?;
             let ti = blend_target(st, body, edges)?;
             let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
-            let edges = resolve_edges(&mb.body, edges, warning)?;
+            let edges = resolve_edges(&mb.body, edges, &f.edge_refs, warning)?;
             let nb = if matches!(f.kind, FeatureKind::Fillet { .. }) {
                 kernel::fillet(&mb.body, &edges, r)?
             } else {

@@ -1011,6 +1011,10 @@ pub struct Feature {
     /// The component the feature (and what it makes) belongs to; 0 = the root.
     #[serde(default, skip_serializing_if = "is_root")]
     pub component: u64,
+    /// For each picked edge (fillets, chamfers): where it sat in its body when picked, so it
+    /// is found again when earlier edits move or resize the body.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edge_refs: Vec<crate::EdgeRef>,
     #[serde(flatten)]
     pub kind: FeatureKind,
 }
@@ -1271,7 +1275,7 @@ impl Document {
             Some(n) if !n.trim().is_empty() => n.trim().to_string(),
             _ => self.unique_name(kind.base_name()),
         };
-        let f = Feature { id, name, suppressed: false, body_names: Vec::new(), param_names: Vec::new(), component: 0, kind };
+        let f = Feature { id, name, suppressed: false, body_names: Vec::new(), param_names: Vec::new(), component: 0, edge_refs: Vec::new(), kind };
         match self.marker {
             Some(m) if m < self.features.len() => {
                 self.features.insert(m, f);
