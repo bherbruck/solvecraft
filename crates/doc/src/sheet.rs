@@ -1404,6 +1404,20 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
     Ok(sheet)
 }
 
+/// Persistent names of the sheet edges nearest each world point (empty when none).
+pub fn sheet_edge_names(st: &crate::ModelState, pts: &[Vec3]) -> Vec<String> {
+    pts.iter()
+        .map(|p| {
+            st.sheets
+                .iter()
+                .filter_map(|sh| sh.edge_at(*p).map(|e| (e.4, sh)))
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .and_then(|(_, sh)| sh.edge_name(*p))
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1495,18 +1509,4 @@ mod tests {
         s.flat = true;
         assert!(s.solid().is_ok());
     }
-}
-
-/// Persistent names of the sheet edges nearest each world point (empty when none).
-pub fn sheet_edge_names(st: &crate::ModelState, pts: &[Vec3]) -> Vec<String> {
-    pts.iter()
-        .map(|p| {
-            st.sheets
-                .iter()
-                .filter_map(|sh| sh.edge_at(*p).map(|e| (e.4, sh)))
-                .min_by(|a, b| a.0.total_cmp(&b.0))
-                .and_then(|(_, sh)| sh.edge_name(*p))
-                .unwrap_or_default()
-        })
-        .collect()
 }
