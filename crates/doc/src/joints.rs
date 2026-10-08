@@ -122,7 +122,8 @@ pub struct Joint {
     /// Per value: (min, max) limits.
     #[serde(default)]
     pub limits: Vec<Option<(f64, f64)>>,
-    /// Turn B over (its z opposite to A's).
+    /// Don't mate: B's z along A's instead of against it (by default the origins mate, as two
+    /// faces meeting).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub flip: bool,
     /// Distance from A's frame to B's along z, and a turn about it (radians).
@@ -404,7 +405,8 @@ pub fn solve(doc: &Document, st: &ModelState) -> Solution {
     let flip_m = |j: &Joint| {
         let mut m = rot_z(j.angle);
         m[3][2] = j.offset;
-        if j.flip { mat_mul(&m, &[[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]) } else { m }
+        // Origins mate (B's z against A's, as faces meet) unless flipped.
+        if !j.flip { mat_mul(&m, &[[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]) } else { m }
     };
     // B's world transform from A's (or A's from B's, going the other way).
     let through = |j: &Joint, from_a: bool, t: &Mat| -> Option<Mat> {

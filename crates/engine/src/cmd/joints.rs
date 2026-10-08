@@ -303,7 +303,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         b: JointOrigin { occurrence: ob, snap: fb },
         values: vec![0.0; n],
         limits: limits_param(s, p, kind, cmd)?,
-        flip: false,
+        flip: true, // as built: the origins coincide as they are, not mated
         offset: 0.0,
         angle: 0.0,
         suppressed: false,

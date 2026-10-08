@@ -32,7 +32,7 @@ fn rail() -> Session {
     run(&mut s, "component.activate", json!({"component": "root"}));
     let a = occ(&s, "A");
     run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
-    run(&mut s, "JointAssembleCmdNew", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "flip": true, "name": "Rail"}));
+    run(&mut s, "JointAssembleCmdNew", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"}));
     run(&mut s, "FusionMoveJointsCommand", json!({"joint": "Rail", "value": 10}));
     assert!((b_x(&s) - 20.0).abs() < 1e-6, "{}", b_x(&s));
     s

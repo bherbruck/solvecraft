@@ -45,7 +45,7 @@ fn revolute_hinge_turns_about_the_knuckle() {
         &mut s,
         "JointAssembleCmdNew",
         json!({
-        "type": "revolute", "a": {"occurrence": "LeafA", "circle": [1, 37, 4]}, "b": {"occurrence": "LeafB", "circle": [1, 37, 4]}, "name": "Hinge"}),
+        "type": "revolute", "a": {"occurrence": "LeafA", "circle": [1, 37, 4]}, "b": {"occurrence": "LeafB", "circle": [1, 37, 4]}, "flip": true, "name": "Hinge"}),
     );
     assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{r}");
     // Same frames: B stays put at angle 0.
@@ -89,7 +89,7 @@ fn slider_limits_clamp() {
     let r = run(
         &mut s,
         "JointAssembleCmdNew",
-        json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "flip": true, "limits": [[0, 10]], "name": "Rail"}),
+        json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "limits": [[0, 10]], "name": "Rail"}),
     );
     assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{r}");
     // B now sits on A.
@@ -154,11 +154,7 @@ fn rigid_cycles_solve_and_conflicts_report() {
 #[test]
 fn motion_links_and_interference() {
     let mut s = two_cubes();
-    run(
-        &mut s,
-        "JointAssembleCmdNew",
-        json!({"type": "cylindrical", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "flip": true, "name": "Screw"}),
-    );
+    run(&mut s, "JointAssembleCmdNew", json!({"type": "cylindrical", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Screw"}));
     run(&mut s, "FusionMoveJointsCommand", json!({"joint": "Screw", "values": [0, 0]}));
     // No overlap while B sits on A; then push B 4 mm into A.
     let i = run(&mut s, "InterferenceCheckCommand", json!({}));
@@ -174,7 +170,7 @@ fn motion_links_and_interference() {
     run(
         &mut s,
         "JointAssembleCmdNew",
-        json!({"type": "slider", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "D", "face": [65, 5, 0]}, "flip": true, "name": "Follower"}),
+        json!({"type": "slider", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "D", "face": [65, 5, 0]}, "name": "Follower"}),
     );
     run(&mut s, "FusionMotionRelationshipCommand", json!({"a": "Screw", "ia": 1, "b": "Follower", "ratio": 2}));
     run(&mut s, "FusionMoveJointsCommand", json!({"joint": "Screw", "values": [0, 3]}));
@@ -185,4 +181,17 @@ fn motion_links_and_interference() {
     let mut t = Session::new(back);
     let l = run(&mut t, "joint.list", json!({}));
     assert_eq!(l["joints"].as_array().map(Vec::len), Some(2));
+}
+
+/// Two faces joined mate: B's bottom face lands on A's top face, B on top of A (not inside
+/// it); Flip turns B over instead.
+#[test]
+fn faces_mate_by_default() {
+    let mut s = two_cubes();
+    run(&mut s, "JointAssembleCmdNew", json!({"type": "rigid", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Stack"}));
+    // B's bottom centre (25, 5, 0) at A's top centre, B above it.
+    assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(5.0, 5.0, 10.0)));
+    assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 10.0)), Vec3::new(5.0, 5.0, 20.0)), "{:?}", place(&s, "B", Vec3::new(25.0, 5.0, 10.0)));
+    run(&mut s, "joint.edit", json!({"joint": "Stack", "flip": true}));
+    assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 10.0)), Vec3::new(5.0, 5.0, 0.0)), "{:?}", place(&s, "B", Vec3::new(25.0, 5.0, 10.0)));
 }
