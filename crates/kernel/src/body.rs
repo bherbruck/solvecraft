@@ -250,6 +250,17 @@ fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
 }
 
 impl Body {
+    /// The very same body (shared data), not just an equal-looking one.
+    pub fn same(&self, other: &Body) -> bool {
+        std::sync::Arc::ptr_eq(&self.solid, &other.solid)
+            && match (&self.mesh, &other.mesh) {
+                (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+            && self.color == other.color
+    }
+
     pub(crate) fn new(solid: Solid) -> Result<Body> {
         if solid.boundaries().is_empty() {
             return Err(KernelError::Failed("empty result".into()));

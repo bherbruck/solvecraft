@@ -83,9 +83,8 @@ pub fn read(s: &str) -> Result<Document> {
             return Err(DocError::Invalid(format!("damaged design: occurrence `{}` has an invalid placement", o.name)));
         }
     }
-    if version < 2 {
-        v1_to_v2(&mut d)?;
-    }
+    // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
+    normalise(&mut d)?;
     d.format = format_string(FORMAT);
     Ok(d)
 }
@@ -134,8 +133,8 @@ fn rigid(m: &crate::Mat) -> bool {
         && t[..3].iter().all(|v| v.abs() <= MAX_REAL)
 }
 
-/// Format 1 files may predate feature input names and occurrences.
-fn v1_to_v2(d: &mut Document) -> Result<()> {
+/// Feature input names and component occurrences, which format 1 files may predate.
+fn normalise(d: &mut Document) -> Result<()> {
     let ids: Vec<u64> = d.features.iter().map(|f| f.id).collect();
     for id in ids {
         d.name_feature_inputs(id);

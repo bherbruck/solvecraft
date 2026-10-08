@@ -1074,3 +1074,73 @@ fn appearances_by_face_body_and_component() {
     assert!(s.execute("AppearanceCommand", &json!({"color": "#ffffff"})).is_err(), "no target");
     assert!(s.execute("AppearanceCommand", &json!({"faces": [[500, 500, 500]], "color": "#ffffff"})).is_err(), "no face there");
 }
+
+/// The evaluation cache gives exactly what evaluating from scratch gives, through edits,
+/// suppression, roll-back, undo and redo.
+#[test]
+fn cached_evaluation_matches_from_scratch() {
+    let mut s = Session::default();
+    s.run_script(&crate::sample::script()).unwrap();
+    run(
+        &mut s,
+        "PatternRectangular",
+        json!({"bodies": ["Plate"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 100, "dir2": [0, 1, 0], "count2": 2, "spacing2": 70}),
+    );
+    run(&mut s, "PrimitiveBox", json!({"corner": [-50, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Side"}));
+    let same = |s: &Session, what: &str| {
+        let mut fresh = solvecraft_doc::Model::new();
+        fresh.no_cache = true;
+        fresh.evaluate(&s.doc);
+        let errs = |m: &solvecraft_doc::Model| m.results.iter().map(|r| (r.id, r.error.clone(), r.skipped)).collect::<Vec<_>>();
+        assert_eq!(errs(&s.model), errs(&fresh), "{what}: feature results");
+        let shape = |st: &solvecraft_doc::ModelState| {
+            st.bodies
+                .iter()
+                .map(|b| {
+                    let m = solvecraft_kernel::measure(&b.body).unwrap();
+                    // Volume and area to 1e-9: two evaluations from scratch differ in the last
+                    // bits too (the kernel's tessellation is not bit-for-bit repeatable).
+                    (b.name.clone(), b.feature, (m.volume * 1e6).round(), (m.area * 1e6).round(), m.faces, m.edges, m.vertices, m.merged.faces)
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shape(&s.model.state()), shape(&fresh.state()), "{what}: bodies");
+        assert_eq!(s.model.state().sketches.len(), fresh.state().sketches.len(), "{what}: sketches");
+    };
+    // Two evaluations from scratch agree to the same precision.
+    let mut a = solvecraft_doc::Model::new();
+    a.no_cache = true;
+    a.evaluate(&s.doc);
+    let mut b = solvecraft_doc::Model::new();
+    b.no_cache = true;
+    b.evaluate(&s.doc);
+    let vols = |m: &solvecraft_doc::Model| {
+        m.state().bodies.iter().map(|x| (solvecraft_kernel::measure(&x.body).unwrap().volume * 1e6).round()).collect::<Vec<_>>()
+    };
+    assert_eq!(vols(&a), vols(&b));
+    same(&s, "built");
+    let hits = |s: &Session| s.model.cache.lock().map(|c| c.hits).unwrap_or(0);
+    for (step, (id, p)) in [
+        ("ChangeParameterCommand", json!({"name": "width", "expression": "90 mm"})),
+        ("ChangeParameterCommand", json!({"name": "width", "expression": "80 mm"})),
+        ("ChangeParameterCommand", json!({"name": "thickness", "expression": "10 mm"})),
+        ("UndoCommand", json!({})),
+        ("RedoCommand", json!({})),
+        ("timeline.suppress", json!({"feature": "Holes", "suppressed": true})),
+        ("timeline.suppress", json!({"feature": "Holes", "suppressed": false})),
+        ("timeline.rollTo", json!({"position": 6})),
+        ("timeline.rollTo", json!({})),
+        ("UndoCommand", json!({})),
+        ("UndoCommand", json!({})),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let before = hits(&s);
+        run(&mut s, id, p.clone());
+        same(&s, &format!("step {step}: {id} {p}"));
+        if step == 1 {
+            assert!(hits(&s) > before, "setting the width back reuses the earlier results");
+        }
+    }
+}

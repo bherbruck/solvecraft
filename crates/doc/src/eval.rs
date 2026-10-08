@@ -20,11 +20,14 @@ pub struct ModelBody {
     /// Feature that created it.
     pub feature: u64,
     mesh: OnceLock<Arc<Mesh>>,
+    /// Identity of this body's content for the evaluation cache: the key of the evaluation
+    /// that produced it (kept while later features pass it through unchanged).
+    key: u64,
 }
 
 impl ModelBody {
     pub fn new(name: String, body: Body, feature: u64) -> Self {
-        ModelBody { name, body, feature, mesh: OnceLock::new() }
+        ModelBody { name, body, feature, mesh: OnceLock::new(), key: 0 }
     }
     /// Display mesh (chord tolerance 1/1000 of the body size), computed once.
     pub fn mesh(&self) -> Arc<Mesh> {
@@ -187,6 +190,85 @@ pub struct ModelState {
     pub body_counter: usize,
     /// Sheet metal bodies (by body name) and their flat patterns.
     pub sheets: Vec<crate::sheet::SheetBody>,
+    /// Evaluation-cache keys of the sketches (by sketch feature id).
+    sketch_keys: BTreeMap<u64, u64>,
+}
+
+impl ModelState {
+    /// A digest of everything later features can read: bodies (by content identity), sketches,
+    /// the body counter, threads and sheet bodies.
+    fn digest(&self) -> u64 {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for b in &self.bodies {
+            b.name.hash(&mut h);
+            b.key.hash(&mut h);
+            b.feature.hash(&mut h);
+        }
+        for s in &self.sketches {
+            s.feature.hash(&mut h);
+            self.sketch_keys.get(&s.feature).hash(&mut h);
+        }
+        self.body_counter.hash(&mut h);
+        serde_json::to_string(&self.threads).unwrap_or_default().hash(&mut h);
+        serde_json::to_string(&self.sheets).unwrap_or_default().hash(&mut h);
+        h.finish()
+    }
+
+    /// After a feature evaluated to this state from `before` with cache key `key`: bodies it
+    /// made or changed, and sketches it made, take that key; the rest keep theirs.
+    fn stamp(&mut self, before: &ModelState, feature: u64, key: u64) {
+        for b in &mut self.bodies {
+            let kept = before.bodies.iter().find(|x| x.name == b.name && x.body.same(&b.body)).map(|x| x.key);
+            b.key = kept.unwrap_or_else(|| {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                (key, &b.name).hash(&mut h);
+                h.finish()
+            });
+        }
+        if self.sketches.iter().any(|s| s.feature == feature) {
+            self.sketch_keys.insert(feature, key);
+        }
+    }
+}
+
+/// Evaluation results by cache key, shared by a model and its copies (previews, scratch
+/// sessions), so a result computed once is reused wherever the same inputs come back.
+#[derive(Debug, Default)]
+pub struct EvalCache {
+    map: std::collections::HashMap<u64, CachedEval>,
+    order: std::collections::VecDeque<u64>,
+    pub hits: usize,
+}
+
+#[derive(Clone, Debug)]
+struct CachedEval {
+    error: Option<String>,
+    warning: Option<String>,
+    ms: f64,
+    state: Arc<ModelState>,
+}
+
+/// Results kept (oldest dropped first).
+const CACHE_ENTRIES: usize = 4096;
+
+impl EvalCache {
+    fn get(&mut self, key: u64) -> Option<CachedEval> {
+        let r = self.map.get(&key).cloned();
+        if r.is_some() {
+            self.hits += 1;
+        }
+        r
+    }
+    fn put(&mut self, key: u64, e: CachedEval) {
+        if self.map.insert(key, e).is_none() {
+            self.order.push_back(key);
+        }
+        while self.order.len() > CACHE_ENTRIES {
+            if let Some(k) = self.order.pop_front() {
+                self.map.remove(&k);
+            }
+        }
+    }
 }
 
 impl ModelState {
@@ -221,6 +303,10 @@ pub struct Model {
     empty: Arc<ModelState>,
     /// Features recomputed by the last `evaluate`.
     pub last_recomputed: usize,
+    /// Results by inputs, shared with this model's copies.
+    pub cache: Arc<std::sync::Mutex<EvalCache>>,
+    /// Evaluate everything from scratch (no reuse; tests compare the two).
+    pub no_cache: bool,
 }
 
 /// Parameters a feature uses directly (inputs and sketch dimensions), sorted.
@@ -249,6 +335,56 @@ fn fingerprint(prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_ba
             }
             None => 0u8.hash(&mut h),
         }
+    }
+    h.finish()
+}
+
+/// Document-level inputs any feature may read: construction planes (resolved by name), sheet
+/// metal and plastic rules (and the parameters they use), components and body placement.
+fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for f in doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. })) {
+        fingerprint(0, f, vals, false).hash(&mut h);
+    }
+    serde_json::to_string(&doc.sheet).unwrap_or_default().hash(&mut h);
+    serde_json::to_string(&doc.plastic).unwrap_or_default().hash(&mut h);
+    serde_json::to_string(&doc.components).unwrap_or_default().hash(&mut h);
+    serde_json::to_string(&doc.body_components).unwrap_or_default().hash(&mut h);
+    for e in doc
+        .sheet
+        .rules
+        .iter()
+        .flat_map(|r| [&r.thickness, &r.k_factor, &r.bend_radius, &r.relief_width, &r.relief_depth, &r.corner_relief, &r.hem_gap, &r.gap])
+    {
+        for n in expr::references(e) {
+            vals.get(&n).map(|v| v.v.to_bits()).hash(&mut h);
+        }
+    }
+    for r in &doc.plastic.rules {
+        for (_, e, _) in r.fields() {
+            for n in expr::references(e) {
+                vals.get(&n).map(|v| v.v.to_bits()).hash(&mut h);
+            }
+        }
+    }
+    h.finish()
+}
+
+/// The cache key of a feature evaluation: its own inputs, the document context and the state it
+/// starts from. Features that replay other features' definitions (patterns and mirrors of
+/// features) also take the chain fingerprint, which covers every earlier definition.
+fn cache_key(f: &Feature, chain_fp: u64, local: u64, ctx: u64, state: &ModelState) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    local.hash(&mut h);
+    ctx.hash(&mut h);
+    state.digest().hash(&mut h);
+    f.id.hash(&mut h);
+    let replays = match &f.kind {
+        FeatureKind::Pattern { features, .. } | FeatureKind::Mirror { features, .. } => !features.is_empty(),
+        _ => false,
+    };
+    if replays {
+        chain_fp.hash(&mut h);
     }
     h.finish()
 }
@@ -284,9 +420,10 @@ impl Model {
         let mut prev_fp = 0u64;
         let mut state = self.empty.clone();
         let mut out: Vec<FeatureResult> = Vec::with_capacity(doc.features.len());
-        let mut reuse = true;
+        let mut reuse = !self.no_cache;
         let mut recomputed = 0;
         let marker = doc.marker.unwrap_or(usize::MAX);
+        let ctx = context_digest(doc, &vals);
         for (i, f) in doc.features.iter().enumerate() {
             let rolled_back = i >= marker;
             let mut fp = fingerprint(prev_fp, f, &vals, rolled_back);
@@ -344,6 +481,26 @@ impl Model {
                 });
                 continue;
             }
+            // The same feature on the same inputs: its earlier result.
+            let key = cache_key(f, fp, fingerprint(0, f, &vals, false), ctx, &state);
+            if !self.no_cache
+                && let Some(c) = self.cache.lock().ok().and_then(|mut m| m.get(key))
+            {
+                if c.error.is_none() {
+                    state = c.state.clone();
+                }
+                out.push(FeatureResult {
+                    id: f.id,
+                    name: f.name.clone(),
+                    error: c.error,
+                    warning: c.warning,
+                    ms: c.ms,
+                    skipped: false,
+                    fingerprint: fp,
+                    state: state.clone(),
+                });
+                continue;
+            }
             recomputed += 1;
             let t0 = now();
             let mut next = (*state).clone();
@@ -359,11 +516,17 @@ impl Model {
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
             let error = match r {
                 Ok(()) => {
+                    next.stamp(&state, f.id, key);
                     state = Arc::new(next);
                     None
                 }
                 Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
             };
+            if !self.no_cache
+                && let Ok(mut m) = self.cache.lock()
+            {
+                m.put(key, CachedEval { error: error.clone(), warning: warning.clone(), ms, state: state.clone() });
+            }
             out.push(FeatureResult { id: f.id, name: f.name.clone(), error, warning, ms, skipped: false, fingerprint: fp, state: state.clone() });
         }
         self.results = out;

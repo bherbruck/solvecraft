@@ -57,6 +57,8 @@ fn main() -> ExitCode {
         Some("mcp") => cmd_mcp(&args[1..]),
         // Hidden, for the kill-mid-save test: save a large design over and over.
         Some("save-stress") => cmd_save_stress(&args[1..]),
+        // Hidden: time recomputes after parameter edits (docs/perf.md).
+        Some("bench-edit") => cmd_bench_edit(&args[1..]),
         Some("--version" | "-V") => {
             println!("solvecraft-cli {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -239,5 +241,35 @@ fn cmd_save_stress(args: &[String]) -> Result<(), String> {
         s.doc_mut().set_param("save_round", &r.to_string(), None, None).map_err(|e| e.to_string())?;
         s.execute("SaveDocumentCommand", &json!({ "path": path })).map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+/// `bench-edit <script.json|recipe.json> <param> <expr>`: build the design, then time a
+/// parameter edit, setting it back, undo and redo (ms and features recomputed each).
+fn cmd_bench_edit(args: &[String]) -> Result<(), String> {
+    let (Some(path), Some(param), Some(expr)) = (args.first(), args.get(1), args.get(2)) else {
+        return Err("usage: solvecraft-cli bench-edit <script.json|recipe.json> <param> <expr>".into());
+    };
+    let v = read_json(path)?;
+    let script = if v.get("features").is_some() { recipe::to_script(&v)? } else { v };
+    let mut s = Session::default();
+    let t = std::time::Instant::now();
+    s.run_script(&script).map_err(|e| e.to_string())?;
+    let build = t.elapsed().as_secs_f64() * 1000.0;
+    let old = s.doc.all_param_exprs().into_iter().find(|(n, _, _)| n == param).map(|(_, e, _)| e).ok_or(format!("no parameter `{param}`"))?;
+    let mut out = vec![json!({"step": "build", "ms": build, "features": s.doc.features.len()})];
+    let mut time = |s: &mut Session, step: &str, id: &str, p: Value| -> Result<(), String> {
+        let t = std::time::Instant::now();
+        let r = s.execute(id, &p).map_err(|e| format!("{step}: {e}"))?;
+        let n = r.get("recomputed").cloned().unwrap_or_else(|| json!(s.model.last_recomputed));
+        out.push(json!({"step": step, "ms": t.elapsed().as_secs_f64() * 1000.0, "recomputed": n}));
+        Ok(())
+    };
+    let expr = expr.replace("{old}", &old);
+    time(&mut s, "edit", "ChangeParameterCommand", json!({"name": param, "expression": expr}))?;
+    time(&mut s, "set back", "ChangeParameterCommand", json!({"name": param, "expression": old}))?;
+    time(&mut s, "undo", "UndoCommand", json!({}))?;
+    time(&mut s, "redo", "RedoCommand", json!({}))?;
+    println!("{}", pretty(&json!(out)));
     Ok(())
 }
