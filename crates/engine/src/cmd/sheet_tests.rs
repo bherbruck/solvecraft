@@ -327,3 +327,20 @@ fn flange_edges_are_named_and_follow_the_base_sketch() {
     let h = s.doc.find_feature("H").cloned().unwrap();
     assert!(h.edge_names[0].starts_with(&format!("F{id}.0:far")), "{:?}", h.edge_names);
 }
+
+/// With no fixed side, the larger side stays whichever side of the line it is on (QA s22).
+#[test]
+fn fold_keeps_the_larger_side_either_way() {
+    for (w, line, moving_right) in [(60.0, 40.0, true), (100.0, 40.0, false)] {
+        let mut s = Session::default();
+        base(&mut s, w, 40.0);
+        run(&mut s, "SheetMetalFoldCmd", json!({"points": [[line, 0, 2.5], [line, 40, 2.5]]}));
+        let b = bbox(&mut s);
+        let (x0, x1) = (b["min"][0].as_f64().unwrap_or(0.0), b["max"][0].as_f64().unwrap_or(0.0));
+        if moving_right {
+            assert!(x0.abs() < 1e-6 && x1 < line + 5.0, "the left (larger) part stays: {b}");
+        } else {
+            assert!((x1 - w).abs() < 1e-6 && x0 > line - 5.0, "the right (larger) part stays: {b}");
+        }
+    }
+}

@@ -953,7 +953,8 @@ impl SheetBody {
         let mut n = Vec2::new(-d.y, d.x);
         let l0 = a2.dot(n);
         // Which side moves. A flange keeps the side its own bend is on.
-        let side_area = |n: Vec2| signed_area(&clip(&pts, n * l0, n)).abs();
+        let on_line = n * l0;
+        let side_area = |m: Vec2| signed_area(&clip(&pts, on_line, m)).abs();
         let moves_n = match (panel, fixed) {
             (Some(j), _) => {
                 let f = self.flanges.get(j).ok_or_else(|| DocError::Invalid("flange".into()))?;
