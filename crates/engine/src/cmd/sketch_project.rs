@@ -328,15 +328,16 @@ fn auto_project(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Point arguments that snap to model geometry while drawing, rewritten to sketch point ids:
 /// `{"vertex": [x,y,z]}` projects the vertex (a linked point); `{"on_edge": [x,y,z]}` projects
-/// the edge and makes a free point on it (coincident with the projection). Everything else is
-/// left as it is. The links are added to the active sketch in the session's document.
+/// the edge and makes a free point on it (coincident with the projection); `"mid:<line>"`
+/// makes a point held at the line's midpoint. Everything else is left as it is. The links are added to the active sketch in the session's document.
 pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let Some(id) = s.active_sketch else { return Ok(p.clone()) };
     let mut out = p.clone();
     let mut doc: Option<(Document, Sketch)> = None;
     let fix = |v: &mut Value, s: &Session, doc: &mut Option<(Document, Sketch)>| -> Result<()> {
         let (vertex, edge) = (v.get("vertex").and_then(vec3), v.get("on_edge").and_then(vec3));
-        if vertex.is_none() && edge.is_none() {
+        let mid = v.as_str().and_then(|x| x.strip_prefix("mid:")).map(str::to_string);
+        if vertex.is_none() && edge.is_none() && mid.is_none() {
             return Ok(());
         }
         if doc.is_none() {
@@ -347,7 +348,14 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         }
         let Some((d, sk)) = doc.as_mut() else { return Ok(()) };
         let body = str_(v, "body").unwrap_or("").to_string();
-        let pid = if let Some(at) = vertex {
+        let pid = if let Some(line) = mid {
+            // "mid:<line>": a new point at the line's midpoint, kept there.
+            let l = sk.curve_index(&line).ok_or_else(|| bad(cmd, format!("unknown curve `{line}`")))?;
+            let Some(solvecraft_sketch::Shape::Line { a, b }) = sk.shape(l) else { return Err(bad(cmd, format!("`{line}` is not a line"))) };
+            let pi = sk.add_point((a + b) * 0.5, None)?;
+            sk.add_constraint(ConstraintKind::Midpoint { p: pi, l }, None)?;
+            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
+        } else if let Some(at) = vertex {
             let l = add_link(s, d, id, sk, LinkKind::Project, LinkSource::Vertex { body, at }).map_err(|e| bad(cmd, format!("vertex: {e}")))?;
             let pi = sk.link_points(&l).first().copied().ok_or_else(|| bad(cmd, "vertex projects to nothing"))?;
             sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
@@ -373,7 +381,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
                         fix(x, s, &mut doc)?;
                     }
                 }
-                Value::Object(_) => fix(v, s, &mut doc)?,
+                Value::Object(_) | Value::String(_) => fix(v, s, &mut doc)?,
                 _ => {}
             }
         }

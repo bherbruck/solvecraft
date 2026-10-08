@@ -170,3 +170,20 @@ fn smart_constrain_and_driven_toggle() {
     let r = run(&mut s, "sketch.toggle_driven", json!({"constraint": did}));
     assert_eq!(r["driven"], false);
 }
+
+#[test]
+fn drawing_from_a_line_midpoint_keeps_it_there() {
+    let mut s = new_sketch();
+    let l = ids(&run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [20, 0]]}))["curves"])[0].clone();
+    let r = run(&mut s, "DrawPolyline", json!({"points": [format!("mid:{l}"), [10, 15]]}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert!(si["constraints"].as_array().unwrap().iter().any(|c| c["name"] == "MidPoint"), "{si}");
+    // Lengthen the first line: the second one's start follows the middle.
+    run(&mut s, "sketch.move_point", json!({"point": format!("{l}.end"), "to": [40, 0]}));
+    let sk = sketch(&s);
+    let n = ids(&r["curves"])[0].clone();
+    let st = sk.resolve_point(&format!("{n}.start")).and_then(|i| sk.point(i)).unwrap();
+    let a = sk.resolve_point(&format!("{l}.start")).and_then(|i| sk.point(i)).unwrap();
+    let b = sk.resolve_point(&format!("{l}.end")).and_then(|i| sk.point(i)).unwrap();
+    assert!(st.dist((a + b) * 0.5) < 1e-7, "{st:?}");
+}

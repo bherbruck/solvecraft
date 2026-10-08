@@ -35,12 +35,13 @@ pub fn refine_snap(
     sk: &solvecraft_engine::sketch::Sketch,
     plane: &solvecraft_engine::geom::Plane,
     lp: Vec2,
-) -> Option<Vec2> {
+) -> Option<(Vec2, Option<String>)> {
     // Millimetres per pixel here.
     let (a, b) = (proj.to_screen(plane.to_world(lp))?, proj.to_screen(plane.to_world(lp + Vec2::X))?);
     let px = 1.0 / (a.distance(b) as f64).max(1e-9);
     let tol = 7.0 * px;
     let mut best: Option<(f64, &'static str, Vec2)> = None;
+    let mut mid_of: Option<String> = None;
     for (i, c) in sk.curves.iter().enumerate() {
         if let solvecraft_engine::sketch::CurveKind::Line { .. } = c.kind
             && let Some(solvecraft_engine::sketch::Shape::Line { a, b }) = sk.shape(i)
@@ -49,6 +50,7 @@ pub fn refine_snap(
             let d = m.dist(lp);
             if d < tol && best.is_none_or(|x| d < x.0) {
                 best = Some((d, "Mid", m));
+                mid_of = Some(c.id.clone());
             }
         }
     }
@@ -76,7 +78,8 @@ pub fn refine_snap(
         }
     }
     SNAP.with(|s| *s.borrow_mut() = best.map(|(_, l, p)| (l, p)));
-    best.map(|(_, _, p)| p)
+    // A midpoint snap is a point argument the commands understand ("mid:<line>").
+    best.map(|(_, l, p)| (p, if l == "Mid" { mid_of.map(|m| format!("mid:{m}")) } else { None }))
 }
 
 /// A click on a constraint glyph selects it (true: the click was used).
