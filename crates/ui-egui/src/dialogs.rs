@@ -255,7 +255,7 @@ fn fits(a: Accept, s: &Sel) -> bool {
         Sel::Axis { .. } => a & AXES != 0,
         Sel::SketchCurve { .. } => a & (AXES | CURVES) != 0,
         Sel::Vertex { .. } => a & selection::VERTICES != 0,
-        Sel::Feature { .. } | Sel::SketchPoint { .. } => false,
+        Sel::Feature { .. } | Sel::SketchPoint { .. } | Sel::SketchConstraint { .. } => false,
     }
 }
 

@@ -772,6 +772,60 @@ impl Sketch {
         out
     }
 
+    /// The curves joined end to end with curve `ci` (through shared or coincident end points),
+    /// `ci` first, then the others in sketch order: what a double-click selects.
+    pub fn chain(&self, ci: usize) -> Vec<usize> {
+        if ci >= self.curves.len() {
+            return Vec::new();
+        }
+        // Points made one by coincident constraints.
+        let mut root: Vec<usize> = (0..self.points.len()).collect();
+        fn find(r: &mut [usize], mut i: usize) -> usize {
+            while let Some(&p) = r.get(i) {
+                if p == i {
+                    break;
+                }
+                i = p;
+            }
+            i
+        }
+        for c in &self.constraints {
+            if let ConstraintKind::Coincident { p, q } = c.kind {
+                let (a, b) = (find(&mut root, p), find(&mut root, q));
+                if let Some(x) = root.get_mut(a) {
+                    *x = b;
+                }
+            }
+        }
+        let ends: Vec<Vec<usize>> =
+            self.curves.iter().map(|c| c.kind.ends().map(|(a, b)| vec![find(&mut root, a), find(&mut root, b)]).unwrap_or_default()).collect();
+        let mut seen = vec![false; self.curves.len()];
+        let mut stack = vec![ci];
+        let mut out = Vec::new();
+        while let Some(i) = stack.pop() {
+            if seen.get(i).copied().unwrap_or(true) {
+                continue;
+            }
+            if let Some(s) = seen.get_mut(i) {
+                *s = true;
+            }
+            out.push(i);
+            let mine = ends.get(i).cloned().unwrap_or_default();
+            for (j, e) in ends.iter().enumerate() {
+                if !seen.get(j).copied().unwrap_or(true) && e.iter().any(|p| mine.contains(p)) {
+                    stack.push(j);
+                }
+            }
+        }
+        let first = out.first().copied();
+        out.sort_unstable();
+        if let Some(f) = first {
+            out.retain(|x| *x != f);
+            out.insert(0, f);
+        }
+        out
+    }
+
     /// Is curve `c` held in place: fixed or projected (linked).
     pub fn curve_locked(&self, c: usize) -> bool {
         self.curves.get(c).is_some_and(|c| c.fixed || c.link.is_some())

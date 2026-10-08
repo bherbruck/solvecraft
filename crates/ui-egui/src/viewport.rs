@@ -672,8 +672,9 @@ pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
     let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
     hits.iter()
         .filter(|h| match h {
-            Hit::SketchCurve { sketch, .. } => app.session.active_sketch == Some(*sketch) && !off("sketch"),
-            Hit::SketchPoint { .. } | Hit::Profile { .. } => !off("sketch"),
+            Hit::SketchCurve { sketch, .. } => app.session.active_sketch == Some(*sketch) && !off("sketch") && !off("sketch_curves"),
+            Hit::SketchPoint { .. } => !off("sketch") && !off("sketch_points"),
+            Hit::Profile { .. } => !off("sketch"),
             Hit::Vertex { .. } => !off("vertices") && !app.ui.pick_bodies,
             Hit::Edge { .. } => !off("edges") && !app.ui.pick_bodies,
             Hit::Face { .. } => !off("faces") || app.ui.pick_bodies,
@@ -1132,13 +1133,32 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.dialog = Some(d);
                 }
             } else {
-                if !crate::dim_view::click(app, p) && !crate::sketch_tools::click_glyph(app, &proj, p) {
-                    select(app, cand.and_then(|c| c.1), add);
+                // Dimensions and constraint glyphs sit on top of the geometry.
+                let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
+                let sketching = app.session.active_sketch.is_some();
+                let on_dim = crate::dim_view::hit(p).filter(|_| sketching && !off("dimensions"));
+                let on_glyph = crate::sketch_tools::glyph_at(p).filter(|_| sketching && !off("constraints"));
+                match on_dim.or(on_glyph) {
+                    Some(id) => select(app, Some(Sel::SketchConstraint { id }), add),
+                    None => select(app, cand.and_then(|c| c.1), add),
                 }
             }
         }
         // Double-click a dimension: edit its value in place.
         let dim_edit = resp.double_clicked() && app.tool.is_none() && app.dialog.is_none() && crate::dim_view::double_click(app, p);
+        // Double-click a sketch curve: select the chain joined to it end to end.
+        if resp.double_clicked()
+            && !dim_edit
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && let Some(Hit::SketchCurve { sketch, id, .. }) = app.viewport.hover.clone()
+            && app.session.active_sketch == Some(sketch)
+            && let Ok(v) = app.session.execute("sketch.chain", &json!({ "curve": id }))
+        {
+            let items: Vec<Sel> =
+                v["curves"].as_array().into_iter().flatten().filter_map(|c| c.as_str()).map(|id| Sel::SketchCurve { id: id.into() }).collect();
+            let _ = app.run("select.set", json!({ "items": items, "add": add }));
+        }
         // Double-click an edge: select the edges that continue it smoothly (the loop).
         if resp.double_clicked()
             && !dim_edit
@@ -1302,15 +1322,34 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     if app.dialog.is_none()
         && let Some(ss) = app.session.active_sketch.and_then(|sid| st.sketch(sid))
     {
-        for (i, c) in ss.sketch.curves.iter().enumerate() {
+        // What the selection filter lets through (window: wholly inside; crossing: touching).
+        let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
+        for (i, c) in ss.sketch.curves.iter().enumerate().filter(|_| !off("sketch") && !off("sketch_curves")) {
+            if c.link.is_some() && ss.sketch.view.hide_projected {
+                continue;
+            }
             let pts: Vec<Vec3> = ss.sketch.segs(i).iter().flat_map(|sg| sg.polyline(0.05)).map(|q| ss.plane.to_world(q)).collect();
             if bx.takes(&to2(&pts)) {
                 out.push(Sel::SketchCurve { id: c.id.clone() });
             }
         }
-        for p in &ss.sketch.points {
-            if bx.takes(&to2(&[ss.plane.to_world(p.pos)])) {
+        for (i, p) in ss.sketch.points.iter().enumerate().filter(|_| !off("sketch") && !off("sketch_points")) {
+            if i != 0 && solvecraft_engine::view::sketch_point_visible(&ss.sketch, i) && bx.takes(&to2(&[ss.plane.to_world(p.pos)])) {
                 out.push(Sel::SketchPoint { id: p.id.clone() });
+            }
+        }
+        if !off("dimensions") {
+            for (id, r) in crate::dim_view::text_rects() {
+                if bx.takes(&[r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()]) {
+                    out.push(Sel::SketchConstraint { id });
+                }
+            }
+        }
+        if !off("constraints") {
+            for (id, c) in crate::sketch_tools::glyph_positions() {
+                if bx.takes(&[c]) {
+                    out.push(Sel::SketchConstraint { id });
+                }
             }
         }
     } else {

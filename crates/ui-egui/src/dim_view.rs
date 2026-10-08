@@ -13,6 +13,7 @@ use std::cell::RefCell;
 
 use egui::{FontId, Pos2, Rect, Shape, Stroke, vec2};
 use serde_json::json;
+use solvecraft_engine::Sel;
 use solvecraft_engine::geom::Vec2;
 use solvecraft_engine::sketch::{ConstraintKind, DimFrame, chain_centres, default_text, dim_frame, dim_layout};
 
@@ -44,7 +45,6 @@ struct Edit {
 
 thread_local! {
     static DRAWN: RefCell<Vec<Drawn>> = const { RefCell::new(Vec::new()) };
-    static SELECTED: RefCell<Option<String>> = const { RefCell::new(None) };
     /// A text being dragged: dimension id, undo depth at the start, grab offset (sketch).
     static DRAG: RefCell<Option<(String, usize, Vec2)>> = const { RefCell::new(None) };
     static EDIT: RefCell<Option<Edit>> = const { RefCell::new(None) };
@@ -74,36 +74,20 @@ pub fn hit(pos: Pos2) -> Option<String> {
     })
 }
 
-/// The selected dimension (constraint id).
-pub fn selected() -> Option<String> {
-    SELECTED.with(|s| s.borrow().clone())
+/// The selected dimensions (constraint ids; they are in the session's selection).
+pub fn selected(app: &SolveApp) -> Vec<String> {
+    let dims: Vec<String> = DRAWN.with(|d| d.borrow().iter().map(|x| x.id.clone()).collect());
+    app.session
+        .selection
+        .iter()
+        .filter_map(|s| if let Sel::SketchConstraint { id } = s { Some(id.clone()) } else { None })
+        .filter(|id| dims.contains(id))
+        .collect()
 }
 
-/// A click without a tool: select the dimension under it (true: the click was used). A click
-/// elsewhere drops the dimension selection.
-pub fn click(app: &mut SolveApp, pos: Pos2) -> bool {
-    if app.session.active_sketch.is_none() {
-        return false;
-    }
-    let h = hit(pos);
-    SELECTED.with(|s| *s.borrow_mut() = h.clone());
-    if let Some(id) = &h {
-        let _ = app.run("select.clear", json!({}));
-        app.set_status(format!("Dimension {id} selected: drag to move, double-click to edit, Delete removes it"), false);
-    }
-    h.is_some()
-}
-
-/// Drop the dimension selection (true when there was one).
-pub fn deselect() -> bool {
-    SELECTED.with(|s| s.borrow_mut().take()).is_some()
-}
-
-/// Delete the selected dimension (true when one was selected).
-pub fn delete_selected(app: &mut SolveApp) -> bool {
-    let Some(id) = SELECTED.with(|s| s.borrow_mut().take()) else { return false };
-    let _ = app.run("sketch.delete", json!({"entities": [id]}));
-    true
+/// Dimension text boxes drawn last frame (for box selection).
+pub fn text_rects() -> Vec<(String, Rect)> {
+    DRAWN.with(|d| d.borrow().iter().map(|x| (x.id.clone(), x.text)).collect())
 }
 
 /// A double-click on a dimension opens its value for editing (true: it was on one).
@@ -114,7 +98,6 @@ pub fn double_click(app: &mut SolveApp, pos: Pos2) -> bool {
     }) else {
         return false;
     };
-    SELECTED.with(|s| *s.borrow_mut() = Some(d.id.clone()));
     let Some(param) = d.param else {
         app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
         return true;
@@ -132,7 +115,6 @@ pub fn drag_start(app: &SolveApp, press: Pos2, press_sketch: Vec2) -> bool {
     }) else {
         return false;
     };
-    SELECTED.with(|s| *s.borrow_mut() = Some(d.id.clone()));
     DRAG.with(|g| *g.borrow_mut() = Some((d.id, app.session.undo.len(), d.at - press_sketch)));
     true
 }
@@ -181,7 +163,6 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     let st = app.session.model.state();
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else {
         DRAWN.with(|d| d.borrow_mut().clear());
-        SELECTED.with(|s| *s.borrow_mut() = None);
         EDIT.with(|e| *e.borrow_mut() = None);
         return;
     };
@@ -191,11 +172,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         return;
     }
     let tk = Tokens::get();
-    let sel = selected();
-    // A selected dimension that was deleted (undo, another command) is forgotten.
-    if sel.as_ref().is_some_and(|id| !sk.constraints.iter().any(|c| &c.id == id)) {
-        SELECTED.with(|s| *s.borrow_mut() = None);
-    }
+    let is_sel = |id: &str| app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { id: x } if x == id));
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|p| proj.rect.contains(*p)).and_then(hit);
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let font = FontId::proportional(12.0);
@@ -217,7 +194,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let failing = ss.report.failing.contains(&c.id);
         let col = if failing {
             tk.error
-        } else if sel.as_deref() == Some(c.id.as_str()) || hover.as_deref() == Some(c.id.as_str()) {
+        } else if is_sel(&c.id) || hover.as_deref() == Some(c.id.as_str()) {
             tk.accent
         } else if c.driven {
             tk.dimension_driven

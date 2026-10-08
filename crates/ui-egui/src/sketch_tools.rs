@@ -147,6 +147,16 @@ pub fn refine_snap(
     })
 }
 
+/// The constraint glyph under a screen position (its constraint id).
+pub fn glyph_at(pos: Pos2) -> Option<String> {
+    GLYPHS.with(|g| g.borrow().iter().find(|(_, c)| c.distance(pos) <= 7.0).map(|(id, _)| id.clone()))
+}
+
+/// Constraint glyphs drawn last frame: (constraint id, screen centre).
+pub fn glyph_positions() -> Vec<(String, Pos2)> {
+    GLYPHS.with(|g| g.borrow().clone())
+}
+
 /// A click on a constraint glyph selects it (true: the click was used).
 pub fn click_glyph(app: &mut SolveApp, _proj: &Proj, pos: Pos2) -> bool {
     if app.session.active_sketch.is_none() {
@@ -731,7 +741,8 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
         placed.push(sp);
         let failing = ss.report.failing.contains(&c.id);
-        let selected = picked.as_deref() == Some(c.id.as_str());
+        let selected = picked.as_deref() == Some(c.id.as_str())
+            || app.session.selection.iter().any(|s| matches!(s, solvecraft_engine::Sel::SketchConstraint { id } if *id == c.id));
         let col = if failing {
             tk.error
         } else if selected {

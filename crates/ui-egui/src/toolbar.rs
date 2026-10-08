@@ -364,7 +364,16 @@ fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new("Selection filter").color(t.text_dim).size(11.0));
     ui.checkbox(&mut app.ui.pick_bodies, "Select bodies (a face picks its body)");
-    for (k, label) in [("faces", "Faces"), ("edges", "Edges"), ("vertices", "Vertices"), ("sketch", "Sketch geometry and profiles")] {
+    for (k, label) in [
+        ("faces", "Faces"),
+        ("edges", "Edges"),
+        ("vertices", "Vertices"),
+        ("sketch", "Sketch geometry and profiles"),
+        ("sketch_curves", "Sketch curves"),
+        ("sketch_points", "Sketch points"),
+        ("dimensions", "Sketch dimensions"),
+        ("constraints", "Sketch constraints"),
+    ] {
         let mut on = !app.ui.pick_off.iter().any(|x| x == k);
         if ui.checkbox(&mut on, label).changed() {
             app.ui.pick_off.retain(|x| x != k);
@@ -417,7 +426,6 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::tools::finish(app);
                 } else if app.dialog.is_some() {
                     crate::dialogs::cancel(app);
-                } else if crate::dim_view::deselect() {
                 } else if !app.session.selection.is_empty() || app.session.active_sketch.is_none() {
                     let _ = app.run("select.clear", json!({}));
                 } else {

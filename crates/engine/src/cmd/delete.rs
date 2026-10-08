@@ -65,7 +65,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let mut bodies: Vec<String> = Vec::new();
     for x in &items {
         match x {
-            Sel::SketchCurve { id } | Sel::SketchPoint { id } => entities.push(id.clone()),
+            Sel::SketchCurve { id } | Sel::SketchPoint { id } | Sel::SketchConstraint { id } => entities.push(id.clone()),
             Sel::Feature { id } => {
                 if s.doc.feature(*id).is_none() {
                     return Err(bad(cmd, format!("no feature {id}")));

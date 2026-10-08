@@ -94,6 +94,10 @@ pub enum Sel {
     SketchPoint {
         id: String,
     },
+    /// A constraint or dimension (by id) of the active sketch.
+    SketchConstraint {
+        id: String,
+    },
     /// A closed profile of a sketch (by index).
     Profile {
         sketch: u64,

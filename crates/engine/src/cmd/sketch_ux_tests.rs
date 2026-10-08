@@ -526,3 +526,41 @@ fn fully_constrained_feedback_is_per_entity() {
     assert!(lines.iter().filter(|l| l.1 == crate::view::colors::SKETCH_FIXED).count() >= 4);
     assert!(lines.iter().any(|l| l.1 == crate::view::colors::SKETCH));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Selection inside sketches
+
+#[test]
+fn chain_follows_shared_and_coincident_ends() {
+    let mut s = new_sketch();
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "DrawPolyline", json!({"points": [[40, 0], [50, 0]]}));
+    run(&mut s, "DrawPolyline", json!({"points": [[50.5, 0], [60, 5]]}));
+    run(&mut s, "CircleCenterRadius", json!({"center": [80, 0], "radius": 3}));
+    let chain = |s: &mut Session, c: &str| -> Vec<String> {
+        let v = run(s, "sketch.chain", json!({"curve": c}));
+        v["curves"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
+    };
+    assert_eq!(chain(&mut s, "l3"), ["l3", "l1", "l2", "l4"]);
+    assert_eq!(chain(&mut s, "l5"), ["l5"]);
+    assert_eq!(chain(&mut s, "c1"), ["c1"]);
+    // Joined by a coincident constraint, the two lines are one chain.
+    run(&mut s, "ConstraintCoincident", json!({"a": "l5.end", "b": "l6.start"}));
+    assert_eq!(chain(&mut s, "l6"), ["l6", "l5"]);
+    assert!(s.execute("sketch.chain", &json!({"curve": "nope"})).is_err());
+}
+
+#[test]
+fn constraints_and_dimensions_can_be_selected_and_deleted_together() {
+    let mut s = new_sketch();
+    run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [30, 0]]}));
+    run(&mut s, "ConstraintHorizontalVertical", json!({"line": "l1"}));
+    run(&mut s, "SketchDimension", json!({"entities": ["l1"], "value": 30}));
+    let ids: Vec<String> = sketch(&s).constraints.iter().map(|c| c.id.clone()).collect();
+    assert_eq!(ids.len(), 2);
+    let items: Vec<Value> = ids.iter().map(|id| json!({"type": "sketch_constraint", "id": id})).collect();
+    run(&mut s, "select.set", json!({ "items": items }));
+    assert_eq!(s.selection.len(), 2);
+    run(&mut s, "selection.delete", json!({"items": items}));
+    assert!(sketch(&s).constraints.is_empty());
+}

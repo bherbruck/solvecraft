@@ -163,6 +163,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.options", "Sketch Palette Options", sketch_options).icon("sketch").params(
         "sketch?: id|name (default active); any of show_profile, show_points, show_dimensions, show_constraints, show_projected, grid, snap, slice, sketch_3d: bool. Returns them all",
     ),
+    CommandSpec::new("sketch.chain", "Chain", chain_cmd)
+        .enabled(in_sketch)
+        .noundo()
+        .params("curve: id: the curves joined to it end to end (what a double-click selects)"),
     CommandSpec::new("sketch.solve", "Solve Sketch", solve_cmd)
         .enabled(in_sketch)
         .noundo()
@@ -1658,6 +1662,14 @@ fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(options_json(v))
     })?;
     Ok(json!({"options": v, "sketch": info}))
+}
+
+fn chain_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.chain";
+    let id = target_sketch(s, p, cmd)?;
+    let sk = s.doc.sketch(id)?;
+    let c = curve_ref(sk, p.get("curve"), cmd, "curve")?;
+    Ok(json!({"curves": ids_of(sk, &sk.chain(c))}))
 }
 
 fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
