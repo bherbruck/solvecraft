@@ -17,7 +17,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
-        .params("point: corner shared by two lines (\"l1.end\") | a, b: two lines meeting at a corner; radius: expr"),
+        .params("point: corner shared by two curves (\"l1.end\") | a, b: two lines or arcs meeting at a corner; radius: expr"),
     CommandSpec::new("ChamferSketchEqualDistance", "Equal Distance Chamfer", chamfer_equal)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer")
@@ -483,7 +483,17 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         if !(r > 1e-9 && r < 1e8) {
             return Err(bad(cmd, "radius must be positive"));
         }
-        let (la, lb, c, fa, fb) = corner(sk, p, cmd)?;
+        let (la, lb, c, fa, fb) = match corner(sk, p, cmd) {
+            Ok(x) => x,
+            // Not two lines: a corner with an arc.
+            Err(e) => {
+                let Some((arc, cons)) = round_corner(sk, p, r, cmd)? else { return Err(e) };
+                let mut cons = cons;
+                let pname = doc.new_model_param(&r_expr, "mm");
+                cons.push(sk.add_constraint(ConstraintKind::Radius { c: arc, value: r }, Some(pname.clone()))?);
+                return Ok((ids_of(sk, &[arc]), cons, pname));
+            }
+        };
         let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
         let u = (pa - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
         let v = (pb - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
@@ -508,6 +518,81 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         Ok((ids_of(sk, &[arc]), cons, pname))
     })?;
     Ok(json!({"curves": out.0, "constraints": out.1, "param": out.2, "sketch": info}))
+}
+
+/// Fillet a corner where a line meets an arc, or two arcs meet: the arc of radius `r` touching
+/// both, nearest the corner; both curves are cut back to it. None when the corner is not of
+/// that kind.
+fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<(usize, Vec<String>)>> {
+    let ends = |c: usize| match sk.curves.get(c).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) | Some(CurveKind::Arc { a, b, .. }) => Some((*a, *b)),
+        _ => None,
+    };
+    let (ca, cb, q) = if let Some(rf) = str_(p, "point") {
+        let Some(q) = sk.resolve_point(rf) else { return Ok(None) };
+        let cs: Vec<usize> = (0..sk.curves.len()).filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i)).collect();
+        match cs[..] {
+            [a, b] => (a, b, q),
+            _ => return Ok(None),
+        }
+    } else {
+        let (Some(a), Some(b)) = (str_(p, "a").and_then(|i| sk.curve_index(i)), str_(p, "b").and_then(|i| sk.curve_index(i))) else {
+            return Ok(None);
+        };
+        let (Some((a0, a1)), Some((b0, b1))) = (ends(a), ends(b)) else { return Ok(None) };
+        let Some(q) = [a0, a1].into_iter().find(|x| *x == b0 || *x == b1) else { return Ok(None) };
+        (a, b, q)
+    };
+    let (Some(sa), Some(sb), Some(pc)) = (sk.shape(ca), sk.shape(cb), sk.point(q)) else { return Ok(None) };
+    let offsets = |sh: &Shape| -> Vec<Shape> {
+        match *sh {
+            Shape::Line { a, b } => match (b - a).normalized() {
+                Some(d) => [1.0, -1.0].iter().map(|s| Shape::Line { a: a + d.perp() * (r * s), b: b + d.perp() * (r * s) }).collect(),
+                None => Vec::new(),
+            },
+            Shape::Round { c, r: rr, .. } => {
+                let mut v = vec![Shape::Round { c, r: rr + r, start: 0.0, sweep: TAU }];
+                if rr - r > 1e-9 {
+                    v.push(Shape::Round { c, r: rr - r, start: 0.0, sweep: TAU });
+                }
+                v
+            }
+        }
+    };
+    let mut best: Option<(f64, Vec2, Vec2, Vec2)> = None;
+    for oa in offsets(&sa) {
+        for ob in offsets(&sb) {
+            for cen in intersections(&oa, &ob) {
+                let (ta, tb) = (sa.project(cen), sb.project(cen));
+                if on_bounded(&sa, ta).is_none() || on_bounded(&sb, tb).is_none() || ta.dist(pc) < 1e-9 || tb.dist(pc) < 1e-9 {
+                    continue;
+                }
+                let score = ta.dist(pc) + tb.dist(pc);
+                if best.is_none_or(|b| score < b.0) {
+                    best = Some((score, cen, ta, tb));
+                }
+            }
+        }
+    }
+    let (_, cen, ta, tb) = best.ok_or_else(|| bad(cmd, "that radius does not fit the corner"))?;
+    let (na, nb) = (sk.add_point(ta, None)?, sk.add_point(tb, None)?);
+    for (c, n) in [(ca, na), (cb, nb)] {
+        if let Some(cu) = sk.curves.get_mut(c) {
+            cu.kind.map_points(&|i| if i == q { n } else { i });
+        }
+    }
+    let ccw = (ta - cen).cross(tb - cen) > 0.0;
+    let arc =
+        if ccw { sk.add_arc(cen, ta, tb, [None, Some(na), Some(nb)], None)? } else { sk.add_arc(cen, tb, ta, [None, Some(nb), Some(na)], None)? };
+    let cons = vec![add_c(sk, ConstraintKind::Tangent { a: ca, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: cb, b: arc })?];
+    let used = sk.curves.iter().any(|x| x.kind.uses(q));
+    if !used && q != 0 {
+        let arc_id = sk.curves.get(arc).map(|c| c.id.clone()).unwrap_or_default();
+        sk.remove_points(&[q]);
+        let arc = sk.curve_index(&arc_id).unwrap_or(arc);
+        return Ok(Some((arc, cons)));
+    }
+    Ok(Some((arc, cons)))
 }
 
 fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl FnOnce(f64) -> Result<(f64, f64)>) -> Result<Value> {

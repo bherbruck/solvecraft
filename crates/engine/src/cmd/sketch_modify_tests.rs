@@ -392,3 +392,22 @@ fn ellipse_radii_dimensions() {
     let a = profiles(&s)[0];
     assert!((a - std::f64::consts::PI * 60.0).abs() < 1e-6, "{a}");
 }
+
+#[test]
+fn fillet_a_line_and_an_arc() {
+    let mut s = new_sketch();
+    // A line into a quarter arc meeting at a sharp corner.
+    let l = ids(&run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [20, 0]]}))["curves"])[0].clone();
+    let a = ids(&run(&mut s, "ArcCenterTwoPoint", json!({"center": [30, 0], "start": format!("{l}.end"), "end": [30, -10]}))["curves"])[0].clone();
+    let _ = a;
+    let f = run(&mut s, "FilletSketchCmd", json!({"point": format!("{l}.end"), "radius": 2}));
+    let arc = ids(&f["curves"])[0].clone();
+    let sk = sketch(&s);
+    let ai = sk.curve_index(&arc).unwrap();
+    assert!((sk.radius(ai).unwrap() - 2.0).abs() < 1e-7);
+    // The fillet touches the line (its centre 2 below it) and the arc's circle (outside it: 10 + 2).
+    let c = sk.center(ai).unwrap();
+    assert!((c.y - 2.0).abs() < 1e-6 || (c.y + 2.0).abs() < 1e-6, "{c:?}");
+    let d = c.dist(Vec2::new(30.0, 0.0));
+    assert!((d - 12.0).abs() < 1e-6, "{d} {c:?}");
+}
