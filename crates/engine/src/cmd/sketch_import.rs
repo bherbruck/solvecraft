@@ -16,11 +16,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("ImportDxfFileCommand", "Insert DXF", insert_dxf)
         .at("SKETCH", "INSERT")
         .icon("dxf")
-        .params("path | text: ASCII DXF; at?: [x,y] offset, scale?; plane?: (when no sketch is active, a new sketch on it; default XY)"),
+        .params("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale?, tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)"),
     CommandSpec::new("SketchImportSVG", "Insert SVG", insert_svg)
         .at("SKETCH", "INSERT")
         .icon("svg")
-        .params("path | text: SVG; at?: [x,y] offset, scale?; plane?: (when no sketch is active, a new sketch on it; default XY)"),
+        .params("path | text: SVG; at?: [x,y] offset, scale?, tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", export_dxf)
         .noundo()
         .params("sketch?: id|name (default active); path?: file to write (else the DXF text is returned)"),
@@ -43,17 +43,24 @@ fn source_text(p: &Value, cmd: &str) -> Result<String> {
 }
 
 /// Add imported geometry to a sketch, sharing end points that meet.
-fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
-    let q = 1e-6;
-    let mut map: HashMap<(i64, i64), usize> = HashMap::new();
+/// Adds the geometry; end points closer than `q` (mm) become one point, so drawings whose
+/// ends almost meet still make closed profiles.
+fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
+    let mut map: HashMap<(i64, i64), Vec<(Vec2, usize)>> = HashMap::new();
     let mut pt = |sk: &mut Sketch, p: Vec2| -> Result<usize> {
         let p = f(p);
-        let key = ((p.x / q).round() as i64, (p.y / q).round() as i64);
-        if let Some(i) = map.get(&key) {
-            return Ok(*i);
+        let key = ((p.x / q).floor() as i64, (p.y / q).floor() as i64);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(v) = map.get(&(key.0 + dx, key.1 + dy))
+                    && let Some((_, i)) = v.iter().find(|(o, _)| o.dist(p) <= q)
+                {
+                    return Ok(*i);
+                }
+            }
         }
         let i = sk.add_point(p, None)?;
-        map.insert(key, i);
+        map.entry(key).or_default().push((p, i));
         Ok(i)
     };
     let mut curves = Vec::new();
@@ -119,9 +126,10 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         let r = (super::find_command("SketchCreate").ok_or_else(|| bad(cmd, "SketchCreate"))?.run)(s, &cp)?;
         created = r.get("sketch").and_then(Value::as_u64);
     }
+    let tol = num(p, "tolerance").filter(|t| t.is_finite() && *t > 0.0).unwrap_or(1e-4).clamp(1e-9, 10.0);
     let f = move |q: Vec2| q * k + off;
     let ((curves, texts), info) = edit(s, p, cmd, false, |sk, _| {
-        let (cs, texts) = add_geometry(sk, &geom, &f, k)?;
+        let (cs, texts) = add_geometry(sk, &geom, &f, k, tol)?;
         Ok((ids_of(sk, &cs), texts))
     })?;
     // Text becomes sketch text.
@@ -216,5 +224,14 @@ mod tests {
         assert_eq!(r["texts"], 1, "{r}");
         assert!(s.execute("SketchImportSVG", &json!({"text": "<svg></svg>"})).is_err());
         assert!(s.execute("ImportDxfFileCommand", &json!({"path": "/nonexistent.dxf"})).is_err());
+        s.execute("SketchStop", &json!({})).unwrap();
+        // Ends that miss by 0.00005 still close the square; with a tighter tolerance they don't.
+        let gappy = "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n10\n21\n0\n0\nLINE\n10\n10.00005\n20\n0\n11\n10\n21\n10\n0\nLINE\n10\n10\n20\n10\n11\n0\n21\n10\n0\nLINE\n10\n0\n20\n10.00003\n11\n0\n21\n0.00004\n0\nENDSEC\n0\nEOF\n";
+        for (tol, n) in [(1e-4, 1), (1e-6, 0)] {
+            let r = s.execute("ImportDxfFileCommand", &json!({"text": gappy, "tolerance": tol})).unwrap();
+            let ss = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+            assert_eq!(ss.profiles.len(), n, "tolerance {tol}");
+            s.execute("SketchStop", &json!({})).unwrap();
+        }
     }
 }
