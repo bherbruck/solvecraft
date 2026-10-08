@@ -189,7 +189,8 @@ fn polyhedra_shell_and_draft() {
     .unwrap();
     assert!(rel(measure(&tet).unwrap().volume, 36.0) < 1e-9);
     let cyl = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 5.0).unwrap();
-    assert!(shell(&cyl, &[Vec3::new(0.0, 0.0, 5.0)], 1.0).is_err(), "curved faces");
+    let cup = shell(&cyl, &[Vec3::new(0.0, 0.0, 5.0)], 1.0).unwrap();
+    assert!(rel(measure(&cup).unwrap().volume, PI * (25.0 * 5.0 - 16.0 * 4.0)) < 1e-4, "cup");
 }
 
 #[test]
@@ -908,4 +909,26 @@ fn trimmed_revolved_faces_measure_exactly() {
     }
     let got = measure(&shaft).unwrap().volume - measure(&c).unwrap().volume;
     assert!((got - want).abs() < 0.01 * want, "removed {got}, want {want}");
+}
+
+#[test]
+fn shell_with_cylindrical_faces() {
+    // A box with its four vertical edges rounded, opened at the top.
+    let b = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
+    let edges: Vec<Vec3> = [(0.0, 0.0), (100.0, 0.0), (100.0, 60.0), (0.0, 60.0)].iter().map(|(x, y)| Vec3::new(*x, *y, 15.0)).collect();
+    let r = fillet(&b, &edges, 6.0).unwrap();
+    let s = shell(&r, &[Vec3::new(50.0, 30.0, 30.0)], 2.0).unwrap();
+    let outer = (100.0 * 60.0 - (4.0 - PI) * 36.0) * 30.0;
+    let cavity = (96.0 * 56.0 - (4.0 - PI) * 16.0) * 28.0;
+    let v = measure(&s).unwrap().volume;
+    assert!(rel(v, outer - cavity) < 1e-4, "{v} vs {}", outer - cavity);
+    // A plate with a round boss, opened underneath: the cavity follows the boss.
+    let plate = box_solid(Vec3::new(-30.0, -30.0, 0.0), Vec3::new(30.0, 30.0, 10.0)).unwrap();
+    let boss = cylinder(Vec3::new(0.0, 0.0, 5.0), Vec3::Z, 12.0, 25.0).unwrap();
+    let pb = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+    let s = shell(&pb, &[Vec3::new(0.0, 0.0, 0.0)], 2.0).unwrap();
+    let outer = 3600.0 * 10.0 + PI * 144.0 * 20.0;
+    let cavity = 56.0 * 56.0 * 8.0 + PI * 100.0 * 20.0;
+    let v = measure(&s).unwrap().volume;
+    assert!(rel(v, outer - cavity) < 1e-4, "{v} vs {}", outer - cavity);
 }

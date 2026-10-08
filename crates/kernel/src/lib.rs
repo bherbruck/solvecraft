@@ -22,6 +22,7 @@ mod helix;
 mod loopblend;
 mod measure;
 mod meshbody;
+mod offset;
 mod ops;
 mod polybool;
 mod polyhedron;

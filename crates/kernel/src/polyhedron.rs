@@ -350,95 +350,11 @@ fn point_tri(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
 /// The body with every planar face moved along its outward normal by `shift(face index,
 /// normal)`, keeping the topology: each vertex goes to where its faces' moved planes meet.
 pub(crate) fn offset_planar(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Result<Body> {
-    let fail = |m: &str| KernelError::Failed(format!("offset: {m}"));
-    let faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
-    let mut planes: Vec<(Vec3, f64)> = Vec::new();
-    for (i, f) in faces.iter().enumerate() {
-        let mt::Surface::Plane(pl) = f.oriented_surface() else { return Err(fail("only bodies with planar faces")) };
-        let n = pl.normal();
-        let n = Vec3::new(n.x, n.y, n.z).normalized().ok_or_else(|| fail("normal"))?;
-        let d = n.dot(from_p3(pl.origin())) + shift(i, n);
-        planes.push((n, d));
-    }
-    // Vertex → its faces.
-    let mut vfaces: HashMap<mt::VertexID, Vec<usize>> = HashMap::new();
-    for (i, f) in faces.iter().enumerate() {
-        for v in f.vertex_iter() {
-            let e = vfaces.entry(v.id()).or_default();
-            if !e.contains(&i) {
-                e.push(i);
-            }
-        }
-    }
-    let size = b.size();
-    let mut newpos: HashMap<mt::VertexID, Vec3> = HashMap::new();
-    for v in b.solid.vertex_iter() {
-        let fs = vfaces.get(&v.id()).ok_or_else(|| fail("vertex"))?;
-        // Least squares over the vertex's planes (exact for three independent ones).
-        let mut m = [[0.0f64; 3]; 3];
-        let mut r = [0.0f64; 3];
-        for fi in fs {
-            let (n, d) = *planes.get(*fi).ok_or_else(|| fail("plane"))?;
-            let nv = [n.x, n.y, n.z];
-            for i in 0..3 {
-                for j in 0..3 {
-                    m[i][j] += nv[i] * nv[j];
-                }
-                r[i] += nv[i] * d;
-            }
-        }
-        let x = solve3(m, r).ok_or_else(|| fail("a corner whose faces don't meet in a point"))?;
-        let x = Vec3::new(x[0], x[1], x[2]);
-        for fi in fs {
-            let (n, d) = *planes.get(*fi).ok_or_else(|| fail("plane"))?;
-            if (n.dot(x) - d).abs() > size * 1e-6 {
-                return Err(fail("a corner with more faces than can move together"));
-            }
-        }
-        newpos.insert(v.id(), x);
-    }
-    guard("offset", || {
-        let verts: HashMap<mt::VertexID, mt::Vertex> = newpos.iter().map(|(k, p)| (*k, builder::vertex(p3(*p)))).collect();
-        let mut edges: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
-        for e in b.solid.edge_iter() {
-            if edges.contains_key(&e.id()) {
-                continue;
-            }
-            let (Some(a), Some(c)) = (verts.get(&e.absolute_front().id()), verts.get(&e.absolute_back().id())) else { return Err(fail("edge")) };
-            if from_p3(a.point()).dist(from_p3(c.point())) < size * 1e-9 {
-                return Err(fail("an edge vanishes (the offset is too large)"));
-            }
-            edges.insert(e.id(), builder::line(a, c));
-        }
-        let mut out = Vec::new();
-        for (i, f) in faces.iter().enumerate() {
-            let wires: Vec<mt::Wire> = f
-                .absolute_boundaries()
-                .iter()
-                .map(|w| {
-                    w.edge_iter()
-                        .filter_map(|e| edges.get(&e.id()).map(|ne| if e.front() == e.absolute_front() { ne.clone() } else { ne.inverse() }))
-                        .collect::<Vec<_>>()
-                        .into()
-                })
-                .collect();
-            let (n, d) = *planes.get(i).ok_or_else(|| fail("plane"))?;
-            let shift_v = n
-                * (d - n.dot(from_p3(match f.oriented_surface() {
-                    mt::Surface::Plane(pl) => pl.origin(),
-                    _ => return Err(fail("plane")),
-                })));
-            let surface = mt::Transformed::transformed(&f.surface(), mt::Matrix4::from_translation(v3(shift_v)));
-            let mut nf = mt::Face::try_new(wires, surface).map_err(|e| fail(&e.to_string()))?;
-            if !f.orientation() {
-                nf.invert();
-            }
-            out.push(nf);
-        }
-        let shell: mt::Shell = out.into();
-        let solid = Solid::try_new(vec![shell]).map_err(|e| fail(&e.to_string()))?;
-        Body::new(solid)
-    })
+    crate::offset::offset_body(b, shift)
+}
+
+pub(crate) fn solve3_pub(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
+    solve3(m, r)
 }
 
 fn solve3(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {

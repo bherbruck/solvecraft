@@ -402,7 +402,23 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
             }
             Some("hole") => {
                 let n = f.get("face").and_then(|fc| fc.get("plane_normal_outward").or(fc.get("normal_at_point_on_face"))).cloned();
-                let dir = n.and_then(|n| n.as_array().map(|a| a.iter().map(|x| -x.as_f64().unwrap_or(0.0)).collect::<Vec<f64>>()));
+                let mut dir = n.and_then(|n| n.as_array().map(|a| a.iter().map(|x| -x.as_f64().unwrap_or(0.0)).collect::<Vec<f64>>()));
+                // On a cylinder the normal given is at the face's sample point: drill toward the axis.
+                let v3 = |v: Option<&Value>| -> Option<[f64; 3]> {
+                    let a = v?.as_array()?;
+                    Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+                };
+                if let Some(fc) = f.get("face").filter(|fc| fc.get("type").and_then(Value::as_str) == Some("cylinder"))
+                    && let (Some(o), Some(ax), Some(p)) = (v3(fc.get("axis_origin")), v3(fc.get("axis")), v3(f.get("position")))
+                {
+                    let d = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+                    let t = d[0] * ax[0] + d[1] * ax[1] + d[2] * ax[2];
+                    let r = [d[0] - t * ax[0], d[1] - t * ax[1], d[2] - t * ax[2]];
+                    let l = (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt();
+                    if l > 1e-9 {
+                        dir = Some(vec![-r[0] / l, -r[1] / l, -r[2] / l]);
+                    }
+                }
                 let ty = f.get("hole_type").and_then(Value::as_str).unwrap_or("simple");
                 let mut p = json!({"position": f.get("position"), "diameter": f.get("diameter"), "type": ty, "name": name});
                 // "sketch HolePoints points p1..p6"

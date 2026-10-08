@@ -81,7 +81,10 @@ fn refined(pm: &PolygonMesh, surf: &mt::Surface, tol: f64) -> Option<Vec<[(Vec3,
     }
     // The parameters must be the surface's own.
     let check = tris.iter().take(8).flat_map(|t| t.iter()).all(|(p, (u, v), _)| from_p3(surf.subs(*u, *v)).dist(*p) < tol * 4.0 + 1e-9);
-    if !check || tris.len() > 200_000 {
+    // Bounded work: a face may grow to a few times its triangles (wild surfaces sag
+    // everywhere and are left as meshed).
+    let cap = (tris.len() * 8).clamp(2_000, 60_000);
+    if !check || tris.len() > 50_000 {
         return None;
     }
     // Edges on the face's boundary are shared with the next face: never split them.
@@ -145,7 +148,7 @@ fn refined(pm: &PolygonMesh, surf: &mt::Surface, tol: f64) -> Option<Vec<[(Vec3,
         }
         tris = next;
         changed |= any;
-        if !any || tris.len() > 400_000 {
+        if !any || tris.len() > cap {
             break;
         }
     }

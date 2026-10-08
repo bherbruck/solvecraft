@@ -323,6 +323,32 @@ fn classify_faces(mesh: &Mesh, nf: usize, tol: f64) -> Vec<Surf> {
             }
         }
     }
+    // A point where one face's corners disagree on the normal is singular (a cone's apex):
+    // leave it out of the fit.
+    for (pv, nv) in pts.iter_mut().zip(nrm.iter_mut()) {
+        let key = |p: &Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
+        let mut first: HashMap<(i64, i64, i64), Vec3> = HashMap::new();
+        let mut bad: std::collections::HashSet<(i64, i64, i64)> = std::collections::HashSet::new();
+        for (p, n) in pv.iter().zip(nv.iter()) {
+            let k = key(p);
+            match first.get(&k) {
+                Some(m) if m.dot(*n) < 0.999 => {
+                    bad.insert(k);
+                }
+                Some(_) => {}
+                None => {
+                    first.insert(k, *n);
+                }
+            }
+        }
+        if !bad.is_empty() && bad.len() * 4 < first.len() {
+            let keep: Vec<bool> = pv.iter().map(|p| !bad.contains(&key(p))).collect();
+            let mut it = keep.iter();
+            pv.retain(|_| it.next().copied().unwrap_or(true));
+            let mut it = keep.iter();
+            nv.retain(|_| it.next().copied().unwrap_or(true));
+        }
+    }
     (0..nf).map(|i| classify(pts.get(i).map(Vec::as_slice).unwrap_or(&[]), nrm.get(i).map(Vec::as_slice).unwrap_or(&[]), tol * 10.0, i)).collect()
 }
 
