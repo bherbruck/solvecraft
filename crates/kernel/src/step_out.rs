@@ -937,8 +937,49 @@ fn brep_exchange(b: &Body) -> Result<p21::Exchange> {
     let text = crate::step::truck_step(&[b], "SolveCraft")?;
     let mut ex = p21::parse(&text).map_err(|e| KernelError::Failed(format!("STEP export: {e}")))?;
     collapse_short_edges(&mut ex);
+    let plain = ex.clone();
     merge_split_faces(&mut ex);
+    // Keep the merged faces only when they read back as cleanly as the pieces (a merge that
+    // leaves a face the reader cannot lay out, such as a band round a closed surface whose
+    // loop crosses itself, is undone).
+    let clean = |ex: &p21::Exchange| {
+        let header = text.split("DATA;").next().unwrap_or_default();
+        exchange_text(header, ex).and_then(|t| crate::step_in::step_import(&t).ok()).is_some_and(|imp| imp.warnings.is_empty())
+    };
+    if ex.entities.len() != plain.entities.len() && !clean(&ex) && clean(&plain) {
+        return Ok(plain);
+    }
     Ok(ex)
+}
+
+/// A parsed exchange written back as STEP text (with the given header).
+fn exchange_text(header: &str, ex: &p21::Exchange) -> Option<String> {
+    let map: HashMap<u64, u64> = ex.entities.keys().map(|k| (*k, *k)).collect();
+    let mut ids: Vec<u64> = ex.entities.keys().copied().collect();
+    ids.sort();
+    let mut o = format!("{header}DATA;\n");
+    for id in ids {
+        let e = ex.get(id)?;
+        let _ = write!(o, "#{id}=");
+        if e.is_complex() {
+            o.push('(');
+            for r in &e.records {
+                o.push_str(&r.name);
+                o.push('(');
+                params(&r.params, &map, &mut o).ok()?;
+                o.push(')');
+            }
+            o.push(')');
+        } else {
+            o.push_str(e.name());
+            o.push('(');
+            params(e.params(), &map, &mut o).ok()?;
+            o.push(')');
+        }
+        o.push_str(";\n");
+    }
+    o.push_str("ENDSEC;\nEND-ISO-10303-21;\n");
+    Some(o)
 }
 
 fn rigid_frame(m: &[[f64; 4]; 4]) -> Result<([f64; 3], [f64; 3], [f64; 3])> {
