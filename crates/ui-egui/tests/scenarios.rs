@@ -55,7 +55,8 @@ scenarios!(
     s35_construction_mode,
     s36_sketch_palette_visible,
     s32_cut_in_active_component,
-    s30_pattern_a_hole
+    s30_pattern_a_hole,
+    s41_type_value_after_picking
 );
 
 /// Scenarios written ahead of their fixes or features (the user's open bugs): run with
