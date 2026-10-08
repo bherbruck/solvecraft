@@ -875,3 +875,37 @@ fn circle_loop_fillets_and_chamfers() {
     let removed = 0.5 * 2.0 * PI * (10.0 - 1.0 / 3.0);
     assert!((v1 - v2 - removed).abs() < 0.02 * removed, "{} {}", v1 - v2, removed);
 }
+
+#[test]
+fn trimmed_revolved_faces_measure_exactly() {
+    use solvecraft_geom::Seg2;
+    use std::f64::consts::FRAC_PI_2;
+    // A slot with concave ends sketched on the plane x = 12.5, cut 4 deep into a revolved shaft
+    // of radius 12.5 (the cut faces' triangulation spans wide angles unless refined).
+    let segs = vec![
+        Seg2::Arc { center: Vec2::new(-45.0, 0.0), radius: 4.0, start: FRAC_PI_2, sweep: PI },
+        Seg2::Line { a: Vec2::new(-45.0, -4.0), b: Vec2::new(-75.0, -4.0) },
+        Seg2::Arc { center: Vec2::new(-75.0, 0.0), radius: 4.0, start: -FRAC_PI_2, sweep: PI },
+        Seg2::Line { a: Vec2::new(-75.0, 4.0), b: Vec2::new(-45.0, 4.0) },
+    ];
+    let pl = Plane::new(Vec3::new(12.5, 0.0, 0.0), Vec3::new(0.0, 0.0, -1.0), Vec3::Y).unwrap();
+    let tool = extrude(&pl, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], -4.0, 1.0).unwrap().pop().unwrap();
+    let pts = [(0.0, 0.0), (10.0, 0.0), (10.0, -30.0), (12.5, -30.0), (12.5, -90.0), (10.0, -90.0), (10.0, -120.0), (0.0, -120.0)];
+    let segs = (0..8).map(|i| Seg2::Line { a: Vec2::new(pts[i].0, pts[i].1), b: Vec2::new(pts[(i + 1) % 8].0, pts[(i + 1) % 8].1) }).collect();
+    let xz = Plane::new(Vec3::ZERO, Vec3::X, Vec3::new(0.0, 0.0, -1.0)).unwrap();
+    let shaft = revolve(&xz, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], Vec2::ZERO, Vec2::new(0.0, -1.0), 2.0 * PI).unwrap().pop().unwrap();
+    let c = boolean(&shaft, &tool, BoolOp::Cut).unwrap().unwrap();
+    // Removed: ∫∫ over the slot of (√(12.5² − y²) − 8.5), by a fine midpoint rule.
+    let (n, mut want) = (800, 0.0);
+    for i in 0..n {
+        let z = 30.0 + 60.0 * (i as f64 + 0.5) / n as f64;
+        for j in 0..n {
+            let y = -4.0 + 8.0 * (j as f64 + 0.5) / n as f64;
+            if (45.0..=75.0).contains(&z) && (z - 45.0).powi(2) + y * y >= 16.0 && (z - 75.0).powi(2) + y * y >= 16.0 {
+                want += ((156.25 - y * y).sqrt() - 8.5) * (60.0 / n as f64) * (8.0 / n as f64);
+            }
+        }
+    }
+    let got = measure(&shaft).unwrap().volume - measure(&c).unwrap().volume;
+    assert!((got - want).abs() < 0.01 * want, "removed {got}, want {want}");
+}

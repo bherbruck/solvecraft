@@ -79,13 +79,13 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         });
     }
     let size = b.size();
-    let coarse = b.tessellate((size * 1e-3).max(1e-3))?;
+    let coarse = b.tessellate_with((size * 1e-3).max(1e-3), true)?;
     // Chord error relative to a radius sets the volume error: keep it near 3e-4 of the
     // smallest radius (thin tubes, small fillets).
     let tight = min_edge_radius(&coarse).map(|r| r * 3e-4).unwrap_or(f64::INFINITY);
     let fine_tol = (size * 5e-5).min(tight).max(size * 5e-6).max(1e-4);
-    let fine = b.tessellate(fine_tol)?;
-    let medium = b.tessellate((fine_tol * 5.0).max(2e-4))?;
+    let fine = b.tessellate_with(fine_tol, true)?;
+    let medium = b.tessellate_with((fine_tol * 5.0).max(2e-4), true)?;
     let nf = b.face_count();
     let (sf, sm, sc) = (face_sums(&fine, nf), face_sums(&medium, nf), face_sums(&coarse, nf));
     let close = |x: f64, y: f64| (x - y).abs() <= 0.01 * x.abs().max(y.abs()) + 1e-9;
@@ -114,6 +114,6 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         edges: b.edge_count(),
         vertices: b.vertex_count(),
         shells: b.shell_count(),
-        merged: merged_topology(b, &coarse)?,
+        merged: merged_topology(b, &b.tessellate((size * 1e-3).max(1e-3))?)?,
     })
 }

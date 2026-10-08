@@ -56,6 +56,102 @@ fn mesh_shells(solid: &Solid, tol: f64) -> Vec<MeshedShell> {
         .collect()
 }
 
+/// A face's triangles (corner positions and normals, in the mesh's winding) with every edge
+/// whose middle sags more than `tol` from the surface split there, found through the mesh's
+/// surface parameters. A split depends on the edge alone, so neighbours stay conforming.
+/// `None` when nothing needs splitting or the parameters don't match the surface.
+#[allow(clippy::type_complexity)]
+fn refined(pm: &PolygonMesh, surf: &mt::Surface, tol: f64) -> Option<Vec<[(Vec3, Vec3); 3]>> {
+    use mt::{ParametricSurface, ParametricSurface3D};
+    let (pos, uvs, nor) = (pm.positions(), pm.uv_coords(), pm.normals());
+    if uvs.is_empty() {
+        return None;
+    }
+    type V = (Vec3, (f64, f64), Vec3);
+    let mut tris: Vec<[V; 3]> = Vec::new();
+    for tri in pm.faces().triangle_iter() {
+        let mut t = [(Vec3::ZERO, (0.0, 0.0), Vec3::Z); 3];
+        for (slot, v) in t.iter_mut().zip(tri.iter()) {
+            let p = pos.get(v.pos)?;
+            let uv = uvs.get(v.uv?)?;
+            let n = v.nor.and_then(|i| nor.get(i)).map(|n| Vec3::new(n.x, n.y, n.z)).unwrap_or(Vec3::Z);
+            *slot = (Vec3::new(p.x, p.y, p.z), (uv.x, uv.y), n);
+        }
+        tris.push(t);
+    }
+    // The parameters must be the surface's own.
+    let check = tris.iter().take(8).flat_map(|t| t.iter()).all(|(p, (u, v), _)| from_p3(surf.subs(*u, *v)).dist(*p) < tol * 4.0 + 1e-9);
+    if !check || tris.len() > 200_000 {
+        return None;
+    }
+    // Edges on the face's boundary are shared with the next face: never split them.
+    let k = |x: &V| ((x.1.0 * 1e9).round() as i64, (x.1.1 * 1e9).round() as i64);
+    let ek = |a: &V, b: &V| if k(a) < k(b) { (k(a), k(b)) } else { (k(b), k(a)) };
+    let mut changed = false;
+    for _ in 0..4 {
+        let mut uses: std::collections::HashMap<((i64, i64), (i64, i64)), u32> = std::collections::HashMap::new();
+        for [a, b, c] in &tris {
+            for e in [ek(a, b), ek(b, c), ek(c, a)] {
+                *uses.entry(e).or_default() += 1;
+            }
+        }
+        let at = |a: &V, b: &V| -> Option<V> {
+            if uses.get(&ek(a, b)).copied().unwrap_or(0) < 2 {
+                return None;
+            }
+            // Not at a degenerate point (a cone's apex: its parameters there are arbitrary).
+            let singular = |x: &V| {
+                let (du, dv) = (surf.uder(x.1.0, x.1.1), surf.vder(x.1.0, x.1.1));
+                let c = du.cross(dv);
+                c.x * c.x + c.y * c.y + c.z * c.z
+                    <= 1e-12 * (du.x * du.x + du.y * du.y + du.z * du.z + dv.x * dv.x + dv.y * dv.y + dv.z * dv.z).powi(2) + 1e-300
+            };
+            if singular(a) || singular(b) {
+                return None;
+            }
+            let (u, v) = ((a.1.0 + b.1.0) / 2.0, (a.1.1 + b.1.1) / 2.0);
+            let q = from_p3(surf.subs(u, v));
+            // Within tolerance, or so far off that the parameters wrapped (a seam).
+            let sag = q.dist((a.0 + b.0) * 0.5);
+            if sag <= tol || sag >= 0.5 * a.0.dist(b.0) {
+                return None;
+            }
+            let n = surf.normal(u, v);
+            let mut n = Vec3::new(n.x, n.y, n.z);
+            // Keep the mesh's normal side.
+            if n.dot(a.2 + b.2) < 0.0 {
+                n = -n;
+            }
+            Some((q, (u, v), n))
+        };
+        let mut next = Vec::with_capacity(tris.len());
+        let mut any = false;
+        for t in &tris {
+            let [a, b, c] = t;
+            let m = [at(a, b), at(b, c), at(c, a)];
+            any |= m.iter().any(Option::is_some);
+            match m {
+                [None, None, None] => next.push(*t),
+                [Some(x), Some(y), Some(z)] => {
+                    next.extend([[*a, x, z], [x, *b, y], [z, y, *c], [x, y, z]]);
+                }
+                [Some(x), None, None] => next.extend([[*a, x, *c], [x, *b, *c]]),
+                [None, Some(y), None] => next.extend([[*a, *b, y], [*a, y, *c]]),
+                [None, None, Some(z)] => next.extend([[*a, *b, z], [z, *b, *c]]),
+                [Some(x), Some(y), None] => next.extend([[*a, x, *c], [x, *b, y], [x, y, *c]]),
+                [None, Some(y), Some(z)] => next.extend([[*a, *b, z], [z, *b, y], [z, y, *c]]),
+                [Some(x), None, Some(z)] => next.extend([[*a, x, z], [x, *b, *c], [x, *c, z]]),
+            }
+        }
+        tris = next;
+        changed |= any;
+        if !any || tris.len() > 400_000 {
+            break;
+        }
+    }
+    changed.then(|| tris.into_iter().map(|t| t.map(|(p, _, n)| (p, n))).collect())
+}
+
 /// Revolved surfaces are periodic in their angle; a face whose angles start at 0 is found at 0
 /// or 2π, which confuses the boolean's loop projection. Each revolved face's surface is turned
 /// (same geometry) so the face sits around angle π, well away from the wrap.
@@ -217,6 +313,12 @@ impl Body {
 
     /// Triangulate with chord tolerance `tol` (mm). Triangles carry their face index.
     pub fn tessellate(&self, tol: f64) -> Result<Mesh> {
+        self.tessellate_with(tol, false)
+    }
+
+    /// Like [`Body::tessellate`]; with `refine`, triangles that cut through curved faces are
+    /// split until within `tol` of the surface (for measuring).
+    pub fn tessellate_with(&self, tol: f64, refine: bool) -> Result<Mesh> {
         let tol = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
         let tol = tol.max(self.size() * 1e-6);
         if let Some(m) = &self.mesh {
@@ -225,10 +327,30 @@ impl Body {
         guard("tessellate", || {
             let meshed = mesh_shells(&self.solid, tol);
             let mut out = Mesh::default();
+            let solid_faces: Vec<&mt::Face> = self.solid.face_iter().collect();
             for (fi, face) in meshed.iter().flat_map(|s| s.face_iter()).enumerate() {
                 let Some(pm) = face.surface() else { continue };
                 let flip = !face.orientation();
                 let base = u32::try_from(out.positions.len()).unwrap_or(u32::MAX);
+                // Curved faces: split triangles that cut through the surface.
+                if refine
+                    && let Some(sf) = solid_faces.get(fi)
+                    && !matches!(sf.surface(), mt::Surface::Plane(_))
+                    && let Some(tris) = refined(&pm, &sf.surface(), tol)
+                {
+                    let fid = u32::try_from(fi).unwrap_or(u32::MAX);
+                    for t in tris {
+                        let mut idx = [0u32; 3];
+                        for (slot, (p, n)) in idx.iter_mut().zip(t) {
+                            out.positions.push(p);
+                            out.normals.push(if flip { -n } else { n });
+                            *slot = u32::try_from(out.positions.len() - 1).unwrap_or(0);
+                        }
+                        out.triangles.push(if flip { [idx[0], idx[2], idx[1]] } else { idx });
+                        out.tri_face.push(fid);
+                    }
+                    continue;
+                }
                 let pos = pm.positions();
                 let nor = pm.normals();
                 // Expand to per-corner vertices so normals stay per face (crisp edges).

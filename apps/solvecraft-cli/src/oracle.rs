@@ -104,7 +104,7 @@ fn step_export_check(s: &solvecraft_engine::Session, volume: f64) -> (bool, Stri
             let faces0: usize = st.bodies.iter().map(|b| b.body.face_count()).sum();
             let close = |x: f64, y: f64| (x - y).abs() <= REL_TOL * y.abs().max(1.0);
             let ok = close(v, volume) && close(a, a0) && faces == faces0;
-            (ok, format!("re-imported volume {v:.3}, area {a:.3} (was {a0:.3}), faces {faces} (was {faces0})"))
+            (ok, format!("re-imported volume {v:.3} (was {volume:.3}), area {a:.3} (was {a0:.3}), faces {faces} (was {faces0})"))
         }
         Err(e) => (false, format!("import: {e}")),
     }
