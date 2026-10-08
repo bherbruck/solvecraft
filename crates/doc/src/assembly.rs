@@ -193,6 +193,13 @@ impl FeatureKind {
             FeatureKind::Thread { face, .. } => pt(face),
             FeatureKind::SheetFlange { edges, .. } | FeatureKind::SheetHem { edges, .. } => edges.iter_mut().for_each(pt),
             FeatureKind::SheetConvert { face, .. } => pt(face),
+            FeatureKind::SheetFold { a, b, fixed, .. } => {
+                pt(a);
+                pt(b);
+                if let Some(f) = fixed {
+                    pt(f);
+                }
+            }
             FeatureKind::Boss { position, direction, .. } => {
                 pt(position);
                 dir(direction);

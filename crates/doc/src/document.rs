@@ -460,6 +460,28 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<String>,
     },
+    /// Fold a sheet along a line on its base face: a sketch line (followed when the sketch
+    /// changes), else the points `a`, `b`.
+    SheetFold {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        curve: Option<String>,
+        a: Vec3,
+        b: Vec3,
+        angle: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radius: Option<String>,
+        /// centerline | start | end | mould
+        position: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// A point on the side that stays put (default: the larger side).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fixed: Option<Vec3>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
     /// Unfold a sheet body flat (all bends), or refold it.
     SheetUnfold {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -742,6 +764,7 @@ impl FeatureKind {
                 | FeatureKind::SheetContour { .. }
                 | FeatureKind::SheetFlange { .. }
                 | FeatureKind::SheetHem { .. }
+                | FeatureKind::SheetFold { .. }
                 | FeatureKind::SheetUnfold { .. }
                 | FeatureKind::SheetConvert { .. }
         )
@@ -787,6 +810,7 @@ impl FeatureKind {
             FeatureKind::SheetContour { .. } => "ContourFlangeFeature",
             FeatureKind::SheetFlange { .. } => "EdgeFlangeFeature",
             FeatureKind::SheetHem { .. } => "HemFeature",
+            FeatureKind::SheetFold { .. } => "FoldFeature",
             FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
             FeatureKind::SheetUnfold { .. } => "RefoldFeature",
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
@@ -840,6 +864,7 @@ impl FeatureKind {
             FeatureKind::SheetContour { .. } => "ContourFlange",
             FeatureKind::SheetFlange { .. } => "EdgeFlange",
             FeatureKind::SheetHem { .. } => "Hem",
+            FeatureKind::SheetFold { .. } => "Fold",
             FeatureKind::SheetUnfold { refold: false, .. } => "Unfold",
             FeatureKind::SheetUnfold { .. } => "Refold",
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetal",
@@ -944,6 +969,10 @@ impl FeatureKind {
             FeatureKind::SheetContour { distance, .. } => v.push(distance),
             FeatureKind::SheetFlange { height, angle, radius, .. } => {
                 v.extend([height.as_str(), angle]);
+                v.extend(radius.iter().map(String::as_str));
+            }
+            FeatureKind::SheetFold { angle, radius, .. } => {
+                v.push(angle);
                 v.extend(radius.iter().map(String::as_str));
             }
             FeatureKind::SheetHem { length, gap, .. } => {
@@ -1275,6 +1304,7 @@ impl Document {
                 FeatureKind::Pattern { pattern: PatternKind::Path { path_sketch, .. }, .. } if *path_sketch == id => gone.push(f.id),
                 FeatureKind::Emboss { sketch, .. } | FeatureKind::Rib { sketch, .. } if *sketch == id => gone.push(f.id),
                 FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } if *sketch == id => gone.push(f.id),
+                FeatureKind::SheetFold { sketch: Some(s), .. } if *s == id => gone.push(f.id),
                 _ => {}
             }
         }

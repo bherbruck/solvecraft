@@ -22,6 +22,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SHEET METAL", "CREATE")
         .icon("hem")
         .params("edges: [[x,y,z] on sheet edges]; length (to the outer face); gap? (inner radius, default: rule); flip?; body?"),
+    CommandSpec::new("SheetMetalFoldCmd", "Fold", fold).at("SHEET METAL", "CREATE").icon("fold").params(
+        "line: sketch + curve (a sketch line on the sheet's base face; followed when the sketch changes) or points: [[x,y,z], [x,y,z]]; \
+         angle? (default 90 deg); radius? (default: rule); position?: centerline|start|end|mould (where the line sits in the bend, default centerline); \
+         fixed?: [x,y,z] on the side that stays (default: the larger side); flip? (fold the other way); body?",
+    ),
     CommandSpec::new("FusionSheetmetalUnfoldCommand", "Unfold", unfold).at("SHEET METAL", "MODIFY").icon("unfold").params("body? (default: the last sheet body) — all bends"),
     CommandSpec::new("sheet.refold", "Refold", refold).at("SHEET METAL", "MODIFY").icon("refold").params("body? (default: the last unfolded sheet)"),
     CommandSpec::new("ConvertToSheetMetalCmd", "Convert to Sheet Metal", convert)
@@ -131,6 +136,48 @@ fn hem(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::SheetHem { edges, length, gap, flip: bool_(p, "flip").unwrap_or(false), body: str_(p, "body").map(str::to_string) },
     )
+}
+
+fn fold(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "SheetMetalFoldCmd";
+    let (sketch, curve, a, b) = match p.get("points") {
+        Some(v) => {
+            let pts = v.as_array().map(|a| a.iter().filter_map(vec3).collect::<Vec<Vec3>>()).unwrap_or_default();
+            let [a, b] = pts[..] else { return Err(bad(cmd, "`points` must be two points [x, y, z]")) };
+            (None, None, a, b)
+        }
+        None => {
+            let sk = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
+            let c = str_(p, "curve").ok_or_else(|| bad(cmd, "give `sketch` + `curve` (a sketch line) or `points`"))?.to_string();
+            let st = s.model.state();
+            let ss = st.sketch(sk).ok_or_else(|| bad(cmd, "no such sketch"))?;
+            let ci = ss.sketch.curve_index(&c).ok_or_else(|| bad(cmd, format!("no curve `{c}` in the sketch")))?;
+            let (a, b) = match ss.sketch.segs(ci).as_slice() {
+                [solvecraft_geom::Seg2::Line { a, b }] => (ss.plane.to_world(*a), ss.plane.to_world(*b)),
+                _ => return Err(bad(cmd, "the fold line must be a sketch line")),
+            };
+            (Some(sk), Some(c), a, b)
+        }
+    };
+    if a.dist(b) < 1e-9 {
+        return Err(bad(cmd, "the fold line has no length"));
+    }
+    let angle = expr(p, "angle").unwrap_or_else(|| "90 deg".into());
+    check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
+    let radius = expr(p, "radius");
+    if let Some(r) = &radius {
+        check_expr(s, r, Kind::Length, cmd, "radius")?;
+    }
+    let position = str_(p, "position").unwrap_or("centerline").to_ascii_lowercase();
+    if !matches!(position.as_str(), "centerline" | "start" | "end" | "mould" | "mold") {
+        return Err(bad(cmd, "`position` must be centerline, start, end or mould"));
+    }
+    let fixed = match p.get("fixed") {
+        Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`fixed` must be a point [x, y, z]"))?),
+        None => None,
+    };
+    let body = str_(p, "body").map(str::to_string);
+    add_feature(s, p, FeatureKind::SheetFold { sketch, curve, a, b, angle, radius, position, flip: bool_(p, "flip").unwrap_or(false), fixed, body })
 }
 
 fn unfold(s: &mut Session, p: &Value) -> Result<Value> {

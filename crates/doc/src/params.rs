@@ -187,6 +187,12 @@ impl FeatureKind {
                     v.push(("Bend radius", r, L));
                 }
             }
+            FeatureKind::SheetFold { angle, radius, .. } => {
+                v.push(("Angle", angle, A));
+                if let Some(r) = radius {
+                    v.push(("Bend radius", r, L));
+                }
+            }
             FeatureKind::SheetHem { length, gap, .. } => {
                 v.push(("Length", length, L));
                 if let Some(g) = gap {

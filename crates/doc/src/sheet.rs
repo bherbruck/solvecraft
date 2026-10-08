@@ -156,6 +156,10 @@ pub struct SheetFlange {
     /// The panel runs on past the bend's ends by these (toward a neighbouring flange).
     #[serde(default)]
     pub ext: (f64, f64),
+    /// A fold's panel: the part of the sheet past the bend (flat coordinates, counter-clockwise)
+    /// instead of a rectangle `leg` long.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<Vec<Vec2>>,
 }
 
 /// A sheet metal body (see the module docs).
@@ -318,6 +322,9 @@ impl SheetBody {
 
     /// Flat region of a flange's panel.
     pub fn panel(&self, f: &SheetFlange) -> Region2 {
+        if let Some(sh) = &f.shape {
+            return Region2 { outer: Loop2::polygon(sh).ccw(), holes: Vec::new() };
+        }
         let ba = self.allowance(f);
         let a = f.p + f.n * ba - f.d * f.ext.0;
         let b = f.p + f.n * ba + f.d * (f.len + f.ext.1);
@@ -831,6 +838,7 @@ impl SheetBody {
                 angle: if up { angle } else { -angle },
                 radius,
                 leg: leg.max(0.0),
+                shape: None,
                 ext: (0.0, 0.0),
             });
             made.push(self.flanges.len() - 1);
@@ -896,8 +904,113 @@ impl SheetBody {
             radius: gap,
             leg,
             ext: (0.0, 0.0),
+            shape: None,
         });
         Ok(self.flanges.len() - 1)
+    }
+
+    /// Fold the base panel along a line on its top or bottom face (world points `a`, `b`).
+    /// The bend zone (width BA = θ·(R + K·T)) is taken out of the existing sheet, so the flat
+    /// pattern keeps its size; `position` puts the line at the zone's centre (`centerline`),
+    /// start or end (`start`/`end`, from the fixed side), or on the mould line (`mould`: where
+    /// the outer faces meet, so the fixed side measures the same to it folded as flat).
+    /// The side holding `fixed` (default: the larger side) stays put; `flip` folds the other way.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_fold(&mut self, a: Vec3, b: Vec3, angle: f64, radius: f64, position: &str, flip: bool, fixed: Option<Vec3>) -> Result<usize> {
+        if !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6) {
+            return Err(DocError::Invalid("the fold angle must be between 0 and 180°".into()));
+        }
+        if !(radius >= 0.0) {
+            return Err(DocError::Invalid("the bend radius must not be negative".into()));
+        }
+        let inv = mat_inverse(&self.world(None)).ok_or_else(|| DocError::Invalid("sheet frame".into()))?;
+        let (fa, fb) = (apply_point(&inv, a), apply_point(&inv, b));
+        let on_face = |q: Vec3| q.z.abs() < 1e-4 || (q.z - self.t).abs() < 1e-4;
+        if !(on_face(fa) && on_face(fb)) {
+            return Err(DocError::Invalid("the fold line must lie on the base face of the sheet (folds on flanges are not supported yet)".into()));
+        }
+        let (a2, b2) = (Vec2::new(fa.x, fa.y), Vec2::new(fb.x, fb.y));
+        let d = (b2 - a2).normalized().ok_or_else(|| DocError::Invalid("the fold line has no length".into()))?;
+        let pts = dedup(&self.base.outer.ccw().polyline(1e-3));
+        let mut n = Vec2::new(-d.y, d.x);
+        let l0 = a2.dot(n);
+        // Which side moves: away from `fixed`, else the smaller side.
+        let side_area = |n: Vec2| signed_area(&clip(&pts, n * l0, n)).abs();
+        let moves_n = match fixed {
+            Some(p) => {
+                let q = apply_point(&inv, p);
+                Vec2::new(q.x, q.y).dot(n) < l0
+            }
+            None => side_area(n) <= side_area(n * -1.0),
+        };
+        if !moves_n {
+            n = n * -1.0;
+        }
+        let l = a2.dot(n);
+        let probe = SheetFlange { parent: None, p: a2, d, len: 1.0, n, angle, radius, leg: 0.0, ext: (0.0, 0.0), shape: None };
+        let ba = self.allowance(&probe);
+        let s0 = match position {
+            "centerline" | "center" | "centre" => l - ba / 2.0,
+            "start" => l,
+            "end" => l - ba,
+            "mould" | "mold" => l - (radius + self.t) * (angle / 2.0).tan(),
+            o => return Err(DocError::Invalid(format!("unknown fold position `{o}` (centerline, start, end or mould)"))),
+        };
+        let fixed_part = clip(&pts, n * s0, n * -1.0);
+        let moving = clip(&pts, n * (s0 + ba), n);
+        let strip = clip(&clip(&pts, n * s0, n), n * (s0 + ba), n * -1.0);
+        if signed_area(&fixed_part).abs() < 1e-9 || signed_area(&moving).abs() < 1e-9 {
+            return Err(DocError::Invalid("the fold line must cross the sheet with material on both sides of the bend".into()));
+        }
+        // The bend zone must be a rectangle across the sheet.
+        let us: Vec<f64> = strip.iter().map(|q| q.dot(d)).collect();
+        let (u0, u1) = (us.iter().cloned().fold(f64::MAX, f64::min), us.iter().cloned().fold(f64::MIN, f64::max));
+        if ((u1 - u0) * ba - signed_area(&strip).abs()).abs() > 1e-6 * (u1 - u0).max(1.0) * ba.max(1.0) {
+            return Err(DocError::Invalid("not supported yet: folds whose bend zone crosses a slanted or curved edge of the sheet".into()));
+        }
+        if self.holes.iter().any(|h| {
+            let hp = dedup(&h.outer.ccw().polyline(1e-3));
+            hp.iter().any(|q| point_in(&strip, *q)) || polys_cross(&strip, &hp)
+        }) {
+            return Err(DocError::Invalid("not supported yet: folds through a cut-out".into()));
+        }
+        let up = !flip;
+        let leg = moving.iter().map(|q| q.dot(n) - s0 - ba).fold(0.0, f64::max);
+        let p0 = n * s0 + d * u0;
+        let mut ccw = moving.clone();
+        if signed_area(&ccw) < 0.0 {
+            ccw.reverse();
+        }
+        self.base = Region2 { outer: Loop2::polygon(&fixed_part).ccw(), holes: self.base.holes.clone() };
+        self.flanges.push(SheetFlange {
+            parent: None,
+            p: snap(p0),
+            d,
+            len: u1 - u0,
+            n,
+            angle: if up { angle } else { -angle },
+            radius,
+            leg,
+            ext: (0.0, 0.0),
+            shape: Some(ccw.into_iter().map(snap).collect()),
+        });
+        let i = self.flanges.len() - 1;
+        // Flanges on the moving part's edges now hang off the fold and move with it.
+        for k in 0..i {
+            let Some(f) = self.flanges.get(k) else { continue };
+            if f.parent.is_some() {
+                continue;
+            }
+            let (e0, e1) = ((f.p - p0).dot(n), (f.p + f.d * f.len - p0).dot(n));
+            if e0.min(e1) >= ba - 1e-9 {
+                if let Some(f) = self.flanges.get_mut(k) {
+                    f.parent = Some(i);
+                }
+            } else if e0.max(e1) > 1e-9 {
+                return Err(DocError::Invalid("not supported yet: a fold through a flange's bend".into()));
+            }
+        }
+        Ok(i)
     }
 
     /// Map a region in a world plane to flat coordinates through a panel's placement.
@@ -1179,6 +1292,7 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
             radius: r,
             leg: leg.max(0.0),
             ext: (0.0, 0.0),
+            shape: None,
         };
         let ba = sheet.allowance(&f);
         sheet.flanges.push(f);

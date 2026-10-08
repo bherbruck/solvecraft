@@ -49,6 +49,7 @@ impl FeatureKind {
                 sk(path_sketch);
             }
             FeatureKind::Pipe { path_sketch, .. } => sk(path_sketch),
+            FeatureKind::SheetFold { sketch: Some(s), .. } => sk(s),
             FeatureKind::Loft { sections, .. } => sections.iter_mut().for_each(|s| sk(&mut s.sketch)),
             FeatureKind::Hole { points: Some(p), .. } => sk(&mut p.sketch),
             FeatureKind::Pattern { features, pattern, .. } => {

@@ -141,3 +141,95 @@ fn unfold_cut_refold_and_convert() {
     run(&mut t, "PrimitiveCylinder", json!({"radius": 10, "height": 30, "body_name": "Rod"}));
     assert!(t.execute("ConvertToSheetMetalCmd", &json!({"body": "Rod", "face": [0, 0, 30]})).is_err());
 }
+
+/// A sketch line across a 100 x 60 plate's top face at x = 40.
+fn fold_line(s: &mut Session) {
+    run(s, "SketchCreate", json!({"plane": "XY", "offset": 2.5, "name": "FoldLine"}));
+    run(s, "DrawPolyline", json!({"points": [[40, 0], [40, 60]], "ids": ["fl"]}));
+    run(s, "SketchStop", json!({}));
+}
+
+fn bbox(s: &mut Session) -> Value {
+    run(s, "MeasureCommand", json!({}))["bodies"][0]["bbox"].clone()
+}
+
+#[test]
+fn fold_takes_the_bend_out_of_the_flat_sheet() {
+    let (t, r, k) = (2.5, 2.5, 0.44);
+    let ba = FRAC_PI_2 * (r + k * t);
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    fold_line(&mut s);
+    run(&mut s, "SheetMetalFoldCmd", json!({"sketch": "FoldLine", "curve": "fl"}));
+    // The flat pattern keeps its size; the bend's centre line is the sketch line.
+    let f = flat(&mut s);
+    assert!((f["flat_size_mm"][0].as_f64().unwrap_or(0.0) - 100.0).abs() < 1e-6, "{f}");
+    assert!((f["flat_size_mm"][1].as_f64().unwrap_or(0.0) - 60.0).abs() < 1e-6, "{f}");
+    assert!((f["bends"][0]["allowance"].as_f64().unwrap_or(0.0) - ba).abs() < 1e-9, "{f}");
+    // Folded: the zone's flat volume BA·T·w becomes the bend's θ·T·(R + T/2)·w.
+    let want = 15000.0 - ba * t * 60.0 + FRAC_PI_2 * t * (r + t / 2.0) * 60.0;
+    assert!(rel(volume(&mut s), want) < 1e-4, "{} {want}", volume(&mut s));
+    // The smaller side (x < 40) stands up: outer face at the zone start less R + T, leg 40 − BA/2
+    // tall above the bend.
+    let b = bbox(&mut s);
+    assert!((b["min"][0].as_f64().unwrap_or(0.0) - (40.0 + ba / 2.0 - r - t)).abs() < 1e-6, "{b}");
+    assert!((b["max"][2].as_f64().unwrap_or(0.0) - (t + r + 40.0 - ba / 2.0)).abs() < 1e-6, "{b}");
+    assert!((b["max"][0].as_f64().unwrap_or(0.0) - 100.0).abs() < 1e-6, "{b}");
+}
+
+#[test]
+fn fold_positions_fixed_side_and_flip() {
+    let (t, r, k) = (2.5, 2.5, 0.44);
+    let ba = FRAC_PI_2 * (r + k * t);
+    let case = |p: Value| {
+        let mut s = Session::default();
+        base(&mut s, 100.0, 60.0);
+        fold_line(&mut s);
+        let mut q = json!({"sketch": "FoldLine", "curve": "fl"});
+        for (k, v) in p.as_object().into_iter().flatten() {
+            q[k] = v.clone();
+        }
+        run(&mut s, "SheetMetalFoldCmd", q);
+        bbox(&mut s)
+    };
+    let x0 = |b: &Value| b["min"][0].as_f64().unwrap_or(f64::NAN);
+    // Start: the bend starts at the line (on the fixed side), so the folded outer face is R + T
+    // short of it. End: the bend ends there. Mould: the outer face lands on the line.
+    assert!((x0(&case(json!({"position": "start"}))) - (40.0 - r - t)).abs() < 1e-6);
+    assert!((x0(&case(json!({"position": "end"}))) - (40.0 + ba - r - t)).abs() < 1e-6);
+    assert!((x0(&case(json!({"position": "mould"}))) - 40.0).abs() < 1e-6);
+    // Keep the small side: the large one (x > 40) stands up instead.
+    let b = case(json!({"fixed": [10, 30, 2.5]}));
+    assert!((b["max"][0].as_f64().unwrap_or(0.0) - (40.0 - ba / 2.0 + r + t)).abs() < 1e-6, "{b}");
+    assert!((b["max"][2].as_f64().unwrap_or(0.0) - (t + r + 60.0 - ba / 2.0)).abs() < 1e-6, "{b}");
+    // Flipped: folds down, below the sheet.
+    let b = case(json!({"flip": true}));
+    assert!((b["min"][2].as_f64().unwrap_or(0.0) + (r + 40.0 - ba / 2.0)).abs() < 1e-6, "{b}");
+    // A 45° fold: the leg leans.
+    let b = case(json!({"angle": "45 deg"}));
+    assert!(b["max"][2].as_f64().unwrap_or(0.0) < t + r + 40.0 - ba / 2.0);
+}
+
+#[test]
+fn fold_carries_flanges_on_the_moving_side() {
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    // A flange on the left edge, then a fold between it and the rest.
+    run(&mut s, "FusionSheetMetalFlangeCommand", json!({"edges": [[0, 30, 2.5]], "height": 20}));
+    let v0 = volume(&mut s);
+    fold_line(&mut s);
+    run(&mut s, "SheetMetalFoldCmd", json!({"sketch": "FoldLine", "curve": "fl", "fixed": [90, 30, 2.5]}));
+    // The flange rode along: it is above the plate now, nothing left at z < 0.
+    let b = bbox(&mut s);
+    assert!(b["min"][2].as_f64().unwrap_or(-1.0) > -1e-6, "{b}");
+    let ba = FRAC_PI_2 * (2.5 + 0.44 * 2.5);
+    let want = v0 - ba * 2.5 * 60.0 + FRAC_PI_2 * 2.5 * (2.5 + 1.25) * 60.0;
+    assert!(rel(volume(&mut s), want) < 1e-4, "{} {want}", volume(&mut s));
+    assert!(flat(&mut s)["bends"].as_array().map(Vec::len) == Some(2));
+    // Errors: off the sheet, through the flange's bend.
+    let mut e = Session::default();
+    base(&mut e, 100.0, 60.0);
+    assert!(e.execute("SheetMetalFoldCmd", &json!({"points": [[40, 0, 30], [40, 60, 30]]})).is_err());
+    assert!(e.execute("SheetMetalFoldCmd", &json!({"points": [[40, 0, 2.5], [40, 60, 2.5]], "position": "sideways"})).is_err());
+    assert!(e.execute("SheetMetalFoldCmd", &json!({"points": [[0.5, 0, 2.5], [0.5, 60, 2.5]]})).is_err(), "no material past the bend");
+}

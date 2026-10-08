@@ -368,6 +368,35 @@ pub(super) fn sheet_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Fea
             }
             rebuild_sheet(st, i)
         }
+        FeatureKind::SheetFold { sketch, curve, a, b, angle, radius, position, flip, fixed, body } => {
+            // The sketch line, where it is now.
+            let (a, b) = match (sketch, curve) {
+                (Some(sk), Some(c)) => {
+                    let ss = st.sketch(*sk).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
+                    let ci = ss.sketch.curve_index(c).ok_or_else(|| DocError::Unknown(format!("curve `{c}`")))?;
+                    match ss.sketch.segs(ci).as_slice() {
+                        [Seg2::Line { a, b }] => (ss.plane.to_world(*a), ss.plane.to_world(*b)),
+                        _ => return Err(DocError::Invalid("the fold line must be a sketch line".into())),
+                    }
+                }
+                _ => (*a, *b),
+            };
+            let i = sheet_for(st, body, Some((a + b) * 0.5))?;
+            let ang = val(vals, angle, Kind::Angle)?;
+            let rr = match radius {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => {
+                    let rule = st.sheets.get(i).map(|s| s.rule.clone()).unwrap_or_default();
+                    doc.rule_values(vals, &doc.sheet_rule(Some(&rule)))?.bend_radius
+                }
+            };
+            let sh = st.sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            if sh.flat {
+                return Err(DocError::Invalid("refold the sheet before folding it".into()));
+            }
+            sh.add_fold(a, b, ang, rr, position, *flip, *fixed)?;
+            rebuild_sheet(st, i)
+        }
         FeatureKind::SheetUnfold { body, refold } => {
             let i = match body {
                 Some(_) => sheet_for(st, body, None)?,
