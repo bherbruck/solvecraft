@@ -15,6 +15,8 @@ pub enum Kind {
     /// Pick sketch entities; `n` picks run the command.
     Pick(usize),
     Dimension,
+    /// A tool from `sketch_tools` (it handles its own clicks).
+    Ext,
 }
 
 #[derive(Clone, Debug)]
@@ -64,7 +66,7 @@ impl Tool {
             "ConstraintMidPoint" => ("ConstraintMidPoint", Kind::Pick(2)),
             "ConstraintSymmetry" => ("ConstraintSymmetry", Kind::Pick(3)),
             "sketch.construction" => ("sketch.construction", Kind::Pick(1)),
-            _ => return None,
+            _ => return crate::sketch_tools::tool_for(id),
         };
         Some(Tool { cmd, kind, pts: Vec::new(), hover: None, picks: Vec::new(), dims: Vec::new(), dims_stage: usize::MAX, dims_focus: false })
     }
@@ -82,7 +84,7 @@ pub fn hint(id: &str) -> String {
         "SketchDimension" => "Dimension: pick a line, circle or arc (or two points/lines)".into(),
         "ShapeSlotCenterToCenter" | "ShapeSlotOverall" => "Slot: click both ends, then the width".into(),
         _ if id.starts_with("Constraint") => "Constraint: pick the sketch entities".into(),
-        _ => "Click in the sketch".into(),
+        _ => crate::sketch_tools::hint(id).unwrap_or_else(|| "Click in the sketch".into()),
     }
 }
 
@@ -131,6 +133,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
                 tool.picks.clear();
             }
         }
+        Kind::Ext => crate::sketch_tools::on_click(app, &mut tool, proj, pos),
         Kind::Dimension => {
             let hits = pick(app, proj, pos);
             let hit = hits.iter().find_map(|h| match h {
@@ -249,6 +252,12 @@ fn run_pick(app: &mut SolveApp, t: &Tool) {
 
 /// Right click / Esc: end the current chain (line) or cancel the tool.
 pub fn finish(app: &mut SolveApp) {
+    if let Some(mut t) = app.tool.take_if(|t| t.kind == Kind::Ext) {
+        if crate::sketch_tools::finish(app, &mut t) {
+            app.tool = Some(t);
+        }
+        return;
+    }
     if let Some(t) = app.tool.as_mut()
         && !t.pts.is_empty()
     {
@@ -261,6 +270,9 @@ pub fn finish(app: &mut SolveApp) {
 
 /// Rubber-band preview of the shape being drawn.
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
+    if t.kind == Kind::Ext {
+        return crate::sketch_tools::preview(app, t, painter, proj);
+    }
     let Some(sid) = app.session.active_sketch else { return };
     let st = app.session.model.state();
     let Some(ss) = st.sketch(sid) else { return };

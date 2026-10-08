@@ -956,6 +956,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::tools::preview(app, tl, &painter, &proj);
     }
     crate::canvas::show(app, ui, &painter, &proj);
+    crate::sketch_tools::show(app, ui, &painter, &proj);
     crate::sketch_dims::show(app, ui, &proj);
     view_cube(app, ui, rect);
     nav_bar(app, ui, rect);
@@ -1133,6 +1134,9 @@ fn overlays(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     let Some(ss) = st.sketch(sid) else { return };
     let sk = &ss.sketch;
     for (i, p) in sk.points.iter().enumerate() {
+        if !solvecraft_engine::view::sketch_point_visible(sk, i) {
+            continue;
+        }
         let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)) else { continue };
         let det = ss.report.point_determined.get(i).copied().unwrap_or(false);
         let c = if det { t.sketch_point } else { t.sketch_point_free };

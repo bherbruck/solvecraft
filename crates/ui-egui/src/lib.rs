@@ -21,6 +21,7 @@ pub mod selection;
 pub mod sketch_dims;
 #[cfg(test)]
 mod sketch_edit_tests;
+pub mod sketch_tools;
 pub mod theme;
 pub mod timeline;
 pub mod toolbar;
