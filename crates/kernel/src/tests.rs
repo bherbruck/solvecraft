@@ -1261,3 +1261,18 @@ fn smooth_loft_through_three_sections() {
     let v = measure(&c).unwrap().volume;
     assert!(v > PI * 64.0 * 30.0 && v < 576.0 * 30.0, "{v}");
 }
+
+#[test]
+fn tangent_holes_pinch_alike() {
+    // Holes at ±15 and ±25 touch along a line (x = ±20); ±30 overlaps ±25. The ±25 wall is cut
+    // in two at the pinch, the same way on both sides (as Fusion counts it).
+    let mut b = box_solid(Vec3::new(-50.0, -20.0, 0.0), Vec3::new(50.0, 20.0, 5.0)).unwrap();
+    for x in [15.0, 25.0, 30.0, -15.0, -25.0, -30.0] {
+        let plane = Plane::XY.offset(-1.0);
+        let disc = Region2 { outer: Loop2::circle(Vec2::new(x, 0.0), 5.0), holes: vec![] };
+        let t = extrude(&plane, &[disc], 0.0, 7.0).unwrap().pop().unwrap();
+        b = boolean(&b, &t, BoolOp::Cut).unwrap().unwrap();
+    }
+    let m = measure(&b).unwrap();
+    assert_eq!(m.merged.faces, 14, "{:?}", m.merged);
+}

@@ -355,6 +355,20 @@ fn classify_faces(mesh: &Mesh, nf: usize, tol: f64) -> Vec<Surf> {
 }
 
 /// Merged face/edge/vertex counts (see module docs). `mesh` must be `b.tessellate(..)`.
+/// The point halfway along a polyline (by length).
+fn halfway(pl: &[Vec3]) -> Option<Vec3> {
+    let total: f64 = pl.windows(2).map(|w| w[0].dist(w[1])).sum();
+    let mut left = total * 0.5;
+    for w in pl.windows(2) {
+        let l = w[0].dist(w[1]);
+        if l >= left && l > 0.0 {
+            return Some(w[0] + (w[1] - w[0]) * (left / l));
+        }
+        left -= l;
+    }
+    pl.first().copied()
+}
+
 pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     let solid = &*b.solid;
     let nf = solid.face_iter().count();
@@ -371,34 +385,40 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     let degenerate: Vec<bool> = area.iter().map(|a| *a < (b.size() * 1e-6).powi(2)).collect();
     let is_deg = |f: usize| degenerate.get(f).copied().unwrap_or(false);
 
-    // Edge → faces, edge → vertices.
+    // Edge → faces, edge → vertices. Vertices and edges lying on each other count once (two
+    // tangent holes touch along a line that both bodies' pieces carry): welded by position,
+    // edges by their ends and the point halfway along them.
+    let q = tol * 10.0;
+    let cell = |p: Vec3| ((p.x / q).round() as i64, (p.y / q).round() as i64, (p.z / q).round() as i64);
     let mut edge_faces: HashMap<usize, Vec<usize>> = HashMap::new();
     let mut edge_verts: HashMap<usize, (usize, usize)> = HashMap::new();
+    // Welded edge → a truck edge index (for its sampled polyline in `mesh.edges`).
+    let mut edge_rep: HashMap<usize, usize> = HashMap::new();
     let mut eid: HashMap<String, usize> = HashMap::new();
-    let mut vid: HashMap<String, usize> = HashMap::new();
-    let mut vpos: Vec<Vec3> = Vec::new();
+    let mut weld_e: HashMap<(usize, usize, (i64, i64, i64)), usize> = HashMap::new();
+    let mut weld_v: HashMap<(i64, i64, i64), usize> = HashMap::new();
     for (fi, f) in solid.face_iter().enumerate() {
         for e in f.edge_iter() {
             let key = format!("{:?}", e.id());
             let n = eid.len();
             let ei = *eid.entry(key).or_insert(n);
-            let faces = edge_faces.entry(ei).or_default();
+            let mut vix = |v: &truck_modeling::Vertex| {
+                let n = weld_v.len();
+                *weld_v.entry(cell(from_p3(v.point()))).or_insert(n)
+            };
+            let (a, bb) = (vix(e.front()), vix(e.back()));
+            let mid = mesh.edges.get(ei).and_then(|pl| halfway(pl)).unwrap_or_else(|| (from_p3(e.front().point()) + from_p3(e.back().point())) * 0.5);
+            let n = weld_e.len();
+            let we = *weld_e.entry((a.min(bb), a.max(bb), cell(mid))).or_insert(n);
+            edge_rep.entry(we).or_insert(ei);
+            let faces = edge_faces.entry(we).or_default();
             if !faces.contains(&fi) {
                 faces.push(fi);
             }
-            let mut vix = |v: &truck_modeling::Vertex| {
-                let k = format!("{:?}", v.id());
-                let n = vid.len();
-                let i = *vid.entry(k).or_insert(n);
-                if i == vpos.len() {
-                    vpos.push(from_p3(v.point()));
-                }
-                i
-            };
-            let (a, bb) = (vix(e.front()), vix(e.back()));
-            edge_verts.insert(ei, (a, bb));
+            edge_verts.insert(we, (a, bb));
         }
     }
+    let poly = |we: usize| edge_rep.get(&we).and_then(|ei| mesh.edges.get(*ei));
     // Merge faces. Free-form faces meeting along an edge: smooth by their exact normals.
     let flist: Vec<&truck_modeling::Face> = solid.face_iter().collect();
     let exact_smooth = |a: usize, b: usize, edge: Option<&Vec<Vec3>>| -> bool {
@@ -421,8 +441,8 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     for (ei, faces) in &edge_faces {
         let other = |f: usize| matches!(surfs.get(f), Some(Surf::Other(_)));
         if let [a, b] = faces[..]
-            && (same_surface(&surfs, &verts, mesh.edges.get(*ei), a, b, tol * 10.0)
-                || (other(a) && other(b) && exact_smooth(a, b, mesh.edges.get(*ei)) && {
+            && (same_surface(&surfs, &verts, poly(*ei), a, b, tol * 10.0)
+                || (other(a) && other(b) && exact_smooth(a, b, poly(*ei)) && {
                     let (Some(va), Some(vb)) = (verts.get(a), verts.get(b)) else { return Ok(TopoCounts::default()) };
                     match (cone_signature(va), cone_signature(vb)) {
                         (Some((xa, ca)), Some((xb, cb))) => xa.dot(xb) > 1.0 - 1e-4 && (ca - cb).abs() < 1e-3,
@@ -501,7 +521,6 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     }
     let real_vertices = deg.keys().filter(|v| !merge_vertex.contains(v)).count();
     let closed_loops = edge_groups.values().filter(|r| !**r).count();
-    let _ = vpos;
     // A cone that reaches its apex has a degenerate edge and a vertex there (as other kernels
     // count them).
     let mut apexes = 0;
