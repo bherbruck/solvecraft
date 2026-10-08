@@ -1,0 +1,780 @@
+//! Split Face: divide chosen faces of a body along where a tool meets them (a plane, another
+//! face's surface, or sketch curves swept along the sketch normal), leaving the solid itself
+//! unchanged. Edges the split line ends on are cut in every face that uses them.
+//!
+//! The tool is a signed field (which side of the tool a point is on). Its zero set on a face is
+//! traced on the face's triangulation, every crossing is placed exactly on the surface by
+//! bisection in the face's parameters, and the line ends exactly on the boundary edges.
+
+use std::collections::HashMap;
+
+use mt::{BoundedCurve, InnerSpace, MetricSpace, ParametricCurve, ParametricSurface, ParametricSurface3D, SearchNearestParameter};
+use solvecraft_geom::{Plane, Vec2, Vec3};
+use truck_meshalgo::tessellation::RobustMeshableShape;
+use truck_modeling as mt;
+
+use crate::body::{Body, from_p3, p3};
+use crate::{KernelError, Result, guard};
+
+/// What splits the faces.
+#[derive(Clone, Debug)]
+pub enum SplitTool<'a> {
+    /// A plane (unbounded).
+    Plane(Plane),
+    /// The surface of another body's face (`face` in that body's face order), extended.
+    Face { body: &'a Body, face: usize },
+    /// Sketch curves (2D polylines in `plane`) swept along the plane's normal; each curve
+    /// splits on its own, its end segments extended.
+    Curves { plane: Plane, curves: Vec<Vec<Vec2>> },
+}
+
+/// Which side of the tool a point is on (zero on the tool).
+enum Field {
+    Plane { o: Vec3, n: Vec3 },
+    Surface(mt::Surface),
+    Curve { plane: Plane, pts: Vec<Vec2> },
+}
+
+impl Field {
+    fn eval(&self, p: Vec3) -> f64 {
+        match self {
+            Field::Plane { o, n } => (p - *o).dot(*n),
+            Field::Surface(s) => match s.search_nearest_parameter(p3(p), None, 50) {
+                Some((u, v)) => {
+                    let q = from_p3(s.subs(u, v));
+                    let n = s.normal(u, v);
+                    (p - q).dot(Vec3::new(n.x, n.y, n.z))
+                }
+                None => f64::NAN,
+            },
+            Field::Curve { plane, pts } => {
+                let q = plane.to_local(p);
+                let q = Vec2::new(q.x, q.y);
+                // Signed distance to the polyline, its end segments extended as lines.
+                let n = pts.len();
+                let mut best = (f64::INFINITY, 0.0);
+                for i in 0..n.saturating_sub(1) {
+                    let (Some(&a), Some(&b)) = (pts.get(i), pts.get(i + 1)) else { continue };
+                    let d = b - a;
+                    let l2 = d.dot(d);
+                    if !(l2 > 0.0) {
+                        continue;
+                    }
+                    let mut t = (q - a).dot(d) / l2;
+                    if i > 0 {
+                        t = t.max(0.0);
+                    }
+                    if i + 2 < n {
+                        t = t.min(1.0);
+                    }
+                    let c = a + d * t;
+                    let dist = (q - c).len();
+                    if dist < best.0 {
+                        let side = d.x * (q.y - a.y) - d.y * (q.x - a.x);
+                        best = (dist, if side >= 0.0 { dist } else { -dist });
+                    }
+                }
+                best.1
+            }
+        }
+    }
+}
+
+/// A crossing of the split line with a face boundary edge.
+#[derive(Clone)]
+struct Hit {
+    edge: mt::Edge,
+    t: f64,
+    p: mt::Point3,
+}
+
+/// One traced split line on a face: points (exact) with their surface parameters, and whether
+/// it closes on itself.
+struct Chain {
+    pts: Vec<(mt::Point3, (f64, f64))>,
+    closed: bool,
+}
+
+/// Mesh tolerance for tracing a face.
+fn trace_tol(face: &mt::Face, size: f64) -> f64 {
+    let _ = face;
+    (size * 2e-3).max(1e-4)
+}
+
+/// Trace the zero set of `g` over a face: chains of exact points.
+fn trace(face: &mt::Face, g: &Field, size: f64) -> Result<Vec<Chain>> {
+    let tol = trace_tol(face, size);
+    let shell: mt::Shell = vec![face.clone()].into();
+    let meshed = shell.robust_triangulation(tol);
+    let Some(mf) = meshed.face_iter().next() else { return Ok(Vec::new()) };
+    let Some(pm) = mf.surface() else { return Err(KernelError::Failed("the face could not be meshed".into())) };
+    let surface = face.surface();
+    let (pos, uvs) = (pm.positions(), pm.uv_coords());
+    // The face's triangles subdivided in parameter space, finely enough that a small split line
+    // (a hole's circle on a big face) crosses some triangle sides. Corners shared between
+    // triangles are found by their (rounded) parameters.
+    let step = size / 100.0;
+    let mut ids: HashMap<(i64, i64), usize> = HashMap::new();
+    let mut corner_uv: Vec<(f64, f64)> = Vec::new();
+    let (mut umin, mut umax, mut vmin, mut vmax) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    for uv in uvs {
+        umin = umin.min(uv.x);
+        umax = umax.max(uv.x);
+        vmin = vmin.min(uv.y);
+        vmax = vmax.max(uv.y);
+    }
+    let qu = ((umax - umin).abs() * 1e-9).max(1e-12);
+    let qv = ((vmax - vmin).abs() * 1e-9).max(1e-12);
+    let mut corner = |uv: (f64, f64)| -> usize {
+        let k = ((uv.0 / qu).round() as i64, (uv.1 / qv).round() as i64);
+        *ids.entry(k).or_insert_with(|| {
+            corner_uv.push(uv);
+            corner_uv.len() - 1
+        })
+    };
+    let mut base: Vec<[((f64, f64), mt::Point3); 3]> = Vec::new();
+    for t in pm.faces().triangle_iter() {
+        let mut c = [((0.0, 0.0), mt::Point3::new(0.0, 0.0, 0.0)); 3];
+        for (k, v) in t.iter().enumerate() {
+            let Some(uv) = v.uv.and_then(|i| uvs.get(i)) else { return Err(KernelError::Failed("mesh without parameters".into())) };
+            let p = pos.get(v.pos).copied().unwrap_or(mt::Point3::new(0.0, 0.0, 0.0));
+            c[k] = ((uv.x, uv.y), p);
+        }
+        base.push(c);
+    }
+    // One division for every triangle, so shared sides divide alike.
+    let longest = base.iter().flat_map(|c| (0..3).map(move |k| c[k].1.distance(c[(k + 1) % 3].1))).fold(0.0, f64::max);
+    let n = ((longest / step).ceil() as usize).clamp(1, 48);
+    let mut tris: Vec<[(usize, (f64, f64)); 3]> = Vec::new();
+    for c in base {
+        let at = |i: usize, j: usize| {
+            let (a, b, cc) = (c[0].0, c[1].0, c[2].0);
+            let (s, t) = (i as f64 / n as f64, j as f64 / n as f64);
+            (a.0 + (b.0 - a.0) * s + (cc.0 - a.0) * t, a.1 + (b.1 - a.1) * s + (cc.1 - a.1) * t)
+        };
+        for i in 0..n {
+            for j in 0..n - i {
+                let (p0, p1, p2) = (at(i, j), at(i + 1, j), at(i, j + 1));
+                tris.push([(corner(p0), p0), (corner(p1), p1), (corner(p2), p2)]);
+                if i + j + 1 < n {
+                    let p3 = at(i + 1, j + 1);
+                    tris.push([(corner(p1), p1), (corner(p3), p3), (corner(p2), p2)]);
+                }
+            }
+        }
+        if tris.len() > 4_000_000 {
+            return Err(KernelError::Failed("the face is too finely divided to trace".into()));
+        }
+    }
+    let gv: Vec<f64> = corner_uv.iter().map(|uv| g.eval(from_p3(surface.subs(uv.0, uv.1)))).collect();
+    if gv.iter().any(|x| !x.is_finite()) {
+        return Err(KernelError::Failed("the splitting tool cannot be evaluated on the face".into()));
+    }
+    let side = |i: usize| gv.get(i).copied().unwrap_or(0.0) >= 0.0;
+    // Mesh edges crossed by the zero set, and which triangles link them.
+    let key = |a: usize, b: usize| (a.min(b), a.max(b));
+    let mut node_uv: HashMap<(usize, usize), ((f64, f64), (f64, f64))> = HashMap::new();
+    let mut links: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::new();
+    let mut edge_tris: HashMap<(usize, usize), usize> = HashMap::new();
+    for t in &tris {
+        for k in 0..3 {
+            let (a, b) = (t[k], t[(k + 1) % 3]);
+            *edge_tris.entry(key(a.0, b.0)).or_default() += 1;
+        }
+        let crossed: Vec<(usize, usize)> = (0..3)
+            .filter_map(|k| {
+                let (a, b) = (t[k], t[(k + 1) % 3]);
+                (side(a.0) != side(b.0)).then(|| {
+                    let kk = key(a.0, b.0);
+                    let (ua, ub) = if a.0 < b.0 { (a.1, b.1) } else { (b.1, a.1) };
+                    node_uv.entry(kk).or_insert((ua, ub));
+                    kk
+                })
+            })
+            .collect();
+        if let [x, y] = crossed[..] {
+            links.entry(x).or_default().push(y);
+            links.entry(y).or_default().push(x);
+        }
+    }
+    // Exact point on a crossed mesh edge: bisection along its parameter segment.
+    let exact = |k: (usize, usize)| -> Option<(mt::Point3, (f64, f64))> {
+        let (ua, ub) = *node_uv.get(&k)?;
+        let f = |s: f64| {
+            let uv = (ua.0 + (ub.0 - ua.0) * s, ua.1 + (ub.1 - ua.1) * s);
+            (g.eval(from_p3(surface.subs(uv.0, uv.1))), uv)
+        };
+        let (mut lo, mut hi) = (0.0, 1.0);
+        let s0 = f(0.0).0 >= 0.0;
+        for _ in 0..48 {
+            let mid = 0.5 * (lo + hi);
+            if (f(mid).0 >= 0.0) == s0 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let uv = f(0.5 * (lo + hi)).1;
+        Some((surface.subs(uv.0, uv.1), uv))
+    };
+    // Walk the links into chains.
+    let mut seen: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    let mut chains = Vec::new();
+    let mut nodes: Vec<(usize, usize)> = links.keys().copied().collect();
+    nodes.sort();
+    // Open chains start at mesh boundary edges (one triangle).
+    nodes.sort_by_key(|k| edge_tris.get(k).copied().unwrap_or(0) != 1);
+    for start in nodes {
+        if seen.contains(&start) {
+            continue;
+        }
+        let mut path = vec![start];
+        seen.insert(start);
+        let mut cur = start;
+        let closed;
+        loop {
+            let next = links.get(&cur).into_iter().flatten().find(|n| !seen.contains(*n)).copied();
+            match next {
+                Some(n) => {
+                    seen.insert(n);
+                    path.push(n);
+                    cur = n;
+                }
+                None => {
+                    closed = path.len() > 2 && links.get(&cur).is_some_and(|l| l.contains(&start));
+                    break;
+                }
+            }
+            if path.len() > 1_000_000 {
+                return Err(KernelError::Failed("split line too long".into()));
+            }
+        }
+        // Points about a step apart (the ends kept).
+        let all: Vec<_> = path.iter().filter_map(|k| exact(*k)).collect();
+        let mut pts: Vec<(mt::Point3, (f64, f64))> = Vec::new();
+        for (i, p) in all.iter().enumerate() {
+            let keep = i == 0 || i + 1 == all.len() || pts.last().is_none_or(|l| l.0.distance(p.0) >= step * 0.5);
+            if keep {
+                pts.push(*p);
+            }
+        }
+        if pts.len() >= 2 {
+            chains.push(Chain { pts, closed });
+        }
+    }
+    Ok(chains)
+}
+
+/// Where the zero set crosses a boundary edge of the face (exact, by bisection on the curve).
+fn boundary_hits(face: &mt::Face, g: &Field) -> Vec<Hit> {
+    let mut out = Vec::new();
+    for w in face.absolute_boundaries() {
+        for e in w.edge_iter() {
+            let c = e.curve();
+            let (t0, t1) = c.range_tuple();
+            let n = 64;
+            let val = |t: f64| g.eval(from_p3(c.subs(t)));
+            let mut prev = (t0, val(t0));
+            for k in 1..=n {
+                let t = t0 + (t1 - t0) * k as f64 / n as f64;
+                let cur = (t, val(t));
+                if (prev.1 >= 0.0) != (cur.1 >= 0.0) {
+                    let (mut lo, mut hi) = (prev.0, cur.0);
+                    let s0 = prev.1 >= 0.0;
+                    for _ in 0..60 {
+                        let mid = 0.5 * (lo + hi);
+                        if (val(mid) >= 0.0) == s0 {
+                            lo = mid;
+                        } else {
+                            hi = mid;
+                        }
+                    }
+                    let t = 0.5 * (lo + hi);
+                    out.push(Hit { edge: e.clone(), t, p: c.subs(t) });
+                }
+                prev = cur;
+            }
+        }
+    }
+    out
+}
+
+/// A curve through points: a line when they are collinear, else a cubic through every point
+/// (Catmull-Rom tangents; `closed` when the last point repeats the first).
+fn fit(pts: &[mt::Point3], scale: f64) -> Result<mt::Curve> {
+    let (Some(a), Some(b)) = (pts.first(), pts.last()) else { return Err(KernelError::Failed("empty split line".into())) };
+    let d = b - a;
+    let len = d.magnitude();
+    let straight = len > 0.0 && pts.iter().all(|p| (p - a).cross(d).magnitude() / len <= scale * 1e-9);
+    if straight {
+        return Ok(mt::Curve::Line(mt::Line(*a, *b)));
+    }
+    let m = pts.len().saturating_sub(1);
+    if m < 1 {
+        return Err(KernelError::Failed("split line too short".into()));
+    }
+    let closed = a.distance(*b) <= scale * 1e-9 && m >= 3;
+    let at = |i: isize| -> mt::Point3 {
+        let i = if closed { i.rem_euclid(m as isize) as usize } else { i.clamp(0, m as isize) as usize };
+        pts.get(i).copied().unwrap_or(*a)
+    };
+    let mut ctrl = vec![*a];
+    let mut knots = vec![0.0; 4];
+    for i in 0..m as isize {
+        let (p0, p1) = (at(i), at(i + 1));
+        let t0 = (at(i + 1) - at(i - 1)) / 6.0;
+        let t1 = (at(i + 2) - at(i)) / 6.0;
+        ctrl.extend([p0 + t0, p1 - t1, p1]);
+        let k = (i + 1) as f64;
+        knots.extend(if i + 1 == m as isize { [k; 4].to_vec() } else { [k; 3].to_vec() });
+    }
+    let bsp = mt::BSplineCurve::try_new(mt::KnotVec::from(knots), ctrl).map_err(|e| KernelError::Failed(format!("split line: {e}")))?;
+    Ok(mt::Curve::BSplineCurve(bsp))
+}
+
+/// Cut an edge at a parameter (none when the point is already a vertex): the vertex and the
+/// pieces in the edge's absolute direction.
+fn cut_edge(e: &mt::Edge, t: f64, p: mt::Point3, tol: f64) -> Result<(mt::Vertex, Option<(mt::Edge, mt::Edge)>)> {
+    let abs = if e.orientation() { e.clone() } else { e.inverse() };
+    if abs.front().point().distance2(p) <= tol * tol {
+        return Ok((abs.front().clone(), None));
+    }
+    if abs.back().point().distance2(p) <= tol * tol {
+        return Ok((abs.back().clone(), None));
+    }
+    let v = mt::Vertex::new(p);
+    let (a, b) = abs.cut_with_parameter(&v, t).ok_or_else(|| KernelError::Failed("cannot cut an edge at the split line".into()))?;
+    Ok((v, Some((a, b))))
+}
+
+/// Replace cut edges (absolute edge → its two pieces) in a face's loops.
+fn recut(face: &mt::Face, cuts: &[(mt::Edge, (mt::Edge, mt::Edge))]) -> mt::Face {
+    let touches = face.absolute_boundaries().iter().flat_map(|w| w.edge_iter()).any(|e| cuts.iter().any(|(c, _)| c.id() == e.id()));
+    if !touches {
+        return face.clone();
+    }
+    let wires: Vec<mt::Wire> = face
+        .absolute_boundaries()
+        .iter()
+        .map(|w| {
+            let mut out: Vec<mt::Edge> = Vec::new();
+            for e in w.edge_iter() {
+                match cuts.iter().find(|(c, _)| c.id() == e.id()) {
+                    Some((c, (a, b))) if c.orientation() == e.orientation() => out.extend([a.clone(), b.clone()]),
+                    Some((_, (a, b))) => out.extend([b.inverse(), a.inverse()]),
+                    None => out.push(e.clone()),
+                }
+            }
+            out.into()
+        })
+        .collect();
+    let mut f = mt::Face::new_unchecked(wires, face.surface());
+    if !face.orientation() {
+        f.invert();
+    }
+    f
+}
+
+/// A face rebuilt from loops (absolute) on the same surface and orientation as `like`.
+fn face_like(like: &mt::Face, wires: Vec<mt::Wire>) -> mt::Face {
+    let mut f = mt::Face::new_unchecked(wires, like.surface());
+    if !like.orientation() {
+        f.invert();
+    }
+    f
+}
+
+/// Polygon of a loop in the surface's parameters (for inside tests).
+fn loop_uv(s: &mt::Surface, w: &mt::Wire) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    let mut hint = None;
+    for e in w.edge_iter() {
+        let c = e.oriented_curve();
+        let (t0, t1) = c.range_tuple();
+        for k in 0..8 {
+            let p = c.subs(t0 + (t1 - t0) * k as f64 / 8.0);
+            if let Some(uv) = s.search_nearest_parameter(p, hint, 50) {
+                hint = Some(uv);
+                out.push(uv);
+            }
+        }
+    }
+    out
+}
+
+fn inside(poly: &[(f64, f64)], q: (f64, f64)) -> bool {
+    let mut c = false;
+    let n = poly.len();
+    for i in 0..n {
+        let (Some(a), Some(b)) = (poly.get(i), poly.get((i + 1) % n)) else { continue };
+        if (a.1 > q.1) != (b.1 > q.1) && q.0 < a.0 + (b.0 - a.0) * (q.1 - a.1) / (b.1 - a.1) {
+            c = !c;
+        }
+    }
+    c
+}
+
+/// Split one face (index `fi` in `faces`) by one field; `faces` is updated (the face replaced
+/// by its pieces, boundary edges cut in every face).
+fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64) -> Result<usize> {
+    let Some(face) = faces.get(fi).cloned() else { return Ok(0) };
+    let chains = trace(&face, g, size)?;
+    if chains.is_empty() {
+        return Ok(0);
+    }
+    let tol = size * 1e-7 + 1e-9;
+    let snap = size * 1e-3;
+    let hits = boundary_hits(&face, g);
+    // Pieces of the original face as they are split.
+    let mut pieces: Vec<mt::Face> = vec![face.clone()];
+    let mut all_cuts: Vec<(mt::Edge, (mt::Edge, mt::Edge))> = Vec::new();
+    let mut made = 0;
+    for ch in chains {
+        if ch.closed {
+            // A closed line inside the face: a new face inside it and a hole in the piece that holds it.
+            let mut pts: Vec<mt::Point3> = ch.pts.iter().map(|x| x.0).collect();
+            if let Some(first) = pts.first().copied() {
+                pts.push(first);
+            }
+            let curve = fit(&pts, size)?;
+            let Some(&(p0, uv0)) = ch.pts.first() else { continue };
+            let v = mt::Vertex::new(p0);
+            let e = mt::Edge::new_unchecked(&v, &v, curve);
+            let uv: Vec<(f64, f64)> = ch.pts.iter().map(|x| x.1).collect();
+            let area: f64 = (0..uv.len())
+                .map(|i| {
+                    let (a, b) = (uv[i], uv[(i + 1) % uv.len()]);
+                    a.0 * b.1 - b.0 * a.1
+                })
+                .sum();
+            let s = face.surface();
+            let Some(pi) = pieces.iter().position(|f| {
+                let ws = f.absolute_boundaries();
+                ws.first().is_some_and(|o| inside(&loop_uv(&s, o), uv0)) && !ws.iter().skip(1).any(|h| inside(&loop_uv(&s, h), uv0))
+            }) else {
+                continue;
+            };
+            let Some(host) = pieces.get(pi).cloned() else { continue };
+            // The new loop counter-clockwise in parameters (an outer loop); its reverse a hole.
+            let ccw: mt::Wire = if area > 0.0 { vec![e.clone()].into() } else { vec![e.inverse()].into() };
+            let hole: mt::Wire = ccw.inverse();
+            let ws = host.absolute_boundaries().clone();
+            let mut outer_ws = vec![];
+            let mut inner_ws = vec![ccw.clone()];
+            for (k, w) in ws.iter().enumerate() {
+                let q = loop_uv(&s, w).first().copied();
+                if k > 0 && q.is_some_and(|q| inside(&uv, q)) {
+                    inner_ws.push(w.clone());
+                } else {
+                    outer_ws.push(w.clone());
+                }
+            }
+            outer_ws.push(hole);
+            let a = face_like(&host, outer_ws);
+            let b = face_like(&host, inner_ws);
+            pieces.splice(pi..=pi, [a, b]);
+            made += 1;
+            continue;
+        }
+        // An open line: it must end on the boundary at two crossings.
+        let (Some(&(pa, _)), Some(&(pb, _))) = (ch.pts.first(), ch.pts.last()) else { continue };
+        let near =
+            |p: mt::Point3| hits.iter().filter(|h| h.p.distance(p) <= snap).min_by(|x, y| x.p.distance(p).total_cmp(&y.p.distance(p))).cloned();
+        let (Some(ha), Some(hb)) = (near(pa), near(pb)) else { continue };
+        // Cut the boundary edges (an edge may already have been cut by an earlier line).
+        let vert = |h: &Hit, cuts: &mut Vec<(mt::Edge, (mt::Edge, mt::Edge))>| -> Result<mt::Vertex> {
+            // The current edge holding the hit: the original, or a piece of it.
+            let mut e = h.edge.clone();
+            for (c, (x, y)) in cuts.iter() {
+                if c.id() == e.id() || c.id() == e.inverse().id() {
+                    let on = |pc: &mt::Edge| {
+                        let cc = pc.curve();
+                        let (t0, t1) = cc.range_tuple();
+                        (t0.min(t1) - 1e-12..=t0.max(t1) + 1e-12).contains(&h.t)
+                    };
+                    e = if on(x) { x.clone() } else { y.clone() };
+                }
+            }
+            let (v, cut) = cut_edge(&e, h.t, h.p, tol)?;
+            if let Some(pair) = cut {
+                let abs = if e.orientation() { e.clone() } else { e.inverse() };
+                cuts.push((abs, pair));
+            }
+            Ok(v)
+        };
+        let va = vert(&ha, &mut all_cuts)?;
+        let vb = vert(&hb, &mut all_cuts)?;
+        if va.id() == vb.id() {
+            continue;
+        }
+        pieces = pieces.iter().map(|f| recut(f, &all_cuts)).collect();
+        let mut pts: Vec<mt::Point3> = ch.pts.iter().map(|x| x.0).collect();
+        if let Some(f) = pts.first_mut() {
+            *f = va.point();
+        }
+        if let Some(l) = pts.last_mut() {
+            *l = vb.point();
+        }
+        // A line from one loop of a piece to another (into a hole): the two loops become one,
+        // joined by the line run both ways; a later line divides it.
+        let in_loop = |w: &mt::Wire, v: &mt::Vertex| w.edge_iter().any(|e| e.front().id() == v.id());
+        if let Some(pi) = pieces.iter().position(|f| {
+            let ws = f.absolute_boundaries();
+            ws.iter().any(|w| in_loop(w, &va)) && ws.iter().any(|w| in_loop(w, &vb)) && !ws.iter().any(|w| in_loop(w, &va) && in_loop(w, &vb))
+        }) && let Some(host) = pieces.get(pi).cloned()
+        {
+            let ws = host.absolute_boundaries().clone();
+            let (Some(wa_i), Some(wb_i)) = (ws.iter().position(|w| in_loop(w, &va)), ws.iter().position(|w| in_loop(w, &vb))) else { continue };
+            let from = |w: &mt::Wire, v: &mt::Vertex| -> Vec<mt::Edge> {
+                let edges: Vec<mt::Edge> = w.edge_iter().cloned().collect();
+                let k = edges.iter().position(|e| e.front().id() == v.id()).unwrap_or(0);
+                edges.iter().skip(k).chain(edges.iter().take(k)).cloned().collect()
+            };
+            let (Some(w1), Some(w2)) = (ws.get(wa_i), ws.get(wb_i)) else { continue };
+            let slit = mt::Edge::new_unchecked(&va, &vb, fit(&pts, size)?);
+            let mut joined = from(w1, &va);
+            joined.push(slit.clone());
+            joined.extend(from(w2, &vb));
+            joined.push(slit.inverse());
+            // The outer loop first.
+            let others = ws.iter().enumerate().filter(|(k, _)| *k != wa_i && *k != wb_i).map(|(_, w)| w.clone());
+            let joined: mt::Wire = joined.into();
+            let loops: Vec<mt::Wire> = if wa_i == 0 || wb_i == 0 {
+                std::iter::once(joined).chain(others).collect()
+            } else {
+                others.chain(std::iter::once(joined)).collect()
+            };
+            pieces.splice(pi..=pi, [face_like(&host, loops)]);
+            continue;
+        }
+        // The piece whose loop passes both vertices.
+        let Some(pi) = pieces.iter().position(|f| {
+            f.absolute_boundaries().iter().any(|w| {
+                let ids: Vec<_> = w.edge_iter().map(|e| e.front().id()).collect();
+                ids.contains(&va.id()) && ids.contains(&vb.id())
+            })
+        }) else {
+            continue;
+        };
+        let Some(host) = pieces.get(pi).cloned() else { continue };
+        let ws = host.absolute_boundaries().clone();
+        let Some(wi) = ws.iter().position(|w| {
+            let ids: Vec<_> = w.edge_iter().map(|e| e.front().id()).collect();
+            ids.contains(&va.id()) && ids.contains(&vb.id())
+        }) else {
+            continue;
+        };
+        let Some(w) = ws.get(wi) else { continue };
+        let edges: Vec<mt::Edge> = w.edge_iter().cloned().collect();
+        let n = edges.len();
+        let (Some(ia), Some(ib)) = (edges.iter().position(|e| e.front().id() == va.id()), edges.iter().position(|e| e.front().id() == vb.id()))
+        else {
+            continue;
+        };
+        let split = mt::Edge::new_unchecked(&va, &vb, fit(&pts, size)?);
+        let run = |from: usize, to: usize| -> Vec<mt::Edge> {
+            let mut out = Vec::new();
+            let mut i = from;
+            while i != to {
+                if let Some(e) = edges.get(i) {
+                    out.push(e.clone());
+                }
+                i = (i + 1) % n;
+            }
+            out
+        };
+        // Piece A: a → b along the loop, back along the split. Piece B: b → a, then the split.
+        let mut wa = run(ia, ib);
+        wa.push(split.inverse());
+        let mut wb = run(ib, ia);
+        wb.push(split.clone());
+        let (wa, wb): (mt::Wire, mt::Wire) = (wa.into(), wb.into());
+        if !wa.is_closed() || !wb.is_closed() {
+            return Err(KernelError::Failed("split loops do not close".into()));
+        }
+        // Other loops go to the piece on their side.
+        let s = face.surface();
+        let (pa_poly, pb_poly) = (loop_uv(&s, &wa), loop_uv(&s, &wb));
+        let (mut la, mut lb) = (vec![wa], vec![wb]);
+        for (k, other) in ws.iter().enumerate() {
+            if k == wi {
+                continue;
+            }
+            let q = loop_uv(&s, other).first().copied();
+            match q {
+                Some(q) if inside(&pa_poly, q) => la.push(other.clone()),
+                Some(q) if inside(&pb_poly, q) => lb.push(other.clone()),
+                _ => return Err(KernelError::Failed("a hole meets the split line".into())),
+            }
+        }
+        let (a, b) = (face_like(&host, la), face_like(&host, lb));
+        pieces.splice(pi..=pi, [a, b]);
+        made += 1;
+    }
+    if made == 0 {
+        return Ok(0);
+    }
+    // Neighbours take the cut edges.
+    let rest: Vec<mt::Face> = faces.iter().enumerate().filter(|(k, _)| *k != fi).map(|(_, f)| recut(f, &all_cuts)).collect();
+    let mut out = Vec::with_capacity(rest.len() + pieces.len());
+    out.extend(rest.iter().take(fi).cloned());
+    out.extend(pieces);
+    out.extend(rest.iter().skip(fi).cloned());
+    *faces = out;
+    Ok(made)
+}
+
+/// Split the given faces (indices in `body`'s face order) where the tool meets them. The solid
+/// is unchanged; faces the tool misses stay whole.
+pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Body> {
+    body.require_brep("split face")?;
+    let size = body.size();
+    let fields: Vec<Field> = match tool {
+        SplitTool::Plane(p) => {
+            let n = p.normal();
+            vec![Field::Plane { o: p.origin, n }]
+        }
+        SplitTool::Face { body: other, face } => {
+            other.require_brep("a split tool")?;
+            let f = other.solid.face_iter().nth(*face).ok_or_else(|| KernelError::Invalid(format!("the tool body has no face {face}")))?;
+            vec![Field::Surface(f.oriented_surface())]
+        }
+        SplitTool::Curves { plane, curves } => {
+            if curves.iter().any(|c| c.len() < 2 || c.iter().any(|p| !(p.x.is_finite() && p.y.is_finite()))) {
+                return Err(KernelError::Invalid("split curves need at least two finite points each".into()));
+            }
+            curves.iter().map(|c| Field::Curve { plane: *plane, pts: c.clone() }).collect()
+        }
+    };
+    let total = body.solid.face_iter().count();
+    if faces.iter().any(|f| *f >= total) {
+        return Err(KernelError::Invalid("no such face".into()));
+    }
+    guard("split face", || {
+        let shells: Vec<mt::Shell> = body.solid.boundaries().clone();
+        // Faces to split, by shell, tracked as faces are replaced by pieces.
+        let mut out_shells = Vec::new();
+        let mut base = 0;
+        let mut made = 0;
+        for sh in shells {
+            let mut fs: Vec<mt::Face> = sh.face_iter().cloned().collect();
+            let mut targets: Vec<mt::FaceID> =
+                faces.iter().filter(|f| **f >= base && **f < base + fs.len()).filter_map(|f| fs.get(*f - base).map(mt::Face::id)).collect();
+            base += fs.len();
+            for g in &fields {
+                let mut next_targets = Vec::new();
+                for id in targets.clone() {
+                    let Some(fi) = fs.iter().position(|f| f.id() == id) else { continue };
+                    let before: Vec<mt::FaceID> = fs.iter().map(mt::Face::id).collect();
+                    made += split_one(&mut fs, fi, g, size)?;
+                    // The face and any pieces of it stay targets for the next curve.
+                    for f in &fs {
+                        if !before.contains(&f.id()) || f.id() == id {
+                            next_targets.push(f.id());
+                        }
+                    }
+                }
+                // Recut neighbours change ids too: keep pieces only.
+                targets = next_targets;
+            }
+            out_shells.push(mt::Shell::from(fs));
+        }
+        if made == 0 {
+            return Err(KernelError::Invalid("the tool does not cross the selected faces".into()));
+        }
+        let solid = mt::Solid::new_unchecked(out_shells);
+        Ok(Body { solid: std::sync::Arc::new(solid), mesh: None, color: body.color, paint: None })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{box_solid, cylinder, measure};
+
+    fn rel(a: f64, b: f64) -> f64 {
+        (a - b).abs() / b.abs().max(1e-9)
+    }
+
+    fn top(b: &Body, z: f64) -> usize {
+        b.faces(0.01).unwrap().iter().position(|f| (f.centroid.z - z).abs() < 1e-6 && f.plane_normal.is_some()).unwrap()
+    }
+
+    #[test]
+    fn plane_splits_a_box_top() {
+        let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let m0 = measure(&b).unwrap();
+        let pl = Plane::new(Vec3::new(4.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+        let s = split_faces(&b, &[top(&b, 30.0)], &SplitTool::Plane(pl)).unwrap();
+        assert_eq!(s.face_count(), 7);
+        let m = measure(&s).unwrap();
+        assert!(rel(m.volume, m0.volume) < 1e-9 && rel(m.area, m0.area) < 1e-9);
+        let mut tops: Vec<f64> = s.faces(0.01).unwrap().iter().filter(|f| (f.centroid.z - 30.0).abs() < 1e-6).map(|f| f.area).collect();
+        tops.sort_by(f64::total_cmp);
+        assert!((tops[0] - 80.0).abs() < 1e-6 && (tops[1] - 120.0).abs() < 1e-6, "{tops:?}");
+        // The side faces the line ends on gained a vertex but kept their area.
+        assert!(s.faces(0.01).unwrap().iter().all(|f| f.area > 0.0));
+        // Later features work on the split body: a hole through the split top.
+        let pin = cylinder(Vec3::new(5.0, 10.0, -1.0), Vec3::Z, 2.0, 40.0).unwrap();
+        let holed = crate::boolean(&s, &pin, crate::BoolOp::Cut).unwrap().unwrap();
+        let v = measure(&holed).unwrap().volume;
+        assert!(rel(v, 6000.0 - std::f64::consts::PI * 4.0 * 30.0) < 1e-3, "{v}");
+    }
+
+    #[test]
+    fn sketch_curve_splits_a_cylinder_side_and_a_circle_splits_a_top() {
+        let c = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap();
+        let m0 = measure(&c).unwrap();
+        let side = c.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_none()).unwrap();
+        // A horizontal line seen from the front (XZ sketch) at z = 5, swept along y.
+        let xz = Plane::XZ;
+        let tool = SplitTool::Curves { plane: xz, curves: vec![vec![Vec2::new(-20.0, 5.0), Vec2::new(20.0, 5.0)]] };
+        let s = split_faces(&c, &[side], &tool).unwrap();
+        let m = measure(&s).unwrap();
+        // (Measured on meshes: curved faces agree to about 1e-4.)
+        assert!(rel(m.volume, m0.volume) < 2e-4 && rel(m.area, m0.area) < 2e-4, "{} {} {} {}", m.volume, m0.volume, m.area, m0.area);
+        // The half side face splits at z = 5: a quarter and three quarters of its area.
+        let mut sides: Vec<f64> = s.faces(0.01).unwrap().iter().filter(|f| f.plane_normal.is_none()).map(|f| f.area).collect();
+        sides.sort_by(f64::total_cmp);
+        let half = std::f64::consts::PI * 10.0 * 20.0;
+        assert_eq!(sides.len(), 3);
+        assert!(rel(sides[0], half / 4.0) < 1e-3 && rel(sides[1], half * 0.75) < 1e-3 && rel(sides[2], half) < 1e-3, "{sides:?}");
+        assert!(s.face_count() > c.face_count());
+        // A smaller cylinder's side splits the top in a ring and a disc.
+        let pin = cylinder(Vec3::ZERO, Vec3::Z, 4.0, 40.0).unwrap();
+        let pin_side = pin.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_none()).unwrap();
+        let s = split_faces(&c, &[top(&c, 20.0)], &SplitTool::Face { body: &pin, face: pin_side }).unwrap();
+        let m = measure(&s).unwrap();
+        assert!(rel(m.volume, m0.volume) < 2e-4 && rel(m.area, m0.area) < 2e-4, "{} {}", m.area, m0.area);
+        let mut tops: Vec<f64> = s.faces(0.01).unwrap().iter().filter(|f| (f.centroid.z - 20.0).abs() < 1e-6).map(|f| f.area).collect();
+        tops.sort_by(f64::total_cmp);
+        let pi = std::f64::consts::PI;
+        assert!(rel(tops[0], pi * 16.0) < 1e-3 && rel(tops[1], pi * 84.0) < 1e-3, "{tops:?}");
+    }
+
+    /// A plane through a hole in a plate's top: the top splits in two, each piece holding
+    /// half of the hole's rim.
+    #[test]
+    fn plane_through_a_hole_splits_the_face() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
+        let pin = cylinder(Vec3::new(20.0, 15.0, -1.0), Vec3::Z, 5.0, 12.0).unwrap();
+        let b = crate::boolean(&plate, &pin, crate::BoolOp::Cut).unwrap().unwrap();
+        let m0 = measure(&b).unwrap();
+        let pl = Plane::new(Vec3::new(20.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+        let s = split_faces(&b, &[top(&b, 10.0)], &SplitTool::Plane(pl)).unwrap();
+        let m = measure(&s).unwrap();
+        assert!(rel(m.volume, m0.volume) < 1e-4 && rel(m.area, m0.area) < 1e-4);
+        let tops: Vec<f64> = s.faces(0.01).unwrap().iter().filter(|f| (f.centroid.z - 10.0).abs() < 1e-6).map(|f| f.area).collect();
+        let half = (1200.0 - std::f64::consts::PI * 25.0) / 2.0;
+        assert_eq!(tops.len(), 2, "{tops:?}");
+        assert!(tops.iter().all(|a| rel(*a, half) < 1e-3), "{tops:?}");
+    }
+
+    #[test]
+    fn a_tool_that_misses_is_an_error() {
+        let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let pl = Plane::new(Vec3::new(50.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+        assert!(split_faces(&b, &[0], &SplitTool::Plane(pl)).is_err());
+        assert!(split_faces(&b, &[99], &SplitTool::Plane(Plane::XY)).is_err());
+    }
+}
