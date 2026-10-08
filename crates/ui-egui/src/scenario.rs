@@ -446,6 +446,21 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                     return Err(format!("named views: got {n}, want {v}"));
                 }
             }
+            "bbox" => {
+                // {body, min?: [x|null, y|null, z|null], max?: […]}: where a body is (±1e-3 mm).
+                let name = v["body"].as_str().unwrap_or_default();
+                // Where it is in the assembly (measured as placed).
+                let m = h.call("engine.execute", json!({"command": "MeasureCommand", "params": {"bodies": [name]}}))["result"].clone();
+                let b = m["bodies"].as_array().and_then(|a| a.first()).cloned().ok_or_else(|| format!("no body {name}: {m}"))?;
+                for side in ["min", "max"] {
+                    for (i, want) in v[side].as_array().into_iter().flatten().enumerate() {
+                        let (Some(w), Some(g)) = (want.as_f64(), b["bbox"][side].get(i).and_then(Value::as_f64)) else { continue };
+                        if (w - g).abs() > 1e-3 {
+                            return Err(format!("{name} bbox {side}[{i}]: got {g}, want {w}"));
+                        }
+                    }
+                }
+            }
             "home" => {
                 if ui["home"] != *v {
                     return Err(format!("start page open: got {}, want {v}", ui["home"]));

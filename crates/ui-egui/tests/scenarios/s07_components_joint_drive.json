@@ -188,14 +188,24 @@
   }
  },
  {
+  "expect": {
+   "bbox": {
+    "body": "Body2",
+    "min": [
+     null,
+     null,
+     10
+    ],
+    "max": [
+     null,
+     null,
+     20
+    ]
+   }
+  }
+ },
+ {
   "start": "FusionMoveJointsCommand"
- },
- {
-  "widget": "0 deg"
- },
- {
-  "key": "A",
-  "cmd": true
  },
  {
   "text": "90"
