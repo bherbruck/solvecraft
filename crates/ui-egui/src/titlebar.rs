@@ -44,7 +44,7 @@ fn maximized(ctx: &egui::Context) -> bool {
     ctx.input(|i| i.viewport().maximized.unwrap_or(false))
 }
 
-fn toggle_maximize(ctx: &egui::Context) {
+pub fn toggle_maximize(ctx: &egui::Context) {
     ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized(ctx)));
 }
 

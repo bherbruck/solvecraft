@@ -18,7 +18,9 @@ pub mod dialogs_assembly;
 pub mod dialogs_plastic;
 pub mod dialogs_sheet;
 pub mod dim_view;
+pub mod documents;
 pub mod gpu;
+pub mod home;
 pub mod icons;
 pub mod inference;
 #[cfg(test)]
@@ -164,6 +166,10 @@ pub struct SolveApp {
     shot_token: u64,
     styled: bool,
     fitted: bool,
+    /// The start page.
+    pub home: home::HomeState,
+    /// The other open designs (tabs).
+    pub docs: documents::Documents,
 }
 
 impl SolveApp {
@@ -199,6 +205,8 @@ impl SolveApp {
             shot_token: 0,
             styled: false,
             fitted: false,
+            home: home::HomeState::default(),
+            docs: documents::Documents::default(),
         }
     }
 
@@ -219,6 +227,7 @@ impl SolveApp {
             "visual_style": self.ui.visual_style,
             "browser_collapsed": self.tree.collapsed,
             "browser_expanded": self.tree.expanded,
+            "recent": self.home.recent,
         })
         .to_string()
     }
@@ -254,6 +263,11 @@ impl SolveApp {
         };
         self.tree.collapsed = keys("browser_collapsed");
         self.tree.expanded = keys("browser_expanded");
+        self.home.recent = v
+            .get("recent")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).take(home::MAX_RECENT).map(str::to_string).collect())
+            .unwrap_or_default();
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
@@ -270,6 +284,11 @@ impl SolveApp {
                 if matches!(id, "NewDocumentCommand" | "doc.open") {
                     self.cam = Camera::default();
                     self.fit_view();
+                }
+                if matches!(id, "doc.open" | "SaveDocumentCommand" | "SaveDocumentAsCommand")
+                    && let Some(p) = self.session.path.clone()
+                {
+                    self.home.add_recent(&p);
                 }
             }
             Err(e) => {
@@ -290,6 +309,7 @@ impl SolveApp {
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
         self.tool = None;
+        self.home.open = false;
         if matches!(id, "FusionImportCommandFromToolbar" | "ParaMeshInsertAlignCommand") {
             if let Some(p) = self.services.pick_open.as_ref().and_then(|f| f()) {
                 self.insert_path(&p);
@@ -455,6 +475,8 @@ impl SolveApp {
     }
 
     pub fn open_path(&mut self, path: &str) {
+        self.home.open = false;
+        documents::prepare_open(self);
         if self.run("doc.open", json!({ "path": path })).is_ok() {
             self.fit_view();
         }
@@ -599,6 +621,14 @@ impl SolveApp {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let t0 = now_ms();
         toolbar::app_bar(self, ui);
+        documents::prompt(self, ui.ctx());
+        if self.home.open {
+            home::show(self, ui);
+            if self.home.open {
+                self.frame_ms = now_ms() - t0;
+                return;
+            }
+        }
         toolbar::toolbar(self, ui);
         if self.ui.show_timeline {
             timeline::timeline(self, ui);

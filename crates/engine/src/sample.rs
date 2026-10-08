@@ -31,3 +31,125 @@ pub fn script() -> Value {
         {"command": "Extrude", "params": {"distance": 22, "direction": "negative", "operation": "cut", "name": "Bore"}},
     ]})
 }
+
+/// A built-in sample design: its name, a line about what it shows, and the script that builds it.
+pub struct Sample {
+    pub name: &'static str,
+    pub about: &'static str,
+    pub script: fn() -> Value,
+}
+
+/// The built-in samples (the start page lists them), each built through commands.
+pub fn samples() -> Vec<Sample> {
+    vec![
+        Sample { name: "Sample Plate", about: "Parametric plate with fillets, holes and a bored boss", script },
+        Sample { name: "Sheet Metal Bracket", about: "Base flange with edge flanges and a hem on a 2 mm rule", script: bracket },
+        Sample { name: "Hinge Assembly", about: "Two components and a revolute joint, driven to 60°", script: hinge },
+        Sample { name: "Plastic Enclosure", about: "Shelled box with a lip, screw bosses, a rest and a snap fit", script: enclosure },
+        Sample { name: "Bolted Flange", about: "Hub and flange with a circular pattern driven by a parameter", script: flange },
+        Sample { name: "Vent Plate", about: "Slots in a rectangular pattern: rows, columns and pitch are parameters", script: vents },
+    ]
+}
+
+fn bracket() -> Value {
+    json!({"commands": [
+        {"command": "FusionSheetMetalRulesCommand", "params": {"name": "Steel 2mm", "thickness": "2 mm", "bend_radius": "Thickness", "active": true}},
+        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Base"}},
+        {"command": "ShapeRectangleTwoPoint", "params": {"p0": [0, 0], "p1": [120, 60]}},
+        {"command": "SketchStop", "params": {}},
+        {"command": "FusionSheetMetalFlangeCommand", "params": {"sketch": "Base"}},
+        {"command": "FusionSheetMetalFlangeCommand", "params": {"edges": [[60, 0, 2], [60, 60, 2]], "height": 30}},
+        {"command": "FusionSheetMetalFlangeCommand", "params": {"edges": [[120, 30, 2]], "height": 20, "angle": "60 deg"}},
+        {"command": "FusionSheetMetalHemFlangeCommand", "params": {"edges": [[0, 30, 2]], "length": 8}},
+    ]})
+}
+
+fn hinge() -> Value {
+    let mut cmds = Vec::new();
+    for name in ["Leaf A", "Leaf B"] {
+        cmds.extend([
+            json!({"command": "component.activate", "params": {"component": "root"}}),
+            json!({"command": "FusionCreateNewComponentCommand", "params": {"name": name}}),
+            json!({"command": "PrimitiveBox", "params": {"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0]}}),
+            json!({"command": "PrimitiveCylinder", "params": {"base": [0, 33, 4], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}}),
+        ]);
+    }
+    cmds.extend([
+        json!({"command": "component.activate", "params": {"component": "root"}}),
+        json!({"command": "occurrence.ground", "params": {"occurrence": "Leaf A:1", "grounded": true}}),
+        json!({"command": "JointAssembleCmdNew", "params": {"type": "revolute", "name": "Hinge",
+            "a": {"occurrence": "Leaf A:1", "circle": [1, 37, 4]}, "b": {"occurrence": "Leaf B:1", "circle": [1, 37, 4]},
+            "limits": [["0 deg", "180 deg"]]}}),
+        json!({"command": "FusionMoveJointsCommand", "params": {"joint": "Hinge", "value": 60}}),
+    ]);
+    json!({ "commands": cmds })
+}
+
+fn enclosure() -> Value {
+    json!({"commands": [
+        {"command": "PrimitiveBox", "params": {"length": 80, "width": 50, "height": 30, "body_name": "Enclosure"}},
+        {"command": "FusionShellBodyCommand", "params": {"faces": [[40, 25, 30]], "thickness": 2}},
+        {"command": "FusionLipCommand", "params": {"face": [1, 25, 30], "width": 1, "height": 2}},
+        {"command": "FusionSnapFitCommand", "params": {"position": [40, 44, 2], "hook": [0, -1, 0], "length": 14, "thickness": 1.5, "width": 6, "catch_depth": 1, "catch_length": 2}},
+        {"command": "FusionBossCommand", "params": {"position": [10, 10, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}},
+        {"command": "FusionBossCommand", "params": {"position": [70, 40, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}},
+        {"command": "FusionRestCommand", "params": {"position": [40, 25, 2], "width": 16, "length": 24, "height": 3}},
+    ]})
+}
+
+fn flange() -> Value {
+    json!({"commands": [
+        {"command": "ChangeParameterCommand", "params": {"name": "bolts", "expression": "6", "unit": "", "comment": "number of bolt holes"}},
+        {"command": "ChangeParameterCommand", "params": {"name": "pcd", "expression": "70 mm", "comment": "bolt circle diameter"}},
+        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Disc"}},
+        {"command": "CircleCenterRadius", "params": {"center": [0, 0], "diameter": 100}},
+        {"command": "SketchStop", "params": {}},
+        {"command": "Extrude", "params": {"distance": 10, "body_name": "Flange", "name": "Disc"}},
+        {"command": "SketchCreate", "params": {"plane": {"face": [0, 0, 10]}, "name": "Hub"}},
+        {"command": "CircleCenterRadius", "params": {"center": [0, 0], "diameter": 44}},
+        {"command": "SketchStop", "params": {}},
+        {"command": "Extrude", "params": {"distance": 16, "operation": "join", "name": "Hub"}},
+        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Bore"}},
+        {"command": "CircleCenterRadius", "params": {"center": [0, 0], "diameter": 24}},
+        {"command": "SketchStop", "params": {}},
+        {"command": "Extrude", "params": {"distance": 26, "operation": "cut", "name": "Bore"}},
+        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Bolt"}},
+        {"command": "CircleCenterRadius", "params": {"center": [35, 0], "diameter": 9}},
+        {"command": "SketchStop", "params": {}},
+        {"command": "Extrude", "params": {"distance": 10, "operation": "cut", "name": "BoltHole"}},
+        {"command": "PatternCircular", "params": {"features": ["BoltHole"], "axis": "Z", "count": "bolts"}},
+    ]})
+}
+
+fn vents() -> Value {
+    json!({"commands": [
+        {"command": "ChangeParameterCommand", "params": {"name": "cols", "expression": "6", "unit": ""}},
+        {"command": "ChangeParameterCommand", "params": {"name": "rows", "expression": "3", "unit": ""}},
+        {"command": "ChangeParameterCommand", "params": {"name": "pitch", "expression": "16 mm", "comment": "slot spacing"}},
+        {"command": "PrimitiveBox", "params": {"length": 120, "width": 80, "height": 4, "body_name": "Plate"}},
+        {"command": "FusionFilletEdgesCommand", "params": {"edges": [[0, 0, 2], [120, 0, 2], [120, 80, 2], [0, 80, 2]], "radius": "8 mm"}},
+        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Slot"}},
+        {"command": "ShapeRectangleTwoPoint", "params": {"p0": [18, 12], "p1": [24, 26]}},
+        {"command": "SketchStop", "params": {}},
+        {"command": "Extrude", "params": {"distance": 4, "operation": "cut", "name": "Vent"}},
+        {"command": "PatternRectangular", "params": {"features": ["Vent"], "dir1": [1, 0, 0], "count1": "cols", "spacing1": "pitch",
+            "dir2": [0, 1, 0], "count2": "rows", "spacing2": "22 mm"}},
+    ]})
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every built-in sample builds without a failing feature or joint.
+    #[test]
+    fn samples_build_cleanly() {
+        for s in super::samples() {
+            let mut session = crate::Session::default();
+            if let Err(e) = session.run_script(&(s.script)()) {
+                panic!("{}: {e}", s.name);
+            }
+            let failed: Vec<String> = session.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{}: {e}", r.name))).collect();
+            assert!(failed.is_empty(), "{}: {failed:?}", s.name);
+            assert!(!session.model.state().bodies.is_empty(), "{}", s.name);
+        }
+    }
+}

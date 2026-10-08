@@ -78,6 +78,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         if click(ui, "redo", "Redo (Ctrl+Y)") {
             let _ = app.run("RedoCommand", json!({}));
         }
+        if click(ui, "home", "Start page") {
+            let rev = app.session.revision;
+            app.home.show(rev);
+        }
         let theme_tip = if app.ui.dark { "Light theme" } else { "Dark theme" };
         if click(ui, if app.ui.dark { "sun" } else { "moon" }, theme_tip) {
             app.ui.dark = !app.ui.dark;
@@ -94,12 +98,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 d.insert_temp(egui::Id::new("sc_file_menu_opened"), pass);
             });
         }
-        // Document tab.
-        let name = format!("{}{}", app.session.doc.name, if app.session.is_dirty() { " •" } else { "" });
-        let tab = Rect::from_min_size(pos2(r.center().x - 110.0, r.top() + 5.0), vec2(220.0, r.height() - 5.0));
-        ui.painter().rect_filled(tab, egui::CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 }, t.toolbar);
-        ui.painter().text(tab.center(), Align2::CENTER_CENTER, name, FontId::proportional(13.0), t.text);
+        // Document tabs.
         let captions = if app.custom_titlebar { crate::titlebar::WIDTH } else { 0.0 };
+        crate::documents::tabs(app, ui, r, x + 16.0, r.right() - captions - 60.0);
         ui.painter().text(
             pos2(r.right() - 12.0 - captions, r.center().y),
             Align2::RIGHT_CENTER,
@@ -130,8 +131,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     ui.add(egui::Button::new(label).shortcut_text(key).frame(false).min_size(vec2(180.0, 22.0))).clicked()
                 };
                 if item(ui, "New Design", "Ctrl+N") {
-                    let _ = app.run("NewDocumentCommand", json!({}));
-                    app.fit_view();
+                    crate::documents::new_design(app);
                     close = true;
                 }
                 if item(ui, "Open…", "Ctrl+O") {
@@ -406,10 +406,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::Z => drop(app.run("UndoCommand", json!({}))),
                 Key::Y => drop(app.run("RedoCommand", json!({}))),
                 Key::S => save(app),
-                Key::N => {
-                    let _ = app.run("NewDocumentCommand", json!({}));
-                    app.fit_view();
-                }
+                Key::N => crate::documents::new_design(app),
                 Key::O => {
                     if let Some(p) = app.services.pick_open.as_ref().and_then(|f| f()) {
                         app.open_path(&p);

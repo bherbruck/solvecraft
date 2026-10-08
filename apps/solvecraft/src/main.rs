@@ -128,6 +128,12 @@ fn main() -> eframe::Result {
             for f in &files {
                 app.open_path(f);
             }
+            // No design given: the start page (not when driven over the control channel, whose
+            // clients expect the design view; `ui.home` shows it there).
+            if files.is_empty() && !sample && control_port.is_none() {
+                let rev = app.session.revision;
+                app.home.show(rev);
+            }
             Ok(Box::new(App(app)))
         }),
     )

@@ -104,7 +104,24 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             "frame_ms": app.frame_ms,
             "build_ms": app.viewport.build_ms,
             "preview": {"active": app.preview.active, "busy": app.preview.busy, "error": app.preview.error, "ms": app.preview.ms, "replaced": app.preview.replaced},
+            "home": app.home.open,
+            "documents": app.docs.count(),
         })),
+        "ui.documents" => ok(crate::documents::control(app, p)),
+        "ui.home" => {
+            match p.get("open").and_then(Value::as_bool) {
+                Some(true) => {
+                    let rev = app.session.revision;
+                    app.home.show(rev);
+                }
+                Some(false) => app.home.open = false,
+                None => {}
+            }
+            if let Some(i) = p.get("sample").and_then(Value::as_u64) {
+                crate::home::open_sample(app, i as usize);
+            }
+            ok(json!({"open": app.home.open, "recent": app.home.recent}))
+        }
         "ui.set" => {
             let mut cur = serde_json::to_value(&app.ui).unwrap_or(json!({}));
             if let (Some(o), Some(src)) = (cur.as_object_mut(), p.as_object()) {
