@@ -1,0 +1,505 @@
+[
+ {
+  "note": "A design with every kind of browser folder: bodies in a group, a component, a sketch, a construction plane, a canvas and named views."
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     30,
+     0,
+     0
+    ]
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     60,
+     0,
+     0
+    ]
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "component.from_bodies",
+   "params": {
+    "bodies": [
+     "Body3"
+    ]
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "browser.group",
+   "params": {
+    "folder": "bodies",
+    "items": [
+     "Body1"
+    ]
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "construct.plane.offset",
+   "params": {
+    "base": "XY",
+    "offset": 20
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     5,
+     5
+    ]
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "sketch.finish",
+   "params": {}
+  }
+ },
+ {
+  "make_image": "pic.png"
+ },
+ {
+  "choose_file": "pic.png"
+ },
+ {
+  "start": "canvas.insert"
+ },
+ {
+  "click": {
+   "plane": "XY"
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "call": "ui.set",
+  "params": {
+   "dark": true
+  }
+ },
+ {
+  "note": "Folders that start closed open with their arrow, and close again; the click selects nothing."
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Units: mm"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Document Settings"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Units: mm"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "click": {
+   "chevron": "Document Settings"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Units: mm"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Top"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Named Views"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Top"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "click": {
+   "chevron": "Named Views"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Top"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "XY"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Origin"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "XY"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "click": {
+   "chevron": "Origin"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "XY"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "note": "Folders that start open close with their arrow, and open again."
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Body1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Group1 (1)"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Body1"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "click": {
+   "chevron": "Group1 (1)"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Body1"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Sketch1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Sketches"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Sketch1"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "click": {
+   "chevron": "Sketches"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Sketch1"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plane1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Construction"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Plane1"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "click": {
+   "chevron": "Construction"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plane1"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Canvas1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Canvases"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Canvas1"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "click": {
+   "chevron": "Canvases"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Canvas1"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Body3"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Body3:1"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Body3"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "click": {
+   "chevron": "Body3:1"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Body3"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Body2"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Bodies"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Body2"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "click": {
+   "chevron": "Bodies"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Body2"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "note": "The design's own row closes the whole tree."
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Bodies"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Untitled"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Bodies"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "click": {
+   "chevron": "Untitled"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Bodies"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "note": "Clicking the row of a folder (not its arrow) toggles it too; clicking a component's arrow doesn't pick it."
+ },
+ {
+  "click": {
+   "browser": "Sketches"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Sketch1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "browser": "Sketches"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Sketch1"
+   ]
+  }
+ },
+ {
+  "shot": "browser_folds"
+ }
+]

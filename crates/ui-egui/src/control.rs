@@ -287,6 +287,20 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                     None => err(format!("handle {h} is not shown")),
                 };
             }
+            // A browser row by its label: the row itself, or its fold arrow.
+            for (k, chevron) in [("browser", false), ("chevron", true)] {
+                if let Some(label) = p.get(k).and_then(Value::as_str) {
+                    let rows = crate::browser::drawn_rows();
+                    let found = rows
+                        .iter()
+                        .find(|r| r.0 == label)
+                        .and_then(|r| if chevron { r.2.map(|f| f.center()) } else { Some(r.1.left_center() + egui::vec2(120.0, 0.0)) });
+                    return match found {
+                        Some(q) => ok(json!([q.x, q.y])),
+                        None => err(format!("no browser row `{label}`{} on screen", if chevron { " with a fold arrow" } else { "" })),
+                    };
+                }
+            }
             if let Some(d) = p.get("dimension").and_then(Value::as_str) {
                 return match crate::dim_view::text_at(d) {
                     Some(q) => ok(json!([q.x, q.y])),
@@ -426,6 +440,11 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 None => ok(json!({"command": id, "key": crate::keymap::effective(app, id)})),
             }
         }
+        "ui.browser" => ok(json!({
+            "rows": crate::browser::drawn_rows().iter().map(|(label, r, _, open)| json!({"label": label, "y": r.center().y, "open": open})).collect::<Vec<_>>(),
+            "selection": app.session.selection,
+            "picked_components": app.tree.picked_components,
+        })),
         "ui.capture" => match s("action") {
             Some(a) => match crate::browser::answer_capture(app, a) {
                 Ok(()) => ok(json!({"pending_moves": app.session.pending_moves.len()})),

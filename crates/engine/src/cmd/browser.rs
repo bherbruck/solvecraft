@@ -442,7 +442,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "waits for unit-less parameters used as lengths to read in the design's units (solvecraft-params)"]
     fn a_bare_width_keeps_its_inches_when_the_design_goes_metric() {
         let mut s = Session::default();
         run(&mut s, "document.units", json!({"units": "in"}));

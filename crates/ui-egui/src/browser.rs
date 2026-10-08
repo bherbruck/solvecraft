@@ -17,6 +17,17 @@ use crate::context_menu::{Item, Target};
 use crate::theme::Tokens;
 use crate::{SolveApp, icons};
 
+thread_local! {
+    /// The rows drawn this frame: (label, row, fold arrow area, open). For automation
+    /// (`ui.at {browser | chevron}`, `ui.browser`).
+    static DRAWN: std::cell::RefCell<Vec<(String, Rect, Option<Rect>, Option<bool>)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The rows on screen: (label, row rect, fold arrow area, open).
+pub fn drawn_rows() -> Vec<(String, Rect, Option<Rect>, Option<bool>)> {
+    DRAWN.with(|d| d.borrow().clone())
+}
+
 /// Browser state kept between frames.
 #[derive(Default)]
 pub struct TreeState {
@@ -246,6 +257,8 @@ struct RowResp {
     hovered: bool,
     /// The row's response (drag and drop).
     resp: Option<egui::Response>,
+    /// The press began on the fold arrow, eye or radio (not a drag of the row).
+    on_control: bool,
 }
 
 fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
@@ -256,7 +269,10 @@ fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         ui.allocate_space(r.size());
         return RowResp { rect: Some(r), ..Default::default() };
     }
-    let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click_and_drag());
+    // A stable id per row (not the layout position), so a press and its release stay on the
+    // same row while rows above open or close.
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
+    let resp = ui.interact(r, id, Sense::click_and_drag());
     // While something is dragged (an appearance swatch, drawn under the pointer) `hovered` is
     // off; the row under the pointer still counts, so a drop lands on it.
     let dragged_over = egui::DragAndDrop::has_any_payload(ui.ctx()) && ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p));
@@ -269,6 +285,27 @@ fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let mut x = r.left() + 2.0 + row.depth as f32 * INDENT;
     let cy = r.center().y;
     let ink = if row.dim { t.text_dim } else { t.icon };
+    // The row is one widget: where a click lands decides what it does (the fold arrow with
+    // padding, the eye, the radio, or the row itself), so a click on the arrow never also
+    // selects the row or starts a drag.
+    let fold_r = Rect::from_min_max(pos2(x - 4.0, r.top()), pos2(x + 15.0, r.bottom()));
+    let eye_r = Rect::from_center_size(pos2(x + 14.0 + 8.0, cy), vec2(19.0, r.height()));
+    let radio_r = Rect::from_center_size(pos2(x + 32.0 + 6.0, cy), vec2(15.0, r.height()));
+    let at = |p: Pos2| -> u8 {
+        if row.fold.is_some() && fold_r.contains(p) {
+            1
+        } else if row.eye.is_some() && eye_r.contains(p) {
+            2
+        } else if row.radio.is_some() && radio_r.contains(p) {
+            3
+        } else {
+            0
+        }
+    };
+    DRAWN.with(|d| d.borrow_mut().push((row.label.to_string(), r, row.fold.map(|_| fold_r), row.fold)));
+    let press_on = ui.input(|i| i.pointer.press_origin()).map_or(0, at);
+    let click_on = resp.interact_pointer_pos().map_or(0, at);
+    let hover_on = resp.hover_pos().map_or(0, at);
     // Fold arrow.
     if let Some(open) = row.fold {
         let ar = Rect::from_center_size(pos2(x + 6.0, cy), vec2(12.0, 12.0));
@@ -277,9 +314,10 @@ fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         } else {
             vec![pos2(ar.left() + 4.0, ar.top() + 2.0), pos2(ar.right() - 3.0, ar.center().y), pos2(ar.left() + 4.0, ar.bottom() - 2.0)]
         };
-        ui.painter().add(egui::Shape::convex_polygon(pts, t.text_dim, Stroke::NONE));
-        out.fold = ui.interact(ar.expand(3.0), id.with("fold"), Sense::click()).clicked();
-        crate::scenario::publish_handle(&format!("fold:{}", row.label), ar.center());
+        let ink = if hover_on == 1 { t.text } else { t.text_dim };
+        ui.painter().add(egui::Shape::convex_polygon(pts, ink, Stroke::NONE));
+        out.fold = resp.clicked() && click_on == 1;
+        crate::scenario::publish_handle(&format!("fold:{}", row.label), fold_r.center());
     }
     x += 14.0;
     // Eye.
@@ -289,9 +327,7 @@ fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         if !vis {
             ui.painter().line_segment([er.left_bottom() + vec2(2.0, -2.0), er.right_top() + vec2(-2.0, 2.0)], Stroke::new(1.4, t.text_dim));
         }
-        let e = ui.interact(er.expand(2.0), id.with("eye"), Sense::click());
-        out.eye = e.clicked();
-        e.on_hover_text(if vis { "Hide" } else { "Show" });
+        out.eye = resp.clicked() && click_on == 2;
     }
     x += 18.0;
     // Activation radio (components).
@@ -301,9 +337,7 @@ fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         if active {
             ui.painter().circle_filled(rc, 2.8, t.accent);
         }
-        let rr = ui.interact(Rect::from_center_size(rc, vec2(14.0, 14.0)), id.with("radio"), Sense::click());
-        out.radio = rr.clicked();
-        rr.on_hover_text(if active { "Active component" } else { "Activate" });
+        out.radio = resp.clicked() && click_on == 3;
         x += 15.0;
     }
     if !row.icon.is_empty() {
@@ -322,9 +356,20 @@ fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         bx += 15.0;
     }
     crate::scenario::publish_handle(&format!("row:{}", row.label), r.center());
+    let tip = match hover_on {
+        1 => Some(if row.fold == Some(true) { "Collapse" } else { "Expand" }),
+        2 => Some(if row.eye == Some(true) { "Hide" } else { "Show" }),
+        3 => Some(if row.radio == Some(true) { "Active component" } else { "Activate" }),
+        _ => None,
+    };
+    let resp = match tip {
+        Some(t) => resp.on_hover_text(t),
+        None => resp,
+    };
+    out.on_control = press_on != 0;
+    out.clicked = resp.clicked() && click_on == 0;
+    out.double = resp.double_clicked() && click_on == 0;
     out.resp = Some(resp.clone());
-    out.clicked = resp.clicked();
-    out.double = resp.double_clicked();
     if resp.secondary_clicked() {
         out.secondary = resp.interact_pointer_pos().or(Some(r.left_bottom()));
     }
@@ -424,6 +469,7 @@ struct Actions {
 pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     app.tree.order.clear();
+    DRAWN.with(|d| d.borrow_mut().clear());
     let mut acts = Actions::default();
     egui::Panel::left("sc_browser")
         .exact_size(250.0)
@@ -1227,7 +1273,7 @@ fn entry_row(
     }
     let Some(resp) = &r.resp else { return };
     // Drag: the selected items of this folder when this one is selected, else just this one.
-    if resp.drag_started() {
+    if resp.drag_started() && !r.on_control {
         let keys: Vec<String> = if e.selected { selected_keys(app, comp, folder) } else { vec![e.key.clone()] };
         resp.dnd_set_drag_payload(Drag { comp, folder, keys });
     }
