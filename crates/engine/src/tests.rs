@@ -900,3 +900,60 @@ fn rolling_back_and_forward_leaves_no_projection_warnings() {
         assert!(warnings(&s).is_empty(), "after rolling to {pos}: {:?}", warnings(&s));
     }
 }
+
+/// Export STEP, validate the file, read it back: no warnings, same volume, area and faces.
+fn step_round_trip(s: &mut Session, tag: &str) -> solvecraft_kernel::StepImport {
+    let p = std::env::temp_dir().join(format!("solvecraft-steprt-{tag}-{}.step", std::process::id()));
+    run(s, "ExportCommand", json!({"path": p.to_string_lossy()}));
+    let text = std::fs::read_to_string(&p).unwrap();
+    let _ = std::fs::remove_file(&p);
+    solvecraft_kernel::step_validate(&text).unwrap();
+    assert!(text.contains("AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF"));
+    let imp = solvecraft_kernel::step_import(&text).unwrap();
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    imp
+}
+
+#[test]
+fn sample_plate_step_round_trip() {
+    let mut s = Session::default();
+    s.run_script(&crate::sample::script()).unwrap();
+    let imp = step_round_trip(&mut s, "sample");
+    let st = s.world_state();
+    assert_eq!(imp.bodies.len(), st.bodies.len());
+    for (a, b) in st.bodies.iter().zip(&imp.bodies) {
+        assert_eq!(a.name, b.name);
+        let (ma, mb) = (solvecraft_kernel::measure(&a.body).unwrap(), solvecraft_kernel::measure(&b.body).unwrap());
+        assert!(rel(mb.volume, ma.volume) < 1e-4, "{} vs {}", mb.volume, ma.volume);
+        assert!(rel(mb.area, ma.area) < 1e-4, "{} vs {}", mb.area, ma.area);
+        assert_eq!(b.file_faces, a.body.face_count());
+        assert_eq!(mb.merged.faces, ma.merged.faces);
+    }
+}
+
+/// Components export as a STEP assembly: products, occurrences, placements.
+#[test]
+fn components_export_as_step_assembly() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 5, "name": "Plate"}));
+    run(&mut s, "FusionCreateNewComponentCommand", json!({"name": "Pin"}));
+    run(&mut s, "PrimitiveCylinder", json!({"radius": 2, "height": 10, "base": [5, 5, 5]}));
+    run(&mut s, "occurrence.copy", json!({"component": "Pin", "translate": [20, 0, 0]}));
+    let want: f64 = s.world_state().bodies.iter().map(|b| solvecraft_kernel::measure(&b.body).unwrap().volume).sum();
+    let imp = step_round_trip(&mut s, "asm");
+    assert_eq!(imp.bodies.len(), 3, "{:?}", imp.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let got: f64 = imp.bodies.iter().map(|b| solvecraft_kernel::measure(&b.body).unwrap().volume).sum();
+    assert!(rel(got, want) < 1e-6, "{got} vs {want}");
+    let root = &imp.tree[0];
+    assert_eq!(root.children.len(), 2);
+    assert!(root.children.iter().all(|c| c.name == "Pin"));
+    // The second pin sits 20 mm along X from the first.
+    let xs: Vec<f64> = imp
+        .bodies
+        .iter()
+        .filter(|b| b.path.last().is_some_and(|p| p == "Pin"))
+        .map(|b| solvecraft_kernel::measure(&b.body).unwrap().centroid.x)
+        .collect();
+    assert_eq!(xs.len(), 2);
+    assert!(((xs[0] - xs[1]).abs() - 20.0).abs() < 1e-6, "{xs:?}");
+}

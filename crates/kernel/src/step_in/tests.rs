@@ -309,10 +309,13 @@ fn exponential_assemblies_are_bounded() {
 
 #[test]
 fn validator_catches_broken_files() {
-    assert!(step_validate(&format!("{HEAD}#1=A(#2);\n#2=B();\n{TAIL}")).is_ok());
-    assert!(step_validate(&format!("{HEAD}#1=A(#2);\n#2=B();\n#2=C();\n{TAIL}")).unwrap_err().contains("duplicate"));
+    assert!(step_validate(&format!("{HEAD}#1=SHAPE_DEFINITION_REPRESENTATION(#2);\n#2=B();\n{TAIL}")).is_ok());
+    assert!(
+        step_validate(&format!("{HEAD}#1=SHAPE_DEFINITION_REPRESENTATION(#2);\n#2=B();\n#3=C();\n{TAIL}")).unwrap_err().contains("not referenced")
+    );
+    assert!(step_validate(&format!("{HEAD}#1=SHAPE_DEFINITION_REPRESENTATION(#2);\n#2=B();\n#2=C();\n{TAIL}")).unwrap_err().contains("duplicate"));
     assert!(step_validate(&format!("{HEAD}#1=A((#7));\n{TAIL}")).unwrap_err().contains("undefined"));
-    assert!(step_validate(&format!("{HEAD}#1=A();\n#5=B();\n{TAIL}")).unwrap_err().contains("dense"));
+    assert!(step_validate(&format!("{HEAD}#1=SHAPE_DEFINITION_REPRESENTATION(#5);\n#5=B();\n{TAIL}")).unwrap_err().contains("dense"));
 }
 
 #[test]

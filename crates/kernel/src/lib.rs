@@ -25,6 +25,7 @@ mod polybool;
 mod polyhedron;
 mod step;
 mod step_in;
+mod step_out;
 mod topo;
 
 pub use blend::{chamfer, fillet};
@@ -37,6 +38,7 @@ pub use polybool::planar_boolean;
 pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
 pub use step::step_export;
 pub use step_in::{ImportedBody, StepImport, StepNode, step_import, step_import_shared, step_validate};
+pub use step_out::{ExportBody, ExportProduct, StepHeader, step_export_bodies, step_export_products};
 pub use topo::{CylinderFace, cylinder_face_at};
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 

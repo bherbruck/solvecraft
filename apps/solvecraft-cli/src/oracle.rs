@@ -67,9 +67,15 @@ fn step_export_check(s: &solvecraft_engine::Session, volume: f64) -> (bool, Stri
         Ok(imp) if !imp.warnings.is_empty() => (false, format!("warnings: {}", imp.warnings.join("; "))),
         Ok(imp) if imp.bodies.len() != st.bodies.len() => (false, format!("{} bodies back of {}", imp.bodies.len(), st.bodies.len())),
         Ok(imp) => {
-            let v: f64 = imp.bodies.iter().filter_map(|b| solvecraft_engine::kernel::measure(&b.body).ok()).map(|m| m.volume).sum();
-            let ok = (v - volume).abs() <= REL_TOL * volume.abs().max(1.0);
-            (ok, format!("re-imported volume {v:.3}"))
+            let m: Vec<_> = imp.bodies.iter().filter_map(|b| solvecraft_engine::kernel::measure(&b.body).ok()).collect();
+            let m0: Vec<_> = st.bodies.iter().filter_map(|b| solvecraft_engine::kernel::measure(&b.body).ok()).collect();
+            let v: f64 = m.iter().map(|x| x.volume).sum();
+            let (a, a0): (f64, f64) = (m.iter().map(|x| x.area).sum(), m0.iter().map(|x| x.area).sum());
+            let faces: usize = imp.bodies.iter().map(|b| b.file_faces).sum();
+            let faces0: usize = st.bodies.iter().map(|b| b.body.face_count()).sum();
+            let close = |x: f64, y: f64| (x - y).abs() <= REL_TOL * y.abs().max(1.0);
+            let ok = close(v, volume) && close(a, a0) && faces == faces0;
+            (ok, format!("re-imported volume {v:.3}, area {a:.3} (was {a0:.3}), faces {faces} (was {faces0})"))
         }
         Err(e) => (false, format!("import: {e}")),
     }

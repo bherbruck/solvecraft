@@ -577,7 +577,8 @@ impl<'a> Reader<'a> {
 }
 
 /// Check a STEP file's structure: it parses, no entity id is defined twice, every reference
-/// names a defined entity, and ids are dense (`#1`…`#n`). Returns the entity count.
+/// names a defined entity, nothing but root entities (relationships, definitions,
+/// presentation) is left unreferenced, and ids are dense (`#1`…`#n`). Returns the entity count.
 pub fn step_validate(text: &str) -> std::result::Result<usize, String> {
     let ex = p21::parse(text)?;
     if let Some(d) = ex.duplicates.first() {
@@ -599,6 +600,36 @@ pub fn step_validate(text: &str) -> std::result::Result<usize, String> {
         }
         if let Some(r) = out.iter().find(|r| ex.get(**r).is_none()) {
             return Err(format!("#{id} refers to undefined #{r}"));
+        }
+    }
+    // Unreferenced entities must be roots of the exchange (relationships, definitions,
+    // presentation); anything else is dead data.
+    let mut used = std::collections::HashSet::new();
+    for e in ex.entities.values() {
+        let mut out = Vec::new();
+        e.records.iter().flat_map(|r| &r.params).for_each(|p| refs(p, &mut out));
+        used.extend(out);
+    }
+    const ROOTS: &[&str] = &[
+        "SHAPE_DEFINITION_REPRESENTATION",
+        "APPLICATION_PROTOCOL_DEFINITION",
+        "PRODUCT_RELATED_PRODUCT_CATEGORY",
+        "PRODUCT_CATEGORY_RELATIONSHIP",
+        "SHAPE_REPRESENTATION_RELATIONSHIP",
+        "REPRESENTATION_RELATIONSHIP",
+        "CONTEXT_DEPENDENT_SHAPE_REPRESENTATION",
+        "MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION",
+        "DRAUGHTING_MODEL",
+        "PROPERTY_DEFINITION_REPRESENTATION",
+        "PRESENTATION_LAYER_ASSIGNMENT",
+    ];
+    for id in &ids {
+        if used.contains(*id) {
+            continue;
+        }
+        let Some(e) = ex.get(**id) else { continue };
+        if !e.records.iter().any(|r| ROOTS.contains(&r.name.as_str()) || r.name.starts_with("APPLIED_")) {
+            return Err(format!("#{id} ({}) is not referenced by anything", e.name()));
         }
     }
     let n = ex.entities.len();

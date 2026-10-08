@@ -62,8 +62,8 @@ where
     mt::BSplineCurve::try_new(mt::KnotVec::from(knots), ctrl).ok()
 }
 
-/// STEP (ISO 10303-21) text for the given bodies.
-pub fn step_export(bodies: &[&Body], system: &str) -> Result<String> {
+/// truck's STEP text for the given bodies (geometry and topology; product data is ours).
+pub(crate) fn truck_step(bodies: &[&Body], system: &str) -> Result<String> {
     if bodies.is_empty() {
         return Err(KernelError::Invalid("nothing to export".into()));
     }
@@ -76,4 +76,13 @@ pub fn step_export(bodies: &[&Body], system: &str) -> Result<String> {
         let header = out::StepHeaderDescriptor { organization_system: system.to_owned(), ..Default::default() };
         Ok(out::CompleteStepDisplay::new(models, header).to_string())
     })
+}
+
+/// STEP (ISO 10303-21, AP242) text for the given bodies as one part (`Body1`…, with the
+/// bodies' colours).
+pub fn step_export(bodies: &[&Body], system: &str) -> Result<String> {
+    let list: Vec<crate::ExportBody> =
+        bodies.iter().enumerate().map(|(i, b)| crate::ExportBody { name: format!("Body{}", i + 1), body: b, color: b.color() }).collect();
+    let header = crate::StepHeader { organization: system.to_string(), ..Default::default() };
+    crate::step_out::step_export_bodies(&list, &header)
 }

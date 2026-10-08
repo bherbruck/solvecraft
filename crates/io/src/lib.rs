@@ -256,8 +256,10 @@ pub fn export(state: &ModelState, bodies: &[String], format: Format, name: &str)
             }
         }
         Format::Step => {
-            let bs: Vec<&solvecraft_kernel::Body> = sel.iter().map(|b| &b.body).collect();
-            solvecraft_kernel::step_export(&bs, "SolveCraft")?.into_bytes()
+            let bs: Vec<solvecraft_kernel::ExportBody> =
+                sel.iter().map(|b| solvecraft_kernel::ExportBody { name: b.name.clone(), body: &b.body, color: b.body.color() }).collect();
+            let header = solvecraft_kernel::StepHeader { file_name: format!("{name}.step"), ..Default::default() };
+            solvecraft_kernel::step_export_bodies(&bs, &header)?.into_bytes()
         }
         Format::ThreeMf => {
             let objs: Vec<MeshObject> = sel
@@ -273,6 +275,33 @@ pub fn export(state: &ModelState, bodies: &[String], format: Format, name: &str)
         }
         Format::Design => return Err(IoError::Format("solvecraft (save the document instead)".into())),
     })
+}
+
+/// STEP assembly of a design with components: a product per component holding its bodies in
+/// the component's own frame (`local` is the model before placing occurrences), and an
+/// assembly occurrence per component occurrence.
+pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<Vec<u8>> {
+    use solvecraft_kernel::{ExportBody, ExportProduct};
+    let mut index: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    index.insert(0, 0);
+    let mut products = vec![ExportProduct { name: doc.name.clone(), bodies: Vec::new(), children: Vec::new() }];
+    for c in &doc.components {
+        index.insert(c.id, products.len());
+        products.push(ExportProduct { name: c.name.clone(), bodies: Vec::new(), children: Vec::new() });
+    }
+    for b in &local.bodies {
+        let comp = doc.body_component(&b.name, b.feature);
+        let Some(p) = index.get(&comp).and_then(|i| products.get_mut(*i)) else { continue };
+        p.bodies.push(ExportBody { name: b.name.clone(), body: &b.body, color: b.body.color() });
+    }
+    for o in &doc.occurrences {
+        let (Some(&parent), Some(&child)) = (index.get(&o.parent), index.get(&o.component)) else { continue };
+        if let Some(p) = products.get_mut(parent) {
+            p.children.push((child, o.transform, o.name.clone()));
+        }
+    }
+    let header = solvecraft_kernel::StepHeader { file_name: format!("{name}.step"), ..Default::default() };
+    Ok(solvecraft_kernel::step_export_products(&products, 0, &header)?.into_bytes())
 }
 
 /// Read a design file's bytes.
@@ -373,7 +402,9 @@ mod tests {
         assert_eq!(Format::from_name("a.STP").unwrap(), Format::Step);
         assert!(is_step_path("/x/Part.STEP") && is_step_path("a.stp") && !is_step_path("a.step.json") && !is_step_path("step"));
         let f = step_import_feature(s.as_bytes(), "/tmp/My Part.step").unwrap();
-        assert_eq!(f.name, "My Part");
+        // Named after the exported product (the export was called `t`).
+        assert_eq!(f.name, "t");
+        assert_eq!(f.body_names, ["Body1"]);
         assert_eq!(f.body_names.len(), 1);
         assert!(matches!(&f.kind, FeatureKind::Import { file, .. } if file == "My Part.step"));
         assert!(step_import_feature(b"ISO-10303-21;", "x.step").is_err());

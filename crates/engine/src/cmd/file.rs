@@ -160,7 +160,12 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Result<Value> {
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
-    let bytes = solvecraft_io::export(&s.world_state(), bodies, format, &name)?;
+    // A design with components exports as a STEP assembly; otherwise bodies as placed.
+    let bytes = if format == Format::Step && bodies.is_empty() && !s.doc.occurrences.is_empty() {
+        solvecraft_io::step_assembly(&s.doc, &s.model.state(), &name)?
+    } else {
+        solvecraft_io::export(&s.world_state(), bodies, format, &name)?
+    };
     std::fs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
 }
