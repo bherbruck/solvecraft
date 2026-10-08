@@ -183,6 +183,15 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.poly(&[(3.0, 7.0), (9.0, 10.0), (9.0, 17.0), (3.0, 17.0)], pen.fill, ink);
             pen.poly(&[(21.0, 7.0), (15.0, 10.0), (15.0, 17.0), (21.0, 17.0)], Color32::TRANSPARENT, a);
         }
+        "lookat" => {
+            pen.poly(&[(4.0, 6.0), (16.0, 6.0), (16.0, 18.0), (4.0, 18.0)], pen.fill, ink);
+            pen.arrow((22.0, 12.0), (13.0, 12.0), a);
+        }
+        "style" => {
+            pen.poly(&[(12.0, 3.0), (20.0, 7.5), (12.0, 12.0), (4.0, 7.5)], pen.fill, ink);
+            pen.poly(&[(4.0, 7.5), (12.0, 12.0), (12.0, 21.0), (4.0, 16.5)], a, ink);
+            pen.poly(&[(12.0, 12.0), (20.0, 7.5), (20.0, 16.5), (12.0, 21.0)], Color32::TRANSPARENT, ink);
+        }
         "sun" => {
             pen.circle(12.0, 12.0, 4.5, a, ink);
             for i in 0..8 {

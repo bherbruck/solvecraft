@@ -155,6 +155,7 @@ fn scene_key(app: &SolveApp) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     app.session.revision.hash(&mut h);
     app.ui.show_grid.hash(&mut h);
+    app.ui.visual_style.hash(&mut h);
     app.ui.show_sketches.hash(&mut h);
     app.ui.hidden_bodies.hash(&mut h);
     app.ui.hidden_sketches.hash(&mut h);
@@ -210,7 +211,13 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         let base = s.doc.materials.get(&b.name).and_then(|m| crate::theme::material_color(m)).unwrap_or(tk.body);
         let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
         let m = b.mesh();
-        for t in &m.triangles {
+        let (shaded, edges) = match app.ui.visual_style {
+            1 => (true, false),
+            2 => (false, true),
+            _ => (true, true),
+        };
+        let edge_col = if shaded { c4(tk.body_edge) } else { c4(tk.text) };
+        for t in m.triangles.iter().filter(|_| shaded) {
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
@@ -222,12 +229,12 @@ fn build_scene(app: &SolveApp) -> GpuScene {
                 }
             }
         }
-        for (ei, e) in m.edges.iter().enumerate() {
+        for (ei, e) in m.edges.iter().enumerate().filter(|_| edges) {
             if m.seams.get(ei).copied().unwrap_or(false) {
                 continue;
             }
             for w in e.windows(2) {
-                sc.line(w[0].to_f32(), w[1].to_f32(), c4(tk.body_edge), 1.3, false);
+                sc.line(w[0].to_f32(), w[1].to_f32(), edge_col, 1.3, false);
             }
         }
     }
@@ -1483,15 +1490,34 @@ fn point_in_poly(p: Pos2, poly: &[Pos2]) -> bool {
 }
 
 /// Navigation bar (bottom centre).
+/// Turn the view to face the selected planar face or plane, else the active sketch.
+pub fn look_at_selection(app: &mut SolveApp) {
+    let target = app.session.selection.iter().find_map(|s| match s {
+        Sel::Face { body, index, point } => crate::dialogs::planar_face(&app.session, body, *index).map(|(_, n)| (*point, n)),
+        Sel::Plane { name } => solvecraft_engine::geom::Plane::named(name).map(|p| (p.origin, p.normal())),
+        _ => None,
+    });
+    match target {
+        Some((p, n)) => {
+            let mut to = app.cam.looking_from(n);
+            to.target = p;
+            app.animate_to(to);
+        }
+        None => crate::dialogs::look_at_sketch(app),
+    }
+}
+
 fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let t = Tokens::get();
-    let items: [(&str, &str); 7] = [
+    let items: [(&str, &str); 9] = [
         ("orbit", "Orbit (drag; or Shift+middle / right drag)"),
         ("pan", "Pan (drag; or middle drag)"),
         ("zoom", "Zoom (drag; or wheel)"),
-        ("fit", "Fit"),
+        ("fit", "Fit (F6)"),
+        ("lookat", "Look At the selected face or plane (or the active sketch)"),
         ("home", "Home view"),
         ("perspective", "Perspective / orthographic"),
+        ("style", "Visual style: shaded with edges, shaded, wireframe"),
         ("settings", "Grid on/off"),
     ];
     let w = items.len() as f32 * 30.0 + 10.0;
@@ -1521,6 +1547,8 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 "zoom" => app.viewport.nav = toggle(NavMode::Zoom, app.viewport.nav),
                 "fit" => app.animate_view("fit"),
                 "home" => app.animate_view("home"),
+                "lookat" => look_at_selection(app),
+                "style" => app.ui.visual_style = (app.ui.visual_style + 1) % 3,
                 "perspective" => app.ui.perspective = !app.ui.perspective,
                 _ => app.ui.show_grid = !app.ui.show_grid,
             }

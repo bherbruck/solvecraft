@@ -406,6 +406,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
             Key::S => app.ui.palette_open = true,
+            Key::F6 => app.animate_view("fit"),
             Key::Delete | Key::Backspace => crate::viewport::delete_selection(app),
             _ => {
                 let name = format!("{k:?}");

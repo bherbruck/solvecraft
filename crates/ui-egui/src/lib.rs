@@ -61,6 +61,8 @@ pub struct UiState {
     pub pick_off: Vec<String>,
     /// A click on a face picks its whole body.
     pub pick_bodies: bool,
+    /// 0: shaded with edges, 1: shaded, 2: wireframe.
+    pub visual_style: u8,
     /// Sketches hidden one by one, and finished sketches shown although a feature uses them.
     pub hidden_sketches: Vec<u64>,
     pub shown_sketches: Vec<u64>,
@@ -86,6 +88,7 @@ impl Default for UiState {
             dark: true,
             pick_off: Vec::new(),
             pick_bodies: false,
+            visual_style: 0,
             hidden_sketches: Vec::new(),
             shown_sketches: Vec::new(),
             hidden_profiles: Vec::new(),
@@ -184,6 +187,7 @@ impl SolveApp {
             "perspective": self.ui.perspective,
             "pick_bodies": self.ui.pick_bodies,
             "auto_project": self.session.auto_project,
+            "visual_style": self.ui.visual_style,
         })
         .to_string()
     }
@@ -206,6 +210,9 @@ impl SolveApp {
         }
         if let Some(a) = flag("auto_project") {
             self.session.auto_project = a;
+        }
+        if let Some(s) = v.get("visual_style").and_then(Value::as_u64) {
+            self.ui.visual_style = u8::try_from(s.min(2)).unwrap_or(0);
         }
     }
 
