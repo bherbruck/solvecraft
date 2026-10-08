@@ -67,7 +67,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("face.delete", "Delete Face", delete_face)
         .at("SOLID", "MODIFY")
         .icon("delete")
-        .params("faces: [[x,y,z] points on the faces]; body?. The neighbouring planes close the gap (a fillet, chamfer, hole or boss taken off)"),
+        .params("faces: [[x,y,z] points on the faces]; body?. The neighbouring planes close the gap, as when a rounded edge, hole or boss is taken off"),
     CommandSpec::new("solid.offset_face", "Offset Face", offset_face)
         .at("SOLID", "MODIFY")
         .icon("offset_face")
