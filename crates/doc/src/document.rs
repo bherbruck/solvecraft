@@ -792,6 +792,9 @@ pub struct Document {
     /// Placements of components in their parents (each non-root component has at least one).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub occurrences: Vec<crate::Occurrence>,
+    /// Joints between occurrences, joint origins and motion links.
+    #[serde(default, skip_serializing_if = "crate::joints::Assembly::is_empty")]
+    pub assembly: crate::joints::Assembly,
     /// Favourite parameters (by name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub favorites: std::collections::BTreeSet<String>,
@@ -831,6 +834,7 @@ impl Document {
             next_id: 1,
             components: Vec::new(),
             occurrences: Vec::new(),
+            assembly: Default::default(),
             body_components: Default::default(),
             materials: Default::default(),
             favorites: Default::default(),

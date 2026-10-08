@@ -249,6 +249,10 @@ impl Session {
     pub fn refresh(&mut self) {
         self.model.evaluate(&self.doc);
         self.revision += 1;
+        // Joints follow the geometry their origins snap to.
+        if !self.doc.assembly.joints.is_empty() {
+            cmd::joints::resolve(self);
+        }
         if let Some(id) = self.active_sketch
             && self.doc.feature(id).is_none()
         {

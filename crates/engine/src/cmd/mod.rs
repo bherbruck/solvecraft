@@ -12,6 +12,7 @@ mod features_more;
 pub use features::auto_operation;
 mod file;
 mod inspect;
+pub(crate) mod joints;
 mod measure_sel;
 mod section;
 pub(crate) use measure_sel::measure_items;
@@ -126,6 +127,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(features::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
+    v.extend(joints::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
     v.extend(clipboard::COMMANDS.iter());

@@ -10,6 +10,7 @@ mod clipboard;
 mod document;
 mod eval;
 pub mod expr;
+pub mod joints;
 mod params;
 pub mod project;
 mod project3d;
