@@ -1924,6 +1924,73 @@ fn object_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> f64 {
     h(p)
 }
 
+/// One point on each face of a body (a triangle centre, so it lies on the face).
+fn face_samples(b: &ModelBody) -> Vec<Vec3> {
+    let m = b.mesh();
+    let mut out: Vec<Option<Vec3>> = Vec::new();
+    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+        let f = *f as usize;
+        if out.len() <= f {
+            out.resize(f + 1, None);
+        }
+        if let (Some(slot @ None), Some([a, bb, c])) = (out.get_mut(f), m.tri(t)) {
+            *slot = Some((a + bb + c) * (1.0 / 3.0));
+        }
+    }
+    out.into_iter().flatten().collect()
+}
+
+/// The picked faces and every face joined to them smoothly (across tangent edges), as points.
+fn smooth_chain(b: &ModelBody, picks: &[Vec3]) -> Vec<Vec3> {
+    let m = b.mesh();
+    let samples = face_samples(b);
+    let face_of = |p: Vec3| crate::appearance::face_index_at(b, p);
+    // The surface normal of face f at its mesh vertex nearest q (vertex normals are the
+    // surface's, so a tangent edge reads the same from both sides).
+    let normal_near = |f: u32, q: Vec3| -> Option<Vec3> {
+        m.triangles
+            .iter()
+            .zip(&m.tri_face)
+            .filter(|(_, tf)| **tf == f)
+            .flat_map(|(t, _)| t.iter().copied())
+            .filter_map(|i| Some((m.positions.get(i as usize)?.dist(q), *m.normals.get(i as usize)?)))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .and_then(|(_, n)| n.normalized())
+    };
+    let mut chosen: Vec<u32> = picks.iter().filter_map(|p| face_of(*p).map(|f| f as u32)).collect();
+    let mut k = 0;
+    while k < chosen.len() && chosen.len() < 10_000 {
+        let f = chosen[k];
+        k += 1;
+        for (e, fs) in m.edges.iter().zip(&m.edge_faces) {
+            let (Some(&a), Some(&bb)) = (fs.first(), fs.get(1)) else { continue };
+            let other = if a == f {
+                bb
+            } else if bb == f {
+                a
+            } else {
+                continue;
+            };
+            if chosen.contains(&other) {
+                continue;
+            }
+            let Some(mid) = e.get(e.len() / 2).copied() else { continue };
+            if let (Some(n1), Some(n2)) = (normal_near(f, mid), normal_near(other, mid))
+                && n1.dot(n2) > 2f64.to_radians().cos()
+            {
+                chosen.push(other);
+            }
+        }
+    }
+    let mut out = picks.to_vec();
+    for f in chosen {
+        if let Some(p) = samples.iter().find(|p| face_of(**p) == Some(f as usize)) {
+            out.push(*p);
+        }
+    }
+    out
+}
+
 /// The plane of the body face a sketch sits on, found again: among planar faces with the
 /// picked plane's normal, the one nearest `at`. The picked frame moves along its normal onto it.
 fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> (Plane, Option<String>) {
@@ -2104,11 +2171,31 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             st.threads.push(t);
             Ok(())
         }
-        FeatureKind::Shell { faces, thickness, body } => {
+        FeatureKind::Shell { faces, thickness, body, direction, tangent_chain } => {
             let t = val(vals, thickness, Kind::Length)?;
             let i = body_at(st, body, faces)?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
-            let nb = kernel::shell(&mb.body, faces, t)?;
+            let open = if *tangent_chain { smooth_chain(&mb, faces) } else { faces.clone() };
+            let nb = match direction.as_str() {
+                "" | "inside" => kernel::shell(&mb.body, &open, t)?,
+                "outside" | "both" => {
+                    // Walls grown out of the faces (or half out, half in): an offset body less a
+                    // cavity, the open faces pushed out of the way.
+                    if !(t > 1e-6) {
+                        return Err(DocError::Invalid("shell thickness must be positive".into()));
+                    }
+                    let (out, inn) = if direction == "outside" { (t, 0.0) } else { (t / 2.0, t / 2.0) };
+                    let samples = face_samples(&mb);
+                    let opened =
+                        |p: &Vec3| open.iter().any(|q| crate::appearance::face_index_at(&mb, *q) == crate::appearance::face_index_at(&mb, *p));
+                    let walls: Vec<Vec3> = samples.iter().filter(|p| !opened(p)).copied().collect();
+                    let outer = kernel::offset_faces(&mb.body, &walls, out)?;
+                    let cavity = if inn > 0.0 { kernel::offset_faces(&mb.body, &walls, -inn)? } else { mb.body.clone() };
+                    let cavity = kernel::offset_faces(&cavity, &open, 2.0 * t + 1.0)?;
+                    kernel::boolean(&outer, &cavity, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the shell removed everything".into()))?
+                }
+                o => return Err(DocError::Invalid(format!("unknown shell direction `{o}` (inside, outside or both)"))),
+            };
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = ModelBody::new(mb.name, nb, mb.feature);
             }
@@ -2476,4 +2563,29 @@ pub fn world_state(doc: &Document, st: &ModelState) -> ModelState {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod chain_tests {
+    use super::*;
+
+    /// The top face of a box with one rounded top edge chains to the round and on to the side
+    /// it rolls into; the other sides meet at sharp edges and stay out.
+    #[test]
+    fn tangent_chain_follows_smooth_edges() {
+        let mut doc = Document::new("T");
+        doc.add_feature(
+            FeatureKind::Box { corner: Vec3::ZERO, length: "40".into(), width: "30".into(), height: "20".into(), operation: Operation::NewBody },
+            None,
+        )
+        .unwrap();
+        doc.add_feature(FeatureKind::Fillet { edges: vec![Vec3::new(20.0, 0.0, 20.0)], radius: "4".into(), body: None }, None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let st = m.state();
+        let b = &st.bodies[0];
+        let pts = smooth_chain(b, &[Vec3::new(20.0, 15.0, 20.0)]);
+        let faces: std::collections::BTreeSet<usize> = pts.iter().filter_map(|p| crate::appearance::face_index_at(b, *p)).collect();
+        assert_eq!(faces.len(), 3, "{faces:?}");
+    }
 }

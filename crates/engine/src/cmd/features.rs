@@ -75,7 +75,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
-        .params("faces: [[x,y,z] points on the faces to remove]; thickness: expr (inside); body?"),
+        .params("faces: [[x,y,z] points on the faces to remove]; thickness: expr; direction?: inside|outside|both; tangent_chain?: bool (also open faces joined smoothly to the picked ones); body?"),
     CommandSpec::new("solid.draft", "Draft", draft)
         .at("SOLID", "MODIFY")
         .icon("draft")
@@ -992,7 +992,21 @@ fn shell(s: &mut Session, p: &Value) -> Result<Value> {
     let faces = face_points(p, cmd)?;
     let thickness = req_expr(cmd, p, "thickness")?;
     check_expr(s, &thickness, Kind::Length, cmd, "thickness")?;
-    add_feature(s, p, FeatureKind::Shell { faces, thickness, body: str_(p, "body").map(str::to_string) })
+    let direction = str_(p, "direction").map(str::to_ascii_lowercase).unwrap_or_default();
+    if !matches!(direction.as_str(), "" | "inside" | "outside" | "both") {
+        return Err(bad(cmd, "`direction` must be inside, outside or both"));
+    }
+    add_feature(
+        s,
+        p,
+        FeatureKind::Shell {
+            faces,
+            thickness,
+            body: str_(p, "body").map(str::to_string),
+            direction: if direction == "inside" { String::new() } else { direction },
+            tangent_chain: bool_(p, "tangent_chain").unwrap_or(false),
+        },
+    )
 }
 
 fn draft(s: &mut Session, p: &Value) -> Result<Value> {

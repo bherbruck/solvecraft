@@ -321,6 +321,12 @@ pub enum FeatureKind {
         thickness: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<String>,
+        /// inside (default) | outside | both (the wall straddles the faces).
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        direction: String,
+        /// Open the faces smoothly joined to the picked ones too.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        tangent_chain: bool,
     },
     /// Tilt faces (at the given points) about a neutral plane, leaning toward `pull`.
     Draft {

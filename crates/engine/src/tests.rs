@@ -1715,3 +1715,30 @@ fn revolve_two_sides_symmetric_and_to_object() {
     let (v, _) = ring(json!({"to": corner}));
     assert!(rel(v, v90) < 1e-3, "{v} {v90}");
 }
+
+/// Shell Inside, Outside and Both, and a tangent chain of open faces.
+#[test]
+fn shell_directions_and_tangent_chain() {
+    let shell = |extra: Value| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+        let mut p = json!({"faces": [[20, 15, 20]], "thickness": 2});
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            p[k] = v.clone();
+        }
+        run(&mut s, "solid.shell", p);
+        let m = run(&mut s, "inspect.measure", json!({}));
+        (m["total"]["volume_mm3"].as_f64().unwrap_or(0.0), m["bodies"][0]["bbox"].clone())
+    };
+    let (v, _) = shell(json!({}));
+    assert!(rel(v, 40.0 * 30.0 * 20.0 - 36.0 * 26.0 * 18.0) < 1e-6, "{v}");
+    // Outside: the walls grow out; the original box is the cavity.
+    let (v, b) = shell(json!({"direction": "outside"}));
+    assert!(rel(v, 44.0 * 34.0 * 22.0 - 40.0 * 30.0 * 20.0) < 1e-6, "{v} {b}");
+    // Both: 1 mm out, 1 mm in.
+    let (v, _) = shell(json!({"direction": "both"}));
+    assert!(rel(v, 42.0 * 32.0 * 21.0 - 38.0 * 28.0 * 19.0) < 1e-6, "{v}");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    assert!(s.execute("solid.shell", &json!({"faces": [[20, 15, 20]], "thickness": 2, "direction": "sideways"})).is_err());
+}
