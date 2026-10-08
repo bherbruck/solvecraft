@@ -11,7 +11,7 @@ use egui_wgpu::wgpu::util::DeviceExt;
 pub const TRI_SIZE: usize = 28;
 /// Line instance: a, b (3 × f32 each), colour (4 × u8), width in pixels (f32).
 pub const LINE_SIZE: usize = 32;
-const UNIFORM_SIZE: u64 = 128;
+const UNIFORM_SIZE: u64 = 160;
 
 /// CPU-side geometry waiting to be uploaded. The model scene changes with the design; the
 /// highlight scene (hover, selection, the origin widget) changes often and is small.
@@ -120,6 +120,9 @@ pub struct ViewportCallback {
     pub cap: [f32; 4],
     /// Canvases and decals.
     pub images: Vec<GpuImage>,
+    /// Surface analysis: (mode: 0 none, 1 zebra, 2 draft, 3 curvature; parameter; 0; 0) and
+    /// the draft pull direction.
+    pub analysis: [f32; 8],
 }
 
 struct Batch {
@@ -188,6 +191,8 @@ struct U {
     screen: vec4<f32>, // viewport width, height (px), depth bias
     clip: vec4<f32>,   // section plane: normal, d (zero normal: no section)
     cap: vec4<f32>,    // colour of the inside of cut bodies
+    ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature), parameter
+    pull: vec4<f32>,   // draft pull direction
 };
 
 fn clipped(p: vec3<f32>) -> bool {
@@ -230,7 +235,43 @@ fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f3
     if (!front && length(u.clip.xyz) > 0.5) {
         return out_color(u.cap);
     }
+    if (u.ana.x > 0.5 && length(i.n) > 0.5) {
+        return analysis(i);
+    }
     return shade(i);
+}
+
+/// Surface analysis colours: zebra stripes, draft angle bands, curvature map.
+fn analysis(i: TOut) -> vec4<f32> {
+    let v = normalize(u.back.xyz);
+    var n = normalize(i.n);
+    if (dot(n, v) < 0.0) { n = -n; }
+    let lit = 0.55 + 0.45 * max(dot(n, v), 0.0);
+    if (u.ana.x < 1.5) {
+        // Reflections of upright light bars standing around the viewer: the stripe follows
+        // the reflected ray's sideways direction (horizontal on screen).
+        let r = reflect(-v, n);
+        var side = cross(v, vec3<f32>(0.0, 0.0, 1.0));
+        if (length(side) < 1e-3) { side = vec3<f32>(1.0, 0.0, 0.0); }
+        let s = sin(dot(r, normalize(side)) * u.ana.y * 3.14159265);
+        let c = select(0.08, 0.95, s > 0.0);
+        return out_color(vec4<f32>(vec3<f32>(c), 1.0));
+    }
+    if (u.ana.x < 2.5) {
+        let a = degrees(asin(clamp(dot(normalize(i.n), normalize(u.pull.xyz)), -1.0, 1.0)));
+        var c = vec3<f32>(0.95, 0.80, 0.15);
+        if (a >= u.ana.y) { c = vec3<f32>(0.20, 0.75, 0.30); }
+        if (a <= -u.ana.y) { c = vec3<f32>(0.85, 0.22, 0.20); }
+        return out_color(vec4<f32>(c * lit, 1.0));
+    }
+    // Curvature from how fast the normal turns across the pixel.
+    let nn = normalize(i.n);
+    let kx = length(dpdx(nn)) / max(length(dpdx(i.wp)), 1e-6);
+    let ky = length(dpdy(nn)) / max(length(dpdy(i.wp)), 1e-6);
+    let t = clamp(max(kx, ky) * u.ana.y, 0.0, 1.0);
+    let c = select(mix(vec3<f32>(0.10, 0.80, 0.25), vec3<f32>(0.90, 0.15, 0.10), t * 2.0 - 1.0),
+                   mix(vec3<f32>(0.15, 0.35, 0.95), vec3<f32>(0.10, 0.80, 0.25), t * 2.0), t < 0.5);
+    return out_color(vec4<f32>(c * lit, 1.0));
 }
 
 @fragment
@@ -643,6 +684,7 @@ pub fn uniform_bytes(cb: &ViewportCallback, w: f32, h: f32, linear: bool) -> Vec
     v.extend([w.max(1.0), h.max(1.0), 2e-4, 0.0]);
     v.extend(cb.clip);
     v.extend(cb.cap);
+    v.extend(cb.analysis);
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 

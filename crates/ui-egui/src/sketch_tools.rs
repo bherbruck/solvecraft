@@ -94,7 +94,23 @@ fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 
 /// Commands that start with a step of their own: Canvas and Decal ask for the image first,
 /// Edit Canvas opens the canvas panel. False when the command should not go on.
-pub fn start_hook(app: &SolveApp, id: &str) -> bool {
+pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
+    // Surface analyses toggle: a second click turns the same one off.
+    use solvecraft_engine::SurfaceAnalysis as A;
+    let same = match (id, app.session.analysis) {
+        ("FusionZebraAnalysisCommand", Some(A::Zebra { .. })) => Some(true),
+        ("FusionDraftAnalysisCommand", Some(A::Draft { .. })) => Some(true),
+        ("FusionCurvatureMapAnalysisCommand", Some(A::Curvature { .. })) => Some(true),
+        ("FusionZebraAnalysisCommand" | "FusionDraftAnalysisCommand" | "FusionCurvatureMapAnalysisCommand", _) => Some(false),
+        _ => None,
+    };
+    if let Some(on) = same {
+        let p = if on { json!({"clear": true}) } else { json!({}) };
+        if app.run(id, p).is_ok() {
+            app.set_status(if on { "Analysis off" } else { "Analysis on (click it again to turn it off)" }, false);
+        }
+        return false;
+    }
     if id == "FusionCenterOfMassCommand" {
         // The whole model at once; the tool stays for picking single bodies.
         MARKS.with(|m| m.borrow_mut().clear());

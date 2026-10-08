@@ -162,6 +162,20 @@ pub struct Session {
     pub clipboard: Vec<solvecraft_doc::Feature>,
     /// Section Analysis: a view cut by a plane (origin, unit normal; the normal side is hidden).
     pub section: Option<(Vec3, Vec3)>,
+    /// Surface analysis shading the model (zebra, draft, curvature map).
+    pub analysis: Option<SurfaceAnalysis>,
+}
+
+/// A way of shading the model's faces to judge their shape (view state, not part of the design).
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SurfaceAnalysis {
+    /// Reflected stripes: `stripes` across the view.
+    Zebra { stripes: f64 },
+    /// Faces by draft angle to `pull`: past +`angle` green, past −`angle` red, between yellow.
+    Draft { pull: Vec3, angle: f64 },
+    /// Colour by curvature: blue flat, through green, to red at 1 / `radius`.
+    Curvature { radius: f64 },
 }
 
 const MAX_UNDO: usize = 200;
@@ -195,6 +209,7 @@ impl Session {
             world_cache: Default::default(),
             clipboard: Vec::new(),
             section: None,
+            analysis: None,
         }
     }
 
@@ -326,6 +341,7 @@ impl Session {
             world_cache: Default::default(),
             clipboard: self.clipboard.clone(),
             section: None,
+            analysis: None,
         }
     }
 

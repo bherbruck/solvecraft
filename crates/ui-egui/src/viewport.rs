@@ -646,6 +646,17 @@ pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
 }
 
 /// The section as the shader's clip plane (normal, d), zero when there is none.
+/// The surface analysis for the shader (see `gpu::ViewportCallback::analysis`).
+fn analysis_uniform(app: &SolveApp) -> [f32; 8] {
+    use solvecraft_engine::SurfaceAnalysis as A;
+    match app.session.analysis {
+        Some(A::Zebra { stripes }) => [1.0, stripes as f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+        Some(A::Draft { pull, angle }) => [2.0, angle as f32, 0.0, 0.0, pull.x as f32, pull.y as f32, pull.z as f32, 0.0],
+        Some(A::Curvature { radius }) => [3.0, radius as f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+        None => [0.0; 8],
+    }
+}
+
 fn section_clip(app: &SolveApp) -> [f32; 4] {
     match section_plane(app) {
         Some((o, n)) => [n.x as f32, n.y as f32, n.z as f32, n.dot(o) as f32],
@@ -1126,6 +1137,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             back: proj.cam.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],
             images: crate::ref_images::gpu_images(app),
+            analysis: analysis_uniform(app),
         };
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
     } else {

@@ -652,6 +652,35 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
                 pen.line(&[(3.0 + 12.0 * t, 17.0 + 2.0 * t), (9.0 + 12.0 * t, 5.0 + 2.0 * t)], a);
             }
         }
+        "zebra" | "draft_analysis" | "curvature_map" => {
+            let pts: Vec<Pos2> =
+                (0..32).map(|i| i as f32 / 32.0 * std::f32::consts::TAU).map(|t| pen.at(12.0 + 9.0 * t.cos(), 12.0 + 9.0 * t.sin())).collect();
+            match name {
+                "zebra" => {
+                    p.add(Shape::convex_polygon(pts, Color32::WHITE, Stroke::new(pen.w, ink)));
+                    for k in 0..3 {
+                        let y = 6.5 + k as f32 * 4.5;
+                        let h = (81.0 - (y + 1.0 - 12.0) * (y + 1.0 - 12.0)).max(0.0).sqrt();
+                        pen.poly(
+                            &[(12.0 - h, y), (12.0 + h, y), (12.0 + h, y + 2.2), (12.0 - h, y + 2.2)],
+                            Color32::from_gray(30),
+                            Color32::TRANSPARENT,
+                        );
+                    }
+                    pen.circle(12.0, 12.0, 9.0, Color32::TRANSPARENT, ink);
+                }
+                "draft_analysis" => {
+                    pen.poly(&[(4.0, 20.0), (20.0, 20.0), (17.0, 5.0), (7.0, 5.0)], Color32::from_rgb(70, 180, 90), ink);
+                    pen.poly(&[(7.0, 5.0), (17.0, 5.0), (16.0, 9.0), (8.0, 9.0)], Color32::from_rgb(235, 200, 50), Color32::TRANSPARENT);
+                    pen.arrow((12.0, 16.0), (12.0, 1.5), a);
+                }
+                _ => {
+                    p.add(Shape::convex_polygon(pts, Color32::from_rgb(60, 110, 230), Stroke::new(pen.w, ink)));
+                    pen.circle(14.0, 10.0, 5.0, Color32::from_rgb(70, 190, 90), Color32::TRANSPARENT);
+                    pen.circle(15.5, 8.5, 2.2, Color32::from_rgb(225, 60, 45), Color32::TRANSPARENT);
+                }
+            }
+        }
         "center_of_mass" => {
             pen.circle(12.0, 12.0, 8.0, Color32::TRANSPARENT, ink);
             let q = |a0: f32| {

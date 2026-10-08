@@ -30,6 +30,7 @@ mod sketch_import;
 mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
+mod surface_analysis;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -132,6 +133,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_inspect::COMMANDS.iter());
     v.extend(sketch_canvas::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
+    v.extend(surface_analysis::COMMANDS.iter());
     v.extend(sketch_modify::COMMANDS.iter());
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
