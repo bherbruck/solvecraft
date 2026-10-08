@@ -4,7 +4,7 @@ use mt::builder;
 use solvecraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use truck_modeling as mt;
 
-use crate::body::{Body, Solid, p3, v3};
+use crate::body::{Body, Solid, from_p3, p3, v3};
 use crate::{KernelError, Result, guard};
 
 const MAX_SEGS: usize = 20_000;
@@ -556,6 +556,12 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
         }
         wires.push(uniform_wire(p, &r)?);
     }
+    // Three sections or more: one smooth surface through them all for each segment.
+    if wires.len() >= 3
+        && let Ok(b) = guard("loft", || smooth_loft(&wires))
+    {
+        return Ok(b);
+    }
     guard("loft", || {
         let mut faces: Vec<mt::Face> = Vec::new();
         for w in wires.windows(2) {
@@ -565,6 +571,74 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
         let (Some(first), Some(last)) = (wires.first(), wires.last()) else { return Err(KernelError::Failed("loft".into())) };
         cap_and_close(faces, std::slice::from_ref(first), std::slice::from_ref(last))
     })
+}
+
+/// Points across the sections (one per section, in order) as a smooth B-spline: cubic through
+/// four or more, quadratic through three.
+fn across(pts: &[Vec3]) -> Option<mt::BSplineCurve<mt::Point3>> {
+    match pts {
+        [a, b, c] => {
+            let m = *b * 2.0 - (*a + *c) * 0.5;
+            mt::BSplineCurve::try_new(mt::KnotVec::bezier_knot(2), vec![p3(*a), p3(m), p3(*c)]).ok()
+        }
+        _ => interpolate_cubic(pts),
+    }
+}
+
+/// A loft whose side faces are B-spline surfaces through every section (smooth across the
+/// middle sections, which leave no edges). Every section wire comes from `uniform_wire`, so the
+/// k-th edges of all sections share one knot vector and their control points pair up.
+fn smooth_loft(wires: &[mt::Wire]) -> Result<Body> {
+    let fail = |m: &str| KernelError::Failed(format!("smooth loft: {m}"));
+    let edges: Vec<Vec<mt::Edge>> = wires.iter().map(|w| w.edge_iter().cloned().collect()).collect();
+    let n = edges.first().map(Vec::len).ok_or_else(|| fail("no sections"))?;
+    if edges.iter().any(|e| e.len() != n) {
+        return Err(fail("sections with different edge counts"));
+    }
+    let curve_of = |e: &mt::Edge| -> Option<mt::BSplineCurve<mt::Point3>> {
+        match e.curve() {
+            mt::Curve::BSplineCurve(c) if e.orientation() => Some(c),
+            _ => None,
+        }
+    };
+    let (Some(first), Some(last)) = (edges.first(), edges.last()) else { return Err(fail("sections")) };
+    // Seams: through the k-th vertex of every section.
+    let mut seams: Vec<mt::Edge> = Vec::with_capacity(n);
+    for k in 0..n {
+        let pts: Vec<Vec3> = edges.iter().filter_map(|es| es.get(k).map(|e| from_p3(e.front().point()))).collect();
+        let c = across(&pts).ok_or_else(|| fail("seam"))?;
+        let (Some(a), Some(b)) = (first.get(k), last.get(k)) else { return Err(fail("seam")) };
+        seams.push(mt::Edge::new(a.front(), b.front(), mt::Curve::BSplineCurve(c)));
+    }
+    let mut faces = Vec::with_capacity(n);
+    for k in 0..n {
+        let curves: Vec<mt::BSplineCurve<mt::Point3>> =
+            edges.iter().map(|es| es.get(k).and_then(curve_of)).collect::<Option<_>>().ok_or_else(|| fail("section curves"))?;
+        let c0 = curves.first().ok_or_else(|| fail("section curves"))?;
+        let uk = c0.knot_vec().clone();
+        let m = c0.control_points().len();
+        if curves.iter().any(|c| c.control_points().len() != m || c.knot_vec() != &uk) {
+            return Err(fail("sections parameterised differently"));
+        }
+        let mut ctrl: Vec<Vec<mt::Point3>> = Vec::with_capacity(m);
+        let mut vk = None;
+        for j in 0..m {
+            let pts: Vec<Vec3> = curves.iter().filter_map(|c| c.control_points().get(j).map(|p| from_p3(*p))).collect();
+            let c = across(&pts).ok_or_else(|| fail("surface"))?;
+            vk = Some(c.knot_vec().clone());
+            ctrl.push(c.control_points().clone());
+        }
+        let vk = vk.ok_or_else(|| fail("surface"))?;
+        let surface = mt::BSplineSurface::try_new((uk, vk), ctrl).map_err(|e| fail(&e.to_string()))?;
+        let (Some(e0), Some(e1), Some(s0), Some(s1)) = (first.get(k), last.get(k), seams.get(k), seams.get((k + 1) % n)) else {
+            return Err(fail("face"));
+        };
+        // u along the section edge, v across the sections: counter-clockwise in (u, v).
+        let w: mt::Wire = vec![e0.clone(), s1.clone(), e1.inverse(), s0.inverse()].into();
+        faces.push(mt::Face::try_new(vec![w], mt::Surface::BSplineSurface(surface)).map_err(|e| fail(&e.to_string()))?);
+    }
+    let (Some(w0), Some(w1)) = (wires.first(), wires.last()) else { return Err(fail("sections")) };
+    cap_and_close(faces, std::slice::from_ref(w0), std::slice::from_ref(w1))
 }
 
 /// A 3D path segment for sweeps.

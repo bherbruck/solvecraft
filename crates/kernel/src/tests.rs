@@ -1238,3 +1238,26 @@ fn shell_with_spherical_and_conical_faces() {
     let v = measure(&s).unwrap().volume;
     assert!(v > 0.1 * v0 && v < 0.6 * v0, "{v} of {v0}");
 }
+
+#[test]
+fn smooth_loft_through_three_sections() {
+    // Squares 40 → 20 → 40 wide, 0, 20 and 40 up: the middle is pinched smoothly (no edge there).
+    let sq = |s: f64| Loop2::polygon(&[Vec2::new(-s, -s), Vec2::new(s, -s), Vec2::new(s, s), Vec2::new(-s, s)]);
+    let l = loft(&[(Plane::XY, sq(20.0)), (Plane::XY.offset(20.0), sq(10.0)), (Plane::XY.offset(40.0), sq(20.0))]).unwrap();
+    let m = measure(&l).unwrap();
+    // Smooth: between the ruled (two frustums, 2 · 20 · (1600 + 400 + 800)/3) and the box.
+    let ruled = 2.0 * 20.0 * (1600.0 + 400.0 + 800.0) / 3.0;
+    assert!(m.volume < ruled && m.volume > 40.0 * 400.0, "{}", m.volume);
+    // Four sides and two caps; the middle section leaves no edges.
+    assert_eq!(m.merged.faces, 6, "{:?}", m.merged);
+    assert_eq!(m.merged.edges, 12, "{:?}", m.merged);
+    // A circle, a square and a circle: valid and between the inner and outer bounds.
+    let c = loft(&[
+        (Plane::XY, Loop2::circle(Vec2::ZERO, 10.0)),
+        (Plane::XY.offset(15.0), sq(12.0)),
+        (Plane::XY.offset(30.0), Loop2::circle(Vec2::ZERO, 8.0)),
+    ])
+    .unwrap();
+    let v = measure(&c).unwrap().volume;
+    assert!(v > PI * 64.0 * 30.0 && v < 576.0 * 30.0, "{v}");
+}
