@@ -17,7 +17,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.revolve", "Revolve", revolve)
         .at("SOLID", "CREATE")
         .icon("revolve")
-        .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world); angle?: expr (default 360 deg); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile), operation?, targets?, name?, body_name?"),
+        .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world); angle?: expr (default 360 deg); angle2?: expr (Two Sides: the other side's angle); direction?: symmetric (angle split either side); to?: [x,y,z] (To Object: turn until that face, vertex or point); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile), operation?, targets?, name?, body_name?"),
     CommandSpec::new("solid.sweep", "Sweep", sweep)
         .at("SOLID", "CREATE")
         .icon("sweep")
@@ -408,7 +408,27 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         Some(f) => f,
         None => profiles(p, cmd)?,
     };
-    let kind = FeatureKind::Revolve { sketch, profiles, axis, angle, operation: operation(p, cmd)?, targets: string_list(p, "targets") };
+    let angle2 = expr(p, "angle2");
+    if let Some(a) = &angle2 {
+        check_expr(s, a, Kind::Angle, cmd, "angle2")?;
+    }
+    let to = match p.get("to") {
+        Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`to` must be a point [x, y, z] to turn to"))?),
+        None => None,
+    };
+    let symmetric =
+        matches!(str_(p, "direction").map(str::to_ascii_lowercase).as_deref(), Some("symmetric")) || bool_(p, "symmetric").unwrap_or(false);
+    let kind = FeatureKind::Revolve {
+        sketch,
+        profiles,
+        axis,
+        angle,
+        operation: operation(p, cmd)?,
+        targets: string_list(p, "targets"),
+        angle2,
+        symmetric,
+        to,
+    };
     add_feature(s, p, kind)
 }
 

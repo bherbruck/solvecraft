@@ -135,6 +135,9 @@ fn errors_are_reported_not_fatal() {
             angle: "90 deg".into(),
             operation: Operation::NewBody,
             targets: vec![],
+            angle2: None,
+            symmetric: false,
+            to: None,
         },
         None,
     )

@@ -47,7 +47,12 @@ impl FeatureKind {
                     v.push(("Taper angle", d, A));
                 }
             }
-            FeatureKind::Revolve { angle, .. } => v.push(("Angle", angle, A)),
+            FeatureKind::Revolve { angle, angle2, .. } => {
+                v.push(("Angle", angle, A));
+                if let Some(a) = angle2 {
+                    v.push(("Angle 2", a, A));
+                }
+            }
             FeatureKind::Fillet { radius, style, .. } => match style {
                 crate::FilletStyle::Constant => v.push(("Radius", radius, L)),
                 crate::FilletStyle::Chord => v.push(("Chord length", radius, L)),

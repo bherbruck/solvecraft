@@ -175,6 +175,15 @@ pub enum FeatureKind {
         operation: Operation,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<String>,
+        /// Two Sides: the angle on the other side.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle2: Option<String>,
+        /// Symmetric: `angle` split evenly either side of the profile.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        symmetric: bool,
+        /// To Object: turn until the face, vertex or point here.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<Vec3>,
     },
     Fillet {
         /// Reference points on the edges to round (each re-finds the nearest edge).
@@ -1000,6 +1009,7 @@ impl FeatureKind {
             | FeatureKind::ReplaceFace { faces, .. } => faces.iter_mut().collect(),
             FeatureKind::Hole { position, points: None, .. } => vec![position],
             FeatureKind::Extrude { extent, .. } => extent.to.iter_mut().chain(extent.from.iter_mut()).collect(),
+            FeatureKind::Revolve { to: Some(p), .. } => vec![p],
             _ => Vec::new(),
         }
     }
@@ -1027,7 +1037,10 @@ impl FeatureKind {
                     v.push(d);
                 }
             }
-            FeatureKind::Revolve { angle, .. } => v.push(angle),
+            FeatureKind::Revolve { angle, angle2, .. } => {
+                v.push(angle);
+                v.extend(angle2.iter().map(String::as_str));
+            }
             FeatureKind::Fillet { radius, style, .. } => {
                 v.push(radius);
                 if let FilletStyle::Variable { radius2, .. } = style {

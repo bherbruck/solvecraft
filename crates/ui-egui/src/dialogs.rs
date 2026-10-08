@@ -2407,7 +2407,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets } => {
+        FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets, .. } => {
             let mut d = start("solid.revolve")?;
             d.kind = Kind::Revolve { angle: angle.clone(), operation: op_index(operation) };
             let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();

@@ -1683,3 +1683,35 @@ fn extrude_to_and_from_objects() {
     assert_eq!(name, vec!["F1:-z".to_string()], "the To face is stored by name");
     assert!(s.execute("solid.extrude", &json!({"sketch": "P", "to": "nope"})).is_err());
 }
+
+/// Revolve Two Sides, Symmetric and To Object.
+#[test]
+fn revolve_two_sides_symmetric_and_to_object() {
+    let ring = |extra: Value| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "S"}));
+        run(&mut s, "sketch.line", json!({"points": [[10, 0], [15, 0], [15, 5], [10, 5]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "S", "axis": "y", "angle": "90 deg"});
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            p[k] = v.clone();
+        }
+        run(&mut s, "solid.revolve", p);
+        let m = run(&mut s, "inspect.measure", json!({}));
+        (m["total"]["volume_mm3"].as_f64().unwrap_or(0.0), m["bodies"][0]["bbox"].clone())
+    };
+    let full = PI * (225.0 - 100.0) * 5.0;
+    let (v, _) = ring(json!({}));
+    assert!(rel(v, full / 4.0) < 1e-3);
+    let (v, _) = ring(json!({"angle2": "45 deg"}));
+    assert!(rel(v, full * 135.0 / 360.0) < 1e-3, "{v}");
+    let (v, b) = ring(json!({"direction": "symmetric"}));
+    assert!(rel(v, full / 4.0) < 1e-3);
+    // Split evenly: the extent either side of the sketch plane (y = 0) is the same.
+    assert!((b["max"][1].as_f64().unwrap_or(0.0) + b["min"][1].as_f64().unwrap_or(0.0)).abs() < 1e-3, "{b}");
+    // To a point a quarter turn round: the same as 90°.
+    let (v90, b90) = ring(json!({}));
+    let corner = if b90["max"][1].as_f64().unwrap_or(0.0) > 1.0 { json!([0, 12, 0]) } else { json!([0, -12, 0]) };
+    let (v, _) = ring(json!({"to": corner}));
+    assert!(rel(v, v90) < 1e-3, "{v} {v90}");
+}

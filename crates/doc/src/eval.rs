@@ -1317,11 +1317,39 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
             }
             Ok(tools)
         }
-        FeatureKind::Revolve { sketch, profiles, axis, angle, .. } => {
+        FeatureKind::Revolve { sketch, profiles, axis, angle, angle2, symmetric, to, .. } => {
             let ss = st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?.clone();
             let regions = solvecraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
             let (o, d) = revolve_axis(&ss, axis)?;
-            let ang = val(vals, angle, Kind::Angle)?;
+            // Where the turn starts (from the profile) and how far it goes.
+            let (start, ang) = match (to, angle2, symmetric) {
+                (Some(p), _, _) => {
+                    let (ow, aw) = (ss.plane.to_world(o), ss.plane.dir_to_world(d));
+                    let pts: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
+                    let c = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, q| a + *q) * (1.0 / pts.len().max(1) as f64));
+                    let flat = |q: Vec3| {
+                        let v = q - ow;
+                        v - aw * v.dot(aw)
+                    };
+                    let (u, v) = (flat(c), flat(*p));
+                    // The revolve turns clockwise about its axis direction (the kernel's sense).
+                    let a = (aw * -1.0).dot(u.cross(v)).atan2(u.dot(v));
+                    let a = if a <= 1e-9 { a + std::f64::consts::TAU } else { a };
+                    (0.0, a)
+                }
+                (None, Some(a2), _) => {
+                    let (a, b) = (val(vals, angle, Kind::Angle)?, val(vals, a2, Kind::Angle)?);
+                    (-b, a + b)
+                }
+                (None, None, true) => {
+                    let a = val(vals, angle, Kind::Angle)?;
+                    (-a / 2.0, a)
+                }
+                (None, None, false) => (0.0, val(vals, angle, Kind::Angle)?),
+            };
+            if !(ang.abs() > 1e-9 && ang.abs() <= std::f64::consts::TAU + 1e-9) {
+                return Err(DocError::Invalid("the revolve angle must be more than 0 and at most 360°".into()));
+            }
             let (operation, targets) = feature_op(f);
             let axis_w = ss.plane.dir_to_world(d);
             let origin_w = ss.plane.to_world(o);
@@ -1336,7 +1364,13 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
                     .collect::<Vec<_>>()
             };
             let regions: Vec<Region2> = regions.iter().map(|r| grow_profile_for_coplanar(st, r, operation, &targets, &probe)).collect();
-            Ok(kernel::revolve(&ss.plane, &regions, o, d, ang)?)
+            let bodies = kernel::revolve(&ss.plane, &regions, o, d, ang)?;
+            if start.abs() < 1e-12 {
+                return Ok(bodies);
+            }
+            // Turned back to start before the profile.
+            let m = crate::rigid(Vec3::ZERO, origin_w, axis_w, -start);
+            Ok(bodies.iter().map(|b| kernel::transform_matrix(b, m)).collect::<std::result::Result<Vec<_>, _>>()?)
         }
         FeatureKind::Loft { sections, .. } if sections.iter().any(|s| s.point.is_some()) => {
             // A profile lofted to a sketch point (an apex).
