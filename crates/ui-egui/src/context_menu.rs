@@ -40,6 +40,8 @@ pub enum Target {
     },
     /// The Origin folder.
     Origin,
+    /// Document Settings › Units.
+    Units,
     /// The Named Views folder, and one view (saved or standard) in it.
     NamedViews,
     NamedView {
@@ -213,9 +215,13 @@ pub fn target_bodies(app: &SolveApp, target: &Target) -> Vec<String> {
         Target::Body { name } => vec![name.clone()],
         Target::Component { id } => component_bodies(app, *id),
         Target::Group { id } => crate::browser::group_bodies(app, *id),
-        Target::Sketch { .. } | Target::Folder { .. } | Target::Canvas { .. } | Target::Origin | Target::NamedViews | Target::NamedView { .. } => {
-            Vec::new()
-        }
+        Target::Sketch { .. }
+        | Target::Folder { .. }
+        | Target::Canvas { .. }
+        | Target::Origin
+        | Target::Units
+        | Target::NamedViews
+        | Target::NamedView { .. } => Vec::new(),
     }
 }
 
@@ -275,6 +281,13 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
+        Target::Units => crate::prefs::UNITS
+            .iter()
+            .map(|u| {
+                let label = if app.session.doc.units == *u { format!("{u}  ✓") } else { (*u).to_string() };
+                cmd(app, "document.units", &label).with(json!({ "units": u }))
+            })
+            .collect(),
         Target::NamedView { name } => crate::browser::view_items(app, name),
     };
     // Several items of the folder selected: they can be grouped.
@@ -1380,24 +1393,27 @@ fn show_props(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.label(format!("{:.3} g", f(total, "mass_g")));
                 ui.end_row();
                 ui.label("Volume");
-                ui.label(format!("{:.3} mm³", f(total, "volume_mm3")));
+                ui.label(crate::prefs::show_mm(app, f(total, "volume_mm3"), 3));
                 ui.end_row();
                 ui.label("Area");
-                ui.label(format!("{:.3} mm²", f(total, "area_mm2")));
+                ui.label(crate::prefs::show_mm(app, f(total, "area_mm2"), 2));
                 ui.end_row();
                 if let [b] = bodies.as_slice() {
                     if let Some(c) = b["center_of_mass"].as_array() {
-                        let c: Vec<String> = c.iter().map(|x| format!("{:.3}", x.as_f64().unwrap_or(f64::NAN))).collect();
+                        let c: Vec<String> = c.iter().map(|x| crate::prefs::show_mm_bare(app, x.as_f64().unwrap_or(f64::NAN))).collect();
                         ui.label("Center of mass");
-                        ui.label(format!("({}) mm", c.join(", ")));
+                        ui.label(format!("({}) {}", c.join(", "), crate::prefs::unit_scale(&app.session.doc.units).1));
                         ui.end_row();
                     }
                     let (mn, mx) = (&b["bbox"]["min"], &b["bbox"]["max"]);
                     if let (Some(a), Some(z)) = (mn.as_array(), mx.as_array()) {
-                        let d: Vec<String> =
-                            a.iter().zip(z).map(|(a, z)| format!("{:.3}", z.as_f64().unwrap_or(0.0) - a.as_f64().unwrap_or(0.0))).collect();
+                        let d: Vec<String> = a
+                            .iter()
+                            .zip(z)
+                            .map(|(a, z)| crate::prefs::show_mm_bare(app, z.as_f64().unwrap_or(0.0) - a.as_f64().unwrap_or(0.0)))
+                            .collect();
                         ui.label("Bounding box");
-                        ui.label(format!("{} mm", d.join(" × ")));
+                        ui.label(format!("{} {}", d.join(" × "), crate::prefs::unit_scale(&app.session.doc.units).1));
                         ui.end_row();
                     }
                 }

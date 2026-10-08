@@ -402,3 +402,17 @@ fn named_views_save_restore_rename_and_delete() {
     context_menu::run_item(&mut app, &find(&top, "Restore"), pos2(0.0, 0.0));
     assert!(app.cam_anim.is_some());
 }
+
+#[test]
+fn units_menu_changes_the_design_units_and_new_designs_take_the_preference() {
+    let mut app = sample_app();
+    let items = context_menu::items(&app, &Target::Units);
+    assert_eq!(items.len(), 5);
+    act(&mut app, &Target::Units, "in");
+    assert_eq!(app.session.doc.units, "in");
+    assert!(crate::prefs::show_mm(&app, 25.4, 1).starts_with("1.00 in"));
+    app.preferences.default_units = "cm".into();
+    crate::documents::new_design(&mut app);
+    assert_eq!(app.session.doc.units, "cm");
+    assert!(!app.session.is_dirty(), "a fresh design stays unmodified");
+}

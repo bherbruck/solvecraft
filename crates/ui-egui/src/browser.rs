@@ -558,7 +558,19 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         return;
     }
     let units = format!("Units: {}", app.session.doc.units);
-    draw_row(ui, ui.id().with("units"), &Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
+    let r = draw_row(ui, ui.id().with("units"), &Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
+    if let Some(p) = r.secondary.or(r.clicked.then(|| r.rect.map(|x| x.left_bottom())).flatten()) {
+        crate::context_menu::open_for(app, p, Target::Units);
+    }
+    let prec = format!(
+        "Precision: {} {}, {}°",
+        format_args!("{:.*}", usize::from(app.preferences.length_decimals), 0.0),
+        crate::prefs::unit_scale(&app.session.doc.units).1,
+        format_args!("{:.*}", usize::from(app.preferences.angle_decimals), 0.0)
+    );
+    if draw_row(ui, ui.id().with("precision"), &Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
+        app.prefs_window.open = true;
+    }
     let params = format!("Parameters ({})", app.session.doc.params.len());
     if draw_row(ui, ui.id().with("params"), &Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() }).clicked {
         app.start("ChangeParameterCommand");

@@ -56,6 +56,19 @@ pub struct PrefsWindow {
     section: usize,
 }
 
+/// A new, empty design takes the preferred units (not an undo step, not a change to save).
+pub fn apply_new_design(app: &mut SolveApp) {
+    if app.session.doc.features.is_empty() && app.session.doc.units != app.preferences.default_units {
+        let saved = !app.session.is_dirty();
+        if app.session.execute("document.units", &json!({ "units": app.preferences.default_units })).is_ok() {
+            app.session.undo.pop();
+            if saved {
+                app.session.mark_saved();
+            }
+        }
+    }
+}
+
 /// The autosave interval follows `app.autosave_minutes` (0: off).
 pub fn set_autosave(app: &mut SolveApp) {
     let m = app.autosave_minutes;
@@ -141,16 +154,39 @@ fn pivot_under(app: &SolveApp, proj: &crate::viewport::Proj, at: Pos2) -> Vec3 {
     if den.abs() > 1e-9 { o + d * ((app.cam.target - o).dot(n) / den) } else { app.cam.target }
 }
 
-/// A length in millimetres in `units`, with `decimals` (for display).
-pub fn format_length(mm: f64, units: &str, decimals: u8) -> String {
-    let (k, u) = match units {
+/// Units per millimetre and the unit's name.
+pub fn unit_scale(units: &str) -> (f64, &'static str) {
+    match units {
         "cm" => (0.1, "cm"),
         "m" => (0.001, "m"),
         "in" => (1.0 / 25.4, "in"),
         "ft" => (1.0 / 304.8, "ft"),
         _ => (1.0, "mm"),
-    };
+    }
+}
+
+/// A length in millimetres in `units`, with `decimals` (for display).
+pub fn format_length(mm: f64, units: &str, decimals: u8) -> String {
+    let (k, u) = unit_scale(units);
     format!("{:.*} {u}", usize::from(decimals.min(8)), mm * k)
+}
+
+/// A length, area (`power` 2) or volume (3) given in millimetres, shown in the design's units
+/// with the length precision.
+pub fn show_mm(app: &SolveApp, v: f64, power: i32) -> String {
+    let (k, u) = unit_scale(&app.session.doc.units);
+    let sup = match power {
+        2 => "²",
+        3 => "³",
+        _ => "",
+    };
+    format!("{:.*} {u}{sup}", usize::from(app.preferences.length_decimals.min(8)), v * k.powi(power))
+}
+
+/// Numbers in millimetres, in the design's units without the unit name.
+pub fn show_mm_bare(app: &SolveApp, v: f64) -> String {
+    let (k, _) = unit_scale(&app.session.doc.units);
+    format!("{:.*}", usize::from(app.preferences.length_decimals.min(8)), v * k)
 }
 
 /// Write the anti-aliasing setting where the host reads it at start (the window's samples can't
@@ -201,8 +237,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 }
                             });
                             ui.end_row();
-                            ui.label("Recovery copy every");
-                            ui.add(egui::DragValue::new(&mut app.preferences.autosave_minutes).range(0..=120).suffix(" min"));
+                            ui.label("Autosave every");
+                            if ui.add(egui::DragValue::new(&mut app.autosave_minutes).range(0.0..=120.0).speed(0.5).suffix(" min")).changed() {
+                                set_autosave(app);
+                            }
                             ui.end_row();
                             ui.label("");
                             ui.label(RichText::new("0 turns it off").size(11.0).color(t.text_dim));

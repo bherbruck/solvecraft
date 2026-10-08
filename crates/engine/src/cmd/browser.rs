@@ -24,6 +24,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("browser.rename_group", "Rename Group", rename_group).params("group: id, name"),
     CommandSpec::new("browser.move", "Move Browser Items", move_items)
         .params("folder, component?, items: [keys]; group?: id (into it; omit to take them out of groups); before?: key (position in the group)"),
+    CommandSpec::new("document.units", "Change Design Units", document_units)
+        .icon("settings")
+        .params("units: mm|cm|m|in|ft (display and unit-less parameters; values keep their meaning)"),
     CommandSpec::new("view.save", "New Named View", view_save)
         .icon("camera")
         .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?} (replaces a view of the same name)"),
@@ -150,6 +153,18 @@ fn order(s: &mut Session, p: &Value) -> Result<Value> {
         d.browser_order.insert(key, order);
     }
     Ok(json!({}))
+}
+
+fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "document.units";
+    let u = str_(p, "units").ok_or_else(|| bad(cmd, "`units` is required"))?;
+    if !["mm", "cm", "m", "in", "ft"].contains(&u) {
+        return Err(bad(cmd, "`units` must be mm, cm, m, in or ft"));
+    }
+    if s.doc.units != u {
+        s.doc_mut().units = u.to_string();
+    }
+    Ok(json!({ "units": u }))
 }
 
 fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
@@ -363,6 +378,20 @@ mod tests {
         assert!(z > 9.0, "the profile stands up on XZ: {z}");
         assert!(s.execute("sketch.redefine", &json!({"sketch": sk, "plane": "nope"})).is_err());
         assert!(s.execute("sketch.redefine", &json!({"sketch": 999, "plane": "XY"})).is_err());
+    }
+
+    #[test]
+    fn design_units_change_without_moving_geometry() {
+        let mut s = Session::default();
+        run(&mut s, "PrimitiveBox", json!({"length": 20, "width": 10, "height": 5}));
+        let vol = |s: &mut Session| run(s, "MeasureCommand", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+        let v0 = vol(&mut s);
+        run(&mut s, "document.units", json!({"units": "in"}));
+        assert_eq!(s.doc.units, "in");
+        assert!((vol(&mut s) - v0).abs() < 1e-6, "feature inputs keep their millimetres");
+        assert!(s.execute("document.units", &json!({"units": "furlong"})).is_err());
+        run(&mut s, "UndoCommand", json!({}));
+        assert_eq!(s.doc.units, "mm");
     }
 
     #[test]

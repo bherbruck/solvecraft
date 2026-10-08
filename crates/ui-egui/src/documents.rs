@@ -166,6 +166,7 @@ pub fn new_design(app: &mut SolveApp) {
     if let Err(e) = open_tab(app, Session::default()) {
         app.set_status(e, true);
     }
+    crate::prefs::apply_new_design(app);
 }
 
 /// Before opening a file: a fresh tab unless the active design is blank.
