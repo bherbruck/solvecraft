@@ -187,7 +187,8 @@ fn build_scene(app: &SolveApp) -> GpuScene {
     let tk = Tokens::get();
     let mut sc = GpuScene::default();
     let s = &app.session;
-    let st = s.model.state();
+    // Bodies where their occurrences place them.
+    let st = s.world_state();
     if app.ui.show_grid {
         let (minor, major) = grid_step(app.cam.half_height());
         let ext = (app.cam.half_height() * 3.0 / major).ceil() * major;
@@ -301,7 +302,7 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
 /// the surfaces along the ray (profiles, faces, planes) nearest first.
 pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     let s = &app.session;
-    let st = s.model.state();
+    let st = s.world_state();
     let mut hits = Vec::new();
     let (o, d) = proj.ray(pos);
     // Sketch points of the active sketch.
@@ -604,7 +605,7 @@ fn highlight_key(app: &SolveApp) -> u64 {
 fn build_highlight(app: &SolveApp) -> GpuScene {
     let t = Tokens::get();
     let mut sc = GpuScene::default();
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let sel = app.highlighted();
     let hover = app.viewport.hover.as_ref();
     let size = origin_size(app.cam.half_height());
@@ -1106,7 +1107,7 @@ fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool) {
 /// active input takes (edges, faces or bodies), otherwise bodies.
 fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     use crate::selection::{BODIES, EDGES, FACES, PROFILES};
-    let st = app.session.model.state();
+    let st = app.session.world_state();
     let mut out: Vec<Sel> = Vec::new();
     let to2 = |pts: &[Vec3]| -> Vec<Pos2> { pts.iter().filter_map(|p| proj.to_screen(*p)).collect() };
     if app.dialog.is_none()

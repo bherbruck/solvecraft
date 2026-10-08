@@ -807,6 +807,25 @@ pub struct Document {
     /// Bodies moved into another component than their feature's (by body name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub body_components: std::collections::BTreeMap<String, u64>,
+    /// Browser groups (folders of bodies, sketches or construction planes).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub browser_groups: Vec<BrowserGroup>,
+    /// Browser item order per component folder (`"<component>/<folder>"` → item keys).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub browser_order: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// A browser group: items of one folder (`bodies`, `sketches` or `construction`) of a
+/// component, by key (body name, or the feature id of a sketch or construction plane).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrowserGroup {
+    pub id: u64,
+    pub name: String,
+    #[serde(default)]
+    pub component: u64,
+    pub folder: String,
+    #[serde(default)]
+    pub items: Vec<String>,
 }
 
 fn default_format() -> String {
@@ -839,6 +858,8 @@ impl Document {
             materials: Default::default(),
             favorites: Default::default(),
             param_comments: Default::default(),
+            browser_groups: Vec::new(),
+            browser_order: Default::default(),
         }
     }
 

@@ -34,9 +34,14 @@ pub enum Target {
     Component {
         id: u64,
     },
-    /// A browser group (folder) of items.
+    /// A browser group of items.
     Group {
         id: u64,
+    },
+    /// A component's Bodies, Sketches or Construction folder.
+    Folder {
+        component: u64,
+        folder: String,
     },
 }
 
@@ -54,7 +59,11 @@ pub struct Item {
 }
 
 impl Item {
-    fn sep() -> Item {
+    /// A view action (`ui.*`).
+    pub fn action(id: &str, label: &str, icon: &str) -> Item {
+        act(id, label, icon)
+    }
+    pub fn sep() -> Item {
         Item { id: "-".into(), label: String::new(), shortcut: String::new(), enabled: false, icon: String::new(), params: None }
     }
     fn heading(label: &str) -> Item {
@@ -66,7 +75,7 @@ impl Item {
     fn is_heading(&self) -> bool {
         self.id.starts_with('#')
     }
-    fn with(mut self, params: Value) -> Item {
+    pub fn with(mut self, params: Value) -> Item {
         self.params = Some(params);
         self
     }
@@ -186,7 +195,7 @@ pub fn target_bodies(app: &SolveApp, target: &Target) -> Vec<String> {
         Target::Body { name } => vec![name.clone()],
         Target::Component { id } => component_bodies(app, *id),
         Target::Group { id } => crate::browser::group_bodies(app, *id),
-        Target::Sketch { .. } => Vec::new(),
+        Target::Sketch { .. } | Target::Folder { .. } => Vec::new(),
     }
 }
 
@@ -236,13 +245,20 @@ pub fn radial_items(app: &SolveApp) -> Vec<Item> {
 
 /// The list of a menu (under the ring for the viewport).
 pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
-    match target {
+    let mut v = match target {
         Target::Viewport => viewport_items(app),
         Target::Body { name } => body_items(app, std::slice::from_ref(name), true),
         Target::Sketch { id } => sketch_items(app, *id),
         Target::Component { id } => component_items(app, *id),
         Target::Group { id } => crate::browser::group_items(app, *id),
+        Target::Folder { component, folder } => crate::browser::folder_items(app, *component, folder),
+    };
+    // Several items of the folder selected: they can be grouped.
+    if let Some(p) = crate::browser::selection_group(app, target) {
+        v.push(Item::sep());
+        v.push(act("ui.groupSelected", "Group Selected", "folder").with(p));
     }
+    v
 }
 
 fn viewport_items(app: &SolveApp) -> Vec<Item> {

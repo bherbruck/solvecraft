@@ -162,3 +162,39 @@ fn pick_runs_an_item_of_the_open_menu() {
     assert!(app.viewport.context_menu.is_none(), "a pick closes the menu");
     assert!(!app.ui.show_origin);
 }
+
+#[test]
+fn folder_and_group_menus_make_rename_and_drop_groups() {
+    let mut app = sample_app();
+    app.run("PrimitiveBox", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
+    let names: Vec<String> = app.session.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let items: Vec<_> = names.iter().map(|n| json!({"type": "body", "name": n})).collect();
+    app.run("select.set", json!({ "items": items })).unwrap();
+    let folder = Target::Folder { component: 0, folder: "bodies".into() };
+    act(&mut app, &folder, "Group Selected");
+    let g = app.session.doc.browser_groups[0].clone();
+    assert_eq!(g.items.len(), 2);
+    // A body's menu offers grouping too while several are selected.
+    assert!(context_menu::items(&app, &Target::Body { name: names[0].clone() }).iter().any(|i| i.label == "Group Selected"));
+    let t = Target::Group { id: g.id };
+    act(&mut app, &t, "Rename");
+    assert!(context_menu::finish_rename(&mut app, Some("Parts"), true));
+    assert_eq!(app.session.doc.browser_groups[0].name, "Parts");
+    act(&mut app, &t, "Hide");
+    assert_eq!(app.ui.hidden_bodies.len(), 2);
+    act(&mut app, &t, "Ungroup");
+    assert!(app.session.doc.browser_groups.is_empty());
+    act(&mut app, &folder, "New Group");
+    assert_eq!(app.session.doc.browser_groups[0].items.len(), 0);
+}
+
+#[test]
+fn browser_folds_are_kept_in_the_preferences() {
+    let mut app = sample_app();
+    app.tree.collapsed.insert("c0/sketches".into());
+    app.tree.expanded.insert("origin".into());
+    let prefs = app.prefs();
+    let mut other = sample_app();
+    other.load_prefs(&prefs);
+    assert!(other.tree.collapsed.contains("c0/sketches") && other.tree.expanded.contains("origin"));
+}

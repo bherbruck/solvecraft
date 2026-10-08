@@ -192,6 +192,8 @@ impl SolveApp {
             "pick_bodies": self.ui.pick_bodies,
             "auto_project": self.session.auto_project,
             "visual_style": self.ui.visual_style,
+            "browser_collapsed": self.tree.collapsed,
+            "browser_expanded": self.tree.expanded,
         })
         .to_string()
     }
@@ -218,6 +220,15 @@ impl SolveApp {
         if let Some(s) = v.get("visual_style").and_then(Value::as_u64) {
             self.ui.visual_style = u8::try_from(s.min(2)).unwrap_or(0);
         }
+        // Browser folders the user opened or closed.
+        let keys = |k: &str| -> std::collections::BTreeSet<String> {
+            v.get(k)
+                .and_then(Value::as_array)
+                .map(|a| a.iter().take(10_000).filter_map(|x| x.as_str().map(str::to_string)).collect())
+                .unwrap_or_default()
+        };
+        self.tree.collapsed = keys("browser_collapsed");
+        self.tree.expanded = keys("browser_expanded");
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
