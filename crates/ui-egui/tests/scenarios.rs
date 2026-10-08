@@ -49,7 +49,8 @@ scenarios!(
     s23_configurations,
     s24_motion_study,
     s25_autosave_recovery,
-    s27_move_triad
+    s27_move_triad,
+    s33_move_x_arrow,
 );
 
 /// Scenarios written ahead of their fixes or features (the user's open bugs): run with
@@ -67,7 +68,6 @@ macro_rules! pending {
 pending!(
     s31_sketch_on_face_projects: "user bug: a sketch on a face projects its loops as reference (solvecraft-sketch)",
     s32_cut_in_active_component: "user bug: a cut in the active component leaves others alone (solvecraft-params)",
-    s33_move_x_arrow: "user bug: Move opens at 0 and its X arrow moves along X only (solvecraft-ui)",
     s34_component_move_carries_sketches: "user bug: moving a component carries its sketches (solvecraft-repo)",
-    s30_pattern_a_hole: "a hole patterned as a feature gives one hole, not three (solvecraft-ui)",
+    s30_pattern_a_hole: "the dialog sends the hole as a feature; the engine's pattern of a blind hole cuts too little (one hole short)",
 );

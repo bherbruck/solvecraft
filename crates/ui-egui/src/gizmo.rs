@@ -247,6 +247,12 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     let l = mm_per_px(proj, t.center)? * LEN_PX;
     LAST.with(|x| *x.borrow_mut() = Some((t.center, l)));
     let sh = shapes(proj, t, l)?;
+    // Handles by name for scenarios ("move_x", "move_rz", "move_ball"…).
+    for n in ["x", "y", "z", "xy", "yz", "xz", "rx", "ry", "rz", "ball"] {
+        if let Some(q) = handle_point(n, Vec3::ZERO, 60.0).and_then(|p| proj.to_screen(p)) {
+            crate::scenario::publish_handle(&format!("move_{n}"), q);
+        }
+    }
     let state: Option<State> = ui.data(|d| d.get_temp(id));
     let pointer = ui.input(|i| i.pointer.hover_pos());
     let hovered = if state.is_none() { pointer.filter(|p| proj.rect.contains(*p)).and_then(|p| hit(&sh, p)) } else { None };
