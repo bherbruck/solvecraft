@@ -918,7 +918,7 @@ pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter,
 
 /// The Joints folder at the end of the Browser: a row per joint (double-click edits, the menu
 /// edits, drives, suppresses or deletes).
-pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui) {
+pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     let t = Tokens::get();
     let joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
@@ -954,7 +954,8 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui) {
         );
         resp
     };
-    if row(ui, 1.0, "folder", "Joints", false, Some(open)).clicked() {
+    let depth = depth as f32;
+    if row(ui, depth, "folder", "Joints", false, Some(open)).clicked() {
         open = !open;
         ui.data_mut(|d| d.insert_temp(fold_id, open));
     }
@@ -964,7 +965,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut dialog: Option<Dialog> = None;
     let mut run: Option<(&'static str, Value)> = None;
     for (id, name, kind, suppressed) in joints {
-        let resp = row(ui, 2.0, "joint", &name, suppressed, None).on_hover_text(format!("{kind:?} joint"));
+        let resp = row(ui, depth + 1.0, "joint", &name, suppressed, None).on_hover_text(format!("{kind:?} joint"));
         if resp.double_clicked() {
             dialog = edit_joint(app, id);
         }

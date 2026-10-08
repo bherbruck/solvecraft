@@ -1386,8 +1386,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.painter().circle_stroke(r.center(), 7.0, Stroke::new(1.2, t.text_dim));
                 ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, "i", egui::FontId::proportional(11.0), t.text_dim);
                 resp.on_hover_text(heading.as_str());
+                // The spinner's place is always taken: a widget that comes and goes would shift
+                // the automatic ids of OK and Cancel, and a click pressed in one frame and
+                // released in the next would be lost (an animating preview toggles it often).
+                let (sr, sresp) = ui.allocate_exact_size(vec2(14.0, 14.0), egui::Sense::hover());
                 if app.preview.busy {
-                    ui.add(egui::Spinner::new().size(14.0)).on_hover_text("Updating the preview");
+                    egui::Spinner::new().size(14.0).paint_at(ui, sr);
+                    sresp.on_hover_text("Updating the preview");
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let close = if matches!(d.kind, Kind::Params { .. } | Kind::Measure { .. } | Kind::Preferences) { "Close" } else { "Cancel" };

@@ -433,7 +433,6 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     component_rows(app, ui, 0, 0, &mut acts);
-                    crate::dialogs_assembly::browser_joints(app, ui);
                 });
         });
     app.viewport.hover_bodies = acts.hover_bodies;
@@ -534,6 +533,9 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     let _ = t;
     for folder in ["bodies", "sketches", "construction"] {
         folder_rows(app, ui, id, folder, d, acts);
+    }
+    if id == 0 {
+        crate::dialogs_assembly::browser_joints(app, ui, d);
     }
     let children: Vec<u64> = app.session.doc.components.iter().filter(|c| c.parent == id).map(|c| c.id).collect();
     for c in children {

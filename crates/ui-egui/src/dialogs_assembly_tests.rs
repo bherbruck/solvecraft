@@ -163,3 +163,43 @@ fn circles_from_edge_polylines() {
     let line: Vec<Vec3> = (0..10).map(|i| Vec3::new(f64::from(i), 0.0, 0.0)).collect();
     assert!(circle_of(&line).is_none());
 }
+
+/// The centre of the first text shape reading `text` in a frame's output.
+fn text_at(out: &egui::FullOutput, text: &str) -> Option<egui::Pos2> {
+    out.shapes.iter().find_map(|c| match &c.shape {
+        egui::Shape::Text(t) if t.galley.text() == text => Some(t.pos + t.galley.rect.center().to_vec2()),
+        _ => None,
+    })
+}
+
+/// OK pressed while the animated preview is computing and released once it is not (the busy
+/// spinner coming and going between the two frames) still applies the joint.
+#[test]
+fn ok_click_survives_a_busy_preview() {
+    let mut app = two_boxes();
+    app.start("JointAssembleCmdNew");
+    let mut d = app.dialog.take().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.kind = 1;
+        f.animate = true;
+    }
+    app.dialog = Some(d);
+    let ctx = egui::Context::default();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let frame = |app: &mut SolveApp, busy: bool, events: Vec<egui::Event>| {
+        app.preview.busy = busy;
+        let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+        ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()))
+    };
+    frame(&mut app, false, vec![]);
+    let out = frame(&mut app, false, vec![]);
+    let ok = text_at(&out, "OK").expect("an OK button");
+    let button = |pressed| egui::Event::PointerButton { pos: ok, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(&mut app, true, vec![egui::Event::PointerMoved(ok)]);
+    frame(&mut app, true, vec![button(true)]);
+    frame(&mut app, false, vec![button(false)]);
+    assert_eq!(app.session.doc.assembly.joints.len(), 1, "the click applied the joint");
+    assert!(app.dialog.is_none());
+}
