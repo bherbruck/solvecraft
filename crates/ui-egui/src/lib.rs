@@ -20,6 +20,7 @@ pub mod dialogs_sheet;
 pub mod dim_view;
 pub mod gpu;
 pub mod icons;
+pub mod inference;
 #[cfg(test)]
 mod menu_tests;
 pub mod palette;

@@ -75,6 +75,7 @@ pub fn refine_snap(
     plane: &solvecraft_engine::geom::Plane,
     lp: Vec2,
 ) -> Option<(Vec2, Option<String>)> {
+    crate::inference::clear();
     // Millimetres per pixel here.
     let (a, b) = (proj.to_screen(plane.to_world(lp))?, proj.to_screen(plane.to_world(lp + Vec2::X))?);
     let px = 1.0 / (a.distance(b) as f64).max(1e-9);
@@ -110,6 +111,15 @@ pub fn refine_snap(
         }
         None => PREV.with(Cell::get),
     };
+    // Line tool: the tangent point of a circle or arc (before plain "on the curve").
+    let line_tool = app.tool.as_ref().is_none_or(|t| t.cmd == "DrawPolyline");
+    if best.is_none()
+        && line_tool
+        && let Some(prev) = prev
+        && let Some(i) = crate::inference::tangent(sk, prev, lp, tol)
+    {
+        best = Some((i.dist, i.label(), i.at));
+    }
     // On a curve (coincident with it).
     if best.is_none() {
         for (i, c) in sk.curves.iter().enumerate() {
@@ -134,6 +144,14 @@ pub fn refine_snap(
         } else if dx < tol && dy > tol {
             best = Some((dx, "V", Vec2::new(prev.x, g(lp.y))));
         }
+    }
+    // Line tool: parallel or perpendicular to a line, or on a line's extension.
+    if best.is_none()
+        && line_tool
+        && let Some(prev) = prev
+        && let Some(i) = crate::inference::lines(sk, prev, lp, tol)
+    {
+        best = Some((i.dist, i.label(), i.at));
     }
     SNAP.with(|s| *s.borrow_mut() = best.map(|(_, l, p)| (l, p)));
     // A midpoint snap is a point argument the commands understand ("mid:<line>").

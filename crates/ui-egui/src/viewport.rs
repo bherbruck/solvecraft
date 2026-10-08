@@ -1272,6 +1272,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     overlays(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch3d::show(app, &painter, &proj);
+    crate::inference::show(app, &painter, &proj);
     hover_highlight(app, &painter, &proj);
     points_2d(app, &painter, &proj);
     if let Some(bx) = app.viewport.boxsel {

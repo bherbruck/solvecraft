@@ -190,6 +190,7 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                 dimension(app, &tool, &curves);
                 // Chain: the next segment starts at this one's end point.
                 if let Some(id) = curves.first() {
+                    crate::inference::commit(app, id, b.0);
                     let last = tool.pts.len() - 1;
                     tool.pts[last].1 = Some(format!("{id}.end"));
                 }
