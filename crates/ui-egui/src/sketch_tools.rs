@@ -30,6 +30,8 @@ thread_local! {
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
     /// Analysis markers shown while an analysis tool is active: (where, label).
     static MARKS: RefCell<Vec<(Vec3, String)>> = const { RefCell::new(Vec::new()) };
+    /// Isocurve analysis polylines (as segments) while the tool is active.
+    static ISO: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
     /// Center of Mass has just started: measure everything on the next frame.
     static DEFERRED: Cell<bool> = const { Cell::new(false) };
     /// The canvas whose panel is open.
@@ -50,6 +52,24 @@ fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     } else if cmd == "FusionMinimumRadiusAnalysisCommand" {
         app.set_status("Minimum radius: it is straight (no curvature)", false);
     }
+}
+
+/// Isocurve analysis lines.
+fn iso_lines(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    if app.tool.as_ref().map(|t| t.cmd) != Some("FusionIsoCurveAnalysisCommand") {
+        ISO.with(|i| i.borrow_mut().clear());
+        return;
+    }
+    let tk = crate::theme::Tokens::get();
+    ISO.with(|i| {
+        for c in i.borrow().iter() {
+            for [a, b] in c {
+                if let (Some(p), Some(q)) = (proj.to_screen(*a), proj.to_screen(*b)) {
+                    painter.line_segment([p, q], Stroke::new(1.2, tk.accent));
+                }
+            }
+        }
+    });
 }
 
 /// Analysis markers: a target with its label.
@@ -338,7 +358,7 @@ fn mode(id: &str) -> Option<Mode> {
     Some(match id {
         "ProjectNewCmd" | "IntersectCmd" | "Include3DGeometry" | "FitCurvesToSectionCommand" | "SketchIsoparametricCurve" => Mode::ModelRef,
         "FusionCurvatureCombAnalysisCommand" | "FusionAddCanvasCommand" | "FusionAddEditDecalCommand" => Mode::ModelRef,
-        "FusionMinimumRadiusAnalysisCommand" | "FusionCenterOfMassCommand" => Mode::ModelRef,
+        "FusionMinimumRadiusAnalysisCommand" | "FusionCenterOfMassCommand" | "FusionIsoCurveAnalysisCommand" => Mode::ModelRef,
         "TrimSketchCmd" | "ExtendSketchCmd" | "BreakSketchCmd" => Mode::CurveAt,
         "SketchMidpointLine" => Mode::Points(2),
         "ArcTangent" => Mode::Points(2),
@@ -386,6 +406,7 @@ pub fn hint(id: &str) -> Option<String> {
             "FusionCurvatureCombAnalysisCommand" => "Curvature comb: click sketch curves or model edges",
             "FusionMinimumRadiusAnalysisCommand" => "Minimum radius: click sketch curves, edges or faces",
             "FusionCenterOfMassCommand" => "Center of mass of all bodies; click a body for its own",
+            "FusionIsoCurveAnalysisCommand" => "Isocurves: click faces",
             "FusionAddCanvasCommand" => "Canvas: click a plane or a planar face where the image's centre goes",
             "FusionAddEditDecalCommand" => "Decal: click a planar face where the image's centre goes",
             "TrimSketchCmd" => "Trim: click the piece of a curve to remove",
@@ -523,6 +544,18 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                     let teeth: Vec<[Vec3; 2]> =
                         comb["teeth"].as_array().into_iter().flatten().filter_map(|t| Some([v3(t.get(0)?)?, v3(t.get(1)?)?])).collect();
                     COMBS.with(|c| c.borrow_mut().push(teeth));
+                }
+            }
+        }
+        Mode::ModelRef if cmd == "FusionIsoCurveAnalysisCommand" => {
+            let face = hits.iter().find_map(|h| if let Hit::Face { point, .. } = h { Some(*point) } else { None });
+            if let Some(at) = face
+                && let Ok(v) = app.run(cmd, json!({"faces": [[at.x, at.y, at.z]]}))
+            {
+                for c in v["curves"].as_array().into_iter().flatten() {
+                    let pts: Vec<Vec3> = c.as_array().into_iter().flatten().filter_map(v3).collect();
+                    let teeth: Vec<[Vec3; 2]> = pts.windows(2).map(|w| [w[0], w[1]]).collect();
+                    ISO.with(|i| i.borrow_mut().push(teeth));
                 }
             }
         }
@@ -989,6 +1022,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         analysis(app, "FusionCenterOfMassCommand", json!({}));
     }
     marks(app, painter, proj);
+    iso_lines(app, painter, proj);
     text_entry(app, ui.ctx());
     canvas_panel(app, ui.ctx());
 }

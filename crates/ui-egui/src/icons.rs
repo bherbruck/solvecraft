@@ -644,6 +644,14 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.arrow((12.0, 10.5), (15.5, 7.0), a);
             pen.dot(12.0, 10.5, ink);
         }
+        "iso_analysis" => {
+            pen.poly(&[(3.0, 17.0), (9.0, 5.0), (21.0, 7.0), (15.0, 19.0)], pen.fill, ink);
+            for k in 1..4 {
+                let t = k as f32 / 4.0;
+                pen.line(&[(3.0 + 6.0 * t, 17.0 - 12.0 * t), (15.0 + 6.0 * t, 19.0 - 12.0 * t)], a);
+                pen.line(&[(3.0 + 12.0 * t, 17.0 + 2.0 * t), (9.0 + 12.0 * t, 5.0 + 2.0 * t)], a);
+            }
+        }
         "center_of_mass" => {
             pen.circle(12.0, 12.0, 8.0, Color32::TRANSPARENT, ink);
             let q = |a0: f32| {

@@ -16,6 +16,7 @@ mod params;
 pub mod plastic;
 pub mod project;
 mod project3d;
+pub use project3d::iso_grid;
 pub mod sheet;
 
 pub use assembly::{IDENTITY, Mat, Occurrence, apply_point, apply_vector, is_identity, mat_inverse, mat_mul, rigid};

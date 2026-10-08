@@ -19,6 +19,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("min_radius")
         .noundo()
         .params("curves?: [sketch curve ids] (sketch?) | edges?: [[x,y,z]…] | faces?: [[x,y,z]…] (default: every face of every body); the smallest radius of curvature of each and where it is"),
+    CommandSpec::new("FusionIsoCurveAnalysisCommand", "Isocurve Analysis", isocurves)
+        .at("SKETCH", "INSPECT")
+        .icon("iso_analysis")
+        .noundo()
+        .params("faces: [[x,y,z]…] points on faces; count?: curves each way (default 8): the faces' isoparametric curves"),
     CommandSpec::new("FusionCenterOfMassCommand", "Center of Mass", center_of_mass)
         .at("SKETCH", "INSPECT")
         .icon("center_of_mass")
@@ -276,6 +281,26 @@ fn minimum_radius(s: &mut Session, p: &Value) -> Result<Value> {
     }))
 }
 
+fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "FusionIsoCurveAnalysisCommand";
+    let count = num(p, "count").map(|c| c.clamp(1.0, 100.0) as usize).unwrap_or(8);
+    let faces = p.get("faces").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z]"))?;
+    if faces.is_empty() {
+        return Err(bad(cmd, "`faces` is empty"));
+    }
+    let st = s.model.state();
+    let mut out = Vec::new();
+    for v in faces.iter().take(100) {
+        let at = vec3(v).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z]"))?;
+        let (bi, f) = face_at(&st, at).ok_or_else(|| bad(cmd, "no face there"))?;
+        let m = st.bodies.get(bi).map(|b| b.mesh()).ok_or_else(|| bad(cmd, "body"))?;
+        for w in solvecraft_doc::iso_grid(&m, f, at, count) {
+            out.push(w.iter().map(|q| [q.x, q.y, q.z]).collect::<Vec<_>>());
+        }
+    }
+    Ok(json!({"curves": out}))
+}
+
 fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "FusionCenterOfMassCommand";
     let names = string_list(p, "bodies");
@@ -300,7 +325,7 @@ fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use crate::Session;
 
@@ -349,5 +374,18 @@ mod tests {
         assert!((r["center"][0].as_f64().unwrap() - want).abs() < 0.1, "{r}");
         assert!((r["center"][2].as_f64().unwrap() - 5.0).abs() < 0.05, "{r}");
         assert!(s.execute("FusionCenterOfMassCommand", &json!({"bodies": ["nope"]})).is_err());
+        // Isocurves on the cylinder's side: rings around it and lines along it.
+        let r = s.execute("FusionIsoCurveAnalysisCommand", &json!({"faces": [[58, 0, 5]], "count": 4})).unwrap();
+        let curves = r["curves"].as_array().unwrap();
+        let ring =
+            |c: &Value| c.as_array().unwrap().iter().all(|q| ((q[0].as_f64().unwrap() - 50.0).hypot(q[1].as_f64().unwrap()) - 8.0).abs() < 0.2);
+        assert!(curves.len() >= 8, "{}", curves.len());
+        assert!(curves.iter().all(ring), "every curve lies on the cylinder");
+        let flat = |c: &Value| {
+            let z: Vec<f64> = c.as_array().unwrap().iter().map(|q| q[2].as_f64().unwrap()).collect();
+            z.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - z.iter().cloned().fold(f64::INFINITY, f64::min) < 1e-6
+        };
+        assert!(curves.iter().filter(|c| flat(c)).count() >= 4, "rings at constant height");
+        assert!(s.execute("FusionIsoCurveAnalysisCommand", &json!({"faces": []})).is_err());
     }
 }
