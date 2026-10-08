@@ -1301,7 +1301,6 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
                 None if extent.through_all => through_all_distance(st, &ss.plane, targets)?,
                 None => val(vals, &extent.distance, Kind::Length)?,
             };
-            let _ = n;
             if let Some(tp) = &extent.taper {
                 let taper = val(vals, tp, Kind::Angle)?;
                 if extent.distance2.is_some() || extent.start_offset.is_some() || extent.direction == crate::Direction::Symmetric {
@@ -1328,14 +1327,32 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
                 (None, crate::Direction::Symmetric) => (-d, d),
             };
             // A negative distance flips the side.
-            let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+            let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
+            // To a curved (or slanted) face: run right through the target body, then keep what
+            // lies before its surface (the tool less the body, the piece at the start).
+            let curved = extent.to.and_then(|p| curved_target(st, n, p));
+            if let Some(bi) = curved
+                && let Some(tb) = st.bodies.get(bi)
+            {
+                let m = tb.mesh();
+                let hs: Vec<f64> = m.positions.iter().map(|q| (*q - ss.plane.origin).dot(n) - off).collect();
+                let margin = tb.body.size() * 0.05 + 1.0;
+                if hi > 0.0 {
+                    hi = hs.iter().cloned().fold(hi, f64::max) + margin;
+                } else {
+                    lo = hs.iter().cloned().fold(lo, f64::min) - margin;
+                }
+            }
             let mut tools = Vec::new();
             for r in &regions {
                 let (l2, h2) = extend_for_coplanar(st, &ss.plane, r, lo + off, hi + off, *operation, targets);
-                let n = ss.plane.normal();
                 let probe = |p: Vec2| (1..4).map(|k| ss.plane.to_world(p) + n * (lo + off + (hi - lo) * k as f64 / 4.0)).collect::<Vec<_>>();
                 let r = grow_profile_for_coplanar(st, r, *operation, targets, &probe);
                 tools.extend(kernel::extrude(&ss.plane, std::slice::from_ref(&r), l2, h2)?);
+            }
+            if let Some(tb) = curved.and_then(|bi| st.bodies.get(bi)) {
+                let start = if hi > 0.0 { lo + off } else { hi + off };
+                tools = trim_to_body(tools, &tb.body, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?;
             }
             Ok(tools)
         }
@@ -1386,6 +1403,29 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
                     .collect::<Vec<_>>()
             };
             let regions: Vec<Region2> = regions.iter().map(|r| grow_profile_for_coplanar(st, r, operation, &targets, &probe)).collect();
+            // To a curved face: turn past the whole target body, then cut back to its surface
+            // (the piece that starts at the profile).
+            let curved = to.and_then(|p| curved_target_any(st, p));
+            if let Some(tb) = curved.and_then(|bi| st.bodies.get(bi)) {
+                let pts: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
+                let c = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, q| a + *q) * (1.0 / pts.len().max(1) as f64));
+                let flat = |q: Vec3| {
+                    let v = q - origin_w;
+                    v - axis_w * v.dot(axis_w)
+                };
+                let u0 = flat(c);
+                let angle_of = |q: Vec3| {
+                    let v = flat(q);
+                    let a = (axis_w * -1.0).dot(u0.cross(v)).atan2(u0.dot(v));
+                    if a < 0.0 { a + std::f64::consts::TAU } else { a }
+                };
+                let far = tb.mesh().positions.iter().map(|q| angle_of(*q)).fold(0.0, f64::max);
+                let sweep = (far + 0.05).min(std::f64::consts::TAU - 1e-3);
+                let bodies = kernel::revolve(&ss.plane, &regions, o, d, sweep)?;
+                let n = ss.plane.normal();
+                let tol_side = |q: Vec3| if flat(q).dot(u0) > 0.0 { ((q - ss.plane.origin).dot(n)).abs() } else { f64::MAX };
+                return trim_to_body(bodies, &tb.body, tol_side);
+            }
             let bodies = kernel::revolve(&ss.plane, &regions, o, d, ang)?;
             if start.abs() < 1e-12 {
                 return Ok(bodies);
@@ -1947,6 +1987,51 @@ fn object_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> f64 {
         return h(p);
     }
     h(p)
+}
+
+/// The body at `p` when the face there is not a plane square to `n` (To Object must then
+/// follow the face's shape).
+fn curved_target(st: &ModelState, n: Vec3, p: Vec3) -> Option<usize> {
+    for (bi, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()) {
+        let Some(fi) = crate::appearance::face_index_at(b, p) else { continue };
+        let tol = (b.body.size() * 1e-3).max(1e-3);
+        let planar =
+            b.body.faces(tol).ok()?.into_iter().find(|f| f.index == fi).and_then(|f| f.plane_normal).is_some_and(|fnrm| fnrm.cross(n).len() < 1e-6);
+        return (!planar).then_some(bi);
+    }
+    None
+}
+
+/// The body at `p` when the face there is not planar.
+fn curved_target_any(st: &ModelState, p: Vec3) -> Option<usize> {
+    for (bi, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()) {
+        let Some(fi) = crate::appearance::face_index_at(b, p) else { continue };
+        let tol = (b.body.size() * 1e-3).max(1e-3);
+        let planar = b.body.faces(tol).ok()?.into_iter().find(|f| f.index == fi).is_some_and(|f| f.plane_normal.is_some());
+        return (!planar).then_some(bi);
+    }
+    None
+}
+
+/// Tools run through `target`, cut back to its surface: each tool less the body, keeping the
+/// piece(s) that touch the start (`dist_to_start` 0 there).
+fn trim_to_body(tools: Vec<Body>, target: &Body, dist_to_start: impl Fn(Vec3) -> f64) -> Result<Vec<Body>> {
+    let mut out = Vec::new();
+    for t in tools {
+        let Some(cut) = kernel::boolean(&t, target, BoolOp::Cut)? else { continue };
+        for lump in cut.lumps()? {
+            let tol = (lump.size() * 1e-4).max(1e-6);
+            let touches =
+                lump.tessellate((lump.size() * 1e-2).max(1e-2)).map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol)).unwrap_or(false);
+            if touches {
+                out.push(lump);
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
+    }
+    Ok(out)
 }
 
 /// One point on each face of a body (a triangle centre, so it lies on the face).
