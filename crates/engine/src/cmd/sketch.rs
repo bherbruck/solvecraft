@@ -1076,24 +1076,16 @@ fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
     constrain(s, p, "sketch.constraint.equal", |sk| two_curves(sk, p, "sketch.constraint.equal").map(|(a, b)| ConstraintKind::Equal { a, b }))
 }
 fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
-    constrain(s, p, "sketch.constraint.parallel", |sk| {
-        two_curves(sk, p, "sketch.constraint.parallel").map(|(a, b)| ConstraintKind::Parallel { a, b })
-    })
+    constrain(s, p, "sketch.constraint.parallel", |sk| two_curves(sk, p, "sketch.constraint.parallel").map(|(a, b)| ConstraintKind::Parallel { a, b }))
 }
 fn c_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
-    constrain(s, p, "sketch.constraint.perpendicular", |sk| {
-        two_curves(sk, p, "sketch.constraint.perpendicular").map(|(a, b)| ConstraintKind::Perpendicular { a, b })
-    })
+    constrain(s, p, "sketch.constraint.perpendicular", |sk| two_curves(sk, p, "sketch.constraint.perpendicular").map(|(a, b)| ConstraintKind::Perpendicular { a, b }))
 }
 fn c_concentric(s: &mut Session, p: &Value) -> Result<Value> {
-    constrain(s, p, "sketch.constraint.concentric", |sk| {
-        two_curves(sk, p, "sketch.constraint.concentric").map(|(a, b)| ConstraintKind::Concentric { a, b })
-    })
+    constrain(s, p, "sketch.constraint.concentric", |sk| two_curves(sk, p, "sketch.constraint.concentric").map(|(a, b)| ConstraintKind::Concentric { a, b }))
 }
 fn c_collinear(s: &mut Session, p: &Value) -> Result<Value> {
-    constrain(s, p, "sketch.constraint.collinear", |sk| {
-        two_curves(sk, p, "sketch.constraint.collinear").map(|(a, b)| ConstraintKind::Collinear { a, b })
-    })
+    constrain(s, p, "sketch.constraint.collinear", |sk| two_curves(sk, p, "sketch.constraint.collinear").map(|(a, b)| ConstraintKind::Collinear { a, b }))
 }
 fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.midpoint";

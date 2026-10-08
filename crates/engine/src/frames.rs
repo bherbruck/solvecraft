@@ -61,7 +61,9 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sketch.intersect" => &[("refs", Picks)],
         "sketch.project_to_surface" | "sketch.isoparametric_curve" => &[("face", Pick), ("body", Body)],
         "sketch.intersection_curve" => &[("a", Picks), ("b", Picks)],
-        "inspect.curvature_comb" | "inspect.minimum_radius" | "inspect.isocurve" => &[("edges", Picks), ("faces", Picks)],
+        "inspect.curvature_comb" | "inspect.minimum_radius" | "inspect.isocurve" => {
+            &[("edges", Picks), ("faces", Picks)]
+        }
         "parts.insert" | "parts.fastener" => &[("at", Pick), ("point", Make), ("direction", Dir)],
         "appearance.assign" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
         "solid.move" => &[("bodies", Body), ("translate", Dir), ("axis", Dir), ("origin", Make)],

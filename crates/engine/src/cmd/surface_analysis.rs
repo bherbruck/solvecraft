@@ -69,7 +69,9 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn accessibility(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = match p.get("direction") {
-        Some(v) => vec3(v).and_then(Vec3::normalized).ok_or_else(|| bad("inspect.accessibility", "`direction` must be a non-zero [x,y,z]"))?,
+        Some(v) => {
+            vec3(v).and_then(Vec3::normalized).ok_or_else(|| bad("inspect.accessibility", "`direction` must be a non-zero [x,y,z]"))?
+        }
         None => Vec3::Z,
     };
     set(s, p, SurfaceAnalysis::Access { dir })

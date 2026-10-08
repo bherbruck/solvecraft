@@ -47,6 +47,33 @@ pub struct FaceLook {
     pub name: Option<String>,
 }
 
+/// The look a body was imported with, carried through later features (which build new kernel
+/// bodies without it): its colour and opacity, and its faces' colours by persistent face name.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ImportedLook {
+    pub color: Option<[f32; 3]>,
+    pub opacity: Option<f32>,
+    pub faces: BTreeMap<String, ([f32; 3], f32)>,
+}
+
+impl ImportedLook {
+    /// A body's imported look: its own kernel paint, else what it carries.
+    pub fn of(b: &crate::ModelBody) -> Option<std::sync::Arc<ImportedLook>> {
+        if b.body.paint().is_none() && b.body.color().is_none() {
+            return b.imported.clone();
+        }
+        let names = crate::naming::face_names(b);
+        let faces = b
+            .body
+            .paint()
+            .map(|p| {
+                p.faces.iter().filter_map(|f| names.get(f.face).map(|n| (crate::naming::strip_piece(n).to_string(), (f.color, f.opacity)))).collect()
+            })
+            .unwrap_or_default();
+        Some(std::sync::Arc::new(ImportedLook { color: b.body.color(), opacity: b.body.paint().map(|p| p.opacity), faces }))
+    }
+}
+
 /// The design's appearances.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Appearances {
@@ -126,15 +153,20 @@ impl Document {
     /// assignment to the same face wins.
     pub fn face_colors(&self, b: &crate::ModelBody) -> Vec<(usize, Look)> {
         // Face colours the body was imported with, under the design's own.
-        let mut out: Vec<(usize, Look)> = b
-            .body
-            .paint()
-            .map(|p| {
-                let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
-                p.faces.iter().map(|f| (f.face, Look::custom(f.color.map(to8), f.opacity as f64))).collect()
-            })
-            .unwrap_or_default();
+        let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
         let names = crate::naming::face_names(b);
+        let mut out: Vec<(usize, Look)> = match b.body.paint() {
+            Some(p) => p.faces.iter().map(|f| (f.face, Look::custom(f.color.map(to8), f.opacity as f64))).collect(),
+            // Carried from an earlier version of the body: by face name.
+            None => match &b.imported {
+                Some(imp) => names
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, n)| imp.faces.get(crate::naming::strip_piece(n)).map(|(c, o)| (i, Look::custom(c.map(to8), *o as f64))))
+                    .collect(),
+                None => Vec::new(),
+            },
+        };
         for f in self.appearances.faces.iter().filter(|f| f.body == b.name) {
             let (p, look) = (f.point, f.look.clone());
             // By name (every piece of a split face), else by the point.

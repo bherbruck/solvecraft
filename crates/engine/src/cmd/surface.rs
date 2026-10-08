@@ -146,7 +146,11 @@ mod tests {
         assert!((v - 240.0).abs() < 1e-9, "{v}");
         // Stitch the patch of a box's open top back on.
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Cup"}));
-        run(&mut s, "surface.patch", json!({"edges": [[25, 0, 10], [30, 5, 10], [25, 10, 10], [20, 5, 10]], "body": "Cup", "body_name": "Lid"}));
+        run(
+            &mut s,
+            "surface.patch",
+            json!({"edges": [[25, 0, 10], [30, 5, 10], [25, 10, 10], [20, 5, 10]], "body": "Cup", "body_name": "Lid"}),
+        );
         assert!(s.world_state().body("Lid").unwrap().body.is_surface());
         assert!(s.execute("surface.thicken", &json!({"bodies": ["Nope"], "thickness": 1})).is_err());
         assert!(s.execute("surface.trim", &json!({"body": "Sheet"})).is_err());

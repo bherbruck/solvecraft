@@ -136,9 +136,7 @@ fn patterns_of_a_blind_hole_drill_every_copy() {
     };
     let r = patterned(("solid.pattern.rectangular", json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": "15 mm"})));
     assert!((r - 3.0 * one).abs() < 1e-3 * one, "{r} vs 3 × {one}");
-    let c = patterned((
-        "solid.pattern.circular",
-        json!({"features": ["Hole1"], "axis": {"origin": [25, 12, 0], "dir": [0, 0, 1]}, "count": 2, "angle": 360}),
-    ));
+    let c =
+        patterned(("solid.pattern.circular", json!({"features": ["Hole1"], "axis": {"origin": [25, 12, 0], "dir": [0, 0, 1]}, "count": 2, "angle": 360})));
     assert!((c - 2.0 * one).abs() < 1e-3 * one, "{c} vs 2 × {one}");
 }

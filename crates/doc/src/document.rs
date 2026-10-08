@@ -1329,7 +1329,7 @@ impl Document {
     /// else its component's, else its material's look, else the colour it was imported with.
     /// (Faces may have their own: `face_looks`.)
     pub fn body_color(&self, b: &crate::ModelBody) -> Option<[f32; 3]> {
-        self.body_look(&b.name, b.feature).map(|l| l.rgb()).or_else(|| b.body.color())
+        self.body_look(&b.name, b.feature).map(|l| l.rgb()).or_else(|| b.body.color()).or_else(|| b.imported.as_ref().and_then(|i| i.color))
     }
 
     /// The model with each body carrying the colour, opacity and face colours it is shown with
@@ -1344,7 +1344,11 @@ impl Document {
                 .into_iter()
                 .map(|(face, l)| solvecraft_kernel::FacePaint { face, color: l.rgb(), opacity: l.opacity as f32 })
                 .collect();
-            let opacity = look.map(|l| l.opacity as f32).or_else(|| b.body.paint().map(|p| p.opacity)).unwrap_or(1.0);
+            let opacity = look
+                .map(|l| l.opacity as f32)
+                .or_else(|| b.body.paint().map(|p| p.opacity))
+                .or_else(|| b.imported.as_ref().and_then(|i| i.opacity))
+                .unwrap_or(1.0);
             let paint = solvecraft_kernel::Paint { opacity, faces };
             if c != b.body.color() || b.body.paint() != Some(&paint) {
                 b.body = b.body.clone().with_color(c).with_paint(Some(paint));

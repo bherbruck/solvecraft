@@ -27,11 +27,13 @@ pub struct ModelBody {
     pub(crate) names: crate::naming::NameCell,
     /// The component the body belongs to (set after each feature).
     pub component: u64,
+    /// The look it was imported with, carried through later features.
+    pub imported: Option<Arc<crate::appearance::ImportedLook>>,
 }
 
 impl ModelBody {
     pub fn new(name: String, body: Body, feature: u64) -> Self {
-        ModelBody { name, body, feature, mesh: OnceLock::new(), key: 0, names: Default::default(), component: 0 }
+        ModelBody { name, body, feature, mesh: OnceLock::new(), key: 0, names: Default::default(), component: 0, imported: None }
     }
     /// Display mesh (chord tolerance 1/1000 of the body size), computed once.
     pub fn mesh(&self) -> Arc<Mesh> {
@@ -236,6 +238,13 @@ impl ModelState {
                     (key, &b.name).hash(&mut h);
                     b.key = h.finish();
                     b.names = crate::naming::NameCell::new(Some(origin.clone()));
+                    // An imported look outlives the operations on the body.
+                    if b.body.paint().is_none()
+                        && b.body.color().is_none()
+                        && let Some(old) = before.bodies.iter().find(|x| x.name == b.name)
+                    {
+                        b.imported = crate::appearance::ImportedLook::of(old);
+                    }
                 }
             }
         }
