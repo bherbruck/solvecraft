@@ -424,6 +424,11 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.circle(12.0, 12.0, 2.6, ink, ink);
         }
         "body" => pen.iso_box(4.0, 10.0, 8.0, 6.0, 6.0),
+        // Component: a box with a smaller one stacked on it.
+        "component" => {
+            pen.iso_box(2.0, 13.0, 9.0, 6.0, 6.0);
+            pen.iso_box(9.0, 6.0, 5.0, 4.0, 4.0);
+        }
         "folder" => pen.poly(&[(3.0, 7.0), (9.0, 7.0), (11.0, 9.0), (21.0, 9.0), (21.0, 19.0), (3.0, 19.0)], Color32::from_rgb(236, 200, 110), ink),
         "origin" => {
             pen.arrow((6.0, 18.0), (20.0, 18.0), Color32::from_rgb(210, 60, 60));

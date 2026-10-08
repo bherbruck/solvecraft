@@ -284,7 +284,7 @@ pub(super) fn result(sk_out: (Vec<String>, Vec<String>), info: Value) -> Value {
 // ---------------------------------------------------------------------------------------------
 // Sketch lifecycle
 
-fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
+pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
     let base = match p.get("plane") {
         None => PlaneRef::Origin { name: "XY".into() },
         Some(Value::String(n)) => {

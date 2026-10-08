@@ -39,6 +39,8 @@ pub struct ViewportState {
     pub boxsel: Option<BoxSel>,
     /// Timeline item under the cursor: its bodies are highlighted.
     pub hover_feature: Option<u64>,
+    /// Bodies whose browser row is under the cursor: highlighted the same way.
+    pub hover_bodies: Vec<String>,
     pub build_ms: f64,
     /// The right-click menu, open at this screen position.
     pub context_menu: Option<Pos2>,
@@ -140,7 +142,11 @@ fn visible_sketches(app: &SolveApp) -> Vec<u64> {
     let st = app.session.model.state();
     st.sketches
         .iter()
-        .filter(|s| app.session.active_sketch == Some(s.feature) || (app.ui.show_sketches && !sketch_consumed(&app.session, s.feature)))
+        .filter(|s| {
+            app.session.active_sketch == Some(s.feature)
+                || (!app.ui.hidden_sketches.contains(&s.feature)
+                    && (app.ui.shown_sketches.contains(&s.feature) || (app.ui.show_sketches && !sketch_consumed(&app.session, s.feature))))
+        })
         .map(|s| s.feature)
         .collect()
 }
@@ -151,6 +157,10 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.ui.show_grid.hash(&mut h);
     app.ui.show_sketches.hash(&mut h);
     app.ui.hidden_bodies.hash(&mut h);
+    app.ui.hidden_sketches.hash(&mut h);
+    app.ui.shown_sketches.hash(&mut h);
+    app.ui.hidden_profiles.hash(&mut h);
+    app.session.active_component.hash(&mut h);
     app.preview.replaced.hash(&mut h);
     crate::theme::is_dark().hash(&mut h);
     app.session.active_sketch.hash(&mut h);
@@ -195,13 +205,20 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         if app.ui.hidden_bodies.contains(&b.name) || app.preview.replaced.contains(&b.name) {
             continue;
         }
-        let col = c4(s.doc.materials.get(&b.name).and_then(|m| crate::theme::material_color(m)).unwrap_or(tk.body));
+        // With a component active, bodies outside it are drawn faded.
+        let faded = s.active_component != 0 && !s.doc.component_within(s.doc.body_component(&b.name, b.feature), s.active_component);
+        let base = s.doc.materials.get(&b.name).and_then(|m| crate::theme::material_color(m)).unwrap_or(tk.body);
+        let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
         let m = b.mesh();
         for t in &m.triangles {
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
-                    sc.tri(p.to_f32(), n.to_f32(), col);
+                    if faded {
+                        sc.trans_tri(p.to_f32(), n.to_f32(), col);
+                    } else {
+                        sc.tri(p.to_f32(), n.to_f32(), col);
+                    }
                 }
             }
         }
@@ -219,7 +236,8 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         let active = s.active_sketch == Some(sid);
         // Closed profiles are shaded (lifted off a face they may lie on).
         let lift = ss.plane.normal() * 0.01;
-        for p in &ss.profiles {
+        let profiles = if app.ui.hidden_profiles.contains(&sid) { &[][..] } else { &ss.profiles[..] };
+        for p in profiles {
             for tri in p.region.triangulate(0.05) {
                 for q in tri {
                     sc.trans_tri((ss.plane.to_world(q) + lift).to_f32(), [0.0; 3], c4(tk.profile_fill));
@@ -563,6 +581,7 @@ fn highlight_key(app: &SolveApp) -> u64 {
     serde_json::to_string(&app.highlighted()).unwrap_or_default().hash(&mut h);
     format!("{:?}", app.viewport.hover).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
+    app.viewport.hover_bodies.hash(&mut h);
     app.ui.pick_bodies.hash(&mut h);
     crate::theme::is_dark().hash(&mut h);
     app.preview.replaced.hash(&mut h);
@@ -660,10 +679,12 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
             _ => {}
         }
     }
-    // Bodies made by the timeline item under the cursor.
-    if let Some(fid) = app.viewport.hover_feature {
+    // Bodies made by the timeline item under the cursor, or whose browser row is.
+    if app.viewport.hover_feature.is_some() || !app.viewport.hover_bodies.is_empty() {
         let k = t.hover_face_lift;
-        for b in st.bodies.iter().filter(|b| b.feature == fid && !app.ui.hidden_bodies.contains(&b.name)) {
+        let lit =
+            |b: &solvecraft_engine::doc::ModelBody| Some(b.feature) == app.viewport.hover_feature || app.viewport.hover_bodies.contains(&b.name);
+        for b in st.bodies.iter().filter(|b| lit(b) && !app.ui.hidden_bodies.contains(&b.name)) {
             let c = body_rgb(app, &b.name);
             let m = b.mesh();
             for f in 0..b.body.face_count() {
@@ -783,12 +804,18 @@ pub fn delete_selection(app: &mut SolveApp) {
     }
     let mut sketch_ids: Vec<String> = Vec::new();
     let mut features: Vec<u64> = Vec::new();
+    let mut bodies: Vec<String> = Vec::new();
     for x in &sel {
         match x {
             Sel::SketchCurve { id } | Sel::SketchPoint { id } => sketch_ids.push(id.clone()),
             Sel::Feature { id } => features.push(*id),
+            Sel::Body { name } if !app.ui.locked_bodies.contains(name) => bodies.push(name.clone()),
             _ => {}
         }
+    }
+    // Deleting a body removes it from here on in the timeline (a Remove feature).
+    if !bodies.is_empty() && app.session.active_sketch.is_none() {
+        let _ = app.run("SoftDeleteCommand", json!({ "bodies": bodies }));
     }
     if !sketch_ids.is_empty() && app.session.active_sketch.is_some() {
         let _ = app.run("sketch.delete", json!({"entities": sketch_ids}));
@@ -815,6 +842,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             i.pointer.delta(),
         )
     });
+    // The right button belongs to the marking menu while it is open.
+    let secondary_down = secondary_down && app.viewport.context_menu.is_none();
     // The view cube handles its own clicks; the model underneath must not see them.
     let cube = Rect::from_center_size(pos2(rect.right() - 80.0, rect.top() + 80.0), vec2(150.0, 150.0));
     let inside = hover.is_some_and(|p| rect.contains(p) && !cube.contains(p));

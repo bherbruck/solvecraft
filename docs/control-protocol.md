@@ -25,9 +25,12 @@ Commands never open dialogs when run this way. `solvecraft-cli commands` prints 
 | `ui.set` | any `UiState` field (`tab`, `perspective`, `showGrid`, `hiddenBodies`, `dark`, …) | `dark: false` switches to the light theme |
 | `ui.view` | `view`: `front`, `back`, `top`, `bottom`, `left`, `right`, `iso`, `home`, `fit`; `animate` (bool, default false: snap) | |
 | `ui.start` | `command` | like a toolbar click: starts the sketch tool or dialog for the command |
-| `ui.click` | `x`, `y` (screen points), `button?`: left/right/middle, `shift?`, `ctrl?` | real pointer input |
+| `ui.click` | `x`, `y` (screen points), `button?`: left/right/middle, `shift?`, `ctrl?`, `double?` | real pointer input |
 | `ui.move` | `x`, `y` | |
-| `ui.drag` | `x0`, `y0`, `x1`, `y1`, `button?`, `shift?`, `ctrl?`, `steps?` | press, move, release; a left drag on the model is a box selection (left to right: window, right to left: crossing) |
+| `ui.drag` | `x0`, `y0`, `x1`, `y1`, `button?`, `shift?`, `ctrl?`, `steps?`, `hold?` | press, move, release; a left drag on the model is a box selection (left to right: window, right to left: crossing); `hold` keeps the button down that many frames first (a right press-and-hold opens the marking menu, releasing over a direction picks it) |
+| `ui.menu` | `x?`, `y?`, `target?`, `close?` | with a point: open a context menu there as a right-click would (the viewport's marking menu, or a browser menu with `target: {"type": "body", "name"} \| {"type": "sketch", "id"} \| {"type": "component", "id"}`); without: the open menu (`radial` and `items`: id, label, shortcut, enabled) |
+| `ui.menuPick` | `item`: id or label | runs an item of the open menu, as clicking it does |
+| `ui.rename` | `text?`, `commit?` (default true) | finishes the rename box a Rename item opened |
 | `ui.selection` | | the selection, the open dialog's inputs and the hovered item |
 | `ui.editFeature` | `feature` (id or name) | what double-clicking a timeline item does: rolls back to it and opens its dialog filled in (sketches open in sketch mode) |
 | `ui.scroll` | `x`, `y`, `delta?` | wheel zoom at the cursor |

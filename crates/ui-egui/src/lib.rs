@@ -15,6 +15,8 @@ pub mod control;
 pub mod dialogs;
 pub mod gpu;
 pub mod icons;
+#[cfg(test)]
+mod menu_tests;
 pub mod palette;
 pub mod preview;
 pub mod selection;
@@ -59,6 +61,13 @@ pub struct UiState {
     pub pick_off: Vec<String>,
     /// A click on a face picks its whole body.
     pub pick_bodies: bool,
+    /// Sketches hidden one by one, and finished sketches shown although a feature uses them.
+    pub hidden_sketches: Vec<u64>,
+    pub shown_sketches: Vec<u64>,
+    /// Sketches whose closed profiles are not shaded.
+    pub hidden_profiles: Vec<u64>,
+    /// Bodies locked in the browser (no move or delete).
+    pub locked_bodies: Vec<String>,
 }
 
 impl Default for UiState {
@@ -77,6 +86,10 @@ impl Default for UiState {
             dark: true,
             pick_off: Vec::new(),
             pick_bodies: false,
+            hidden_sketches: Vec::new(),
+            shown_sketches: Vec::new(),
+            hidden_profiles: Vec::new(),
+            locked_bodies: Vec::new(),
         }
     }
 }
@@ -106,6 +119,10 @@ pub struct SolveApp {
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
     pub palette: palette::Palette,
+    /// Context menus, rename box and Properties window.
+    pub menu: context_menu::MenuState,
+    /// Browser tree state (reveal, groups being edited, occurrence moves).
+    pub tree: browser::TreeState,
     pub preview: preview::PreviewState,
     /// The last command started interactively (id, label), for Repeat.
     pub last_command: Option<(String, String)>,
@@ -136,6 +153,8 @@ impl SolveApp {
             tool: None,
             dialog: None,
             palette: palette::Palette::default(),
+            menu: context_menu::MenuState::default(),
+            tree: browser::TreeState::default(),
             preview: preview::PreviewState::default(),
             last_command: None,
             status: None,

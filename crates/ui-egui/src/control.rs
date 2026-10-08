@@ -6,7 +6,8 @@
 //! - `engine.commands`: every command with tab, panel, params and enablement
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
-//! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?}` (box selection, navigation);
+//! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?, hold?}` (box selection, navigation;
+//!   `hold` keeps the button down that many frames before moving);
 //!   `ui.selection` (selection, dialog inputs, hover); `ui.editFeature {feature}` (edit dialog)
 //! - `ui.set {...UiState fields}`; `ui.view {view: front|back|top|bottom|left|right|iso|home|fit, animate?: bool}` (snaps unless animate)
 //! - `ui.start {command}`: like clicking the toolbar button (starts tools/dialogs)
@@ -14,6 +15,10 @@
 //!   pointer input in screen points; `ui.key {key, cmd?, shift?}`, `ui.text {text}`
 //! - `ui.screenshot {path?}`: PNG of the window; `ui.render {path, width?, height?}`: headless
 //!   CPU render of the model with the current camera (no window needed)
+//! - `ui.menu {x?, y?, target?, close?}`: open a context menu at a point (the viewport's marking
+//!   menu, or a browser menu with `target: {type: body|sketch|component, …}`); without a point,
+//!   the open menu and its items. `ui.menuPick {item}` runs an item by id or label;
+//!   `ui.rename {text?, commit?}` finishes the rename box
 //! - `ui.resize {width, height}`, `app.quit`
 
 use std::sync::mpsc::Sender;
@@ -170,6 +175,10 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             let (a, z) = (egui::pos2(x0 as f32, y0 as f32), egui::pos2(x1 as f32, y1 as f32));
             app.synthetic.push(egui::Event::PointerMoved(a));
             app.synthetic.push(egui::Event::PointerButton { pos: a, button, pressed: true, modifiers });
+            // `hold`: frames to keep the button down before moving (press-and-hold).
+            for _ in 0..f("hold").unwrap_or(0.0).clamp(0.0, 600.0) as usize {
+                app.synthetic.push(egui::Event::PointerMoved(a));
+            }
             let steps = f("steps").unwrap_or(10.0).clamp(1.0, 200.0) as usize;
             for k in 1..=steps {
                 app.synthetic.push(egui::Event::PointerMoved(a + (z - a) * (k as f32 / steps as f32)));
@@ -213,6 +222,35 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
         "ui.text" => {
             app.synthetic.push(egui::Event::Text(s("text").unwrap_or("").to_string()));
             ok(Value::Null)
+        }
+        "ui.menu" => {
+            if b("close") {
+                crate::context_menu::close(app);
+                return ok(json!({"open": false}));
+            }
+            if let (Some(x), Some(y)) = (f("x"), f("y")) {
+                let target = match p.get("target") {
+                    Some(v) => match serde_json::from_value::<crate::context_menu::Target>(v.clone()) {
+                        Ok(t) => t,
+                        Err(e) => return err(e),
+                    },
+                    None => crate::context_menu::Target::Viewport,
+                };
+                crate::context_menu::request_open(app, egui::pos2(x as f32, y as f32), target);
+                return ok(json!({"pending": true}));
+            }
+            ok(crate::context_menu::describe(app))
+        }
+        "ui.menuPick" => {
+            let Some(key) = s("item") else { return err("missing `item` (id or label)") };
+            wrap(crate::context_menu::pick(app, key))
+        }
+        "ui.rename" => {
+            if crate::context_menu::finish_rename(app, s("text"), p.get("commit").and_then(Value::as_bool).unwrap_or(true)) {
+                ok(json!({"done": true}))
+            } else {
+                err("no rename in progress")
+            }
         }
         "ui.resize" => {
             let (Some(w), Some(h)) = (f("width"), f("height")) else { return err("missing width/height") };
