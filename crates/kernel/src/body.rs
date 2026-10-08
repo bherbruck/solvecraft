@@ -17,6 +17,24 @@ pub struct Body {
     pub(crate) mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>,
     /// Display colour (linear RGB 0..1) from an imported file; operations drop it.
     pub(crate) color: Option<[f32; 3]>,
+    /// Opacity and face colours for export (set by the document; operations drop it).
+    pub(crate) paint: Option<std::sync::Arc<Paint>>,
+}
+
+/// How a body looks beyond its colour, for export: its opacity and its faces' own colours.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Paint {
+    /// 1 = opaque.
+    pub opacity: f32,
+    pub faces: Vec<FacePaint>,
+}
+
+/// A face's own colour: the B-rep face index (`face_iter` order), sRGB as 0..1, opacity.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FacePaint {
+    pub face: usize,
+    pub color: [f32; 3],
+    pub opacity: f32,
 }
 
 /// A B-rep edge as seen by the rest of the application.
@@ -259,6 +277,7 @@ impl Body {
                 _ => false,
             }
             && self.color == other.color
+            && self.paint == other.paint
     }
 
     pub(crate) fn new(solid: Solid) -> Result<Body> {
@@ -283,7 +302,7 @@ impl Body {
         if v < 0.0 {
             solid.not();
         }
-        Ok(Body { solid: std::sync::Arc::new(solid), mesh: None, color: None })
+        Ok(Body { solid: std::sync::Arc::new(solid), mesh: None, color: None, paint: None })
     }
 
     /// A deep copy of the solid that can be mutated without affecting other bodies.
@@ -313,6 +332,30 @@ impl Body {
     /// The same body with a display colour.
     pub fn with_color(mut self, c: Option<[f32; 3]>) -> Body {
         self.color = c.filter(|c| c.iter().all(|x| x.is_finite())).map(|c| c.map(|x| x.clamp(0.0, 1.0)));
+        self
+    }
+
+    /// Opacity and face colours for export, if any.
+    pub fn paint(&self) -> Option<&Paint> {
+        self.paint.as_deref()
+    }
+
+    /// The same body with opacity and face colours for export (`None` or opaque with no face
+    /// colours clears them).
+    pub fn with_paint(mut self, p: Option<Paint>) -> Body {
+        let clean = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
+        self.paint = p
+            .map(|mut p| {
+                p.opacity = clean(p.opacity);
+                p.faces.retain(|f| f.color.iter().all(|x| x.is_finite()));
+                for f in &mut p.faces {
+                    f.color = f.color.map(|x| x.clamp(0.0, 1.0));
+                    f.opacity = clean(f.opacity);
+                }
+                p
+            })
+            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty())
+            .map(std::sync::Arc::new);
         self
     }
 

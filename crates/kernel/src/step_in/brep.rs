@@ -26,6 +26,8 @@ pub(crate) struct BrepOut {
     pub closed: bool,
     /// Faces read from the file (before band faces are split for the kernel).
     pub file_faces: usize,
+    /// The file face of each kernel face, in face order.
+    pub face_origin: Vec<u64>,
 }
 
 #[derive(Default)]
@@ -280,7 +282,7 @@ impl Builder {
         }
     }
 
-    fn shell(&mut self, cx: &Ctx, id: u64, failed: &mut Vec<String>) -> R<(mt::Shell, bool, usize)> {
+    fn shell(&mut self, cx: &Ctx, id: u64, failed: &mut Vec<String>) -> R<(mt::Shell, bool, usize, Vec<u64>)> {
         let e = entity(cx, id)?;
         let p = e.params();
         let (faces, flip, closed) = match e.name() {
@@ -296,6 +298,7 @@ impl Builder {
             return Err(format!("shell with {} faces", faces.len()));
         }
         let mut out = Vec::with_capacity(faces.len());
+        let mut origin = Vec::with_capacity(faces.len());
         for f in faces {
             match self.face(cx, f, 0) {
                 Ok(mut face) => {
@@ -303,6 +306,7 @@ impl Builder {
                         face.invert();
                     }
                     out.push(face);
+                    origin.push(f);
                 }
                 Err(err) => {
                     if self.faces > MAX_FACES {
@@ -316,8 +320,8 @@ impl Builder {
             return Err("no face could be imported".into());
         }
         let read = out.len();
-        let out = super::split::split_bands(out, failed);
-        Ok((out.into(), closed, read))
+        let out = super::split::split_bands(out, &mut origin, failed);
+        Ok((out.into(), closed, read, origin))
     }
 }
 
@@ -355,19 +359,23 @@ pub(crate) fn read_item(cx: &Ctx, id: u64) -> R<BrepOut> {
     let mut shells = Vec::new();
     let mut closed = true;
     let mut file_faces = 0;
+    // The file face each kernel face comes from (in face order).
+    let mut face_origin = Vec::new();
     match e.name() {
         "MANIFOLD_SOLID_BREP" | "FACETED_BREP" | "BREP_WITH_VOIDS" => {
-            let (s, c, n) = b.shell(cx, rid(p.get(1), "brep outer shell")?, &mut failed)?;
+            let (s, c, n, o) = b.shell(cx, rid(p.get(1), "brep outer shell")?, &mut failed)?;
             closed &= c;
             file_faces += n;
             shells.push(s);
+            face_origin.extend(o);
             if e.name() == "BREP_WITH_VOIDS" {
                 for v in refs(p.get(2)) {
                     match b.shell(cx, v, &mut failed) {
-                        Ok((s, c, n)) => {
+                        Ok((s, c, n, o)) => {
                             closed &= c;
                             file_faces += n;
                             shells.push(s);
+                            face_origin.extend(o);
                         }
                         Err(err) => failed.push(format!("void shell #{v}: {err}")),
                     }
@@ -377,10 +385,11 @@ pub(crate) fn read_item(cx: &Ctx, id: u64) -> R<BrepOut> {
         "SHELL_BASED_SURFACE_MODEL" => {
             for s in refs(p.get(1)) {
                 match b.shell(cx, s, &mut failed) {
-                    Ok((s, c, n)) => {
+                    Ok((s, c, n, o)) => {
                         closed &= c;
                         file_faces += n;
                         shells.push(s);
+                        face_origin.extend(o);
                     }
                     Err(err) => failed.push(format!("shell #{s}: {err}")),
                 }
@@ -398,5 +407,5 @@ pub(crate) fn read_item(cx: &Ctx, id: u64) -> R<BrepOut> {
             mt::Solid::new_unchecked(shells)
         }
     };
-    Ok(BrepOut { solid, failed, closed, file_faces })
+    Ok(BrepOut { solid, failed, closed, file_faces, face_origin })
 }

@@ -227,8 +227,10 @@ struct Reader<'a> {
     placements: HashMap<u64, u64>,
     /// Styled item → colour.
     colors: HashMap<u64, [f32; 3]>,
+    /// Opacity of styled items with a transparency (1 = opaque).
+    opacity: HashMap<u64, f32>,
     /// Converted items (brep id → solid, or the error).
-    solids: HashMap<u64, std::result::Result<(mt::Solid, bool, usize), String>>,
+    solids: HashMap<u64, std::result::Result<(mt::Solid, bool, usize, Vec<u64>), String>>,
     used_items: HashSet<u64>,
     /// Items already instanced for the product being read.
     node_items: HashSet<u64>,
@@ -291,6 +293,9 @@ impl<'a> Reader<'a> {
                         && let Some(c) = self.find_colour(p.get(1))
                     {
                         self.colors.entry(item).or_insert(c);
+                        if let Some(t) = self.find_transparency(p.get(1)) {
+                            self.opacity.entry(item).or_insert((1.0 - t).clamp(0.0, 1.0));
+                        }
                     }
                 }
                 _ => {}
@@ -314,6 +319,34 @@ impl<'a> Reader<'a> {
     }
 
     /// First colour reachable from a style list (bounded search).
+    /// SURFACE_STYLE_TRANSPARENT under a style list (0 = opaque, 1 = invisible).
+    fn find_transparency(&self, styles: Option<&Param>) -> Option<f32> {
+        let mut queue: Vec<u64> = styles?.as_list()?.iter().filter_map(Param::as_ref_id).collect();
+        let mut seen = HashSet::new();
+        while let Some(id) = queue.pop() {
+            if seen.len() > 64 || !seen.insert(id) {
+                continue;
+            }
+            let e = self.ex.get(id)?;
+            if e.name() == "SURFACE_STYLE_TRANSPARENT" {
+                return e.params().first().and_then(Param::as_f64).filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 1.0) as f32);
+            }
+            if e.name() == "COLOUR_RGB" {
+                continue;
+            }
+            for r in &e.records {
+                for p in &r.params {
+                    match p {
+                        Param::Ref(x) => queue.push(*x),
+                        Param::List(v) => queue.extend(v.iter().filter_map(Param::as_ref_id)),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn find_colour(&self, styles: Option<&Param>) -> Option<[f32; 3]> {
         let mut queue: Vec<u64> = styles?.as_list()?.iter().filter_map(Param::as_ref_id).collect();
         let mut seen = HashSet::new();
@@ -387,7 +420,7 @@ impl<'a> Reader<'a> {
         seen
     }
 
-    fn item_solid(&mut self, item: u64, u: Units) -> Option<(mt::Solid, bool, usize)> {
+    fn item_solid(&mut self, item: u64, u: Units) -> Option<(mt::Solid, bool, usize, Vec<u64>)> {
         if let Some(r) = self.solids.get(&item) {
             return r.as_ref().ok().cloned();
         }
@@ -401,7 +434,7 @@ impl<'a> Reader<'a> {
                 if !out.closed {
                     self.warn(format!("{label}: imported as an open body (the shell is not closed)"));
                 }
-                Ok((out.solid, out.closed, out.file_faces))
+                Ok((out.solid, out.closed, out.file_faces, out.face_origin))
             }
             Err(e) => {
                 let label = self.label(item);
@@ -444,7 +477,7 @@ impl<'a> Reader<'a> {
                         self.warn(format!("more than {MAX_BODIES} bodies: the rest are left out"));
                         return;
                     }
-                    let Some((solid, closed, file_faces)) = self.item_solid(item, u) else { continue };
+                    let Some((solid, closed, file_faces, face_origin)) = self.item_solid(item, u) else { continue };
                     let identity = *m == mt::Matrix4::from_scale(1.0);
                     let placed = if identity {
                         Ok(solid)
@@ -466,7 +499,18 @@ impl<'a> Reader<'a> {
                             }
                             out.push(self.bodies.len());
                             let color = self.colors.get(&item).copied();
-                            self.bodies.push(ImportedBody { name, body: body.with_color(color), color, path: path.to_vec(), closed, file_faces });
+                            // See-through bodies and faces with colours of their own.
+                            let faces = face_origin
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(i, f)| {
+                                    let c = self.colors.get(f)?;
+                                    Some(crate::FacePaint { face: i, color: *c, opacity: self.opacity.get(f).copied().unwrap_or(1.0) })
+                                })
+                                .collect();
+                            let paint = crate::Paint { opacity: self.opacity.get(&item).copied().unwrap_or(1.0), faces };
+                            let body = body.with_color(color).with_paint(Some(paint));
+                            self.bodies.push(ImportedBody { name, body, color, path: path.to_vec(), closed, file_faces });
                         }
                         Err(err) => {
                             let label = self.label(item);
@@ -775,6 +819,7 @@ pub fn step_import(text: &str) -> Result<StepImport> {
         children: HashMap::new(),
         placements: HashMap::new(),
         colors: HashMap::new(),
+        opacity: HashMap::new(),
         solids: HashMap::new(),
         used_items: HashSet::new(),
         node_items: HashSet::new(),

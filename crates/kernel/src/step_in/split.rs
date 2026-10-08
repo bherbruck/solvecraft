@@ -388,7 +388,7 @@ fn recut(face: &mt::Face, cuts: &[(mt::Edge, (mt::Edge, mt::Edge))]) -> mt::Face
 
 /// Split every band face of a shell (see the module docs). Faces that cannot be split stay as
 /// they are and are reported.
-pub(crate) fn split_bands(mut faces: Vec<mt::Face>, warnings: &mut Vec<String>) -> Vec<mt::Face> {
+pub(crate) fn split_bands(mut faces: Vec<mt::Face>, origin: &mut Vec<u64>, warnings: &mut Vec<String>) -> Vec<mt::Face> {
     let n = faces.len();
     for i in 0..n {
         let Some(face) = faces.get(i).cloned() else { continue };
@@ -399,6 +399,9 @@ pub(crate) fn split_bands(mut faces: Vec<mt::Face>, warnings: &mut Vec<String>) 
                     *slot = p.faces.0;
                 }
                 faces.push(p.faces.1);
+                // The second piece comes from the same file face.
+                let o = origin.get(i).copied().unwrap_or(0);
+                origin.push(o);
             }
             Ok(None) => {}
             Err(e) => warnings

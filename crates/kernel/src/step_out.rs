@@ -152,6 +152,8 @@ struct Out {
     /// B-spline cylinder sheets of the body being copied under merged faces, with the direction
     /// of the cylinder's parameter seam.
     merged: HashMap<u64, V3>,
+    /// Faces of the body being copied: exchange id → written id.
+    faces_out: HashMap<u64, u64>,
 }
 
 impl Out {
@@ -332,6 +334,9 @@ impl Out {
             let topo = TOPOLOGY.contains(&e.name());
             let new = if topo { self.add(text) } else { self.add_shared(text) };
             map.insert(id, new);
+            if matches!(e.name(), "FACE_SURFACE" | "ADVANCED_FACE") {
+                self.faces_out.insert(id, new);
+            }
         }
         map.get(&root).copied().ok_or_else(|| "solid not copied".into())
     }
@@ -827,7 +832,7 @@ fn face_edges(ex: &p21::Exchange, face: &p21::Entity) -> Option<Vec<Vec<(u64, bo
 /// Faces that truck splits (a revolution in two or three turns) joined back into one face per
 /// analytic surface, by dropping the edges between them. Faces whose union would lose all its
 /// edges, or whose leftover edges do not close into loops, stay apart.
-fn merge_split_faces(ex: &mut p21::Exchange) -> HashMap<u64, V3> {
+fn merge_split_faces(ex: &mut p21::Exchange, paint: &mut HashMap<u64, FaceLook>) -> HashMap<u64, V3> {
     let mut merged_surfaces = std::collections::HashSet::new();
     let mut next = ex.entities.keys().max().copied().unwrap_or(0) + 1;
     let shells: Vec<u64> = ex.entities.iter().filter(|(_, e)| matches!(e.name(), "CLOSED_SHELL" | "OPEN_SHELL")).map(|(i, _)| *i).collect();
@@ -908,6 +913,10 @@ fn merge_split_faces(ex: &mut p21::Exchange) -> HashMap<u64, V3> {
                         continue;
                     }
                     let (Some(&fa), Some(&fb)) = (faces.get(i), faces.get(j)) else { continue };
+                    // Faces of different colours stay apart.
+                    if paint.get(&fa) != paint.get(&fb) {
+                        continue;
+                    }
                     let (Some(ea), Some(eb)) = (ex.get(fa).and_then(|f| face_edges(ex, f)), ex.get(fb).and_then(|f| face_edges(ex, f))) else {
                         continue;
                     };
@@ -1100,6 +1109,10 @@ fn merge_split_faces(ex: &mut p21::Exchange) -> HashMap<u64, V3> {
                         merged_surfaces.insert(sid);
                     }
                     ex.entities.insert(nid, p21::Entity { records: vec![p21::Record { name: old.name().to_string(), params }] });
+                    if let Some(look) = paint.remove(&fa) {
+                        paint.remove(&fb);
+                        paint.insert(nid, look);
+                    }
                     let new_list: Vec<Param> = faces.iter().filter(|f| **f != fb).map(|f| Param::Ref(if *f == fa { nid } else { *f })).collect();
                     if let Some(she) = ex.entities.get_mut(&sh)
                         && let Some(r) = she.records.first_mut()
@@ -1168,13 +1181,30 @@ fn merge_split_faces(ex: &mut p21::Exchange) -> HashMap<u64, V3> {
 
 /// The B-rep entities of one body as truck writes them, parsed, and the surfaces of faces
 /// merged from pieces.
-fn brep_exchange(b: &Body, merge: bool) -> Result<(p21::Exchange, HashMap<u64, V3>)> {
+fn brep_exchange(b: &Body, merge: bool) -> Result<(p21::Exchange, HashMap<u64, V3>, HashMap<u64, FaceLook>)> {
     let text = crate::step::truck_step(&[b], "SolveCraft")?;
     let mut ex = p21::parse(&text).map_err(|e| KernelError::Failed(format!("STEP export: {e}")))?;
     collapse_short_edges(&mut ex);
-    let merged = if merge { merge_split_faces(&mut ex) } else { Default::default() };
-    Ok((ex, merged))
+    // Face colours by exchange face: truck writes each shell's faces in the body's face order.
+    let mut paint = HashMap::new();
+    if let Some(p) = b.paint()
+        && !p.faces.is_empty()
+    {
+        let mut shells: Vec<u64> = ex.entities.iter().filter(|(_, e)| matches!(e.name(), "CLOSED_SHELL" | "OPEN_SHELL")).map(|(i, _)| *i).collect();
+        shells.sort();
+        let faces: Vec<u64> = shells.iter().filter_map(|s| ex.get(*s)?.params().get(1)?.as_list()).flatten().filter_map(Param::as_ref_id).collect();
+        for f in &p.faces {
+            if let Some(id) = faces.get(f.face) {
+                paint.insert(*id, (f.color, f.opacity));
+            }
+        }
+    }
+    let merged = if merge { merge_split_faces(&mut ex, &mut paint) } else { Default::default() };
+    Ok((ex, merged, paint))
 }
+
+/// A face's own colour (0..1) and opacity.
+type FaceLook = ([f32; 3], f32);
 
 fn rigid_frame(m: &[[f64; 4]; 4]) -> Result<([f64; 3], [f64; 3], [f64; 3])> {
     let x = [m[0][0], m[0][1], m[0][2]];
@@ -1308,17 +1338,26 @@ fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, m
         if !p.bodies.is_empty() {
             let mut solids = Vec::new();
             for b in &p.bodies {
-                let (ex, merged) = brep_exchange(b.body, merge)?;
+                let (ex, merged, face_paint) = brep_exchange(b.body, merge)?;
                 o.merged = merged;
+                o.faces_out.clear();
                 let mut roots: Vec<u64> =
                     ex.entities.iter().filter(|(_, e)| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS")).map(|(i, _)| *i).collect();
                 roots.sort();
                 for r in roots {
                     let id = o.copy_solid(&ex, r, &b.name).map_err(|e| KernelError::Failed(format!("STEP export: {e}")))?;
                     solids.push(id);
+                    let opacity = b.body.paint().map(|p| p.opacity).unwrap_or(1.0);
                     if let Some(c) = b.color {
-                        styled.push(style(&mut o, id, c));
+                        styled.push(style(&mut o, id, c, opacity));
                     }
+                }
+                // Faces with colours of their own.
+                let mut painted: Vec<(u64, ([f32; 3], f32))> =
+                    face_paint.into_iter().filter_map(|(f, look)| Some((*o.faces_out.get(&f)?, look))).collect();
+                painted.sort_by_key(|(f, _)| *f);
+                for (f, (c, op)) in painted {
+                    styled.push(style(&mut o, f, c, op));
                 }
             }
             let list = solids.iter().chain(std::iter::once(&origin)).map(|i| format!("#{i}")).collect::<Vec<_>>().join(",");
@@ -1380,12 +1419,19 @@ fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, m
 }
 
 /// A surface colour for a solid (STYLED_ITEM chain).
-fn style(o: &mut Out, item: u64, c: [f32; 3]) -> u64 {
+fn style(o: &mut Out, item: u64, c: [f32; 3], opacity: f32) -> u64 {
     let rgb = o.add_shared(format!("COLOUR_RGB('',{},{},{})", real(c[0] as f64), real(c[1] as f64), real(c[2] as f64)));
     let fasc = o.add_shared(format!("FILL_AREA_STYLE_COLOUR('',#{rgb})"));
     let fas = o.add_shared(format!("FILL_AREA_STYLE('',(#{fasc}))"));
     let ssfa = o.add_shared(format!("SURFACE_STYLE_FILL_AREA(#{fas})"));
-    let sss = o.add_shared(format!("SURFACE_SIDE_STYLE('',(#{ssfa}))"));
+    // See-through looks add a transparency (1 = invisible) to the side style.
+    let sides = if opacity < 1.0 {
+        let tr = o.add_shared(format!("SURFACE_STYLE_TRANSPARENT({})", real((1.0 - opacity as f64).clamp(0.0, 1.0))));
+        format!("#{ssfa},#{tr}")
+    } else {
+        format!("#{ssfa}")
+    };
+    let sss = o.add_shared(format!("SURFACE_SIDE_STYLE('',({sides}))"));
     let ssu = o.add_shared(format!("SURFACE_STYLE_USAGE(.BOTH.,#{sss})"));
     let psa = o.add_shared(format!("PRESENTATION_STYLE_ASSIGNMENT((#{ssu}))"));
     o.add(format!("STYLED_ITEM('color',(#{psa}),#{item})"))

@@ -100,7 +100,7 @@ pub fn mesh_body(positions: &[Vec3], triangles: &[[u32; 3]]) -> Result<Body> {
             t.swap(1, 2);
         }
     }
-    Ok(Body { solid: Arc::new(crate::body::Solid::new_unchecked(Vec::new())), mesh: Some(Arc::new(out)), color: None })
+    Ok(Body { solid: Arc::new(crate::body::Solid::new_unchecked(Vec::new())), mesh: Some(Arc::new(out)), color: None, paint: None })
 }
 
 /// Every triangle side is shared by exactly two triangles in opposite directions.
@@ -142,6 +142,6 @@ impl Body {
                 t.swap(1, 2);
             }
         }
-        Some(Body { solid: self.solid.clone(), mesh: Some(Arc::new(out)), color: self.color })
+        Some(Body { solid: self.solid.clone(), mesh: Some(Arc::new(out)), color: self.color, paint: self.paint.clone() })
     }
 }

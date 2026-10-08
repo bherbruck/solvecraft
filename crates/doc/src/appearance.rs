@@ -125,7 +125,15 @@ impl Document {
     /// The faces of a body with appearances of their own: (B-rep face index, look). A later
     /// assignment to the same face wins.
     pub fn face_colors(&self, b: &crate::ModelBody) -> Vec<(usize, Look)> {
-        let mut out: Vec<(usize, Look)> = Vec::new();
+        // Face colours the body was imported with, under the design's own.
+        let mut out: Vec<(usize, Look)> = b
+            .body
+            .paint()
+            .map(|p| {
+                let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+                p.faces.iter().map(|f| (f.face, Look::custom(f.color.map(to8), f.opacity as f64))).collect()
+            })
+            .unwrap_or_default();
         let names = crate::naming::face_names(b);
         for f in self.appearances.faces.iter().filter(|f| f.body == b.name) {
             let (p, look) = (f.point, f.look.clone());

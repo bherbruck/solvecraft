@@ -987,6 +987,35 @@ fn material_and_appearance_colours_export_to_step() {
     check(&step_round_trip(&mut s2, "colours2"));
 }
 
+/// Face appearances and see-through bodies export: STEP styles on the faces with a
+/// transparency, read back as face colours.
+#[test]
+fn face_colours_and_opacity_export() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    run(&mut s, "AppearanceCommand", json!({"bodies": ["Cube"], "color": "#2040c0", "opacity": 0.5}));
+    run(&mut s, "AppearanceCommand", json!({"faces": [[5, 5, 10]], "color": "#ff0000"}));
+    let imp = step_round_trip(&mut s, "facecol");
+    let b = &imp.bodies[0];
+    let paint = b.body.paint().expect("paint read back");
+    assert!((paint.opacity - 0.5).abs() < 1e-3, "{paint:?}");
+    let faces = b.body.faces(0.01).unwrap();
+    let top = faces.iter().position(|f| (f.centroid.z - 10.0).abs() < 1e-6).unwrap();
+    assert_eq!(paint.faces.len(), 1, "{paint:?}");
+    assert_eq!(paint.faces[0].face, top);
+    assert!((paint.faces[0].color[0] - 1.0).abs() < 1e-3 && paint.faces[0].color[1].abs() < 1e-3, "{paint:?}");
+    // Opened again, the face keeps its colour (shown and exported).
+    let p = std::env::temp_dir().join(format!("solvecraft-facecol-{}.step", std::process::id()));
+    run(&mut s, "ExportCommand", json!({"path": p.to_string_lossy()}));
+    let mut s2 = Session::default();
+    run(&mut s2, "doc.open", json!({"path": p.to_string_lossy()}));
+    let _ = std::fs::remove_file(&p);
+    let st = s2.world_state();
+    let looks = s2.doc.face_colors(&st.bodies[0]);
+    assert_eq!(looks.len(), 1);
+    assert_eq!(looks[0].1.color, [255, 0, 0]);
+}
+
 /// Components export as a STEP assembly: products, occurrences, placements.
 #[test]
 fn components_export_as_step_assembly() {

@@ -119,7 +119,7 @@ pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
         let positions: Vec<Vec3> = tris.iter().flatten().map(|v| Vec3::new(v[0] as f64, v[1] as f64, v[2] as f64)).collect();
         let n = u32::try_from(tris.len()).map_err(|_| IoError::Invalid("STL too large".into()))?;
         let triangles = (0..n).map(|i| [i * 3, i * 3 + 1, i * 3 + 2]).collect();
-        (vec![MeshObject { name: stem.clone(), positions, triangles, color: None }], Vec::new())
+        (vec![MeshObject { name: stem.clone(), positions, triangles, ..Default::default() }], Vec::new())
     } else {
         read_3mf(bytes)?
     };
@@ -269,8 +269,19 @@ pub fn export(state: &ModelState, bodies: &[String], format: Format, name: &str)
                 .map(|b| {
                     let m = export_mesh(&b.body)?;
                     let eps = (b.body.size() * 1e-6).max(1e-7);
-                    let (positions, triangles) = threemf::weld(&m.positions, &m.triangles, eps);
-                    Ok(MeshObject { name: b.name.clone(), positions, triangles, color: b.body.color() })
+                    // Faces with colours of their own tag their triangles.
+                    let paint = b.body.paint();
+                    let mut looks = Vec::new();
+                    let mut by_face = std::collections::HashMap::new();
+                    for f in paint.map(|p| p.faces.as_slice()).unwrap_or_default() {
+                        looks.push((f.color, 1.0 - f.opacity));
+                        by_face.insert(f.face, looks.len() as u32);
+                    }
+                    let tags: Vec<u32> = m.tri_face.iter().map(|f| by_face.get(&(*f as usize)).copied().unwrap_or(0)).collect();
+                    let (positions, triangles, tri_looks) = threemf::weld_tagged(&m.positions, &m.triangles, &tags, eps);
+                    let tri_looks = if looks.is_empty() { Vec::new() } else { tri_looks };
+                    let transparency = 1.0 - paint.map(|p| p.opacity).unwrap_or(1.0);
+                    Ok(MeshObject { name: b.name.clone(), positions, triangles, color: b.body.color(), transparency, looks, tri_looks })
                 })
                 .collect::<Result<_>>()?;
             write_3mf(&objs)?

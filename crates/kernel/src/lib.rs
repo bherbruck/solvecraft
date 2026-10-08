@@ -36,7 +36,7 @@ mod sweep_path;
 mod topo;
 
 pub use blend::{chamfer, fillet};
-pub use body::{Body, EdgeInfo, FaceInfo};
+pub use body::{Body, EdgeInfo, FaceInfo, FacePaint, Paint};
 pub use build::{PathSeg, box_solid, cylinder, extrude, extrude_tapered, loft, revolve, sphere, sweep, torus};
 pub use helix::{loft_to_point, sweep_helix};
 pub use measure::{BodyMeasure, measure};

@@ -1197,13 +1197,22 @@ impl Document {
         self.body_look(&b.name, b.feature).map(|l| l.rgb()).or_else(|| b.body.color())
     }
 
-    /// The model with each body carrying the colour it is shown in (for export).
+    /// The model with each body carrying the colour, opacity and face colours it is shown with
+    /// (for export).
     pub fn painted(&self, state: &crate::ModelState) -> crate::ModelState {
         let mut st = state.clone();
         for b in &mut st.bodies {
             let c = self.body_color(b);
-            if c != b.body.color() {
-                b.body = b.body.clone().with_color(c);
+            let look = self.body_look(&b.name, b.feature);
+            let faces: Vec<solvecraft_kernel::FacePaint> = self
+                .face_colors(b)
+                .into_iter()
+                .map(|(face, l)| solvecraft_kernel::FacePaint { face, color: l.rgb(), opacity: l.opacity as f32 })
+                .collect();
+            let opacity = look.map(|l| l.opacity as f32).or_else(|| b.body.paint().map(|p| p.opacity)).unwrap_or(1.0);
+            let paint = solvecraft_kernel::Paint { opacity, faces };
+            if c != b.body.color() || b.body.paint() != Some(&paint) {
+                b.body = b.body.clone().with_color(c).with_paint(Some(paint));
             }
         }
         st

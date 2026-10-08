@@ -36,6 +36,13 @@ pub struct MeshObject {
     pub positions: Vec<Vec3>,
     pub triangles: Vec<[u32; 3]>,
     pub color: Option<[f32; 3]>,
+    /// 0 = opaque, 1 = invisible (written as the colour's alpha).
+    pub transparency: f32,
+    /// Colours of their own for some triangles (faces with appearances): colour 0..1 and
+    /// transparency; `tri_looks` gives each triangle's entry + 1 (0: the object's own), and is
+    /// empty when no triangle has one.
+    pub looks: Vec<([f32; 3], f32)>,
+    pub tri_looks: Vec<u32>,
 }
 
 fn esc(s: &str) -> String {
@@ -55,7 +62,7 @@ fn esc(s: &str) -> String {
 }
 
 /// Shared vertices (merged at single precision, as written) and non-degenerate triangles.
-fn indexed(m: &MeshObject) -> (Vec<[f32; 3]>, Vec<[u32; 3]>) {
+fn indexed(m: &MeshObject) -> (Vec<[f32; 3]>, Vec<([u32; 3], u32)>) {
     let mut map: HashMap<[u32; 3], u32> = HashMap::new();
     let mut verts: Vec<[f32; 3]> = Vec::new();
     let mut remap = Vec::with_capacity(m.positions.len());
@@ -72,9 +79,10 @@ fn indexed(m: &MeshObject) -> (Vec<[f32; 3]>, Vec<[u32; 3]>) {
     let tris = m
         .triangles
         .iter()
-        .filter_map(|t| {
+        .enumerate()
+        .filter_map(|(k, t)| {
             let (a, b, c) = (*remap.get(t[0] as usize)?, *remap.get(t[1] as usize)?, *remap.get(t[2] as usize)?);
-            (a != b && b != c && c != a).then_some([a, b, c])
+            (a != b && b != c && c != a).then_some(([a, b, c], m.tri_looks.get(k).copied().unwrap_or(0)))
         })
         .collect();
     (verts, tris)
@@ -83,6 +91,13 @@ fn indexed(m: &MeshObject) -> (Vec<[f32; 3]>, Vec<[u32; 3]>) {
 /// Make a tessellation watertight: merge vertices closer than `eps` and split triangles at
 /// vertices lying on their open sides (T-junctions between separately meshed faces).
 pub fn weld(positions: &[Vec3], triangles: &[[u32; 3]], eps: f64) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+    let (v, t, _) = weld_tagged(positions, triangles, &[], eps);
+    (v, t)
+}
+
+/// [`weld`] keeping a tag per triangle (pieces of a split triangle keep its tag; missing tags
+/// are 0).
+pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps: f64) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<u32>) {
     // Merge on a grid of cell `eps` (a vertex joins one already in its own or a neighbour cell).
     let cell = |p: Vec3| [(p.x / eps).round() as i64, (p.y / eps).round() as i64, (p.z / eps).round() as i64];
     let mut grid: HashMap<[i64; 3], Vec<u32>> = HashMap::new();
@@ -114,13 +129,14 @@ pub fn weld(positions: &[Vec3], triangles: &[[u32; 3]], eps: f64) -> (Vec<Vec3>,
         };
         remap.push(i);
     }
-    let mut tris: Vec<[u32; 3]> = triangles
+    let (mut tris, mut tags): (Vec<[u32; 3]>, Vec<u32>) = triangles
         .iter()
-        .filter_map(|t| {
+        .enumerate()
+        .filter_map(|(k, t)| {
             let (a, b, c) = (*remap.get(t[0] as usize)?, *remap.get(t[1] as usize)?, *remap.get(t[2] as usize)?);
-            (a != b && b != c && c != a).then_some([a, b, c])
+            (a != b && b != c && c != a).then_some(([a, b, c], tags.get(k).copied().unwrap_or(0)))
         })
-        .collect();
+        .unzip();
     // T-junctions: split open sides at open-side vertices lying on them.
     for _ in 0..8 {
         let mut half: HashMap<(u32, u32), usize> = HashMap::new();
@@ -163,7 +179,8 @@ pub fn weld(positions: &[Vec3], triangles: &[[u32; 3]], eps: f64) -> (Vec<Vec3>,
             break;
         }
         let mut next = Vec::with_capacity(tris.len() + splits.len() * 2);
-        for t in &tris {
+        let mut next_tags = Vec::with_capacity(next.capacity());
+        for (t, tag) in tris.iter().zip(&tags) {
             // Rotate so the split side (if any) is (t0, t1); split one side per pass.
             let rot = [[t[0], t[1], t[2]], [t[1], t[2], t[0]], [t[2], t[0], t[1]]];
             match rot.iter().find_map(|r| splits.get(&(r[0], r[1])).map(|s| (r, s))) {
@@ -171,16 +188,22 @@ pub fn weld(positions: &[Vec3], triangles: &[[u32; 3]], eps: f64) -> (Vec<Vec3>,
                     let mut prev = r[0];
                     for (_, v) in s {
                         next.push([prev, *v, r[2]]);
+                        next_tags.push(*tag);
                         prev = *v;
                     }
                     next.push([prev, r[1], r[2]]);
+                    next_tags.push(*tag);
                 }
-                None => next.push(*t),
+                None => {
+                    next.push(*t);
+                    next_tags.push(*tag);
+                }
             }
         }
         tris = next;
+        tags = next_tags;
     }
-    (verts, tris)
+    (verts, tris, tags)
 }
 
 /// The model part's XML.
@@ -189,19 +212,34 @@ pub fn model_xml(objects: &[MeshObject]) -> String {
     x.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     let _ = writeln!(x, "<model unit=\"millimeter\" xml:lang=\"en-US\" xmlns=\"{CORE_NS}\">");
     x.push_str(" <metadata name=\"Application\">SolveCraft</metadata>\n <resources>\n");
-    let colored = objects.iter().any(|o| o.color.is_some());
-    // Base material group id 1; objects from 2.
+    let colored = objects.iter().any(|o| o.color.is_some() || o.transparency > 0.0 || !o.looks.is_empty());
+    // Base material group id 1 (each object's own colour, then its faces' colours); objects
+    // from 2. A see-through colour carries its alpha (#RRGGBBAA).
+    let display = |c: [f32; 3], transparency: f32| {
+        let c = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+        let alpha = if transparency > 0.0 { format!("{:02X}", ((1.0 - transparency.clamp(0.0, 1.0)) * 255.0).round() as u8) } else { String::new() };
+        format!("#{:02X}{:02X}{:02X}{alpha}", c[0], c[1], c[2])
+    };
+    let mut first = Vec::with_capacity(objects.len());
     if colored {
         x.push_str("  <basematerials id=\"1\">\n");
+        let mut n = 0usize;
         for o in objects {
-            let c = o.color.unwrap_or([0.7, 0.7, 0.7]).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
-            let _ = writeln!(x, "   <base name=\"{}\" displaycolor=\"#{:02X}{:02X}{:02X}\"/>", esc(&o.name), c[0], c[1], c[2]);
+            first.push(n);
+            let _ =
+                writeln!(x, "   <base name=\"{}\" displaycolor=\"{}\"/>", esc(&o.name), display(o.color.unwrap_or([0.7, 0.7, 0.7]), o.transparency));
+            n += 1;
+            for (i, (c, t)) in o.looks.iter().enumerate() {
+                let _ = writeln!(x, "   <base name=\"{} face {}\" displaycolor=\"{}\"/>", esc(&o.name), i + 1, display(*c, *t));
+                n += 1;
+            }
         }
         x.push_str("  </basematerials>\n");
     }
     for (k, o) in objects.iter().enumerate() {
         let id = k + 2;
-        let mat = if colored { format!(" pid=\"1\" pindex=\"{k}\"") } else { String::new() };
+        let own = first.get(k).copied().unwrap_or(0);
+        let mat = if colored { format!(" pid=\"1\" pindex=\"{own}\"") } else { String::new() };
         let _ = writeln!(x, "  <object id=\"{id}\" type=\"model\" name=\"{}\"{mat}>", esc(&o.name));
         x.push_str("   <mesh>\n    <vertices>\n");
         let (verts, tris) = indexed(o);
@@ -209,8 +247,15 @@ pub fn model_xml(objects: &[MeshObject]) -> String {
             let _ = writeln!(x, "     <vertex x=\"{}\" y=\"{}\" z=\"{}\"/>", v[0], v[1], v[2]);
         }
         x.push_str("    </vertices>\n    <triangles>\n");
-        for t in &tris {
-            let _ = writeln!(x, "     <triangle v1=\"{}\" v2=\"{}\" v3=\"{}\"/>", t[0], t[1], t[2]);
+        for (t, look) in &tris {
+            match look {
+                l if colored && *l > 0 && (*l as usize) <= o.looks.len() => {
+                    let _ = writeln!(x, "     <triangle v1=\"{}\" v2=\"{}\" v3=\"{}\" pid=\"1\" p1=\"{}\"/>", t[0], t[1], t[2], own + *l as usize);
+                }
+                _ => {
+                    let _ = writeln!(x, "     <triangle v1=\"{}\" v2=\"{}\" v3=\"{}\"/>", t[0], t[1], t[2]);
+                }
+            }
         }
         x.push_str("    </triangles>\n   </mesh>\n  </object>\n");
     }
@@ -573,7 +618,23 @@ mod tests {
             positions: vec![Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)],
             triangles: vec![[0, 2, 1], [0, 1, 3], [1, 2, 3], [0, 3, 2]],
             color: None,
+            ..Default::default()
         }
+    }
+
+    /// A see-through object writes its alpha; triangles of faces with colours of their own
+    /// point at their entries.
+    #[test]
+    fn face_colours_and_alpha() {
+        let mut t = tetra("T");
+        t.color = Some([0.125, 0.25, 0.75]);
+        t.transparency = 0.5;
+        t.looks = vec![([1.0, 0.0, 0.0], 0.0)];
+        t.tri_looks = vec![0, 1, 0, 0];
+        let model = model_xml(&[t]);
+        assert!(model.contains("displaycolor=\"#2040BF80\""), "{model}");
+        assert!(model.contains("displaycolor=\"#FF0000\""), "{model}");
+        assert_eq!(model.matches("p1=\"1\"").count(), 1, "{model}");
     }
 
     fn package(model: &str, rels: Option<&str>) -> Vec<u8> {
