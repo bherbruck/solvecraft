@@ -51,7 +51,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch); direction?: [x,y,z] (default: into the face); diameter; depth? (default through all); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\" (cosmetic)"),
+        .params("position: [x,y,z] on a face | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch); direction?: [x,y,z] (default: into the face); diameter | thread (a tapped hole: the tap drill, major − pitch) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\" (cosmetic)"),
     CommandSpec::new("PrimitivePipe", "Pipe", pipe)
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -719,6 +719,42 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, FeatureKind::Split { body, plane })
 }
 
+/// ISO 273 clearance hole diameters (close, normal, loose fit) for metric bolts.
+fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
+    const TABLE: [(f64, f64, f64, f64); 21] = [
+        (1.6, 1.7, 1.8, 2.0),
+        (2.0, 2.2, 2.4, 2.6),
+        (2.5, 2.7, 2.9, 3.1),
+        (3.0, 3.2, 3.4, 3.6),
+        (4.0, 4.3, 4.5, 4.8),
+        (5.0, 5.3, 5.5, 5.8),
+        (6.0, 6.4, 6.6, 7.0),
+        (8.0, 8.4, 9.0, 10.0),
+        (10.0, 10.5, 11.0, 12.0),
+        (12.0, 13.0, 13.5, 14.5),
+        (14.0, 15.0, 15.5, 16.5),
+        (16.0, 17.0, 17.5, 18.5),
+        (20.0, 21.0, 22.0, 24.0),
+        (24.0, 25.0, 26.0, 28.0),
+        (30.0, 31.0, 33.0, 35.0),
+        (36.0, 37.0, 39.0, 42.0),
+        (42.0, 43.0, 45.0, 48.0),
+        (48.0, 50.0, 52.0, 56.0),
+        (56.0, 58.0, 62.0, 66.0),
+        (60.0, 62.0, 66.0, 70.0),
+        (64.0, 66.0, 70.0, 74.0),
+    ];
+    let t = size.trim().trim_start_matches(['M', 'm']);
+    let d: f64 = t.split(['x', 'X']).next()?.trim().parse().ok()?;
+    let row = TABLE.iter().find(|r| (r.0 - d).abs() < 1e-9)?;
+    match fit {
+        "close" | "fine" => Some(row.1),
+        "normal" | "medium" => Some(row.2),
+        "loose" | "coarse" => Some(row.3),
+        _ => None,
+    }
+}
+
 fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "FusionHoleCommand";
     // At sketch points: the holes go perpendicular to the sketch and follow its points.
@@ -776,7 +812,21 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             }
         },
     };
-    let diameter = req_expr(cmd, p, "diameter")?;
+    // The diameter: given, or the tap drill of the thread (major − pitch), or an ISO 273
+    // clearance hole for a bolt size (close, normal or loose fit).
+    let diameter = match (expr(p, "diameter"), &thread, str_(p, "clearance")) {
+        (Some(d), _, _) => d,
+        (None, _, Some(c)) => {
+            let fit = str_(p, "fit").unwrap_or("normal").to_ascii_lowercase();
+            let d = clearance_diameter(c, &fit).ok_or_else(|| bad(cmd, format!("no clearance hole for `{c}` ({fit} fit): M1.6 to M64")))?;
+            format!("{d} mm")
+        }
+        (None, Some(t), None) => {
+            let (major, pitch) = solvecraft_doc::parse_metric_thread(t).ok_or_else(|| bad(cmd, "thread"))?;
+            format!("{} mm", ((major - pitch) * 1000.0).round() / 1000.0)
+        }
+        (None, None, None) => return Err(bad(cmd, "needs `diameter`, `thread` (a tapped hole) or `clearance` (a bolt size)")),
+    };
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     let depth = expr(p, "depth");
     if let Some(d) = &depth {

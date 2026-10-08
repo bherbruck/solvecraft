@@ -1341,3 +1341,21 @@ mod naming {
         assert_eq!(h, vec!["F1:+z".to_string()]);
     }
 }
+
+/// Tapped holes take the tap drill (major − pitch); clearance holes the ISO 273 diameter.
+#[test]
+fn tapped_and_clearance_holes() {
+    let mut s = Session::default();
+    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 10}));
+    let v0 = volume(&mut s);
+    run(&mut s, "FusionHoleCommand", json!({"position": [10, 15, 10], "thread": "M6"}));
+    let v1 = volume(&mut s);
+    assert!(rel(v0 - v1, PI * 2.5 * 2.5 * 10.0) < 1e-3, "{}", v0 - v1);
+    run(&mut s, "FusionHoleCommand", json!({"position": [30, 15, 10], "clearance": "M6"}));
+    let v2 = volume(&mut s);
+    assert!(rel(v1 - v2, PI * 3.3 * 3.3 * 10.0) < 1e-3, "{}", v1 - v2);
+    run(&mut s, "FusionHoleCommand", json!({"position": [20, 5, 10], "clearance": "M4", "fit": "close"}));
+    assert!(rel(v2 - volume(&mut s), PI * 2.15 * 2.15 * 10.0) < 1e-3);
+    assert!(s.execute("FusionHoleCommand", &json!({"position": [20, 25, 10], "clearance": "M7"})).is_err());
+    assert!(s.execute("FusionHoleCommand", &json!({"position": [20, 25, 10]})).is_err());
+}
