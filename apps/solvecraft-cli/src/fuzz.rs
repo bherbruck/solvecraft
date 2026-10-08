@@ -21,6 +21,11 @@ pub fn one(args: &[String]) -> Result<(), String> {
     let seed: u64 = args.first().and_then(|s| s.parse().ok()).ok_or("fuzz-one <seed> [--steps N] [--minimise]")?;
     let steps = flag(args, "--steps", 8usize);
     let minimise = args.iter().any(|a| a == "--minimise");
+    // Panics caught inside the kernel: harmless natively, fatal in the web build.
+    static PANICS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    std::panic::set_hook(Box::new(|_| {
+        PANICS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }));
     eprintln!("design {seed}");
     let run = fuzz::run_with(seed, steps, &mut |st| eprintln!("step {}", serde_json::to_string(st).unwrap_or_default()));
     let mut design = json!({
@@ -28,6 +33,7 @@ pub fn one(args: &[String]) -> Result<(), String> {
         "steps": run.steps.iter().map(|s| s.kind).collect::<Vec<_>>(),
         "unsupported": run.unsupported,
         "rejected": run.rejected,
+        "panics": PANICS.swap(0, std::sync::atomic::Ordering::SeqCst),
     });
     if run.outcome.is_bug() {
         design["script"] = run.script();
@@ -40,7 +46,8 @@ pub fn one(args: &[String]) -> Result<(), String> {
     let (a, b) = solvecraft_engine::fuzz::boolean_shapes(seed);
     eprintln!("boolean {seed} {} {}", serde_json::to_string(&a).unwrap_or_default(), serde_json::to_string(&b).unwrap_or_default());
     let b = boolean_case(seed);
-    println!("{}", json!({"seed": seed, "design": design, "boolean": b}));
+    let bp = PANICS.swap(0, std::sync::atomic::Ordering::SeqCst);
+    println!("{}", json!({"seed": seed, "design": design, "boolean": b, "boolean_panics": bp}));
     Ok(())
 }
 
@@ -172,7 +179,10 @@ fn summarise(results: &[Value], took: Duration) -> String {
     let mut at_step: BTreeMap<String, usize> = BTreeMap::new();
     let mut unsupported: BTreeMap<String, usize> = BTreeMap::new();
     let mut steps = 0;
+    let (mut dp, mut bp) = (0, 0);
     for v in results {
+        dp += usize::from(v["design"]["panics"].as_u64().unwrap_or(0) > 0);
+        bp += usize::from(v["boolean_panics"].as_u64().unwrap_or(0) > 0);
         let k = if v.get("timeout").is_some() {
             "timeout".to_string()
         } else if v.get("crash").is_some() {
@@ -204,6 +214,7 @@ fn summarise(results: &[Value], took: Duration) -> String {
     for (k, c) in &unsupported {
         s += &format!("- {k}: {c}\n");
     }
+    s += &format!("\nCaught panics (fatal in the web build): designs {}, boolean checks {}\n", pct(dp), pct(bp));
     s += "\nBoolean identity (union, intersection, cut of two primitives):\n";
     for (k, c) in &boolean {
         s += &format!("- {k}: {}\n", pct(*c));

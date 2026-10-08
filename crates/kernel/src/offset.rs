@@ -68,7 +68,7 @@ impl Surf {
     fn grad(&self, p: Vec3) -> Option<Vec3> {
         match *self {
             Surf::Plane { n, .. } => Some(n),
-            Surf::Cylinder { convex, .. } | Surf::Sphere { convex, .. } | Surf::Cone { convex, .. } => {
+            Surf::Cylinder { convex, .. } | Surf::Sphere { convex, .. } | Surf::Cone { convex, .. } | Surf::Torus { convex, .. } => {
                 self.normal(p).map(|n| if convex { n } else { -n })
             }
         }
@@ -454,7 +454,13 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
     let mut new = Vec::with_capacity(faces.len());
     let mut shifts = Vec::with_capacity(faces.len());
     for (i, f) in faces.iter().enumerate() {
-        let sf = surf_of(f, tol * 100.0).ok_or_else(|| fail("only bodies with planes, cylinders, cones, spheres and tori"))?;
+        let sf = surf_of(f, tol * 100.0).ok_or_else(|| {
+            let at = samples(f).first().map(|(p, _)| format!(" (a face at [{:.2}, {:.2}, {:.2}])", p.x, p.y, p.z)).unwrap_or_default();
+            if std::env::var("DBG_OFFSET").is_ok() {
+                eprintln!("unrecognised face: {:?}", f.surface());
+            }
+            fail(&format!("only bodies with planes, cylinders, cones, spheres and tori{at}"))
+        })?;
         let n = match sf {
             Surf::Plane { n, .. } => n,
             Surf::Cylinder { a, .. } | Surf::Cone { a, .. } | Surf::Torus { a, .. } => a.any_perp(),

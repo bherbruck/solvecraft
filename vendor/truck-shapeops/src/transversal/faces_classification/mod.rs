@@ -26,10 +26,11 @@ impl<P, C, S> FacesClassification<P, C, S> {
     pub fn and_or_unknown(&self) -> [Shell<P, C, S>; 3] {
         let [mut and, mut or, mut unknown] = <[Shell<P, C, S>; 3]>::default();
         for face in &self.shell {
-            match self.status.get(&face.id()).unwrap() {
-                ShapesOpStatus::And => and.push(face.clone()),
-                ShapesOpStatus::Or => or.push(face.clone()),
-                ShapesOpStatus::Unknown => unknown.push(face.clone()),
+            // SolveCraft: no panics (wasm can't catch them).
+            match self.status.get(&face.id()) {
+                Some(ShapesOpStatus::And) => and.push(face.clone()),
+                Some(ShapesOpStatus::Or) => or.push(face.clone()),
+                _ => unknown.push(face.clone()),
             }
         }
         [and, or, unknown]
@@ -42,21 +43,19 @@ impl<P, C, S> FacesClassification<P, C, S> {
         let components = unknown.connected_components();
         for comp in components {
             let boundary = comp.extract_boundaries();
-            if and_boundary
-                .iter()
-                .flatten()
-                .any(|edge| edge.id() == boundary[0][0].id())
-            {
+            let Some(first) = boundary.first().and_then(|w| w.edge_iter().next()).map(|e| e.id()) else { continue };
+            let set = if and_boundary.iter().flatten().any(|edge| edge.id() == first) {
+                Some(ShapesOpStatus::And)
+            } else if or_boundary.iter().flatten().any(|edge| edge.id() == first) {
+                Some(ShapesOpStatus::Or)
+            } else {
+                None
+            };
+            if let Some(st) = set {
                 comp.iter().for_each(|face| {
-                    *self.status.get_mut(&face.id()).unwrap() = ShapesOpStatus::And;
-                })
-            } else if or_boundary
-                .iter()
-                .flatten()
-                .any(|edge| edge.id() == boundary[0][0].id())
-            {
-                comp.iter().for_each(|face| {
-                    *self.status.get_mut(&face.id()).unwrap() = ShapesOpStatus::Or;
+                    if let Some(x) = self.status.get_mut(&face.id()) {
+                        *x = st;
+                    }
                 })
             }
         }

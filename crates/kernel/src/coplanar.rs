@@ -42,8 +42,11 @@ fn planes(b: &Body) -> Vec<(usize, PlaneFace)> {
 
 /// Push the planar faces of `b` lying in the plane (n, d) — n their outward normal — along n
 /// by `delta` (negative: inward). Their neighbours must stand perpendicular to the plane.
-fn push_faces(b: &Body, n: Vec3, d: f64, delta: f64) -> Result<Body> {
-    match push_faces_exact(b, n, d, delta) {
+pub(crate) fn push_faces(b: &Body, n: Vec3, d: f64, delta: f64) -> Result<Body> {
+    // The exact rebuild, unless it came out unsound (a curved side it couldn't re-sweep).
+    match push_faces_exact(b, n, d, delta)
+        .and_then(|r| if r.validity().is_empty() { Ok(r) } else { Err(KernelError::Failed("pushing a face: an unsound result".into())) })
+    {
         Ok(r) => Ok(r),
         // Faces of planes and cylinders: every face follows (any neighbours).
         Err(e) => {
@@ -66,7 +69,7 @@ fn push_faces(b: &Body, n: Vec3, d: f64, delta: f64) -> Result<Body> {
     }
 }
 
-fn push_faces_exact(b: &Body, n: Vec3, d: f64, delta: f64) -> Result<Body> {
+pub(crate) fn push_faces_exact(b: &Body, n: Vec3, d: f64, delta: f64) -> Result<Body> {
     let size = b.size();
     let tol = (size * 1e-7).max(1e-9);
     let fail = |m: &str| KernelError::Failed(format!("pushing a face: {m}"));
