@@ -233,3 +233,68 @@ fn fold_carries_flanges_on_the_moving_side() {
     assert!(e.execute("SheetMetalFoldCmd", &json!({"points": [[40, 0, 2.5], [40, 60, 2.5]], "position": "sideways"})).is_err());
     assert!(e.execute("SheetMetalFoldCmd", &json!({"points": [[0.5, 0, 2.5], [0.5, 60, 2.5]]})).is_err(), "no material past the bend");
 }
+
+#[test]
+fn fold_on_a_flange_panel() {
+    let (t, r, k) = (2.5, 2.5, 0.44);
+    let ba = FRAC_PI_2 * (r + k * t);
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "FusionSheetMetalFlangeCommand", json!({"edges": [[50, 0, 2.5]], "height": 30}));
+    let flat0 = flat(&mut s)["flat_size_mm"].clone();
+    let v0 = volume(&mut s);
+    // The flange stands up at the plate's y = 0 edge: its outer face is the body's min y.
+    let y = bbox(&mut s)["min"][1].as_f64().unwrap_or(f64::NAN);
+    run(&mut s, "SheetMetalFoldCmd", json!({"points": [[10, y, 18], [90, y, 18]]}));
+    let f = flat(&mut s);
+    for i in 0..2 {
+        assert!(
+            (f["flat_size_mm"][i].as_f64().unwrap_or(0.0) - flat0[i].as_f64().unwrap_or(1.0)).abs() < 1e-6,
+            "the flat pattern keeps its size: {f}"
+        );
+    }
+    assert_eq!(f["bends"].as_array().map(Vec::len), Some(2));
+    let len = f["bends"][1]["length"].as_f64().unwrap_or(0.0);
+    assert!(len > 90.0, "{f}");
+    let want = v0 - ba * t * len + FRAC_PI_2 * t * (r + t / 2.0) * len;
+    assert!(rel(volume(&mut s), want) < 1e-4, "{} {want}", volume(&mut s));
+    // The top part now leans over the plate (folded up, toward its top face).
+    let b = bbox(&mut s);
+    assert!(b["max"][2].as_f64().unwrap_or(99.0) < 25.0, "{b}");
+    // Folding across the flange's own bend is refused.
+    assert!(s.execute("SheetMetalFoldCmd", &json!({"points": [[50, y, 2], [50, y, 25]]})).is_err());
+}
+
+#[test]
+fn fold_through_cut_outs() {
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    // A slot across the fold line (edges along and across the bend).
+    run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "Slot"}));
+    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [30, 20], "p1": [50, 40]}));
+    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "Extrude", json!({"sketch": "Slot", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+    let mut plain = Session::default();
+    base(&mut plain, 100.0, 60.0);
+    fold_line(&mut plain);
+    run(&mut plain, "SheetMetalFoldCmd", json!({"sketch": "FoldLine", "curve": "fl"}));
+    fold_line(&mut s);
+    run(&mut s, "SheetMetalFoldCmd", json!({"sketch": "FoldLine", "curve": "fl"}));
+    let f = flat(&mut s);
+    assert_eq!(f["cutouts"].as_array().map(Vec::len), Some(1), "{f}");
+    let (v, vp) = (volume(&mut s), volume(&mut plain));
+    // The slot takes 20 x 20 of the flat sheet; across the bend it removes the bend's share.
+    assert!(v < vp - 900.0 && v > vp - 1100.0, "{v} {vp}");
+    run(&mut s, "FusionSheetmetalUnfoldCommand", json!({}));
+    assert!((volume(&mut s) - (15000.0 - 1000.0)).abs() < 1e-3, "{}", volume(&mut s));
+    // A round hole across the bend is not supported yet, and says so.
+    let mut c = Session::default();
+    base(&mut c, 100.0, 60.0);
+    run(&mut c, "SketchCreate", json!({"plane": "XY", "name": "Hole"}));
+    run(&mut c, "CircleCenterRadius", json!({"center": [40, 30], "radius": 5}));
+    run(&mut c, "SketchStop", json!({}));
+    run(&mut c, "Extrude", json!({"sketch": "Hole", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+    fold_line(&mut c);
+    let e = c.execute("SheetMetalFoldCmd", &json!({"sketch": "FoldLine", "curve": "fl"})).map(|_| ()).unwrap_err().to_string();
+    assert!(e.contains("not supported yet"), "{e}");
+}

@@ -909,12 +909,13 @@ impl SheetBody {
         Ok(self.flanges.len() - 1)
     }
 
-    /// Fold the base panel along a line on its top or bottom face (world points `a`, `b`).
-    /// The bend zone (width BA = θ·(R + K·T)) is taken out of the existing sheet, so the flat
-    /// pattern keeps its size; `position` puts the line at the zone's centre (`centerline`),
-    /// start or end (`start`/`end`, from the fixed side), or on the mould line (`mould`: where
-    /// the outer faces meet, so the fixed side measures the same to it folded as flat).
-    /// The side holding `fixed` (default: the larger side) stays put; `flip` folds the other way.
+    /// Fold a panel (the base or a flange's) along a line on its top or bottom face (world
+    /// points `a`, `b`). The bend zone (width BA = θ·(R + K·T)) is taken out of the existing
+    /// sheet, so the flat pattern keeps its size; `position` puts the line at the zone's centre
+    /// (`centerline`), start or end (`start`/`end`, from the fixed side), or on the mould line
+    /// (`mould`: where the outer faces meet, so the fixed side measures the same to it folded as
+    /// flat). On the base the side holding `fixed` (default: the larger side) stays put; on a
+    /// flange the side toward its own bend does. `flip` folds the other way.
     #[allow(clippy::too_many_arguments)]
     pub fn add_fold(&mut self, a: Vec3, b: Vec3, angle: f64, radius: f64, position: &str, flip: bool, fixed: Option<Vec3>) -> Result<usize> {
         if !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6) {
@@ -923,31 +924,51 @@ impl SheetBody {
         if !(radius >= 0.0) {
             return Err(DocError::Invalid("the bend radius must not be negative".into()));
         }
-        let inv = mat_inverse(&self.world(None)).ok_or_else(|| DocError::Invalid("sheet frame".into()))?;
-        let (fa, fb) = (apply_point(&inv, a), apply_point(&inv, b));
+        // The panel the line lies on: both ends on its top or bottom face, the middle inside it.
         let on_face = |q: Vec3| q.z.abs() < 1e-4 || (q.z - self.t).abs() < 1e-4;
-        if !(on_face(fa) && on_face(fb)) {
-            return Err(DocError::Invalid("the fold line must lie on the base face of the sheet (folds on flanges are not supported yet)".into()));
+        let mut found = None;
+        for (pi, r) in self.panels() {
+            let Some(inv) = mat_inverse(&self.world(pi)) else { continue };
+            let (fa, fb) = (apply_point(&inv, a), apply_point(&inv, b));
+            if !(on_face(fa) && on_face(fb) && (fa.z - fb.z).abs() < 1e-4) {
+                continue;
+            }
+            let pts = dedup(&r.outer.ccw().polyline(1e-3));
+            let (a2, b2) = (Vec2::new(fa.x, fa.y), Vec2::new(fb.x, fb.y));
+            if point_in(&pts, (a2 + b2) * 0.5) || polys_cross(&pts, &[a2, b2, (a2 + b2) * 0.5]) {
+                found = Some((pi, inv, a2, b2, pts));
+                break;
+            }
         }
-        let (a2, b2) = (Vec2::new(fa.x, fa.y), Vec2::new(fb.x, fb.y));
+        let (panel, inv, a2, b2, pts) = found.ok_or_else(|| DocError::Invalid("the fold line must lie on a flat face of the sheet".into()))?;
         let d = (b2 - a2).normalized().ok_or_else(|| DocError::Invalid("the fold line has no length".into()))?;
-        let pts = dedup(&self.base.outer.ccw().polyline(1e-3));
         let mut n = Vec2::new(-d.y, d.x);
         let l0 = a2.dot(n);
-        // Which side moves: away from `fixed`, else the smaller side.
+        // Which side moves. A flange keeps the side its own bend is on.
         let side_area = |n: Vec2| signed_area(&clip(&pts, n * l0, n)).abs();
-        let moves_n = match fixed {
-            Some(p) => {
+        let moves_n = match (panel, fixed) {
+            (Some(j), _) => {
+                let f = self.flanges.get(j).ok_or_else(|| DocError::Invalid("flange".into()))?;
+                let ba = self.allowance(f);
+                // The panel's attaching edge must stay whole on the fixed side.
+                let (e0, e1) = (f.p + f.n * ba - f.d * f.ext.0, f.p + f.n * ba + f.d * (f.len + f.ext.1));
+                let (s0, s1) = (e0.dot(n) - l0, e1.dot(n) - l0);
+                if s0 * s1 < -1e-12 {
+                    return Err(DocError::Invalid("a fold on a flange must run across it, clear of the flange's own bend".into()));
+                }
+                (s0 + s1) < 0.0
+            }
+            (None, Some(p)) => {
                 let q = apply_point(&inv, p);
                 Vec2::new(q.x, q.y).dot(n) < l0
             }
-            None => side_area(n) <= side_area(n * -1.0),
+            (None, None) => side_area(n) <= side_area(n * -1.0),
         };
         if !moves_n {
             n = n * -1.0;
         }
         let l = a2.dot(n);
-        let probe = SheetFlange { parent: None, p: a2, d, len: 1.0, n, angle, radius, leg: 0.0, ext: (0.0, 0.0), shape: None };
+        let probe = SheetFlange { parent: panel, p: a2, d, len: 1.0, n, angle, radius, leg: 0.0, ext: (0.0, 0.0), shape: None };
         let ba = self.allowance(&probe);
         let s0 = match position {
             "centerline" | "center" | "centre" => l - ba / 2.0,
@@ -962,28 +983,32 @@ impl SheetBody {
         if signed_area(&fixed_part).abs() < 1e-9 || signed_area(&moving).abs() < 1e-9 {
             return Err(DocError::Invalid("the fold line must cross the sheet with material on both sides of the bend".into()));
         }
-        // The bend zone must be a rectangle across the sheet.
+        // The bend zone must be a rectangle across the panel (a slanted or curved edge would
+        // run across the bend as a helix, which the sheet's faces can't carry yet).
         let us: Vec<f64> = strip.iter().map(|q| q.dot(d)).collect();
         let (u0, u1) = (us.iter().cloned().fold(f64::MAX, f64::min), us.iter().cloned().fold(f64::MIN, f64::max));
         if ((u1 - u0) * ba - signed_area(&strip).abs()).abs() > 1e-6 * (u1 - u0).max(1.0) * ba.max(1.0) {
             return Err(DocError::Invalid("not supported yet: folds whose bend zone crosses a slanted or curved edge of the sheet".into()));
         }
-        if self.holes.iter().any(|h| {
-            let hp = dedup(&h.outer.ccw().polyline(1e-3));
-            hp.iter().any(|q| point_in(&strip, *q)) || polys_cross(&strip, &hp)
-        }) {
-            return Err(DocError::Invalid("not supported yet: folds through a cut-out".into()));
-        }
         let up = !flip;
         let leg = moving.iter().map(|q| q.dot(n) - s0 - ba).fold(0.0, f64::max);
         let p0 = n * s0 + d * u0;
-        let mut ccw = moving.clone();
-        if signed_area(&ccw) < 0.0 {
-            ccw.reverse();
+        let ccw = |mut v: Vec<Vec2>| {
+            if signed_area(&v) < 0.0 {
+                v.reverse();
+            }
+            v.into_iter().map(snap).collect::<Vec<_>>()
+        };
+        match panel {
+            None => self.base = Region2 { outer: Loop2::polygon(&fixed_part).ccw(), holes: self.base.holes.clone() },
+            Some(j) => {
+                if let Some(f) = self.flanges.get_mut(j) {
+                    f.shape = Some(ccw(fixed_part.clone()));
+                }
+            }
         }
-        self.base = Region2 { outer: Loop2::polygon(&fixed_part).ccw(), holes: self.base.holes.clone() };
         self.flanges.push(SheetFlange {
-            parent: None,
+            parent: panel,
             p: snap(p0),
             d,
             len: u1 - u0,
@@ -992,13 +1017,13 @@ impl SheetBody {
             radius,
             leg,
             ext: (0.0, 0.0),
-            shape: Some(ccw.into_iter().map(snap).collect()),
+            shape: Some(ccw(moving)),
         });
         let i = self.flanges.len() - 1;
         // Flanges on the moving part's edges now hang off the fold and move with it.
         for k in 0..i {
             let Some(f) = self.flanges.get(k) else { continue };
-            if f.parent.is_some() {
+            if f.parent != panel {
                 continue;
             }
             let (e0, e1) = ((f.p - p0).dot(n), (f.p + f.d * f.len - p0).dot(n));
@@ -1010,6 +1035,8 @@ impl SheetBody {
                 return Err(DocError::Invalid("not supported yet: a fold through a flange's bend".into()));
             }
         }
+        // Cut-outs may cross the bend where their edges run along or across it (the faces
+        // check the rest when the sheet is built).
         Ok(i)
     }
 
