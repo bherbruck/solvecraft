@@ -9,9 +9,9 @@
 
 pub mod cmd;
 pub mod frames;
+pub mod fuzz;
 pub mod legacy_ids;
 pub mod licences;
-pub mod fuzz;
 pub mod params;
 pub mod recovery;
 pub mod sample;

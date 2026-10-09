@@ -1,8 +1,11 @@
 //! Cases found by the robustness runs (`solvecraft-cli fuzz`, docs/robustness.md), cut down to
 //! the steps that matter, and a fixed set of seeds that must keep running clean.
 
+use std::f64::consts::PI;
+
 use serde_json::{Value, json};
 
+use super::{run, volume};
 use crate::Session;
 use crate::fuzz;
 
@@ -180,22 +183,23 @@ fn shell_after_a_drilled_hole() {
     }
 }
 
-/// Rounding an edge that runs into an earlier round of the same radius (filleting a box's
-/// edges one at a time): the same body as picking both at once. Another radius says so.
+/// Rounding a box's edges one at a time: an edge running into an earlier round (of the same
+/// radius or another) takes off about what each round alone would (the corner where they meet
+/// is small).
 #[test]
 fn fillet_into_an_earlier_round() {
     let box_ = json!({"command": "solid.box", "params": {"length": 60, "width": 40, "height": 15}});
-    let both = script(json!([box_, {"command": "solid.fillet", "params": {"edges": [[30, 0, 15], [60, 0, 7]], "radius": 2}}]));
-    let one_by_one = script(json!([
-        box_,
-        {"command": "solid.fillet", "params": {"edges": [[30, 0, 15]], "radius": 2}},
-        {"command": "solid.fillet", "params": {"edges": [[60, 0, 7]], "radius": 2}}
-    ]));
-    let (a, b) = (total_volume(&both), total_volume(&one_by_one));
-    assert!((a - b).abs() < 1e-6 * a, "{a} vs {b}");
-    let mut s = script(json!([box_, {"command": "solid.fillet", "params": {"edges": [[30, 0, 15]], "radius": 2}}]));
-    let e = s.execute("solid.fillet", &json!({"edges": [[60, 0, 7]], "radius": 3})).unwrap_err();
-    assert!(e.to_string().contains("not supported yet: an edge running into an earlier round of another radius"), "{e}");
+    for r2 in [2.0, 3.0] {
+        let s = script(json!([
+            box_,
+            {"command": "solid.fillet", "params": {"edges": [[30, 0, 15]], "radius": 2}},
+            {"command": "solid.fillet", "params": {"edges": [[60, 0, 7]], "radius": r2}}
+        ]));
+        let lost = |r: f64, len: f64| (1.0 - PI / 4.0) * r * r * len;
+        let want = 36000.0 - lost(2.0, 60.0) - lost(r2, 15.0);
+        let v = total_volume(&s);
+        assert!((v - want).abs() < 2.0, "r2 {r2}: {v} vs {want}");
+    }
 }
 
 /// Seeds that run clean: no failure, no invalid body, no volume going the wrong way.
@@ -208,3 +212,71 @@ fn fixed_seeds_run_clean() {
 }
 
 const FIXED_SEEDS: &[u64] = &[3, 5, 11, 16, 21, 29, 33, 35];
+
+/// A drilled hole as deep as the plate: the drill point breaks through the bottom.
+#[test]
+fn hole_as_deep_as_the_plate() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 25, "height": 10}));
+    let v0 = volume(&mut s);
+    run(&mut s, "solid.hole", json!({"position": [25, 12.5, 10], "diameter": 6, "depth": 10, "type": "drilled"}));
+    let v = volume(&mut s);
+    assert!(v < v0 - PI * 9.0 * 9.0 && v > v0 - PI * 9.0 * 10.0 - 1.0, "{v0} {v}");
+    // Other sizes and places, the defaults, and a tapped hole.
+    for (i, p) in [
+        json!({"position": [10, 10, 10], "diameter": 5, "depth": 10, "type": "drilled"}),
+        json!({"position": [40, 15, 10], "diameter": 5, "depth": 10}),
+        json!({"position": [12, 6, 10], "diameter": 8.5, "depth": 10}),
+        json!({"position": [30, 7, 10], "thread": "M6", "depth": 10}),
+        json!({"position": [20, 18, 10], "diameter": 4, "depth": 10, "tip_angle": 90}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let before = volume(&mut s);
+        let r = s.execute("solid.hole", &p);
+        assert!(r.is_ok(), "{i} {p}: {r:?}");
+        assert!(volume(&mut s) < before - 1.0, "{i} {p}");
+    }
+}
+
+/// An enclosure built in the usual order: shell, bosses, then the lip on the rim.
+#[test]
+fn lip_after_boss() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 30}));
+    run(&mut s, "solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2}));
+    run(&mut s, "plastic.boss", json!({"position": [10, 10, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}));
+    run(&mut s, "plastic.boss", json!({"position": [70, 40, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}));
+    let v0 = volume(&mut s);
+    run(&mut s, "plastic.lip", json!({"face": [1, 25, 30], "width": 1, "height": 2}));
+    let v = volume(&mut s);
+    assert!(v > v0 + 1.0, "{v0} {v}");
+    // Bosses up to the rim, with ribs, against a wall; lips, grooves and outside rims.
+    let bosses = [
+        json!({"position": [15, 15, 2], "diameter": 8, "height": 28, "hole_diameter": 3}),
+        // Ribs out to the inner walls (15 − 4 − 9 = 2), and short of them.
+        json!({"position": [15, 15, 2], "diameter": 8, "height": 12, "ribs": 4, "rib_thickness": 1.5, "rib_length": 9}),
+        json!({"position": [15, 15, 2], "diameter": 8, "height": 12, "ribs": 4, "rib_thickness": 1.5, "rib_length": 6}),
+        json!({"position": [5.5, 25, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}),
+        json!({"position": [40, 25, 2], "diameter": 8, "height": 20, "draft": "1 deg", "fillet": 1}),
+    ];
+    let lips = [
+        json!({"face": [1, 25, 30], "width": 1, "height": 2}),
+        json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": "groove"}),
+        json!({"face": [1, 25, 30], "width": 1, "height": 2, "side": "outside"}),
+    ];
+    for (i, b) in bosses.iter().enumerate() {
+        for (j, l) in lips.iter().enumerate() {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 30}));
+            run(&mut s, "solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2}));
+            let r = s.execute("plastic.boss", b);
+            assert!(r.is_ok(), "boss {i}: {r:?}");
+            let v0 = volume(&mut s);
+            let r = s.execute("plastic.lip", l);
+            assert!(r.is_ok(), "boss {i} lip {j}: {r:?}");
+            assert!((volume(&mut s) - v0).abs() > 1.0, "boss {i} lip {j}");
+        }
+    }
+}

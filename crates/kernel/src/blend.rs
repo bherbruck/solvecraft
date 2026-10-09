@@ -361,15 +361,6 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
             let attempt = match guard(what, || blend_one(&solid, &edge, size, r, shape)) {
                 Ok(o) => Ok((o, vec![j])),
                 // A curved edge, or one between curved faces: roll a ball along its smooth chain.
-                // A straight edge running into an earlier round of the same radius: that round
-                // undone and both edges rounded together (they meet in a mitre, as when picked
-                // at once).
-                Err(e) if !curved_case(&solid, &edge) && e.to_string().contains("edge ends must be planar") && shape == Shape::Round => {
-                    unround_and_blend(&cur, &edge, r, what).map(|b| ((*b.solid).clone(), vec![j])).map_err(|e2| match &e2 {
-                        KernelError::Failed(m) if m.starts_with("not supported yet: an edge running into") => e2,
-                        _ => KernelError::Failed(format!("{e} ({e2})")),
-                    })
-                }
                 Err(e) if !curved_case(&solid, &edge) => Err(e),
                 Err(e) => match smooth_chain(&solid, &edge) {
                     Some(ids) => {
@@ -806,54 +797,6 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
         cur = crate::ops::boolean(&cur, &t, crate::BoolOp::Cut)?.ok_or_else(|| KernelError::Failed("the chamfer removed everything".into()))?;
     }
     Ok(cur)
-}
-
-thread_local! {
-    static UNROUNDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Round `edge` of `cur` where an end runs into an earlier round of radius `r`: the round is
-/// deleted (its faces healed back to the sharp edge) and both edges rounded in one go.
-fn unround_and_blend(cur: &Body, edge: &mt::Edge, r: f64, what: &str) -> Result<Body> {
-    if UNROUNDING.with(|c| c.get()) {
-        return Err(unsupported("rounds meeting rounds"));
-    }
-    let size = cur.size();
-    let mesh = cur.tessellate((size * 1e-3).max(1e-3))?;
-    let info = cur.faces((size * 1e-3).max(1e-3))?;
-    let curved = |f: usize| info.get(f).is_some_and(|x| x.plane_normal.is_none());
-    let ends = [from_p3(edge.absolute_front().point()), from_p3(edge.absolute_back().point())];
-    let mut round: Option<(usize, Vec3)> = None;
-    for q in ends {
-        let near = mesh
-            .triangles
-            .iter()
-            .zip(&mesh.tri_face)
-            .filter(|(_, f)| curved(**f as usize))
-            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (q.dist((x + y + z) / 3.0), *f as usize, (x + y + z) / 3.0)))
-            .min_by(|a, b| a.0.total_cmp(&b.0));
-        if let Some((d, f, c)) = near
-            && d < r * 2.0
-        {
-            round = Some((f, c));
-            break;
-        }
-    }
-    let (g, on_g) = round.ok_or_else(|| unsupported("the faces at the edge ends must be planar"))?;
-    let cyl = crate::topo::cylinder_face_at(cur, on_g).ok_or_else(|| unsupported("only rounds (cylinders) at the edge ends"))?;
-    if (cyl.radius - r).abs() > 1e-4 * r.max(1.0) || cyl.internal {
-        return Err(unsupported("an edge running into an earlier round of another radius (round both with one radius, or pick them together)"));
-    }
-    let faces = crate::offset::with_same_surface(cur, &[g]);
-    let sharp = crate::delete_face::delete_faces(cur, &faces)?;
-    let mid = (ends[0] + ends[1]) * 0.5;
-    // The restored edge: nearest the middle of the round (its centroid), not its ends (where
-    // the new edge is near too).
-    let old = info.get(g).map(|x| x.centroid).unwrap_or(on_g);
-    UNROUNDING.with(|c| c.set(true));
-    let r2 = blend(&sharp, &[old, mid], r, Shape::Round, what);
-    UNROUNDING.with(|c| c.set(false));
-    r2
 }
 
 pub(crate) fn chamfer_tool(cur: &Body, p: Vec3, s: f64, k: usize) -> Result<Body> {

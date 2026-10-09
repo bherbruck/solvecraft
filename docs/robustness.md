@@ -94,9 +94,9 @@ Found by QA on new users' first steps, each with an engine test against the anal
 - **Shell thinner than a round tangent to the open face** (1.5 mm): every face moves in
   (tangencies keep) and the opening is the open face's copy swept out through the body.
 - **Shell after a drilled hole** (its tip a cone).
-- **Filleting a box's edges one at a time**: an edge that runs into an earlier round of the
-  same radius undoes that round and rounds both together, the same body as picking both at once.
-  Another radius says what to do; Fusion's corner patch for it is still missing.
+- **Filleting a box's edges one at a time**: an edge that runs into an earlier round takes
+  that round off and rounds both together, with the corner where they meet (`blend_corner.rs`,
+  any radii).
 
 ### Speed
 
