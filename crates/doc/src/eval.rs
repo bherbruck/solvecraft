@@ -2453,10 +2453,11 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 }
                 (None, Some(sid)) => {
                     let ss = st.sketch(*sid).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
-                    let curves: Vec<Vec<Vec2>> = (0..ss.sketch.curves.len())
+                    // Each curve's exact segments (lines and arcs split by their own plane and cylinder).
+                    let curves: Vec<Vec<solvecraft_geom::Seg2>> = (0..ss.sketch.curves.len())
                         .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
-                        .map(|ci| ss.sketch.polyline(ci))
-                        .filter(|pl| pl.len() >= 2)
+                        .map(|ci| ss.sketch.segs(ci))
+                        .filter(|segs| !segs.is_empty())
                         .collect();
                     if curves.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to split with", ss.name)));
@@ -2854,7 +2855,11 @@ mod chain_tests {
             None,
         )
         .unwrap();
-        doc.add_feature(FeatureKind::Fillet { edges: vec![Vec3::new(20.0, 0.0, 20.0)], radius: "4".into(), body: None }, None).unwrap();
+        doc.add_feature(
+            FeatureKind::Fillet { edges: vec![Vec3::new(20.0, 0.0, 20.0)], radius: "4".into(), body: None, style: crate::FilletStyle::Constant },
+            None,
+        )
+        .unwrap();
         let mut m = Model::new();
         m.evaluate(&doc);
         let st = m.state();
