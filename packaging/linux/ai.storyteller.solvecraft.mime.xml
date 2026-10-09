@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- shared-mime-info definitions for types the system database may not have.
+     Installed to /usr/share/mime/packages/ (update-mime-database runs on install). -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-solvecraft">
+    <comment>SolveCraft design</comment>
+    <icon name="ai.storyteller.solvecraft"/>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.solvecraft"/>
+  </mime-type>
+</mime-info>

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SolveCraft MSI (WiX Toolset v5, plus the UI and Util extensions). Built by package.ps1:
+
+    wix build solvecraft.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext
+      -culture en-US -loc solvecraft.en-us.wxl -d Version=1.2.3 -d DisplayVersion=1.2.3-rc.1
+      -d BinDir=... -d IconPath=... -o out.msi
+
+  Per-machine install with a setup wizard: Welcome, install folder (Program Files\SolveCraft by
+  default, remembered for upgrades), Ready, progress, and a Finish page with a ticked "Launch
+  SolveCraft" box. Installs a Start Menu shortcut, solvecraft-cli, the licence files (including
+  THIRD-PARTY-LICENSES.txt), makes SolveCraft the owner of `.solvecraft` and offers it under
+  "Open with" for STEP, IGES, 3MF and STL. `msiexec /qn` installs silently.
+  Adapted from PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package
+      Name="SolveCraft"
+      Manufacturer="SolveCraft contributors"
+      Version="$(var.Version)"
+      UpgradeCode="6A145FD6-D285-428D-AE84-A69570CDF4DB"
+      Scope="perMachine"
+      Compressed="yes"
+      Language="1033">
+    <SummaryInformation Description="SolveCraft parametric 3D CAD" Manufacturer="SolveCraft contributors" />
+    <!-- Same-version upgrades let successive pre-releases of one X.Y.Z replace each other. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of SolveCraft is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Advertised shortcuts to an .exe need an .exe icon identifier (ICE50). -->
+    <Icon Id="SolvecraftIcon.exe" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="SolvecraftIcon.exe" />
+    <Property Id="ARPURLINFOABOUT" Value="https://bherbruck.github.io/solvecraft/" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://github.com/bherbruck/solvecraft/releases" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/bherbruck/solvecraft/issues" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="SolveCraft" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <!-- An upgrade installs where the user put the previous version (written by SolvecraftApp). -->
+    <Property Id="INSTALLFOLDER">
+      <RegistrySearch Id="PreviousInstallFolder" Root="HKLM" Key="Software\SolveCraft" Name="InstallDir" Type="raw" />
+    </Property>
+
+    <Feature Id="Main" Title="SolveCraft" Level="1">
+      <ComponentGroupRef Id="SolvecraftFiles" />
+    </Feature>
+
+    <!-- WixUI_InstallDir without its licence page (MIT OR Apache-2.0: nothing to accept). -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UI>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2" Condition="NOT Installed" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchSolvecraft"
+          Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+    </UI>
+
+    <Property Id="SolvecraftVersion" Value="$(var.DisplayVersion)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT" Value="SolveCraft $(var.DisplayVersion) is installed. You can start it any time from the Start menu." />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch SolveCraft" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[#SolvecraftExe]" />
+    <!-- Runs in the wizard's own (unelevated) process, so the app starts as the user. -->
+    <CustomAction Id="LaunchSolvecraft" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixShellExec" Impersonate="yes" Return="ignore" />
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="SolvecraftFiles" Directory="INSTALLFOLDER">
+      <Component Id="SolvecraftApp" Guid="290BEF27-C200-4069-AA43-7DE6A39CDB0A">
+        <File Id="SolvecraftExe" Source="$(var.BinDir)\solvecraft.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolveCraft"
+              Description="SolveCraft parametric 3D CAD" WorkingDirectory="INSTALLFOLDER" Advertise="yes"
+              Icon="SolvecraftIcon.exe" IconIndex="0" />
+        </File>
+
+        <!-- .solvecraft: SolveCraft's own format; SolveCraft is its default app. -->
+        <ProgId Id="Solvecraft.Design" Description="SolveCraft Design" Icon="SolvecraftExe" IconIndex="0">
+          <Extension Id="solvecraft" ContentType="application/x-solvecraft">
+            <Verb Id="open" Command="Open" TargetFile="SolvecraftExe" Argument="&quot;%1&quot;" />
+          </Extension>
+        </ProgId>
+        <!-- STEP, IGES and meshes: offered under "Open with", never forced as the default. -->
+        <ProgId Id="Solvecraft.Model" Description="3D model" Icon="SolvecraftExe" IconIndex="0" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Solvecraft.Model\shell\open\command" Value="&quot;[#SolvecraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.step\OpenWithProgids" Name="Solvecraft.Model" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.stp\OpenWithProgids" Name="Solvecraft.Model" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.igs\OpenWithProgids" Name="Solvecraft.Model" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.iges\OpenWithProgids" Name="Solvecraft.Model" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.3mf\OpenWithProgids" Name="Solvecraft.Model" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.stl\OpenWithProgids" Name="Solvecraft.Model" Value="" Type="string" />
+
+        <!-- "Open with" app list and the Run dialog (Win+R "solvecraft"). -->
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solvecraft.exe" Name="FriendlyAppName" Value="SolveCraft" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solvecraft.exe\shell\open\command" Value="&quot;[#SolvecraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solvecraft.exe\SupportedTypes" Name=".solvecraft" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solvecraft.exe\SupportedTypes" Name=".step" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solvecraft.exe\SupportedTypes" Name=".stp" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solvecraft.exe\SupportedTypes" Name=".igs" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solvecraft.exe\SupportedTypes" Name=".iges" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solvecraft.exe\SupportedTypes" Name=".3mf" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solvecraft.exe\SupportedTypes" Name=".stl" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\solvecraft.exe" Value="[#SolvecraftExe]" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\SolveCraft" Name="InstallDir" Value="[INSTALLFOLDER]" Type="string" />
+      </Component>
+
+      <Component Id="SolvecraftCli">
+        <File Id="SolvecraftCliExe" Source="$(var.BinDir)\solvecraft-cli.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="SolvecraftLicences">
+        <File Id="LicenseMit" Source="$(var.BinDir)\LICENSE-MIT" KeyPath="yes" />
+        <File Id="LicenseApache" Source="$(var.BinDir)\LICENSE-APACHE" />
+        <File Id="Notice" Source="$(var.BinDir)\NOTICE" />
+        <File Id="ThirdParty" Source="$(var.BinDir)\THIRD-PARTY-LICENSES.txt" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

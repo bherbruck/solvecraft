@@ -16,6 +16,8 @@ vendor/truck-shapeops/LICENSE. Copyright (c) RICOS Co. Ltd.
 
 Some code is adapted from sibling projects in the storytold family (CADCraft, GridCraft), which are
 licensed MIT OR Apache-2.0; ATTRIBUTION.md lists the files.
+The release packaging (.github/workflows/release.yml, packaging/) is adapted from PhotoCraft
+(https://github.com/storytold/photocraft), licensed under the Apache License 2.0.
 
 None of the bundled assets come from third parties: every icon is drawn in code. The per-file
 list is in ATTRIBUTION.md.

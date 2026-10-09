@@ -1,10 +1,18 @@
-# Release builds: push a tag `v*` (or run it by hand with a tag name) and this builds the desktop
-# app and the CLI for Linux, Windows and macOS plus the web app, and attaches them to a GitHub
-# release with SHA256SUMS (a pre-release when the tag has a suffix, such as v0.2.0-rc1). Every
-# download is a plain program (Windows .exe, Linux binary and AppImage, a macOS .dmg); the licences
-# are built into the programs (Help ▸ About ▸ Licences, `solvecraft-cli licences`). Only the web
-# app, being many files, is a zip. Notes: .github/release-notes.md, with {tag} replaced. A dry run:
-# Actions ▸ Release ▸ Run workflow with "publish" off keeps the assets as the release-assets artifact.
+# Release pipeline, after PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
+#
+# Push a tag `v<version>` (matching [workspace.package] version in Cargo.toml) and this builds and
+# packages SolveCraft for every platform and publishes the GitHub release "SolveCraft v<version>"
+# with SHA256SUMS.txt, .github/release-notes.md and GitHub's generated "What's Changed". A
+# version with a suffix (0.2.0-rc.1) is a pre-release. Nothing is signed yet.
+#
+#   Linux x86_64, aarch64   AppImage (+ .zsync), .deb, .rpm, .flatpak, .tar.gz     packaging/linux
+#   FreeBSD x86_64          .tar.gz (built in a FreeBSD VM)                        packaging/freebsd
+#   macOS universal         .dmg, and the CLI as a .zip                            packaging/macos
+#   Windows x64, x86, arm64 .msi and a portable .zip; x64 also the plain .exe      packaging/windows
+#   Web                     a .zip of the static site                              packaging/web
+#
+# A dry run: Actions > Release > Run workflow (publish off) builds everything and keeps it as
+# the release-assets artifact instead of releasing.
 name: Release
 
 on:
@@ -12,144 +20,324 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag to release (must exist), e.g. v0.1.0; empty: the branch this runs on"
-        required: false
       publish:
-        description: "Create the GitHub release (off: a dry run that keeps everything as the release-assets artifact)"
+        description: "Publish the release (off: a dry run; the files become the release-assets artifact)"
         type: boolean
-        default: true
+        default: false
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
-  TAG: ${{ inputs.tag || github.ref_name }}
-  TRUNK_VERSION: v0.21.14
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  linux:
-    runs-on: ubuntu-22.04 # an older glibc, so the binaries run on older distributions
-    timeout-minutes: 60
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      date: ${{ steps.v.outputs.date }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TAG }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked -p solvecraft -p solvecraft-cli
-      - name: Package
-        run: .github/release/package-linux.sh "$TAG"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux
-          path: out/*
-
-  windows:
-    runs-on: windows-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TAG }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked -p solvecraft -p solvecraft-cli
-      - name: Package
-        shell: pwsh
+      - id: v
+        name: Resolve version
         run: |
-          New-Item -ItemType Directory -Force -Path out | Out-Null
-          Copy-Item target/release/solvecraft.exe "out/SolveCraft-$env:TAG-windows-x86_64.exe"
-          Copy-Item target/release/solvecraft-cli.exe "out/solvecraft-cli-$env:TAG-windows-x86_64.exe"
+          . packaging/env.sh
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match the Cargo.toml version $VERSION"
+            exit 1
+          fi
+          case "$VERSION" in *-*) pre=true ;; *) pre=false ;; esac
+          { echo "version=$VERSION"; echo "date=$(date -u +%Y-%m-%d)"; echo "prerelease=$pre"; } >>"$GITHUB_OUTPUT"
+          echo "### SolveCraft v$VERSION (\`${GITHUB_SHA::9}\`)" >>"$GITHUB_STEP_SUMMARY"
+
+  # The app icon in every size, drawn by solvecraft-cli (no image files are committed), for the
+  # Windows jobs: the ARM64 build is cross-compiled and can't run there to draw its own.
+  icons:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-icons
+      - run: cargo build --release --locked -p solvecraft-cli
+      - run: |
+          . packaging/env.sh
+          make_icons target/release/solvecraft-cli icons
       - uses: actions/upload-artifact@v4
         with:
-          name: windows
-          path: out/*
+          name: icons
+          path: icons
+          if-no-files-found: error
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: version
+    # The oldest GitHub-hosted image, so the binaries only need glibc >= 2.35.
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-22.04, deb: amd64 }
+          - { arch: aarch64, runner: ubuntu-22.04-arm, deb: arm64 }
+    env:
+      SOLVECRAFT_VERSION: ${{ needs.version.outputs.version }}
+      SOLVECRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      NFPM_VERSION: 2.47.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils appstream zsync rpm
+          curl -fsSL -o "$RUNNER_TEMP/nfpm.deb" \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_${{ matrix.deb }}.deb"
+          sudo dpkg -i "$RUNNER_TEMP/nfpm.deb"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-linux-${{ matrix.arch }}
+      - name: Build and package (AppImage, deb, rpm, tar.gz)
+        run: packaging/linux/package.sh
+      - name: Check the packages
+        run: |
+          dpkg-deb --info dist/release/*.deb
+          dpkg-deb --contents dist/release/*.deb | grep -E 'usr/bin/solvecraft$|usr/bin/solvecraft-cli$|metainfo|applications|THIRD-PARTY-LICENSES.txt'
+          rpm -qip dist/release/*.rpm
+          rpm -qlp dist/release/*.rpm | grep -E '/usr/bin/solvecraft$|THIRD-PARTY-LICENSES.txt'
+          tar -tzf dist/release/*.tar.gz | grep -E '/bin/solvecraft$|THIRD-PARTY-LICENSES.txt'
+          ldd target/release/solvecraft
+          for appimage in dist/release/*.AppImage; do
+            chmod +x "$appimage"
+            APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --version
+            "$appimage" --appimage-updateinformation | grep -F 'gh-releases-zsync|'
+            test -s "$appimage.zsync"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  flatpak:
+    name: Flatpak ${{ matrix.arch }}
+    needs: [version, linux]
+    # Repackages the Linux job's tarball (the same binaries as the AppImage/deb/rpm); no Rust
+    # build here. 24.04 for a newer flatpak-builder than 22.04 ships.
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    env:
+      SOLVECRAFT_VERSION: ${{ needs.version.outputs.version }}
+      SOLVECRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/linux
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder librsvg2-common
+          # Ubuntu 24.04's AppArmor blocks the unprivileged user namespaces bubblewrap needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Build the Flatpak bundle
+        run: packaging/linux/flatpak-bundle.sh "dist/linux/solvecraft-$SOLVECRAFT_VERSION-linux-${{ matrix.arch }}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-flatpak-${{ matrix.arch }}
+          path: dist/release/*.flatpak
+          if-no-files-found: error
+
+  freebsd:
+    name: FreeBSD x86_64
+    needs: version
+    # GitHub has no FreeBSD runners: build in a FreeBSD 14.3 VM.
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      SOLVECRAFT_VERSION: ${{ needs.version.outputs.version }}
+      SOLVECRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and package in a FreeBSD VM (tar.gz)
+        # vmactions/freebsd-vm v1.5.9, pinned by commit (it runs our build).
+        uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc
+        with:
+          release: "14.3"
+          usesh: true
+          cpu: 4
+          mem: 12288
+          # Passed into the VM by name; never templated into the script below.
+          envs: "SOLVECRAFT_VERSION SOLVECRAFT_BUILD_DATE"
+          prepare: |
+            pkg install -y bash git curl pkgconf libxkbcommon wayland libX11 libXcursor libXrandr libXi libxcb mesa-libs vulkan-loader
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          run: |
+            set -e
+            . "$HOME/.cargo/env"
+            git config --global --add safe.directory "$PWD"
+            # Build outside the checkout so only dist/ is copied back out of the VM. 4 jobs: more
+            # runs the VM out of memory.
+            export CARGO_TARGET_DIR=/var/tmp/solvecraft-target CARGO_BUILD_JOBS=4
+            bash packaging/freebsd/package.sh
+            tar -tzf dist/release/solvecraft-*-freebsd-x86_64.tar.gz \
+              | grep -E '/bin/solvecraft$|/bin/solvecraft-cli$|/share/applications/ai\.storyteller\.solvecraft\.desktop$|/share/doc/solvecraft/THIRD-PARTY-LICENSES\.txt$'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-freebsd-x86_64
+          path: dist/release/*
+          if-no-files-found: error
 
   macos:
-    # One universal build: arm64 natively, x86_64 cross-compiled on the same runner, joined by lipo.
+    name: macOS universal
+    needs: version
     runs-on: macos-14
-    timeout-minutes: 90
+    env:
+      SOLVECRAFT_VERSION: ${{ needs.version.outputs.version }}
+      SOLVECRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
-      - run: |
-          cargo build --release --locked -p solvecraft -p solvecraft-cli --target aarch64-apple-darwin
-          cargo build --release --locked -p solvecraft -p solvecraft-cli --target x86_64-apple-darwin
-      - name: Package
-        run: .github/release/package-macos.sh "$TAG"
+        with:
+          key: release-macos-universal
+      - name: Build and package (dmg, CLI zip; the dmg is mounted and checked)
+        run: packaging/macos/package.sh --arch universal
       - uses: actions/upload-artifact@v4
         with:
-          name: macos
-          path: out/*
+          name: release-macos
+          path: dist/release/*
+          if-no-files-found: error
 
-  web:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+  windows:
+    name: Windows ${{ matrix.arch }}
+    needs: [version, icons]
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, target: x86_64-pc-windows-msvc }
+          - { arch: x86, target: i686-pc-windows-msvc }
+          # Windows on ARM: cross-compiled on the x64 runner.
+          - { arch: arm64, target: aarch64-pc-windows-msvc }
+    env:
+      SOLVECRAFT_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          ref: ${{ env.TAG }}
+          name: icons
+          path: icons
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-windows-${{ matrix.arch }}
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+      - name: Build and package (msi, portable zip)
+        shell: pwsh
+        env:
+          SOLVECRAFT_ICONS: ${{ github.workspace }}/icons
+        run: ./packaging/windows/package.ps1 -Arch ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  web:
+    name: Web (wasm)
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      SOLVECRAFT_VERSION: ${{ needs.version.outputs.version }}
+      TRUNK_VERSION: 0.21.14
+    steps:
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-web
       - name: Install trunk
         run: |
-          mkdir -p "$HOME/.local/bin"
-          curl -sSfL "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Build (relative public URL, so it can be served from any path)
-        working-directory: apps/solvecraft-web
-        run: trunk build --release
-      - name: Package
-        run: |
-          name="solvecraft-$TAG-web"
-          mkdir -p out && cp -r dist/web "$name"
-          cp LICENSE-MIT LICENSE-APACHE NOTICE THIRD-PARTY-LICENSES.txt "$name/"
-          zip -qr "out/$name.zip" "$name"
+          curl -fsSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$HOME/.cargo/bin" trunk
+      - name: Build and zip
+        run: packaging/web/package.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: web
-          path: out/*
+          name: release-web
+          path: dist/release/*
+          if-no-files-found: error
 
   release:
-    needs: [linux, windows, macos, web]
+    name: GitHub Release
+    needs: [version, linux, flatpak, freebsd, macos, windows, web]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TAG }}
       - uses: actions/download-artifact@v4
         with:
-          path: assets
+          pattern: release-*
+          path: artifacts
           merge-multiple: true
-      - name: Checksums
-        working-directory: assets
-        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
-      - name: Notes
-        run: sed "s/{tag}/$TAG/g" .github/release-notes.md > notes.md
-      - if: ${{ github.event_name == 'push' || inputs.publish }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          name: SolveCraft ${{ env.TAG }}
-          body_path: notes.md
-          generate_release_notes: true
-          # A tag with a suffix (v0.2.0-rc1) is a pre-release; v1.2.3 is a normal release.
-          prerelease: ${{ contains(env.TAG, '-') }}
-          files: assets/*
-      # A dry run (workflow_dispatch with publish off): the assets and notes as an artifact.
-      - if: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish }}
-        run: cp notes.md assets/release-notes.md
-      - if: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish }}
+      - name: Checksums and notes
+        run: |
+          (cd artifacts && sha256sum -- * | tee SHA256SUMS.txt)
+          sed "s/{version}/$VERSION/g" .github/release-notes.md >notes.md
+      - name: Publish the release
+        if: github.event_name == 'push' || inputs.publish
+        working-directory: artifacts
+        run: |
+          tag="v$VERSION"
+          pre=()
+          if [ "$PRERELEASE" = true ]; then pre=(--prerelease); else pre=(--latest); fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists. Bump the version before tagging."
+            exit 1
+          fi
+          gh release create "$tag" --title "SolveCraft v$VERSION" --verify-tag --notes-file ../notes.md --generate-notes "${pre[@]}" -- *
+          {
+            echo "Published **SolveCraft v$VERSION** at \`${GITHUB_SHA::9}\`:"
+            echo
+            sed 's/^/    /' SHA256SUMS.txt
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Keep the files (dry run)
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish
+        run: cp notes.md artifacts/release-notes.md
+      - if: github.event_name == 'workflow_dispatch' && !inputs.publish
         uses: actions/upload-artifact@v4
         with:
           name: release-assets
-          path: assets/*
+          path: artifacts/*

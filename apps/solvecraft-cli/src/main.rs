@@ -11,6 +11,7 @@
 //! solvecraft-cli step-corpus <case-dir>...                    import part.step and compare with measure.json
 //! solvecraft-cli mcp [--in design|script] [--connect HOST:PORT] MCP server on stdio (docs/mcp.md)
 //! solvecraft-cli licences                                     SolveCraft's licence and the third-party licences
+//! solvecraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //! ```
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -37,6 +38,7 @@ const USAGE: &str = "usage:
   solvecraft-cli step-corpus <case-dir>... [--json]
   solvecraft-cli mcp [--in design.solvecraft|script.json] [--connect 127.0.0.1:PORT]
   solvecraft-cli licences
+  solvecraft-cli icon --out icon.png [--size 256] | --out icon.ico
 ";
 
 fn main() -> ExitCode {
@@ -57,6 +59,7 @@ fn main() -> ExitCode {
         Some("oracle") => oracle::run(&args[1..]),
         Some("step-corpus") => oracle::step_corpus(&args[1..]),
         Some("mcp") => cmd_mcp(&args[1..]),
+        Some("icon") => cmd_icon(&args[1..]),
         Some("licences" | "licenses") => {
             // Written, not print!ed: a closed pipe (`| head`) is not a crash.
             use std::io::Write as _;
@@ -202,6 +205,69 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
     std::fs::write(out, &png).map_err(|e| format!("{out}: {e}"))?;
     println!("{}", pretty(&json!({"path": out, "width": w, "height": h, "bytes": png.len()})));
     Ok(())
+}
+
+/// The app icon: a blue block with a bore, drawn by the CPU renderer on a transparent background
+/// (so packages need no committed image). `.ico` holds the Windows sizes as PNGs.
+fn cmd_icon(args: &[String]) -> Result<(), String> {
+    let out = flag(args, "--out").ok_or("icon needs --out FILE.png or FILE.ico")?;
+    let size: usize = flag(args, "--size").and_then(|x| x.parse().ok()).unwrap_or(256).clamp(8, 2048);
+    let bytes = if out.to_ascii_lowercase().ends_with(".ico") {
+        let pngs: Vec<(usize, Vec<u8>)> =
+            [16, 20, 24, 32, 40, 48, 64, 128, 256].into_iter().map(|s| icon_png(s).map(|p| (s, p))).collect::<Result<_, _>>()?;
+        ico(&pngs)?
+    } else {
+        icon_png(size)?
+    };
+    std::fs::write(out, &bytes).map_err(|e| format!("{out}: {e}"))?;
+    println!("{}", pretty(&json!({"path": out, "bytes": bytes.len()})));
+    Ok(())
+}
+
+fn icon_png(size: usize) -> Result<Vec<u8>, String> {
+    use solvecraft_engine::render::{Rgb, Scene, SceneLine, SceneMesh, png, render_transparent};
+    let mut s = Session::default();
+    for (cmd, p) in [
+        ("solid.box", json!({"length": 20, "width": 20, "height": 20, "center": [0, 0, 0]})),
+        ("solid.cylinder", json!({"diameter": 9, "height": 30, "base": [0, 0, -15], "operation": "cut"})),
+    ] {
+        s.execute(cmd, &p).map_err(|e| format!("icon: {e}"))?;
+    }
+    let mut cam = solvecraft_engine::view::home_camera(&s);
+    cam.distance *= 0.95;
+    let mut scene = Scene { radius: 60.0, ..Default::default() };
+    let px = size as f64 / 256.0;
+    for body in &s.world_state().bodies {
+        let mesh = body.mesh();
+        scene.meshes.push(SceneMesh { mesh: std::sync::Arc::clone(&mesh), color: Rgb(90, 160, 240) });
+        for (i, e) in mesh.edges.iter().enumerate() {
+            if !mesh.seams.get(i).copied().unwrap_or(false) {
+                scene.lines.push(SceneLine { points: e.clone(), color: Rgb(24, 52, 96), width: (3.0 * px).max(0.8), on_top: false });
+            }
+        }
+    }
+    let c = render_transparent(&mut scene, &cam, size, size);
+    png(c.w, c.h, c.rgba).ok_or_else(|| "icon: PNG encoding failed".to_string())
+}
+
+/// A Windows icon file holding PNG images (Vista and later read these).
+fn ico(images: &[(usize, Vec<u8>)]) -> Result<Vec<u8>, String> {
+    let n = u16::try_from(images.len()).map_err(|_| "too many icon sizes")?;
+    let mut out = Vec::new();
+    out.extend_from_slice(&[0, 0, 1, 0]);
+    out.extend_from_slice(&n.to_le_bytes());
+    let mut offset = 6 + 16 * images.len();
+    for (size, data) in images {
+        let dim = if *size >= 256 { 0 } else { *size as u8 };
+        out.extend_from_slice(&[dim, dim, 0, 0, 1, 0, 32, 0]);
+        out.extend_from_slice(&u32::try_from(data.len()).map_err(|_| "icon too large")?.to_le_bytes());
+        out.extend_from_slice(&u32::try_from(offset).map_err(|_| "icon too large")?.to_le_bytes());
+        offset += data.len();
+    }
+    for (_, data) in images {
+        out.extend_from_slice(data);
+    }
+    Ok(out)
 }
 
 fn cmd_exec(args: &[String]) -> Result<(), String> {

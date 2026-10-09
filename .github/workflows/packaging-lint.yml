@@ -1,0 +1,53 @@
+# Quick static checks for the release pipeline (seconds, no Rust build): workflow syntax, the
+# packaging shell and PowerShell scripts, and the Linux desktop/AppStream/Flatpak metadata.
+# Adapted from PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
+name: Packaging lint
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/**", "packaging/**"]
+  pull_request:
+    paths: [".github/workflows/**", "packaging/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaging-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck desktop-file-utils appstream libxml2-utils python3-yaml
+          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" actionlint
+      - name: actionlint
+        run: '"$RUNNER_TEMP/actionlint" -color'
+      - name: shellcheck
+        run: shellcheck packaging/*.sh packaging/*/*.sh packaging/linux/AppRun
+      - name: PowerShell
+        shell: pwsh
+        run: |
+          foreach ($f in Get-ChildItem packaging/windows/*.ps1) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Output "::error file=$($f.Name)::$_" }; exit 1 }
+            Write-Output "ok $($f.Name)"
+          }
+      - name: XML, desktop entry, AppStream, Flatpak manifest
+        run: |
+          xmllint --noout packaging/windows/solvecraft.wxs packaging/windows/solvecraft.en-us.wxl packaging/macos/*.plist* packaging/linux/*.xml*
+          desktop-file-validate packaging/linux/ai.storyteller.solvecraft.desktop
+          sed -e 's/@VERSION@/0.0.0/' -e 's/@DATE@/2026-01-01/' packaging/linux/ai.storyteller.solvecraft.metainfo.xml.in >"$RUNNER_TEMP/ai.storyteller.solvecraft.metainfo.xml"
+          appstreamcli validate --no-net --explain "$RUNNER_TEMP/ai.storyteller.solvecraft.metainfo.xml"
+          python3 -c "import yaml; m = yaml.safe_load(open('packaging/linux/flatpak/ai.storyteller.solvecraft.bundle.yml')); assert m['id'] == 'ai.storyteller.solvecraft' and m['command'] == 'solvecraft'"

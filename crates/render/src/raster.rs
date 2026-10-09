@@ -200,10 +200,36 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
 /// Render to PNG bytes.
 pub fn render_png(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> {
     let c = render(scene, cam, w, h);
-    let img = image::RgbaImage::from_raw(c.w as u32, c.h as u32, c.rgba)?;
+    png(c.w, c.h, c.rgba)
+}
+
+/// RGBA pixels (`w × h`) to PNG bytes.
+pub fn png(w: usize, h: usize, rgba: Vec<u8>) -> Option<Vec<u8>> {
+    let img = image::RgbaImage::from_raw(u32::try_from(w).ok()?, u32::try_from(h).ok()?, rgba)?;
     let mut buf = std::io::Cursor::new(Vec::new());
     img.write_to(&mut buf, image::ImageFormat::Png).ok()?;
     Some(buf.into_inner())
+}
+
+/// Render on a transparent background: the scene drawn over black and over white, and the
+/// alpha recovered from the difference (exact for the anti-aliased edges).
+pub fn render_transparent(scene: &mut Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
+    let keep = scene.background;
+    scene.background = Some((Rgb(0, 0, 0), Rgb(0, 0, 0)));
+    let black = render(scene, cam, w, h);
+    scene.background = Some((Rgb(255, 255, 255), Rgb(255, 255, 255)));
+    let mut out = render(scene, cam, w, h);
+    scene.background = keep;
+    for (o, b) in out.rgba.as_chunks_mut::<4>().0.iter_mut().zip(black.rgba.as_chunks::<4>().0) {
+        // white - black = 255 (1 - alpha) in every channel; average them.
+        let d: u32 = (0..3).map(|k| u32::from(o[k].saturating_sub(b[k]))).sum();
+        let a = 255.0 - d as f64 / 3.0;
+        for k in 0..3 {
+            o[k] = if a > 0.5 { (f64::from(b[k]) * 255.0 / a).round().clamp(0.0, 255.0) as u8 } else { 0 };
+        }
+        o[3] = a.round().clamp(0.0, 255.0) as u8;
+    }
+    out
 }
 
 #[cfg(test)]
