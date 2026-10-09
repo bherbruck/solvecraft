@@ -209,6 +209,37 @@ pub(super) fn feature_sketch(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
         .ok_or_else(|| bad(cmd, "there is no sketch to use (create one first)"))
 }
 
+/// Profile indices become the curve ids of each profile's loops as the sketch is now solved.
+fn stable_profiles(s: &Session, kind: &mut FeatureKind) -> Result<()> {
+    let st = s.model.state();
+    'sels: for (sketch, sel) in kind.profile_sels_mut() {
+        let ProfileSel::Indices { indices } = sel else { continue };
+        let Some(ss) = st.sketch(sketch) else { continue };
+        let mut loops = Vec::with_capacity(indices.len());
+        for i in indices.iter() {
+            let pr = ss
+                .profiles
+                .get(*i)
+                .ok_or_else(|| EngineError::Other(format!("no profile {i} in sketch `{}` (it has {})", ss.name, ss.profiles.len())))?;
+            // Two profiles with the same outer curves (one inside the other's holes cannot be):
+            // keep the index then.
+            if pr.outer_curves.is_empty() || ss.profiles.iter().filter(|q| same_loop(&q.outer_curves, &pr.outer_curves)).count() != 1 {
+                continue 'sels;
+            }
+            loops.push(pr.outer_curves.clone());
+        }
+        *sel = ProfileSel::Curves { loops };
+    }
+    Ok(())
+}
+
+fn same_loop(a: &[String], b: &[String]) -> bool {
+    let (mut a, mut b) = (a.to_vec(), b.to_vec());
+    a.sort();
+    b.sort();
+    a == b
+}
+
 pub(super) fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
     let Some(v) = p.get("profiles") else { return Ok(ProfileSel::All) };
     match v {
@@ -270,6 +301,9 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
             *e = doc.with_design_unit(e, k);
         }
     }
+    // Profiles picked by index are kept by the curves around them: a recompute can renumber a
+    // sketch's profiles (a face sketch's projected outline rebuilt), never the curves.
+    stable_profiles(s, &mut kind)?;
     // Blends remember where their edges sat, to find them again after upstream edits.
     let (refs, names) = match &kind {
         FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => {

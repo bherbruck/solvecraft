@@ -1078,6 +1078,20 @@ impl FeatureKind {
     /// Every expression the feature uses.
     /// Points on faces the feature refers to (shell, draft, offset and replace faces, a hole's
     /// placement), for persistent face names.
+    /// The feature's profile selections, each with its sketch.
+    pub fn profile_sels_mut(&mut self) -> Vec<(u64, &mut ProfileSel)> {
+        match self {
+            FeatureKind::Extrude { sketch, profiles, .. }
+            | FeatureKind::Revolve { sketch, profiles, .. }
+            | FeatureKind::Sweep { sketch, profiles, .. }
+            | FeatureKind::Emboss { sketch, profiles, .. }
+            | FeatureKind::SheetBase { sketch, profiles, .. } => vec![(*sketch, profiles)],
+            FeatureKind::Patch { sketch: Some(sk), profiles, .. } => vec![(*sk, profiles)],
+            FeatureKind::Loft { sections, .. } => sections.iter_mut().filter(|s| s.point.is_none()).map(|s| (s.sketch, &mut s.profiles)).collect(),
+            _ => Vec::new(),
+        }
+    }
+
     pub fn face_points_mut(&mut self) -> Vec<&mut Vec3> {
         match self {
             FeatureKind::Shell { faces, .. }
