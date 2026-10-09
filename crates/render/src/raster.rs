@@ -19,6 +19,8 @@ impl Rgb {
 pub struct SceneMesh {
     pub mesh: Arc<Mesh>,
     pub color: Rgb,
+    /// Faces in colours of their own: (B-rep face index, colour).
+    pub face_colors: Vec<(u32, Rgb)>,
 }
 
 pub struct SceneLine {
@@ -102,9 +104,11 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     let view_dir = cam.back();
     for sm in &scene.meshes {
         let m = &sm.mesh;
-        let base = sm.color.f();
+        let body = sm.color.f();
         let pts: Vec<Option<[f64; 3]>> = m.positions.iter().map(|p| project(*p)).collect();
-        for t in &m.triangles {
+        for (ti, t) in m.triangles.iter().enumerate() {
+            let face = m.tri_face.get(ti).copied();
+            let base = sm.face_colors.iter().find(|(f, _)| Some(*f) == face).map_or(body, |(_, c)| c.f());
             let (Some(Some(a)), Some(Some(b)), Some(Some(cc))) = (pts.get(t[0] as usize), pts.get(t[1] as usize), pts.get(t[2] as usize)) else {
                 continue;
             };
@@ -248,8 +252,12 @@ mod tests {
             seams: vec![],
             edge_faces: vec![],
         };
-        let scene =
-            Scene { meshes: vec![SceneMesh { mesh: Arc::new(mesh), color: Rgb(200, 30, 30) }], lines: vec![], background: None, radius: 20.0 };
+        let scene = Scene {
+            meshes: vec![SceneMesh { mesh: Arc::new(mesh), color: Rgb(200, 30, 30), face_colors: Vec::new() }],
+            lines: vec![],
+            background: None,
+            radius: 20.0,
+        };
         let mut cam = Camera { distance: 50.0, ..Default::default() };
         cam.set_view(StandardView::Front);
         let c = render(&scene, &cam, 64, 64);

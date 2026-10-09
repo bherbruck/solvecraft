@@ -142,7 +142,17 @@ pub fn scene(s: &Session, cam: &Camera) -> Scene {
     for body in &st.bodies {
         let selected = s.selection.iter().any(|x| matches!(x, Sel::Body { name } if *name == body.name));
         let mesh = body.mesh();
-        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color: if selected { colors::BODY_SELECTED } else { colors::BODY } });
+        // The body's appearance (or imported colour) and faces with looks of their own, as in
+        // the viewport.
+        let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let color =
+            if selected { colors::BODY_SELECTED } else { s.doc.body_color(body).map_or(colors::BODY, |[r, g, b]| Rgb(to8(r), to8(g), to8(b))) };
+        let face_colors = if selected {
+            Vec::new()
+        } else {
+            s.doc.face_colors(body).into_iter().map(|(f, l)| (f as u32, Rgb(l.color[0], l.color[1], l.color[2]))).collect()
+        };
+        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors });
         for (i, e) in mesh.edges.iter().enumerate() {
             if mesh.seams.get(i).copied().unwrap_or(false) {
                 continue;
@@ -235,4 +245,29 @@ fn constructs(s: &Session) -> Vec<(u64, String, solvecraft_doc::construct::Const
             Some((c.feature, c.name.clone(), g))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    /// The CPU renderer (snapshots) shows appearances as the viewport does: a body's colour and
+    /// faces with looks of their own.
+    #[test]
+    fn snapshot_scene_carries_appearances() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        s.execute("solid.cylinder", &json!({"diameter": 14, "height": 30, "base": [50, 15, 0], "operation": "new"})).unwrap();
+        s.execute("appearance.assign", &json!({"bodies": ["Body2"], "color": [220, 60, 40]})).unwrap();
+        s.execute("appearance.assign", &json!({"faces": [[20, 15, 20]], "body": "Body1", "color": [40, 170, 80]})).unwrap();
+        let cam = home_camera(&s);
+        let sc = scene(&s, &cam);
+        assert!(sc.meshes.iter().any(|m| m.color == Rgb(220, 60, 40)));
+        assert!(sc.meshes.iter().any(|m| m.face_colors.iter().any(|(_, c)| *c == Rgb(40, 170, 80))));
+        // And the rendered picture has the green top.
+        let img = solvecraft_render::render(&sc, &cam, 200, 140);
+        assert!(img.rgba.chunks(4).any(|p| p[1] > 120 && p[0] < 90 && p[2] < 110), "no green pixels");
+    }
 }

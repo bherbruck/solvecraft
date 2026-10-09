@@ -239,7 +239,7 @@ fn icon_png(size: usize) -> Result<Vec<u8>, String> {
     let px = size as f64 / 256.0;
     for body in &s.world_state().bodies {
         let mesh = body.mesh();
-        scene.meshes.push(SceneMesh { mesh: std::sync::Arc::clone(&mesh), color: Rgb(90, 160, 240) });
+        scene.meshes.push(SceneMesh { mesh: std::sync::Arc::clone(&mesh), color: Rgb(90, 160, 240), face_colors: Vec::new() });
         for (i, e) in mesh.edges.iter().enumerate() {
             if !mesh.seams.get(i).copied().unwrap_or(false) {
                 scene.lines.push(SceneLine { points: e.clone(), color: Rgb(24, 52, 96), width: (3.0 * px).max(0.8), on_top: false });
