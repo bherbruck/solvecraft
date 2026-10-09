@@ -1,0 +1,162 @@
+name: Publish Flatpak repository to Pages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Published GitHub release tag to publish (for example, v1.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flatpak-pages-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Flatpak repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+      APP_ID: ai.storyteller.solvecraft
+    steps:
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Install Flatpak repository tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak ostree
+
+      - name: Download and validate release bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_TAG"
+          if ! printf '%s' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "::error::Release tag '$tag' is not strict SemVer prefixed with v"
+            exit 1
+          fi
+          published_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq \
+            'select(.draft == false and .published_at != null) | .tag_name')"
+          if [[ "$published_tag" != "$tag" ]]; then
+            echo "::error::$tag is not a published release in $GITHUB_REPOSITORY"
+            exit 1
+          fi
+
+          version="${tag#v}"
+          mkdir -p bundles
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern SHA256SUMS.txt --dir bundles
+          for arch in x86_64 aarch64; do
+            asset="solvecraft-$version-linux-$arch.flatpak"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+              --pattern "$asset" --dir bundles
+            test -s "bundles/$asset"
+            (
+              cd bundles
+              awk -v file="$asset" '$2 == file || $2 == "*" file { print; found=1 } END { exit !found }' \
+                SHA256SUMS.txt | sha256sum --check -
+            )
+          done
+          test "$(find bundles -maxdepth 1 -type f -name '*.flatpak' | wc -l)" -eq 2
+
+          for arch in x86_64 aarch64; do
+            asset="bundles/solvecraft-$version-linux-$arch.flatpak"
+            validation_repo="$(mktemp -d)"
+            ostree --repo="$validation_repo" init --mode=archive-z2
+            flatpak build-import-bundle "$validation_repo" "$asset"
+            expected_ref="app/$APP_ID/$arch/stable"
+            ostree --repo="$validation_repo" refs | grep -Fxq "$expected_ref" || {
+              echo "::error::$(basename "$asset") does not contain $expected_ref"
+              exit 1
+            }
+            rm -rf "$validation_repo"
+          done
+
+      - name: Build repository and site
+        shell: bash
+        env:
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          set -euo pipefail
+          site="$RUNNER_TEMP/site"
+          repo_dir="$site/flatpak/repo"
+          mkdir -p "$repo_dir"
+          ostree --repo="$repo_dir" init --mode=archive-z2
+
+          previous_url="${PAGES_BASE_URL%/}/flatpak/repo"
+          if curl --fail --silent --show-error --location \
+            --output /dev/null "$previous_url/summary"; then
+            ostree --repo="$repo_dir" remote add --no-gpg-verify previous "$previous_url"
+            ostree --repo="$repo_dir" pull --mirror previous
+            ostree --repo="$repo_dir" remote delete previous
+          fi
+
+          version="${RELEASE_TAG#v}"
+          for arch in x86_64 aarch64; do
+            flatpak build-import-bundle "$repo_dir" \
+              "bundles/solvecraft-$version-linux-$arch.flatpak"
+          done
+          flatpak build-update-repo \
+            --title="SolveCraft" \
+            --comment='Official SolveCraft releases' \
+            --description='Official Flatpak repository for SolveCraft' \
+            --homepage="https://github.com/$GITHUB_REPOSITORY" \
+            --default-branch=stable \
+            "$repo_dir"
+
+          for arch in x86_64 aarch64; do
+            ostree --repo="$repo_dir" rev-parse "app/$APP_ID/$arch/stable" >/dev/null
+          done
+          test -s "$repo_dir/summary"
+
+          base_url="${PAGES_BASE_URL%/}"
+          repo_url="$base_url/flatpak/repo/"
+          cat >"$site/flatpak/solvecraft.flatpakrepo" <<META
+          [Flatpak Repo]
+          Title=SolveCraft
+          Comment=Official SolveCraft releases
+          Description=Official Flatpak repository for SolveCraft
+          Url=$repo_url
+          Homepage=https://github.com/$GITHUB_REPOSITORY
+          META
+          cat >"$site/flatpak/index.html" <<HTML
+          <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SolveCraft Flatpak repository</title></head><body><main><h1>SolveCraft Flatpak repository</h1><p>Latest published release: <strong>$RELEASE_TAG</strong></p><p><a href="solvecraft.flatpakrepo">Add the SolveCraft repository</a></p><pre>flatpak remote-add --if-not-exists solvecraft $base_url/flatpak/solvecraft.flatpakrepo
+          flatpak install solvecraft $APP_ID</pre></main></body></html>
+          HTML
+          cat >"$site/index.html" <<HTML
+          <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SolveCraft downloads</title></head><body><main><h1>SolveCraft downloads</h1><p><a href="flatpak/">Flatpak repository</a></p><p><a href="https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG">Release assets</a></p></main></body></html>
+          HTML
+          touch "$site/.nojekyll"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/site
+          include-hidden-files: true
+
+  deploy:
+    name: Deploy Pages
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
