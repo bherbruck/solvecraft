@@ -6,7 +6,9 @@ with extrude and revolve, round edges, combine bodies, and change a parameter to
 timeline rebuild. It is a clean-room implementation (see [CLAUDE.md](CLAUDE.md)) and part of the
 storytold "craft" family.
 
-![SolveCraft with the sample plate](docs/screenshots/sample-plate.png)
+![An AI agent builds a parametric enclosure in SolveCraft over MCP, then the width is changed in the Parameters dialog and the model rebuilds (3x speed)](docs/screenshots/demo.gif)
+
+*An agent builds an electronics enclosure over MCP: sketches on faces, shell, a port cut, one screw boss patterned to four, then width 80 → 100 mm in the Parameters dialog and the timeline rebuilds. 3× speed; [full video](https://github.com/bherbruck/solvecraft/releases/download/v0.1.0/enclosure-demo-v3.mp4), script in [examples/demo](examples/demo).*
 
 **Documentation:** the [SolveCraft book](https://bherbruck.github.io/solvecraft/) (user guide,
 developer guide and command reference; sources in [docs/book](docs/book)), and the

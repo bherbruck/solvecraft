@@ -18,6 +18,7 @@ Generated-in-code assets are original and have no file to list:
 | File | Author | Source | Licence |
 |---|---|---|---|
 | docs/screenshots/sample-plate.png | SolveCraft contributors | screenshot of SolveCraft itself (`solvecraft --sample`) | MIT OR Apache-2.0 |
+| docs/screenshots/demo.gif | SolveCraft contributors | screen recording of SolveCraft itself driven by examples/demo (3x speed) | MIT OR Apache-2.0 |
 | docs/book/src/generated/sample-plate.png | SolveCraft contributors | copy of docs/screenshots/sample-plate.png made by `cargo xtask book` (gitignored) | MIT OR Apache-2.0 |
 | docs/book/src/generated/bracket.png | SolveCraft contributors | rendered by `cargo xtask book` (`solvecraft-cli snapshot examples/bracket.json`; gitignored) | MIT OR Apache-2.0 |
 | docs/book/src/generated/enclosure.png | SolveCraft contributors | rendered by `cargo xtask book` (`solvecraft-cli snapshot docs/book/scripts/enclosure.json`; gitignored) | MIT OR Apache-2.0 |
