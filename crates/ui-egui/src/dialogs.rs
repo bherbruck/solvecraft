@@ -1422,6 +1422,37 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         row_label(ui, "Swap Ends");
                         extra_check(ui, &mut d.extra, "swap_ends");
                         ui.end_row();
+                        // Radii between the ends: position along the edge (from the start end)
+                        // and radius.
+                        let mut mids = mid_points(&d.extra);
+                        let mut remove = None;
+                        for (k, (t, r)) in mids.iter_mut().enumerate() {
+                            row_label(ui, "Mid Radius");
+                            ui.horizontal(|ui| {
+                                ui.add(egui::DragValue::new(t).speed(0.01).range(0.01..=0.99).fixed_decimals(2))
+                                    .on_hover_text("Position along the edge, 0 at the start end, 1 at the other");
+                                enter |= field(ui, r);
+                                if ui.small_button("×").on_hover_text("Remove this point").clicked() {
+                                    remove = Some(k);
+                                }
+                            });
+                            ui.end_row();
+                        }
+                        if let Some(k) = remove {
+                            mids.remove(k);
+                        }
+                        row_label(ui, "");
+                        if ui.button("Add Mid Radius").clicked() && mids.len() < 20 {
+                            let t = if mids.is_empty() { 0.5 } else { (mids.iter().map(|m| m.0).fold(0.0, f64::max) + 1.0) * 0.5 };
+                            mids.push((t.min(0.99), radius.clone()));
+                        }
+                        ui.end_row();
+                        d.extra.insert("mid".into(), json!(mids.iter().map(|(t, r)| json!([t, r])).collect::<Vec<_>>()));
+                        if !mids.is_empty() {
+                            row_label(ui, "Smooth");
+                            extra_check(ui, &mut d.extra, "smooth");
+                            ui.end_row();
+                        }
                     }
                     row_label(ui, "Tangent Chain");
                     ui.checkbox(chain, "");
@@ -1913,6 +1944,25 @@ fn extra_field(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, ke
     enter
 }
 
+/// A variable fillet's middle radii as (position, radius expression).
+fn mid_points(extra: &serde_json::Map<String, Value>) -> Vec<(f64, String)> {
+    extra
+        .get("mid")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| {
+            let t = m.get(0)?.as_f64()?;
+            let r = match m.get(1)? {
+                Value::String(x) => x.clone(),
+                Value::Number(n) => n.to_string(),
+                _ => return None,
+            };
+            Some((t, r))
+        })
+        .collect()
+}
+
 const CHAMFER_TYPES: [&str; 3] = ["Equal Distance", "Two Distances", "Distance and Angle"];
 
 /// A new Fillet or Chamfer dialog's values.
@@ -2169,6 +2219,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     let swap = d.extra.get("swap_ends").and_then(Value::as_bool).unwrap_or(false);
                     if let Some((a, b)) = ends {
                         p["start"] = pt(if swap { b } else { a });
+                    }
+                    let mids = mid_points(&d.extra);
+                    if !mids.is_empty() {
+                        p["mid"] = json!(mids.iter().map(|(t, r)| json!([t, r])).collect::<Vec<_>>());
+                        if d.extra.get("smooth").and_then(Value::as_bool).unwrap_or(false) {
+                            p["smooth"] = json!(true);
+                        }
                     }
                 }
                 ("solid.fillet", p)
@@ -2790,9 +2847,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     FilletStyle::Chord => {
                         d.extra.insert("type".into(), json!("chord"));
                     }
-                    FilletStyle::Variable { radius2, start, .. } => {
+                    FilletStyle::Variable { radius2, start, mid, smooth } => {
                         d.extra.insert("type".into(), json!("variable"));
                         d.extra.insert("radius2".into(), json!(radius2));
+                        d.extra.insert("mid".into(), json!(mid.iter().map(|(t, r)| json!([t, r])).collect::<Vec<_>>()));
+                        d.extra.insert("smooth".into(), json!(smooth));
                         // The start was the first edge's last point: ends swapped.
                         let first_end = edges.first().and_then(|p| edge_sel(s, *p)).and_then(|x| match x {
                             Sel::Edge { body, index, .. } => {

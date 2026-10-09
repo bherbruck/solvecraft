@@ -262,6 +262,30 @@ fn variable_fillet_round_trip() {
 }
 
 #[test]
+fn variable_fillet_mid_radii_round_trip() {
+    let mut app = boxed();
+    let e0 = edge(&app, Vec3::new(40.0, 15.0, 20.0));
+    let mut d = start(&mut app, vec![e0], "solid.fillet");
+    d.inputs[0].items.truncate(1);
+    d.extra.insert("type".into(), json!("variable"));
+    d.extra.insert("radius2".into(), json!("2 mm"));
+    d.extra.insert("mid".into(), json!([[0.5, "4 mm"]]));
+    d.extra.insert("smooth".into(), json!(true));
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!((p["mid"].clone(), p["smooth"].clone()), (json!([[0.5, "4 mm"]]), json!(true)), "{p}");
+    let id = apply(&mut app, &d);
+    let e = crate::dialogs::for_feature(&app, id, None).unwrap();
+    assert_eq!(e.extra.get("mid"), Some(&json!([[0.5, "4 mm"]])));
+    assert_eq!(e.extra.get("smooth"), Some(&json!(true)));
+    // All middle radii removed: a plain two-radius fillet again.
+    let mut d = e;
+    d.extra.insert("mid".into(), json!([]));
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    // (an edit: the feature's new parameters)
+    assert_eq!(p["params"]["mid"], json!([]), "{p}");
+}
+
+#[test]
 fn newer_options_reach_their_commands() {
     let mut app = boxed();
     // Thread: Modeled.
