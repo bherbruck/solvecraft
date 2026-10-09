@@ -1,0 +1,265 @@
+{
+ "description": "An electronics enclosure built over MCP, one command at a time (examples/demo/enclosure_mcp.py). Each step: an MCP `execute` call; `caption` is shown in the video, `pause` (s) is the wait after it, `view` then animates the app's camera to that view. A lip on the rim is left out until issue #29 (Lip on a rounded rim) is fixed.",
+ "steps": [
+  {
+   "caption": "User parameters: width, depth, height, wall",
+   "command": "parameters.change",
+   "params": {
+    "name": "width",
+    "expression": "80 mm",
+    "comment": "outside, X"
+   }
+  },
+  {
+   "caption": "",
+   "command": "parameters.change",
+   "params": {
+    "name": "depth",
+    "expression": "60 mm",
+    "comment": "outside, Y"
+   },
+   "pause": 0.6
+  },
+  {
+   "caption": "",
+   "command": "parameters.change",
+   "params": {
+    "name": "height",
+    "expression": "30 mm"
+   },
+   "pause": 0.6
+  },
+  {
+   "caption": "",
+   "command": "parameters.change",
+   "params": {
+    "name": "wall",
+    "expression": "2 mm"
+   },
+   "pause": 0.6
+  },
+  {
+   "caption": "Sketch on XY",
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Outline"
+   }
+  },
+  {
+   "caption": "Center rectangle",
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     40,
+     30
+    ]
+   }
+  },
+  {
+   "caption": "Centre it on the origin",
+   "command": "sketch.constraint.coincident",
+   "params": {
+    "a": "p5",
+    "b": "origin"
+   }
+  },
+  {
+   "caption": "Dimension: width",
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l1"
+    ],
+    "value": "width"
+   }
+  },
+  {
+   "caption": "Dimension: depth",
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l2"
+    ],
+    "value": "depth"
+   }
+  },
+  {
+   "caption": "Finish sketch",
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "caption": "Extrude by height",
+   "command": "solid.extrude",
+   "params": {
+    "distance": "height",
+    "body_name": "Enclosure"
+   },
+   "view": "home"
+  },
+  {
+   "caption": "Round the vertical edges (6 mm)",
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      40,
+      30,
+      15
+     ],
+     [
+      -40,
+      30,
+      15
+     ],
+     [
+      -40,
+      -30,
+      15
+     ],
+     [
+      40,
+      -30,
+      15
+     ]
+    ],
+    "radius": 6
+   }
+  },
+  {
+   "caption": "Shell it open at the top (wall)",
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      0,
+      0,
+      30
+     ]
+    ],
+    "thickness": "wall"
+   }
+  },
+  {
+   "caption": "Sketch on YZ for the USB port",
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      0,
+      1,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "USB port"
+   }
+  },
+  {
+   "caption": "Port outline",
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     12
+    ],
+    "corner": [
+     6,
+     15.5
+    ]
+   }
+  },
+  {
+   "caption": "Finish sketch",
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "caption": "Cut through the side wall",
+   "command": "solid.extrude",
+   "params": {
+    "through_all": true,
+    "operation": "cut"
+   }
+  },
+  {
+   "caption": "Screw boss",
+   "command": "plastic.boss",
+   "params": {
+    "position": [
+     -30,
+     -20,
+     2
+    ],
+    "diameter": 7,
+    "height": 12,
+    "hole_diameter": 2.5
+   }
+  },
+  {
+   "caption": "Screw boss",
+   "command": "plastic.boss",
+   "params": {
+    "position": [
+     30,
+     -20,
+     2
+    ],
+    "diameter": 7,
+    "height": 12,
+    "hole_diameter": 2.5
+   }
+  },
+  {
+   "caption": "Screw boss",
+   "command": "plastic.boss",
+   "params": {
+    "position": [
+     30,
+     20,
+     2
+    ],
+    "diameter": 7,
+    "height": 12,
+    "hole_diameter": 2.5
+   }
+  },
+  {
+   "caption": "Screw boss",
+   "command": "plastic.boss",
+   "params": {
+    "position": [
+     -30,
+     20,
+     2
+    ],
+    "diameter": 7,
+    "height": 12,
+    "hole_diameter": 2.5
+   }
+  },
+  {
+   "caption": "Change one parameter: width 80 \u2192 100 mm",
+   "command": "parameters.change",
+   "params": {
+    "name": "width",
+    "expression": "100 mm"
+   },
+   "pause": 4
+  }
+ ]
+}

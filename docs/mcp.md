@@ -72,6 +72,15 @@ result with `isError: true` and the engine's message, which the model can read a
 `batch` rollback undoes as many steps as the batch added to the undo history; batches that
 themselves call `edit.undo`, `file.new` or `doc.open` are not rolled back exactly.
 
+## Demo: an enclosure built over MCP
+
+`examples/demo/enclosure_mcp.py` is a small MCP client. It drives a running app (`solvecraft
+--control PORT`) through `solvecraft-cli mcp --connect` and builds an electronics enclosure one
+`execute` call at a time (`enclosure_steps.json`): a rounded box, shelled open at the top, a
+USB port cut through a side wall, four screw bosses, and then a change of the `width`
+parameter that the timeline rebuilds. `examples/demo/record.sh` records the run with ffmpeg,
+with each step's caption burnt in.
+
 ## A typical session
 
 ```text
