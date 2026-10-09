@@ -81,6 +81,12 @@ USB port cut through a side wall, four screw bosses, and then a change of the `w
 parameter that the timeline rebuilds. `examples/demo/record.sh` records the run with ffmpeg,
 with each step's caption burnt in.
 
+`examples/demo/enclosure_ui_mcp.py` (v2) builds the same part the way a person would: the
+modelling goes through the app's UI over its control channel. The pointer glides to toolbar
+buttons and faces and clicks them, the real dialogs open, the sketches go on the model's faces,
+and the camera follows. The parameters, the sketch dimensions bound to them and two extrudes go
+over MCP. `record_v2.sh` records it and draws the pointer and the captions.
+
 ## A typical session
 
 ```text

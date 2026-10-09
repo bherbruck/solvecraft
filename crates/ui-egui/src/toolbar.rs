@@ -297,6 +297,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let br = Rect::from_min_size(pos2(px + 4.0 + i as f32 * 40.0, top + 2.0), vec2(38.0, 38.0));
                 let info = c.info(&app.session);
                 let resp = ui.interact(br, ui.id().with(("cmd", c.id)), Sense::click());
+                crate::scenario::publish_handle(&format!("toolbar:{}", c.id), br.center());
                 if resp.hovered() && info.enabled {
                     painter.rect_filled(br, 4.0, t.hover);
                 }
@@ -324,6 +325,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let lr = Rect::from_min_size(pos2(px, top + 42.0), vec2(width, 18.0));
             let label = panel.to_string();
             let lresp = ui.interact(lr, ui.id().with(("panel", panel)), Sense::click());
+            crate::scenario::publish_handle(&format!("panel:{tab}:{panel}"), lr.center());
             if lresp.hovered() && enabled_panel {
                 painter.rect_filled(lr, 3.0, t.hover);
             }
@@ -360,6 +362,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 let (ir, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
                                 icons::paint(ui.painter(), ir, c.icon, t.icon, t.icon_fill, t.accent);
                                 let b = ui.add_enabled(info.enabled, egui::Button::new(c.label).frame(false).shortcut_text(c.shortcut.unwrap_or("")));
+                                crate::scenario::publish_handle(&format!("toolbar:{}", c.id), b.rect.center());
                                 if b.clicked() {
                                     let id = c.id;
                                     app.start(id);

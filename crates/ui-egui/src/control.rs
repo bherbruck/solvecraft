@@ -252,6 +252,11 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 _ => err("no dialog input with that index"),
             }
         }
+        "ui.handles" => {
+            // The handles drawn last frame (toolbar buttons `toolbar:<id>`, panels, browser rows…).
+            let list = crate::scenario::handles(s("prefix").unwrap_or(""));
+            ok(json!(list.into_iter().map(|(n, p)| json!({"name": n, "x": p.x, "y": p.y})).collect::<Vec<_>>()))
+        }
         "ui.at" => {
             // A scenario point: {world: [x,y,z]} | {sketch: [x,y]} | {plane: "XY"} (the middle of an
             // origin plane's square) → screen point.

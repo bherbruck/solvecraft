@@ -6,3 +6,4 @@
 *.swp
 /.claude/worktrees/
 /target-snapshot
+__pycache__/

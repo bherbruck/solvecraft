@@ -62,6 +62,11 @@ pub fn handle_at(name: &str) -> Option<egui::Pos2> {
     HANDLES.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
 }
 
+/// Every handle drawn last frame whose name starts with `prefix`.
+pub fn handles(prefix: &str) -> Vec<(String, egui::Pos2)> {
+    HANDLES.with(|h| h.borrow().iter().filter(|(n, _)| n.starts_with(prefix)).cloned().collect())
+}
+
 /// A painted part's rect this frame, by name ("toolbar", "workspace_switcher").
 pub fn publish_rect(name: &str, r: egui::Rect) {
     RECTS.with(|h| h.borrow_mut().push((name.to_string(), r)));
