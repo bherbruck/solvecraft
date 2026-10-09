@@ -548,6 +548,21 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                     return Err(format!("handle order: got {xs:?}"));
                 }
             }
+            "camera" => {
+                // {"camera": {"yaw_deg": y, "pitch_deg": p}}: where the camera looks from (±0.5°),
+                // once any view animation has finished.
+                for _ in 0..240 {
+                    if h.app.cam_anim.is_none() {
+                        break;
+                    }
+                    h.frame();
+                }
+                let (yaw, pitch) = (h.app.cam.yaw.to_degrees(), h.app.cam.pitch.to_degrees());
+                let near = |got: f64, want: &Value| want.as_f64().is_none_or(|w| ((got - w + 540.0).rem_euclid(360.0) - 180.0).abs() < 0.5);
+                if !near(yaw, &v["yaw_deg"]) || !near(pitch, &v["pitch_deg"]) {
+                    return Err(format!("camera yaw {yaw:.2}°, pitch {pitch:.2}°, want {v}"));
+                }
+            }
             "count" => {
                 // {"count": {"name": n, "value": x}}: a published count.
                 let n = v["name"].as_str().unwrap_or_default();

@@ -1,110 +1,22 @@
 [
- {
-  "note": "View cube hover from the home view: a face lights one patch, an edge the 2 patches on its faces, a corner the 3 around it (Fusion)."
- },
- {
-  "call": "ui.view",
-  "params": {
-   "view": "home"
-  }
- },
- {
-  "move": {
-   "cube": [
-    0,
-    0,
-    1
-   ]
-  }
- },
- {
-  "expect": {
-   "count": {
-    "name": "cube_highlights",
-    "value": 1
-   }
-  }
- },
- {
-  "move": {
-   "cube": [
-    0,
-    -0.9,
-    1
-   ]
-  }
- },
- {
-  "expect": {
-   "count": {
-    "name": "cube_highlights",
-    "value": 2
-   }
-  }
- },
- {
-  "move": {
-   "cube": [
-    1,
-    -0.9,
-    0
-   ]
-  }
- },
- {
-  "expect": {
-   "count": {
-    "name": "cube_highlights",
-    "value": 2
-   }
-  }
- },
- {
-  "move": {
-   "cube": [
-    0.9,
-    -0.9,
-    1
-   ]
-  }
- },
- {
-  "expect": {
-   "count": {
-    "name": "cube_highlights",
-    "value": 3
-   }
-  }
- },
- {
-  "move": {
-   "cube": [
-    0.9,
-    -1,
-    0.9
-   ]
-  }
- },
- {
-  "expect": {
-   "count": {
-    "name": "cube_highlights",
-    "value": 3
-   }
-  }
- },
- {
-  "move": [
-   800,
-   500
-  ]
- },
- {
-  "expect": {
-   "count": {
-    "name": "cube_highlights",
-    "value": 0
-   }
-  }
- }
+ {"note": "The view cube is a cube with chamfered corners. Its targets are the 6 faces and the 8 corner facets; hover lights exactly the one under the pointer (edges are not targets: a point on an edge goes to a neighbour), and a click turns the view to it."},
+ {"call": "ui.view", "params": {"view": "home"}},
+ {"move": {"cube": [0, 0, 1]}},
+ {"expect": {"count": {"name": "cube_highlights", "value": 1}, "shown_handles": ["cube_hover:top"]}},
+ {"move": {"cube": [0.3, -1, 0.2]}},
+ {"expect": {"count": {"name": "cube_highlights", "value": 1}, "shown_handles": ["cube_hover:front"]}},
+ {"note": "On the top-front edge: one target, the top or the front face."},
+ {"move": {"cube": [0, -1, 1]}},
+ {"expect": {"count": {"name": "cube_highlights", "value": 1}}},
+ {"move": {"cube": [0.873, -0.873, 0.873]}},
+ {"expect": {"count": {"name": "cube_highlights", "value": 1}, "shown_handles": ["cube_hover:top-front-right"]}},
+ {"click": {"handle": "cube:top-front-right"}},
+ {"expect": {"camera": {"yaw_deg": -45, "pitch_deg": 35.26}}},
+ {"click": {"handle": "cube:front"}},
+ {"expect": {"camera": {"yaw_deg": 0, "pitch_deg": 0}}},
+ {"call": "ui.view", "params": {"view": "home"}},
+ {"click": {"handle": "cube:top-back-right"}},
+ {"expect": {"camera": {"yaw_deg": -135, "pitch_deg": 35.26}}},
+ {"move": [800, 500]},
+ {"expect": {"count": {"name": "cube_highlights", "value": 0}}}
 ]

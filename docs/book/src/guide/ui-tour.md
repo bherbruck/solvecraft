@@ -15,7 +15,8 @@
 - **Viewport.** Click to select, Shift or Ctrl to add, drag for a window or crossing box. The
   wheel zooms at the cursor, the middle button pans and Shift+middle orbits (the mouse preset in
   Preferences switches to SolidWorks or Inventor style). The view cube and the navigation bar
-  change the view. Right-click for the marking menu: eight commands around the cursor, plus a
+  change the view: a cube face turns to its standard view, a chamfered corner to that corner's
+  iso view, and the house goes home. Right-click for the marking menu: eight commands around the cursor, plus a
   menu for whatever is under it.
 - **Dialogs** dock on the right with a live preview. Most features also show drag handles and a
   value box in the viewport.
