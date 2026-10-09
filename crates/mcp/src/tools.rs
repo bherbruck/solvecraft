@@ -43,8 +43,8 @@ pub fn tool_definitions() -> Vec<Value> {
             "list_commands",
             "List commands",
             "The command catalog: id, label, toolbar tab/panel, shortcut, one-line parameter docs and whether the command is \
-             enabled right now. Ids are Fusion's command ids where Fusion has the command (Extrude, SketchCreate, \
-             FusionFilletEdgesCommand…), dotted ids otherwise (sketch.inspect, timeline.rollback). Optional case-insensitive \
+             enabled right now. Ids are dotted and lower-case (solid.extrude, sketch.create, \
+             solid.fillet, sketch.inspect, timeline.rollback). Optional case-insensitive \
              substring `filter` over id, label, panel and params.",
             obj(json!({"filter": string("Substring to match, e.g. \"sketch\", \"fillet\", \"pattern\"")}), &[]),
             true,
@@ -54,9 +54,9 @@ pub fn tool_definitions() -> Vec<Value> {
             "execute",
             "Execute a command",
             "Run one command with JSON parameters, exactly as the toolbar, palette and scripts do. Never opens a dialog. \
-             Examples: SketchCreate {plane: \"XY\"}; ShapeRectangleTwoPoint {p0: [0,0], p1: [40,30]}; CircleCenterRadius \
-             {center: [20,15], radius: 5}; SketchDimension {entities: [curve id], value: \"width\"}; SketchStop {}; Extrude \
-             {distance: 20, operation: \"cut\"}; FusionFilletEdgesCommand {edges: [[0,0,10]], radius: 3}; PrimitiveBox {length, \
+             Examples: sketch.create {plane: \"XY\"}; sketch.rectangle.two_point {p0: [0,0], p1: [40,30]}; sketch.circle.center \
+             {center: [20,15], radius: 5}; sketch.dimension {entities: [curve id], value: \"width\"}; sketch.finish {}; solid.extrude \
+             {distance: 20, operation: \"cut\"}; solid.fillet {edges: [[0,0,10]], radius: 3}; solid.box {length, \
              width, height}. Lengths are mm; expressions may use parameters and units (\"width / 2\", \"30 deg\"). Returns \
              the command's result; failures leave the design unchanged.",
             obj(
@@ -192,7 +192,7 @@ pub fn tool_definitions() -> Vec<Value> {
             "Open a design",
             "Open a .solvecraft design file, a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
              Import base feature) or a 3MF/STL mesh (.3mf/.stl: mesh bodies). Replaces the current design; insert into it \
-             instead with the FusionImportCommandFromToolbar (STEP) or ParaMeshInsertAlignCommand (3MF/STL) commands.",
+             instead with the file.insert_step (STEP) or file.insert_mesh (3MF/STL) commands.",
             obj(json!({"path": string("Path to a .solvecraft, .step/.stp, .3mf or .stl file")}), &["path"]),
             false,
             true,
@@ -333,7 +333,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
                 Some(body) => json!({"bodies": [body]}),
                 None => json!({}),
             };
-            exec(b, "MeasureCommand", p)
+            exec(b, "inspect.measure", p)
         }
         "body_topology" => {
             let p = pick(a, &["body"]);
@@ -344,14 +344,14 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "set_parameter" => {
             let mut p = pick(a, &["name", "unit", "comment"]);
             p["expression"] = a.get("value").cloned().unwrap_or(Value::Null);
-            exec(b, "ChangeParameterCommand", p)
+            exec(b, "parameters.change", p)
         }
-        "export" => exec(b, "ExportCommand", pick(a, &["path", "format", "bodies"])),
-        "undo" => exec(b, "UndoCommand", json!({})),
-        "redo" => exec(b, "RedoCommand", json!({})),
-        "new_design" => exec(b, "NewDocumentCommand", pick(a, &["name"])),
+        "export" => exec(b, "file.export", pick(a, &["path", "format", "bodies"])),
+        "undo" => exec(b, "edit.undo", json!({})),
+        "redo" => exec(b, "edit.redo", json!({})),
+        "new_design" => exec(b, "file.new", pick(a, &["name"])),
         "open" => exec(b, "doc.open", pick(a, &["path"])),
-        "save" => exec(b, "SaveDocumentCommand", pick(a, &["path"])),
+        "save" => exec(b, "file.save", pick(a, &["path"])),
         other => Err(format!("unknown tool `{other}`")),
     }
 }
@@ -383,7 +383,7 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
                 let mut undone = 0u64;
                 if let (Some(before), Some(after)) = (before, rollback.then(|| undo_depth(b)).flatten()) {
                     for _ in before..after {
-                        if exec(b, "UndoCommand", json!({})).is_err() {
+                        if exec(b, "edit.undo", json!({})).is_err() {
                             break;
                         }
                         undone += 1;

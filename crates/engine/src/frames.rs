@@ -37,38 +37,36 @@ use K::*;
 /// The parameters each command takes in world coordinates.
 fn table(id: &str) -> &'static [(&'static str, K)] {
     match id {
-        "Extrude" | "Revolve" => &[("face", Pick), ("targets", Body), ("participants", Body)],
-        "PrimitiveBox" | "PrimitiveSphere" => &[("corner", Make), ("center", Make)],
-        "PrimitiveCylinder" | "PrimitiveCoil" | "PrimitiveTorus" => &[("base", Make), ("center", Make), ("axis", Dir)],
-        "FusionFilletEdgesCommand" | "FusionChamferCommand" => &[("edges", Picks), ("body", Body)],
-        "FusionHoleCommand" => &[("position", Pick), ("direction", Dir), ("body", Body)],
-        "ModifyScale" => &[("origin", Make), ("bodies", Body)],
-        "FusionOffsetFacesCommand" | "FusionShellBodyCommand" => &[("faces", Picks), ("body", Body)],
-        "FusionThreadCommand" => &[("face", Pick)],
-        "FusionDraftCommand" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
-        "FusionPressPullCommand" => &[("face", Pick), ("edges", Picks)],
-        "FusionReplaceFaceCommand" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],
-        "AlignCmd" => &[("from", Pick), ("from_face", Pick), ("to", Pick), ("to_face", Pick), ("bodies", Body)],
-        "MirrorCommand" | "FusionSplitBodyCommand" => &[("plane", Plane), ("bodies", Body), ("body", Body)],
-        "FusionBossCommand" | "FusionSnapFitCommand" | "FusionRestCommand" => {
+        "solid.extrude" | "solid.revolve" => &[("face", Pick), ("targets", Body), ("participants", Body)],
+        "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
+        "solid.cylinder" | "solid.coil" | "solid.torus" => &[("base", Make), ("center", Make), ("axis", Dir)],
+        "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
+        "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
+        "solid.scale" => &[("origin", Make), ("bodies", Body)],
+        "solid.offset_face" | "solid.shell" => &[("faces", Picks), ("body", Body)],
+        "solid.thread" => &[("face", Pick)],
+        "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
+        "solid.press_pull" => &[("face", Pick), ("edges", Picks)],
+        "solid.replace_face" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],
+        "solid.align" => &[("from", Pick), ("from_face", Pick), ("to", Pick), ("to_face", Pick), ("bodies", Body)],
+        "solid.mirror" | "solid.split_body" => &[("plane", Plane), ("bodies", Body), ("body", Body)],
+        "plastic.boss" | "plastic.snap_fit" | "plastic.rest" => {
             &[("position", Pick), ("direction", Dir), ("hook", Dir), ("along", Dir), ("body", Body)]
         }
-        "FusionLipCommand" | "ConvertToSheetMetalCmd" => &[("face", Pick), ("body", Body)],
-        "FusionSheetMetalFlangeCommand" | "FusionSheetMetalHemFlangeCommand" => &[("edges", Picks), ("body", Body)],
-        "SheetMetalFoldCmd" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
-        "SketchCreate" | "sketch.redefine" => &[("plane", Plane)],
-        "FusionAddEditDecalCommand" => &[("face", Pick)],
-        "IntersectCmd" => &[("refs", Picks)],
-        "ProjectToSurface" | "SketchIsoparametricCurve" => &[("face", Pick), ("body", Body)],
-        "IntersectionCurve" => &[("a", Picks), ("b", Picks)],
-        "FusionCurvatureCombAnalysisCommand" | "FusionMinimumRadiusAnalysisCommand" | "FusionIsoCurveAnalysisCommand" => {
-            &[("edges", Picks), ("faces", Picks)]
-        }
-        "parts.insert" | "FusionFastenersCommand" => &[("at", Pick), ("point", Make), ("direction", Dir)],
-        "AppearanceCommand" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
-        "FusionMoveCommand" => &[("bodies", Body), ("translate", Dir), ("axis", Dir), ("origin", Make)],
-        "FusionCombineCommand" => &[("target", Body), ("tools", Body)],
-        "SoftDeleteCommand" | "StockModelCommand" | "PhysicalMaterialCommand" => &[("bodies", Body)],
+        "plastic.lip" | "sheet.convert" => &[("face", Pick), ("body", Body)],
+        "sheet.flange" | "sheet.hem" => &[("edges", Picks), ("body", Body)],
+        "sheet.fold" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
+        "sketch.create" | "sketch.redefine" => &[("plane", Plane)],
+        "canvas.decal" => &[("face", Pick)],
+        "sketch.intersect" => &[("refs", Picks)],
+        "sketch.project_to_surface" | "sketch.isoparametric_curve" => &[("face", Pick), ("body", Body)],
+        "sketch.intersection_curve" => &[("a", Picks), ("b", Picks)],
+        "inspect.curvature_comb" | "inspect.minimum_radius" | "inspect.isocurve" => &[("edges", Picks), ("faces", Picks)],
+        "parts.insert" | "parts.fastener" => &[("at", Pick), ("point", Make), ("direction", Dir)],
+        "appearance.assign" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
+        "solid.move" => &[("bodies", Body), ("translate", Dir), ("axis", Dir), ("origin", Make)],
+        "solid.combine" => &[("target", Body), ("tools", Body)],
+        "solid.remove" | "solid.bounding_solid" | "material.assign" => &[("bodies", Body)],
         _ => &[],
     }
 }

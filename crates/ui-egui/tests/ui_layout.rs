@@ -9,10 +9,10 @@ use solvecraft_ui_egui::scenario::{Harness, check};
 fn harness() -> Harness {
     let mut h = Harness::new();
     for (id, p) in [
-        ("SketchCreate", json!({"plane": "XY"})),
-        ("ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [40, 30]})),
-        ("SketchStop", json!({})),
-        ("Extrude", json!({"distance": 10})),
+        ("sketch.create", json!({"plane": "XY"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 10})),
     ] {
         h.call("engine.execute", json!({"command": id, "params": p}));
     }

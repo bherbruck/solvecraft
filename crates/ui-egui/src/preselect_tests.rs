@@ -15,7 +15,7 @@ fn app_with(script: serde_json::Value) -> SolveApp {
 }
 
 fn boxed() -> SolveApp {
-    app_with(json!([{"command": "PrimitiveBox", "params": {"length": 40, "width": 30, "height": 20}}]))
+    app_with(json!([{"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}]))
 }
 
 /// The face of Body1 whose centre is at `c`.
@@ -42,13 +42,13 @@ fn start(app: &mut SolveApp, sels: Vec<Sel>, id: &str) -> Dialog {
 #[test]
 fn profiles_then_extrude_takes_them_all() {
     let mut app = app_with(json!([
-        {"command": "SketchCreate", "params": {"plane": "XY"}},
-        {"command": "CircleCenterRadius", "params": {"center": [0, 0], "radius": 5}},
-        {"command": "CircleCenterRadius", "params": {"center": [20, 0], "radius": 5}},
-        {"command": "SketchStop", "params": {}},
+        {"command": "sketch.create", "params": {"plane": "XY"}},
+        {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 5}},
+        {"command": "sketch.circle.center", "params": {"center": [20, 0], "radius": 5}},
+        {"command": "sketch.finish", "params": {}},
     ]));
     let sk = app.session.doc.features.first().unwrap().id;
-    let d = start(&mut app, vec![Sel::Profile { sketch: sk, index: 0 }, Sel::Profile { sketch: sk, index: 1 }], "Extrude");
+    let d = start(&mut app, vec![Sel::Profile { sketch: sk, index: 0 }, Sel::Profile { sketch: sk, index: 1 }], "solid.extrude");
     assert_eq!(d.inputs[0].items.len(), 2);
     assert!(d.focus, "the value box takes the keyboard");
     assert!(apply_commands(&app, &d).is_ok());
@@ -58,7 +58,7 @@ fn profiles_then_extrude_takes_them_all() {
 fn edges_then_fillet_takes_them_with_chains() {
     let mut app = boxed();
     let (a, b) = (edge(&app, Vec3::new(0.0, 0.0, 10.0)), edge(&app, Vec3::new(20.0, 0.0, 20.0)));
-    let d = start(&mut app, vec![a, b], "FusionFilletEdgesCommand");
+    let d = start(&mut app, vec![a, b], "solid.fillet");
     assert_eq!(d.inputs[0].items.len(), 2, "box edges are not tangent to others");
     let cmds = apply_commands(&app, &d).unwrap();
     assert_eq!(cmds[0].1["edges"].as_array().unwrap().len(), 2);
@@ -68,7 +68,7 @@ fn edges_then_fillet_takes_them_with_chains() {
 fn face_then_extrude_press_pulls_it() {
     let mut app = boxed();
     let top = face(&app, Vec3::new(20.0, 15.0, 20.0));
-    let d = start(&mut app, vec![top], "Extrude");
+    let d = start(&mut app, vec![top], "solid.extrude");
     let cmds = apply_commands(&app, &d).unwrap();
     assert!(cmds[0].1.get("face").is_some());
 }
@@ -78,9 +78,9 @@ fn faces_then_shell_and_face_then_hole() {
     let mut app = boxed();
     let top = face(&app, Vec3::new(20.0, 15.0, 20.0));
     let front = face(&app, Vec3::new(20.0, 0.0, 10.0));
-    let d = start(&mut app, vec![top.clone(), front], "FusionShellBodyCommand");
+    let d = start(&mut app, vec![top.clone(), front], "solid.shell");
     assert_eq!(d.inputs[0].items.len(), 2);
-    let d = start(&mut app, vec![top], "FusionHoleCommand");
+    let d = start(&mut app, vec![top], "solid.hole");
     assert_eq!(d.inputs[0].items.len(), 1);
     let cmds = apply_commands(&app, &d).unwrap();
     assert!(cmds[0].1.get("position").is_some());
@@ -89,12 +89,12 @@ fn faces_then_shell_and_face_then_hole() {
 #[test]
 fn line_and_profile_then_revolve_routes_each() {
     let mut app = app_with(json!([
-        {"command": "SketchCreate", "params": {"plane": "XZ"}},
-        {"command": "ShapeRectangleTwoPoint", "params": {"p0": [10, 0], "p1": [20, 10]}},
-        {"command": "DrawPolyline", "params": {"points": [[0, 0], [0, 30]], "ids": ["axis"]}},
+        {"command": "sketch.create", "params": {"plane": "XZ"}},
+        {"command": "sketch.rectangle.two_point", "params": {"p0": [10, 0], "p1": [20, 10]}},
+        {"command": "sketch.line", "params": {"points": [[0, 0], [0, 30]], "ids": ["axis"]}},
     ]));
     let sk = app.session.active_sketch.unwrap();
-    let d = start(&mut app, vec![Sel::SketchCurve { id: "axis".into() }, Sel::Profile { sketch: sk, index: 0 }], "Revolve");
+    let d = start(&mut app, vec![Sel::SketchCurve { id: "axis".into() }, Sel::Profile { sketch: sk, index: 0 }], "solid.revolve");
     assert_eq!(d.inputs[0].items, vec![Sel::Profile { sketch: sk, index: 0 }]);
     assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: "axis".into() }]);
 }
@@ -103,7 +103,7 @@ fn line_and_profile_then_revolve_routes_each() {
 fn face_then_move_takes_the_body_and_odd_items_are_ignored() {
     let mut app = boxed();
     let top = face(&app, Vec3::new(20.0, 15.0, 20.0));
-    let d = start(&mut app, vec![top, Sel::Axis { name: "X".into() }], "FusionMoveCommand");
+    let d = start(&mut app, vec![top, Sel::Axis { name: "X".into() }], "solid.move");
     assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Body1".into() }]);
     assert!(matches!(d.kind, Kind::Move { .. }));
 }
@@ -111,14 +111,14 @@ fn face_then_move_takes_the_body_and_odd_items_are_ignored() {
 #[test]
 fn hole_at_sketch_points() {
     let mut app = app_with(json!([
-        {"command": "PrimitiveBox", "params": {"length": 40, "width": 30, "height": 20}},
-        {"command": "SketchCreate", "params": {"plane": {"face": [20, 15, 20]}}},
-        {"command": "DrawPoint", "params": {"point": [10, 10], "id": "h1"}},
-        {"command": "DrawPoint", "params": {"point": [30, 20], "id": "h2"}},
-        {"command": "SketchStop", "params": {}},
+        {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}},
+        {"command": "sketch.create", "params": {"plane": {"face": [20, 15, 20]}}},
+        {"command": "sketch.point", "params": {"point": [10, 10], "id": "h1"}},
+        {"command": "sketch.point", "params": {"point": [30, 20], "id": "h2"}},
+        {"command": "sketch.finish", "params": {}},
     ]));
     let sk = app.session.doc.features.iter().find(|f| matches!(f.kind, solvecraft_engine::doc::FeatureKind::Sketch { .. })).unwrap().id;
-    app.start("FusionHoleCommand");
+    app.start("solid.hole");
     let mut d = app.dialog.clone().unwrap();
     if let Kind::Hole { opts, .. } = &mut d.kind {
         opts.multiple = true;
@@ -135,12 +135,12 @@ fn hole_at_sketch_points() {
 #[test]
 fn a_hole_is_patterned_as_a_feature() {
     let mut app = app_with(json!([
-        {"command": "PrimitiveBox", "params": {"length": 60, "width": 40, "height": 10}},
-        {"command": "FusionHoleCommand", "params": {"position": [10, 10, 10], "diameter": 5}}
+        {"command": "solid.box", "params": {"length": 60, "width": 40, "height": 10}},
+        {"command": "solid.hole", "params": {"position": [10, 10, 10], "diameter": 5}}
     ]));
     let hole = app.session.doc.features.last().unwrap().id;
     // Picked in the timeline before the command: the objects become features.
-    let mut d = start(&mut app, vec![Sel::Feature { id: hole }], "PatternRectangular");
+    let mut d = start(&mut app, vec![Sel::Feature { id: hole }], "solid.pattern.rectangular");
     assert_eq!(d.inputs[0].accept, crate::selection::FEATURES);
     assert_eq!(d.inputs[0].items, vec![Sel::Feature { id: hole }]);
     d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
@@ -164,7 +164,7 @@ fn a_hole_is_patterned_as_a_feature() {
         let [a, b, c] = m.tri(&m.triangles[t]).unwrap();
         crate::viewport::Hit::Face { body: "Body1".into(), index: m.tri_face[t] as usize, point: (a + b + c) * (1.0 / 3.0) }
     };
-    let mut d = start(&mut app, vec![], "PatternCircular");
+    let mut d = start(&mut app, vec![], "solid.pattern.circular");
     d.inputs[0].accept = crate::selection::FEATURES;
     let box_id = app.session.doc.features[0].id;
     assert_eq!(d.candidate(&app.session, &face_at(Vec3::new(12.5, 10.0, 5.0))), Some(Sel::Feature { id: hole }));
@@ -180,11 +180,11 @@ fn a_hole_is_patterned_as_a_feature() {
 #[test]
 fn a_hole_is_mirrored_as_a_feature() {
     let mut app = app_with(json!([
-        {"command": "PrimitiveBox", "params": {"length": 60, "width": 40, "height": 10}},
-        {"command": "FusionHoleCommand", "params": {"position": [10, 10, 10], "diameter": 5}}
+        {"command": "solid.box", "params": {"length": 60, "width": 40, "height": 10}},
+        {"command": "solid.hole", "params": {"position": [10, 10, 10], "diameter": 5}}
     ]));
     let hole = app.session.doc.features.last().unwrap().id;
-    let mut d = start(&mut app, vec![Sel::Feature { id: hole }], "MirrorCommand");
+    let mut d = start(&mut app, vec![Sel::Feature { id: hole }], "solid.mirror");
     assert_eq!(d.inputs[0].accept, crate::selection::FEATURES);
     d.inputs[1].items = vec![Sel::Plane { name: "YZ".into() }];
     let cmds = apply_commands(&app, &d).unwrap();
@@ -195,7 +195,7 @@ fn a_hole_is_mirrored_as_a_feature() {
 fn chamfer_types_send_their_values() {
     let mut app = boxed();
     let e = edge(&app, Vec3::new(20.0, 0.0, 20.0));
-    let mut d = start(&mut app, vec![e], "FusionChamferCommand");
+    let mut d = start(&mut app, vec![e], "solid.chamfer");
     let mut with = |t: usize| {
         if let Kind::Fillet { ctype, distance2, angle, flip, .. } = &mut d.kind {
             *ctype = t;

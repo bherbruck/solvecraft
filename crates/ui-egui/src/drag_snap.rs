@@ -200,9 +200,9 @@ pub fn release(app: &mut SolveApp) {
     let Some(s) = current() else { return };
     clear();
     let (cmd, params) = match &s.target {
-        Target::Point(t) => ("ConstraintCoincident", json!({"a": s.point, "b": t})),
-        Target::Mid(l) => ("ConstraintMidPoint", json!({"point": s.point, "line": l})),
-        Target::On(c) => ("ConstraintCoincident", json!({"a": s.point, "b": c})),
+        Target::Point(t) => ("sketch.constraint.coincident", json!({"a": s.point, "b": t})),
+        Target::Mid(l) => ("sketch.constraint.midpoint", json!({"point": s.point, "line": l})),
+        Target::On(c) => ("sketch.constraint.coincident", json!({"a": s.point, "b": c})),
         Target::Align => return,
     };
     // A snap that would over-constrain the sketch is simply not kept.

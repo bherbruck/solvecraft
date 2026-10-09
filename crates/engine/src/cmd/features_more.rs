@@ -11,35 +11,35 @@ use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("PrimitiveCoil", "Coil", coil).at("SOLID", "CREATE").icon("coil").params(
+    CommandSpec::new("solid.coil", "Coil", coil).at("SOLID", "CREATE").icon("coil").params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
          base?: [x,y,z]; axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; operation?, targets?, name?, body_name?",
     ),
-    CommandSpec::new("FusionRibCommand", "Rib", rib)
+    CommandSpec::new("solid.rib", "Rib", rib)
         .at("SOLID", "CREATE")
         .icon("rib")
         .params("sketch, curves: [open curve ids, in order]; thickness (across the sketch plane); depth? (default: to the next face); flip?: bool (fill to the other side)"),
-    CommandSpec::new("FusionWebCommand", "Web", web)
+    CommandSpec::new("solid.web", "Web", web)
         .at("SOLID", "CREATE")
         .icon("rib")
         .params("sketch, curves: [open curve ids] (one wall each); thickness; depth? (default: to the next face); flip?: bool"),
-    CommandSpec::new("EmbossCmd", "Emboss", emboss)
+    CommandSpec::new("solid.emboss", "Emboss", emboss)
         .at("SOLID", "CREATE")
         .icon("emboss")
         .params("sketch (on a planar face), profiles?; depth; mode?: emboss|deboss (default emboss); targets?"),
-    CommandSpec::new("FusionReplaceFaceCommand", "Replace Face", replace_face)
+    CommandSpec::new("solid.replace_face", "Replace Face", replace_face)
         .at("SOLID", "MODIFY")
         .icon("offset_face")
         .params("faces: [[x,y,z] points on planar faces]; target: plane (XY|XZ|YZ|construction plane|{origin, normal}) | target_face: [x,y,z] on a parallel planar face; body?"),
-    CommandSpec::new("AlignCmd", "Align", align)
+    CommandSpec::new("solid.align", "Align", align)
         .at("SOLID", "MODIFY")
         .icon("move")
         .params("bodies: [names]; from: [x,y,z] | from_face: [x,y,z]; to: [x,y,z] | to_face: [x,y,z] (faces also turn to meet); flip?: bool"),
-    CommandSpec::new("SoftDeleteCommand", "Remove", remove).at("SOLID", "MODIFY").icon("delete").params("bodies: [names] (removed from here on in the timeline)"),
+    CommandSpec::new("solid.remove", "Remove", remove).at("SOLID", "MODIFY").icon("delete").params("bodies: [names] (removed from here on in the timeline)"),
 ];
 
 fn coil(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "PrimitiveCoil";
+    let cmd = "solid.coil";
     let base = p.get("base").and_then(vec3).unwrap_or(Vec3::ZERO);
     let axis = match p.get("axis") {
         None => Vec3::Z,
@@ -131,15 +131,15 @@ fn rib_like(s: &mut Session, p: &Value, cmd: &str, web: bool) -> Result<Value> {
 }
 
 fn rib(s: &mut Session, p: &Value) -> Result<Value> {
-    rib_like(s, p, "FusionRibCommand", false)
+    rib_like(s, p, "solid.rib", false)
 }
 
 fn web(s: &mut Session, p: &Value) -> Result<Value> {
-    rib_like(s, p, "FusionWebCommand", true)
+    rib_like(s, p, "solid.web", true)
 }
 
 fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "EmbossCmd";
+    let cmd = "solid.emboss";
     let sketch = feature_sketch(s, p, cmd)?;
     let profiles = profiles(p, cmd)?;
     let depth = req_expr(cmd, p, "depth")?;
@@ -166,7 +166,7 @@ fn face_points(p: &Value, k: &str, cmd: &str) -> Result<Vec<Vec3>> {
 }
 
 fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionReplaceFaceCommand";
+    let cmd = "solid.replace_face";
     let faces = face_points(p, "faces", cmd)?;
     for f in &faces {
         if super::face::face_normal(s, *f).is_none() {
@@ -186,7 +186,7 @@ fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn align(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "AlignCmd";
+    let cmd = "solid.align";
     let bodies = string_list(p, "bodies");
     if bodies.is_empty() {
         return Err(bad(cmd, "`bodies` must list the bodies to move"));
@@ -215,7 +215,7 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn remove(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "SoftDeleteCommand";
+    let cmd = "solid.remove";
     let bodies = string_list(p, "bodies");
     if bodies.is_empty() {
         return Err(bad(cmd, "`bodies` must list bodies"));

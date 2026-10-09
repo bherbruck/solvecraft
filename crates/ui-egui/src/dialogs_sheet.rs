@@ -131,26 +131,22 @@ fn new_flange(ty: usize) -> Sm {
 /// The dialog for a sheet metal command.
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let (sm, inputs) = match id {
-        "FusionSheetMetalFlangeCommand" => (new_flange(0), vec![SelInput::new("Profile / Edges", PROFILES | EDGES | CURVES, true)]),
-        "FusionSheetMetalHemFlangeCommand" => {
-            (Sm::Hem { length: "5 mm".into(), gap: String::new(), flip: false }, vec![SelInput::new("Edges", EDGES, true)])
-        }
-        "SheetMetalFoldCmd" => (
+        "sheet.flange" => (new_flange(0), vec![SelInput::new("Profile / Edges", PROFILES | EDGES | CURVES, true)]),
+        "sheet.hem" => (Sm::Hem { length: "5 mm".into(), gap: String::new(), flip: false }, vec![SelInput::new("Edges", EDGES, true)]),
+        "sheet.fold" => (
             Sm::Fold { angle: "90 deg".into(), radius: String::new(), position: 0, flip: false },
             vec![SelInput::new("Bend Line", AXES, false), SelInput::new("Stationary Side", PLANAR_FACES, false)],
         ),
-        "FusionSheetmetalUnfoldCommand" => (Sm::Unfold { refold: false }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
+        "sheet.unfold" => (Sm::Unfold { refold: false }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         "sheet.refold" => (Sm::Unfold { refold: true }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
-        "ConvertToSheetMetalCmd" => (Sm::Convert { rule: 0 }, vec![SelInput::new("Face", PLANAR_FACES, false)]),
-        "FusionSheetMetalRulesCommand" => {
+        "sheet.convert" => (Sm::Convert { rule: 0 }, vec![SelInput::new("Face", PLANAR_FACES, false)]),
+        "sheet.manage_rules" => {
             let active = app.session.doc.sheet.active.clone();
             let rules = rule_list(app);
             let pick = active.and_then(|a| rules.iter().position(|r| r.name == a)).unwrap_or(0);
             (Sm::Rules { pick, name: String::new(), values: Vec::new(), active: true, loaded: None }, vec![])
         }
-        "FusionSheetMetalFlatPatternCmd" => {
-            (Sm::FlatPattern { data: None, key: None, status: None }, vec![SelInput::new("Body (last if none)", BODIES, false)])
-        }
+        "sheet.flat_pattern" => (Sm::FlatPattern { data: None, key: None, status: None }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         _ => return None,
     };
     Some((Kind::Sheet(sm), inputs))
@@ -307,7 +303,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 row_label(ui, "");
                 if ui.button("Delete rule").clicked() {
                     let n = rules.get(*pick).map(|r| r.name.clone()).unwrap_or_default();
-                    match app.run("FusionSheetMetalRulesCommand", json!({"name": n, "delete": true})) {
+                    match app.run("sheet.manage_rules", json!({"name": n, "delete": true})) {
                         Ok(_) => {
                             *pick = 0;
                             *loaded = None;
@@ -326,7 +322,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 if let Some(b) = &body {
                     p["body"] = json!(b);
                 }
-                *data = Some(app.session.execute("FusionSheetMetalFlatPatternCmd", &p).map_err(|e| e.to_string()));
+                *data = Some(app.session.execute("sheet.flat_pattern", &p).map_err(|e| e.to_string()));
                 *key = Some(want);
             }
             match data {
@@ -458,7 +454,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             if let Some(r) = rule_value(app, *rule).filter(|_| p["type"] != "edge") {
                 p["rule"] = json!(r);
             }
-            ("FusionSheetMetalFlangeCommand", p)
+            ("sheet.flange", p)
         }
         Sm::Hem { length, gap, flip } => {
             let edges = edge_points(inputs);
@@ -469,7 +465,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             if !gap.trim().is_empty() {
                 p["gap"] = json!(gap);
             }
-            ("FusionSheetMetalHemFlangeCommand", p)
+            ("sheet.hem", p)
         }
         Sm::Fold { angle, radius, position, flip } => {
             let mut p = json!({"angle": angle, "position": FOLD_POSITIONS.get(*position).copied().unwrap_or("centerline"), "flip": flip});
@@ -496,14 +492,14 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             if let Some(Sel::Face { point, .. }) = items(inputs, 1).first() {
                 p["fixed"] = pt(*point);
             }
-            ("SheetMetalFoldCmd", p)
+            ("sheet.fold", p)
         }
         Sm::Unfold { refold } => {
             let mut p = json!({});
             if let Some(Sel::Body { name }) = items(inputs, 0).first() {
                 p["body"] = json!(name);
             }
-            (if *refold { "sheet.refold" } else { "FusionSheetmetalUnfoldCommand" }, p)
+            (if *refold { "sheet.refold" } else { "sheet.unfold" }, p)
         }
         Sm::Convert { rule } => {
             let Some(Sel::Face { body, point, .. }) = items(inputs, 0).first() else { return Err("select the plate's large face first".into()) };
@@ -511,7 +507,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             if let Some(r) = rule_value(app, *rule) {
                 p["rule"] = json!(r);
             }
-            ("ConvertToSheetMetalCmd", p)
+            ("sheet.convert", p)
         }
         Sm::Rules { pick, name, values, active, .. } => {
             let rules = rule_list(app);
@@ -528,7 +524,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                     p[*k] = json!(v);
                 }
             }
-            ("FusionSheetMetalRulesCommand", p)
+            ("sheet.manage_rules", p)
         }
         Sm::FlatPattern { .. } => return Ok(Vec::new()),
     };
@@ -602,7 +598,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 position: FOLD_POSITIONS.iter().position(|x| x == position || (*x == "mould" && position == "mold")).unwrap_or(0),
                 flip: *flip,
             };
-            let (_, mut ins) = start(app, "SheetMetalFoldCmd")?;
+            let (_, mut ins) = start(app, "sheet.fold")?;
             match curve {
                 Some(c) => {
                     if let Some(i) = ins.first_mut() {
@@ -624,11 +620,11 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         _ => return None,
     };
     let id = match &k {
-        Sm::Flange { .. } => "FusionSheetMetalFlangeCommand",
-        Sm::Hem { .. } => "FusionSheetMetalHemFlangeCommand",
-        Sm::Unfold { refold: false } => "FusionSheetmetalUnfoldCommand",
+        Sm::Flange { .. } => "sheet.flange",
+        Sm::Hem { .. } => "sheet.hem",
+        Sm::Unfold { refold: false } => "sheet.unfold",
         Sm::Unfold { .. } => "sheet.refold",
-        _ => "ConvertToSheetMetalCmd",
+        _ => "sheet.convert",
     };
     let (_, mut inputs) = start(app, id)?;
     if let Some(i) = inputs.first_mut() {

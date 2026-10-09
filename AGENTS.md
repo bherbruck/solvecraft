@@ -50,7 +50,8 @@ People trust SolveCraft with their designs; a crash loses their work. **This out
   (`cargo xtask assets` enforces it). Screenshots of Autodesk software are never committed.
   Breaking this rule is the most serious mistake you can make in this repo.
 - **Everything is a command.** User-visible behaviour = a command in `crates/engine/src/cmd/*`
-  (`CommandSpec`: id = Fusion's command id where Fusion has the command, else a dotted id; label;
+  (`CommandSpec`: id = our own dotted, lower-case id `<area>.<thing>[.<variant>]` such as
+  `solid.extrude` or `sketch.rectangle.two_point`, never another product's command id; label;
   toolbar tab and panel; icon; shortcut; params doc; `enabled`; JSON `run`) + tests. The toolbar,
   dialogs, sketch tools, palette, scripts, CLI and control channel all reach the same commands.
 - **Programmatic calls never open dialogs.** `engine.execute` runs the JSON form; only toolbar
@@ -74,8 +75,8 @@ People trust SolveCraft with their designs; a crash loses their work. **This out
 - `cargo run --release -p solvecraft -- --sample --control PORT` (sample design + control channel).
   Pick a free port. Without a display, run it under `Xvfb :99` with `DISPLAY=:99`.
 - Drive it with JSON lines on `127.0.0.1:PORT` (see `docs/control-protocol.md`):
-  - `{"id":1,"method":"engine.execute","params":{"command":"Extrude","params":{"distance":20}}}`
-  - `{"id":2,"method":"ui.start","params":{"command":"SketchCreate"}}` then `ui.click {x, y}`
+  - `{"id":1,"method":"engine.execute","params":{"command":"solid.extrude","params":{"distance":20}}}`
+  - `{"id":2,"method":"ui.start","params":{"command":"sketch.create"}}` then `ui.click {x, y}`
   - `{"id":3,"method":"ui.screenshot","params":{"path":"/tmp/shot.png"}}` then read the PNG.
 - **For UI work, look at the result** (screenshot, read the PNG). Without a window use
   `ui.render` or `solvecraft-cli snapshot`.

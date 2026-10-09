@@ -8,83 +8,83 @@ use solvecraft_engine::CommandSpec;
 use solvecraft_engine::doc::FeatureKind;
 
 const ASSEMBLE: &[&str] = &[
-    "FusionCreateNewComponentCommand",
-    "JointAssembleCmdNew",
-    "JointAsBuiltCmd",
-    "JointOrigin",
-    "RigidGroupCmd",
-    "FusionMoveJointsCommand",
-    "FusionMotionRelationshipCommand",
-    "FusionMotionStudyCommand",
+    "component.create",
+    "joint.create",
+    "joint.as_built",
+    "joint.origin",
+    "joint.rigid_group",
+    "joint.drive",
+    "joint.motion_link",
+    "motion.study",
     "explode.create",
-    "EnableContactSetsCmd",
-    "EnableAllContactCmd",
-    "DisableAllContactCmd",
-    "ContactSetCmd",
-    "InterferenceCheckCommand",
+    "contact.enable_sets",
+    "contact.enable_all",
+    "contact.disable_all",
+    "contact.create",
+    "inspect.interference",
 ];
 
 const SHEET_CREATE: &[&str] = &[
-    "SketchCreate",
-    "FusionSheetMetalFlangeCommand",
-    "FusionSheetMetalFlatPatternCmd",
-    "FusionSheetMetalHemFlangeCommand",
-    "SheetMetalFoldCmd",
-    "ConvertToSheetMetalCmd",
-    "FusionCreateNewComponentCommand",
-    "Extrude",
-    "FusionHoleCommand",
-    "FusionThreadCommand",
-    "PatternRectangular",
-    "PatternCircular",
-    "PatternOnPath",
-    "MirrorCommand",
-    "JointOrigin",
+    "sketch.create",
+    "sheet.flange",
+    "sheet.flat_pattern",
+    "sheet.hem",
+    "sheet.fold",
+    "sheet.convert",
+    "component.create",
+    "solid.extrude",
+    "solid.hole",
+    "solid.thread",
+    "solid.pattern.rectangular",
+    "solid.pattern.circular",
+    "solid.pattern.path",
+    "solid.mirror",
+    "joint.origin",
 ];
 
 const SHEET_MODIFY: &[&str] = &[
-    "FusionSheetMetalRulesCommand",
-    "FusionSheetmetalUnfoldCommand",
+    "sheet.manage_rules",
+    "sheet.unfold",
     "sheet.refold",
-    "FusionFilletEdgesCommand",
-    "FusionChamferCommand",
-    "FusionMoveCommand",
-    "AlignCmd",
-    "FusionDeleteCommand",
-    "SoftDeleteCommand",
-    "PhysicalMaterialCommand",
-    "ChangeParameterCommand",
+    "solid.fillet",
+    "solid.chamfer",
+    "solid.move",
+    "solid.align",
+    "timeline.delete",
+    "solid.remove",
+    "material.assign",
+    "parameters.change",
 ];
 
-const PLASTIC_SETUP: &[&str] = &["FusionManagePlasticRuleCommand", "FusionAssignPlasticRuleCommand"];
+const PLASTIC_SETUP: &[&str] = &["plastic.manage_rules", "plastic.assign_rule"];
 
 const PLASTIC_CREATE: &[&str] = &[
-    "SketchCreate",
-    "FusionBossCommand",
-    "FusionSnapFitCommand",
-    "FusionLipCommand",
-    "FusionRestCommand",
-    "FusionCreateNewComponentCommand",
-    "Extrude",
-    "Revolve",
-    "Sweep",
-    "SolidLoft",
-    "FusionRibCommand",
-    "FusionWebCommand",
-    "EmbossCmd",
-    "FusionHoleCommand",
-    "FusionThreadCommand",
-    "PrimitiveBox",
-    "PrimitiveCylinder",
-    "PrimitiveSphere",
-    "PrimitiveTorus",
-    "PrimitiveCoil",
-    "PrimitivePipe",
-    "PatternRectangular",
-    "PatternCircular",
-    "PatternOnPath",
-    "MirrorCommand",
-    "JointOrigin",
+    "sketch.create",
+    "plastic.boss",
+    "plastic.snap_fit",
+    "plastic.lip",
+    "plastic.rest",
+    "component.create",
+    "solid.extrude",
+    "solid.revolve",
+    "solid.sweep",
+    "solid.loft",
+    "solid.rib",
+    "solid.web",
+    "solid.emboss",
+    "solid.hole",
+    "solid.thread",
+    "solid.box",
+    "solid.cylinder",
+    "solid.sphere",
+    "solid.torus",
+    "solid.coil",
+    "solid.pipe",
+    "solid.pattern.rectangular",
+    "solid.pattern.circular",
+    "solid.pattern.path",
+    "solid.mirror",
+    "joint.origin",
 ];
 
 /// Panels of a tab, when this module lays the tab out.
@@ -152,17 +152,17 @@ mod tests {
     fn tabs_share_commands_in_fusion_order() {
         for tab in ["SOLID", "SHEET METAL", "PLASTIC"] {
             let a = ids(tab, "ASSEMBLE");
-            assert_eq!(a.get(1).copied(), Some("JointAssembleCmdNew"), "{tab}: {a:?}");
-            assert!(a.contains(&"FusionMoveJointsCommand") && a.contains(&"FusionCreateNewComponentCommand"));
+            assert_eq!(a.get(1).copied(), Some("joint.create"), "{tab}: {a:?}");
+            assert!(a.contains(&"joint.drive") && a.contains(&"component.create"));
         }
         let c = ids("SHEET METAL", "CREATE");
-        assert_eq!(c.get(1).copied(), Some("FusionSheetMetalFlangeCommand"));
-        assert!(c.contains(&"Extrude") && c.contains(&"FusionSheetMetalFlatPatternCmd"));
-        assert!(ids("SHEET METAL", "MODIFY").contains(&"FusionSheetmetalUnfoldCommand"));
-        assert!(ids("PLASTIC", "SETUP").contains(&"FusionManagePlasticRuleCommand"));
+        assert_eq!(c.get(1).copied(), Some("sheet.flange"));
+        assert!(c.contains(&"solid.extrude") && c.contains(&"sheet.flat_pattern"));
+        assert!(ids("SHEET METAL", "MODIFY").contains(&"sheet.unfold"));
+        assert!(ids("PLASTIC", "SETUP").contains(&"plastic.manage_rules"));
         let p = ids("PLASTIC", "CREATE");
-        assert!(p.contains(&"FusionBossCommand") && p.contains(&"FusionRibCommand") && p.contains(&"FusionLipCommand"));
-        assert!(ids("PLASTIC", "MODIFY").contains(&"FusionShellBodyCommand"));
+        assert!(p.contains(&"plastic.boss") && p.contains(&"solid.rib") && p.contains(&"plastic.lip"));
+        assert!(ids("PLASTIC", "MODIFY").contains(&"solid.shell"));
         assert!(panels("PLASTIC").is_some_and(|p| p.first() == Some(&"SETUP")));
     }
 }

@@ -367,10 +367,10 @@ mod tests {
     fn plate() -> Session {
         let mut s = Session::default();
         for (id, p) in [
-            ("SketchCreate", json!({"plane": "XY"})),
-            ("ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [40, 30]})),
-            ("SketchStop", json!({})),
-            ("Extrude", json!({"distance": 20})),
+            ("sketch.create", json!({"plane": "XY"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance": 20})),
         ] {
             s.execute(id, &p).unwrap();
         }
@@ -383,7 +383,7 @@ mod tests {
     fn fillet_preview_scene() {
         let s = plate();
         let (rev, undo) = (s.revision, s.undo.len());
-        let b = compute(&s, &[("FusionFilletEdgesCommand".into(), json!({"edges": [[0, 0, 10]], "radius": 3}))], colors()).unwrap();
+        let b = compute(&s, &[("solid.fillet".into(), json!({"edges": [[0, 0, 10]], "radius": 3}))], colors()).unwrap();
         assert_eq!(b.replaced, vec!["Body1".to_string()]);
         let added = count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().added);
         let kept = count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().body);
@@ -397,10 +397,10 @@ mod tests {
     #[test]
     fn cut_preview_scene() {
         let mut s = plate();
-        s.execute("SketchCreate", &json!({"plane": "XY"})).unwrap();
-        s.execute("CircleCenterRadius", &json!({"center": [20, 15], "radius": 5})).unwrap();
-        s.execute("SketchStop", &json!({})).unwrap();
-        let b = compute(&s, &[("Extrude".into(), json!({"distance": 20, "operation": "cut"}))], colors()).unwrap();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [20, 15], "radius": 5})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let b = compute(&s, &[("solid.extrude".into(), json!({"distance": 20, "operation": "cut"}))], colors()).unwrap();
         assert!(b.replaced.is_empty());
         assert!(b.scene.tris.is_empty() && !b.scene.xray.is_empty());
         assert!(b.error.is_none());
@@ -410,14 +410,14 @@ mod tests {
     #[test]
     fn extrude_preview_scene() {
         let mut s = Session::default();
-        s.execute("SketchCreate", &json!({"plane": "XY"})).unwrap();
-        s.execute("CircleCenterRadius", &json!({"center": [0, 0], "radius": 5})).unwrap();
-        s.execute("SketchStop", &json!({})).unwrap();
-        let b = compute(&s, &[("Extrude".into(), json!({"distance": "15 mm"}))], colors()).unwrap();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [0, 0], "radius": 5})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let b = compute(&s, &[("solid.extrude".into(), json!({"distance": "15 mm"}))], colors()).unwrap();
         assert!(b.replaced.is_empty());
         assert_eq!(count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().body), 0);
         assert!(b.scene.ghost.is_empty());
-        assert!(compute(&s, &[("Extrude".into(), json!({"distance": "1 +"}))], colors()).is_err());
+        assert!(compute(&s, &[("solid.extrude".into(), json!({"distance": "1 +"}))], colors()).is_err());
         assert!(s.model.state().bodies.is_empty());
     }
 }

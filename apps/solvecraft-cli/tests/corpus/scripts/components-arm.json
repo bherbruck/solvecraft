@@ -1,15 +1,15 @@
 {"commands": [
- {"command": "PrimitiveBox", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Base"}},
- {"command": "FusionCreateNewComponentCommand", "params": {"name": "Arm"}},
- {"command": "PrimitiveBox", "params": {"corner": [20, 0, 0], "length": 10, "width": 4, "height": 4, "body_name": "ArmBody"}},
- {"command": "FusionFilletEdgesCommand", "params": {"edges": [[25, 4, 4]], "radius": 1}},
+ {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Base"}},
+ {"command": "component.create", "params": {"name": "Arm"}},
+ {"command": "solid.box", "params": {"corner": [20, 0, 0], "length": 10, "width": 4, "height": 4, "body_name": "ArmBody"}},
+ {"command": "solid.fillet", "params": {"edges": [[25, 4, 4]], "radius": 1}},
  {"command": "component.activate", "params": {"component": 0}},
  {"command": "occurrence.move", "params": {"occurrence": 3, "translate": [0, 50, 0]}},
  {"command": "occurrence.copy", "params": {"component": "Arm", "translate": [0, 20, 0]}},
  {"command": "component.paste_new", "params": {"component": "Arm", "translate": [0, -30, 0]}},
  {"command": "occurrence.ground", "params": {"occurrence": 3}},
- {"command": "SketchCreate", "params": {"plane": "XY", "name": "S1"}},
- {"command": "CircleCenterRadius", "params": {"center": [5, 5], "radius": 2}},
- {"command": "SketchStop", "params": {}},
- {"command": "Extrude", "params": {"distance": 10, "operation": "cut"}}
+ {"command": "sketch.create", "params": {"plane": "XY", "name": "S1"}},
+ {"command": "sketch.circle.center", "params": {"center": [5, 5], "radius": 2}},
+ {"command": "sketch.finish", "params": {}},
+ {"command": "solid.extrude", "params": {"distance": 10, "operation": "cut"}}
 ]}

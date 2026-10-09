@@ -125,9 +125,7 @@ pub fn folder_items(app: &SolveApp, component: u64, folder: &str) -> Vec<Item> {
     let mut v = Vec::new();
     if folder == "bodies" {
         let bodies: Vec<String> = all.iter().map(|e| e.key.clone()).collect();
-        v.push(
-            Item::action("FusionCreateComponentsFromBodiesCommand", "Create Components from Bodies", "component").with(json!({ "bodies": bodies })),
-        );
+        v.push(Item::action("component.from_bodies", "Create Components from Bodies", "component").with(json!({ "bodies": bodies })));
     }
     v.push(
         Item::action("ui.newGroup", if folder == "sketches" { "New Sketch Group" } else { "New Group" }, "folder")
@@ -578,7 +576,7 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     }
     let params = format!("Parameters ({})", app.session.doc.params.len());
     if draw_row(ui, ui.id().with("params"), &Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() }).clicked {
-        app.start("ChangeParameterCommand");
+        app.start("parameters.change");
     }
 }
 
@@ -1352,7 +1350,7 @@ fn occurrence_panel(app: &mut SolveApp, ctx: &egui::Context) {
     gizmo(app, ctx, &mut m);
     if (m.translate, m.angle_deg) != before {
         // The pending move is the typed offset from where the occurrence is now.
-        let _ = app.session.execute("AsBuiltPositionsCmd", &json!({}));
+        let _ = app.session.execute("component.revert_position", &json!({}));
         let _ = app.run(
             "occurrence.move",
             json!({ "occurrence": m.occurrence, "translate": m.translate, "axis": [0, 0, 1], "angle": m.angle_deg.to_radians(), "capture": false }),
@@ -1360,15 +1358,15 @@ fn occurrence_panel(app: &mut SolveApp, ctx: &egui::Context) {
     }
     match action {
         Some("capture") => {
-            let _ = app.run("SnapshotCmd", json!({}));
+            let _ = app.run("component.capture_position", json!({}));
             app.tree.occurrence_move = None;
         }
         Some(_) => {
-            let _ = app.run("AsBuiltPositionsCmd", json!({}));
+            let _ = app.run("component.revert_position", json!({}));
             app.tree.occurrence_move = None;
         }
         None if !open => {
-            let _ = app.run("AsBuiltPositionsCmd", json!({}));
+            let _ = app.run("component.revert_position", json!({}));
             app.tree.occurrence_move = None;
         }
         None => app.tree.occurrence_move = Some(m),
@@ -1445,7 +1443,7 @@ pub const SAVE: &str = "__save";
 /// that capture, revert or keep moving.
 pub fn needs_capture(app: &SolveApp, what: &str) -> bool {
     !app.session.pending_moves.is_empty()
-        && !matches!(what, "SnapshotCmd" | "AsBuiltPositionsCmd" | "occurrence.move" | "UndoCommand" | "RedoCommand")
+        && !matches!(what, "component.capture_position" | "component.revert_position" | "occurrence.move" | "edit.undo" | "edit.redo")
         && app.tree.capture_prompt.is_none()
 }
 
@@ -1454,8 +1452,8 @@ pub fn needs_capture(app: &SolveApp, what: &str) -> bool {
 pub fn answer_capture(app: &mut SolveApp, action: &str) -> Result<(), String> {
     let Some(what) = app.tree.capture_prompt.clone() else { return Err("no Capture Position question is open".into()) };
     match action {
-        "capture" => drop(app.run("SnapshotCmd", json!({}))),
-        "revert" => drop(app.run("AsBuiltPositionsCmd", json!({}))),
+        "capture" => drop(app.run("component.capture_position", json!({}))),
+        "revert" => drop(app.run("component.revert_position", json!({}))),
         "cancel" => {
             app.tree.capture_prompt = None;
             return Ok(());

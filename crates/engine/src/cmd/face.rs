@@ -118,7 +118,7 @@ pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str) -> Result<
         let spec = crate::find_command(id).ok_or_else(|| bad(cmd, id))?;
         (spec.run)(s, &p)
     };
-    let r = run(s, "SketchCreate", json!({"plane": {"face": [inside.x, inside.y, inside.z]}, "project_edges": true}))?;
+    let r = run(s, "sketch.create", json!({"plane": {"face": [inside.x, inside.y, inside.z]}, "project_edges": true}))?;
     let sid = r.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start a sketch on the face"))?;
     s.refresh();
     let plane = s.model.state().sketch(sid).map(|ss| ss.plane).ok_or_else(|| bad(cmd, "could not start a sketch on the face"))?;
@@ -142,10 +142,10 @@ pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str) -> Result<
             None
         };
         match circle {
-            Some((o, r)) if closed => run(s, "CircleCenterRadius", json!({"center": xy(o), "radius": r}))?,
+            Some((o, r)) if closed => run(s, "sketch.circle.center", json!({"center": xy(o), "radius": r}))?,
             Some(_) => {
                 let mid = pts.get(pts.len() / 2).copied().unwrap_or(first);
-                run(s, "ArcThreePoint", json!({"start": xy(first), "end": xy(last), "through": xy(mid)}))?
+                run(s, "sketch.arc.three_point", json!({"start": xy(first), "end": xy(last), "through": xy(mid)}))?
             }
             None => {
                 let mut list: Vec<Value> = Vec::new();
@@ -159,7 +159,7 @@ pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str) -> Result<
                 if closed_poly {
                     list.pop();
                 }
-                run(s, "DrawPolyline", json!({"points": list, "closed": closed_poly}))?
+                run(s, "sketch.line", json!({"points": list, "closed": closed_poly}))?
             }
         };
     }

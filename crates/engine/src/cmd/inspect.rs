@@ -8,7 +8,7 @@ use crate::params::{bad, bool_, str_, string_list};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("MeasureCommand", "Measure", measure)
+    CommandSpec::new("inspect.measure", "Measure", measure)
         .at("SOLID", "INSPECT")
         .icon("measure")
         .key("I")
@@ -19,11 +19,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("model.edges", "List Edges", model_edges).noundo().params("body: name"),
     CommandSpec::new("model.faces", "List Faces", model_faces).noundo().params("body: name"),
     CommandSpec::new("model.threads", "List Threads", model_threads).noundo(),
-    CommandSpec::new("PhysicalMaterialCommand", "Physical Material", physical_material)
+    CommandSpec::new("material.assign", "Physical Material", physical_material)
         .at("SOLID", "MODIFY")
         .icon("material")
         .params("bodies: [names]; material: name (Steel, Aluminum, ABS Plastic, …; `material.list`)"),
-    CommandSpec::new("AppearanceCommand", "Appearance", appearance).at("SOLID", "MODIFY").icon("appearance").key("A").params(
+    CommandSpec::new("appearance.assign", "Appearance", appearance).at("SOLID", "MODIFY").icon("appearance").key("A").params(
         "bodies?: [names]; faces?: [[x,y,z] on faces] (body?: which body, default the nearest); components?: [names or ids, or occurrence names]; \
              appearance?: library name (appearance.library) | color: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1, default 1); \
              neither (or color: null): clear, so the face follows its body, the body its component, the component its material",
@@ -74,7 +74,7 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     if !want.is_empty() && bodies.len() != want.len() {
-        return Err(bad("MeasureCommand", "unknown body name"));
+        return Err(bad("inspect.measure", "unknown body name"));
     }
     // Sheet metal keeps the edges where bends meet flat faces (as Fusion does): count its
     // B-rep faces as they are, without merging coplanar neighbours.
@@ -265,7 +265,7 @@ fn model_threads(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "PhysicalMaterialCommand";
+    let cmd = "material.assign";
     let bodies = string_list(p, "bodies");
     let material = str_(p, "material").ok_or_else(|| bad(cmd, "`material` must be a material name"))?;
     let canonical = solvecraft_doc::MATERIALS
@@ -304,7 +304,7 @@ fn color_param(v: &Value) -> Option<[u8; 3]> {
 
 fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     use solvecraft_doc::appearance::{FaceLook, Look, library};
-    let cmd = "AppearanceCommand";
+    let cmd = "appearance.assign";
     let look: Option<Look> = match (str_(p, "appearance"), p.get("color")) {
         // A colour with a name: that colour, called that (a name not in the library is fine).
         (Some(n), Some(v)) if !v.is_null() => {

@@ -3,7 +3,7 @@
   "note": "User bug 1 (owner solvecraft-sketch): Create Sketch on a body face projects the face's loops as reference geometry (linked), with no big square of real lines, and the face stays pickable for Project."
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -11,7 +11,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -33,7 +33,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "call": "ui.view",
@@ -42,7 +42,7 @@
   }
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "15"
@@ -51,7 +51,7 @@
   "key": "Enter"
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -79,7 +79,7 @@
   "shot": "s26_face_sketch"
  },
  {
-  "start": "ProjectNewCmd"
+  "start": "sketch.project"
  },
  {
   "click": {
@@ -102,7 +102,7 @@
   }
  },
  {
-  "start": "CircleCenterRadius"
+  "start": "sketch.circle.center"
  },
  {
   "click": {
@@ -131,7 +131,7 @@
   }
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "expect": {

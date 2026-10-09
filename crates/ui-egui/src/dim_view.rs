@@ -7,7 +7,7 @@
 //! A click selects a dimension (Delete removes it), a drag moves its text (and so the offset of
 //! its dimension line), a double-click edits its value in place with parameter completion.
 //! Everything acts through commands: `sketch.dimension_text`, `sketch.delete`,
-//! `ChangeParameterCommand`.
+//! `parameters.change`.
 
 use std::cell::RefCell;
 
@@ -321,7 +321,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     e.fresh = e.fresh.saturating_sub(1);
     match done {
         Some(true) => {
-            if let Err(err) = app.run("ChangeParameterCommand", json!({"name": e.param, "expression": e.expr})) {
+            if let Err(err) = app.run("parameters.change", json!({"name": e.param, "expression": e.expr})) {
                 app.set_status(err, true);
                 EDIT.with(|x| *x.borrow_mut() = Some(Edit { fresh: FRESH, ..e }));
             }

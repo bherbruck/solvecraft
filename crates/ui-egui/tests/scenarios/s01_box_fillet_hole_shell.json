@@ -1,6 +1,6 @@
 [
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -13,7 +13,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -40,7 +40,7 @@
   }
  },
  {
-  "start": "SketchDimension"
+  "start": "sketch.dimension"
  },
  {
   "click": {
@@ -77,7 +77,7 @@
   }
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "expect": {
@@ -85,7 +85,7 @@
   }
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "20"
@@ -104,7 +104,7 @@
   "shot": "s01_extrude"
  },
  {
-  "start": "FusionFilletEdgesCommand"
+  "start": "solid.fillet"
  },
  {
   "click": {
@@ -145,7 +145,7 @@
   "shot": "s01_fillet"
  },
  {
-  "start": "FusionShellBodyCommand"
+  "start": "solid.shell"
  },
  {
   "click": {
@@ -173,7 +173,7 @@
   "shot": "s01_shell"
  },
  {
-  "start": "FusionHoleCommand"
+  "start": "solid.hole"
  },
  {
   "click": {

@@ -1,4 +1,4 @@
-//! Measuring picked geometry (`MeasureCommand` with `items`): one item gives its length, area,
+//! Measuring picked geometry (`inspect.measure` with `items`): one item gives its length, area,
 //! volume or position; two give the minimum distance between them (with the two closest
 //! points) and, where both have a direction (planar faces, straight edges), the angle.
 
@@ -146,9 +146,9 @@ fn closest(a: &Geo, b: &Geo) -> Option<(Vec3, Vec3)> {
     }
 }
 
-/// `MeasureCommand` with `items` (one or two selections).
+/// `inspect.measure` with `items` (one or two selections).
 pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
-    let cmd = "MeasureCommand";
+    let cmd = "inspect.measure";
     let list = items.as_array().ok_or_else(|| bad(cmd, "`items` must be a list of selections"))?;
     if list.is_empty() || list.len() > 2 {
         return Err(bad(cmd, "measure one or two items"));

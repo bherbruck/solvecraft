@@ -23,9 +23,9 @@ fn run_all(app: &mut SolveApp, c: Vec<(String, Value)>) {
 /// Edit Feature keeps the direction and refills the values.
 #[test]
 fn boss_from_a_face_pick() {
-    let mut app = app_with(&[("PrimitiveBox", json!({"length": 60, "width": 60, "height": 3}))]);
+    let mut app = app_with(&[("solid.box", json!({"length": 60, "width": 60, "height": 3}))]);
     app.session.selection = face_sel(&app.session, Vec3::new(30.0, 30.0, 3.0)).into_iter().collect();
-    app.start("FusionBossCommand");
+    app.start("plastic.boss");
     let mut d = app.dialog.clone().unwrap();
     assert_eq!(d.primary().map(|p| p.0), Some("Height"));
     let c = apply_commands(&app, &d).unwrap();
@@ -57,11 +57,11 @@ fn snap_lip_rest() {
         assert!(dirs.iter().all(|(_, d)| d.dot(n).abs() < 1e-12 && (d.len() - 1.0).abs() < 1e-12));
     }
     let mut app = app_with(&[
-        ("PrimitiveBox", json!({"length": 80, "width": 50, "height": 30})),
-        ("FusionShellBodyCommand", json!({"faces": [[40, 25, 30]], "thickness": 2})),
+        ("solid.box", json!({"length": 80, "width": 50, "height": 30})),
+        ("solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2})),
     ]);
     app.session.selection = face_sel(&app.session, Vec3::new(1.0, 25.0, 30.0)).into_iter().collect();
-    app.start("FusionLipCommand");
+    app.start("plastic.lip");
     let mut d = app.dialog.clone().unwrap();
     if let Kind::Plastic(Pl::Lip { groove, gap, .. }) = &mut d.kind {
         *groove = true;
@@ -71,15 +71,15 @@ fn snap_lip_rest() {
     assert_eq!(c[0].1["type"], "groove");
     assert_eq!(c[0].1["gap"], "0.2 mm");
     run_all(&mut app, c);
-    let mut app = app_with(&[("PrimitiveBox", json!({"length": 40, "width": 40, "height": 4}))]);
+    let mut app = app_with(&[("solid.box", json!({"length": 40, "width": 40, "height": 4}))]);
     app.session.selection = face_sel(&app.session, Vec3::new(20.0, 20.0, 4.0)).into_iter().collect();
-    app.start("FusionSnapFitCommand");
+    app.start("plastic.snap_fit");
     let c = apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(c[0].1["hook"], json!([1.0, 0.0, 0.0]));
     run_all(&mut app, c);
     app.dialog = None;
     app.session.selection = face_sel(&app.session, Vec3::new(5.0, 5.0, 4.0)).into_iter().collect();
-    app.start("FusionRestCommand");
+    app.start("plastic.rest");
     let mut d = app.dialog.clone().unwrap();
     assert!(apply_commands(&app, &d).unwrap()[0].1.get("length").is_none(), "round");
     if let Kind::Plastic(Pl::Rest { round, .. }) = &mut d.kind {
@@ -91,12 +91,12 @@ fn snap_lip_rest() {
 /// The rule manager edits a library rule into the design; Assign gives bodies a rule.
 #[test]
 fn plastic_rules_manage_and_assign() {
-    let mut app = app_with(&[("PrimitiveBox", json!({"length": 10, "width": 10, "height": 10}))]);
-    app.start("FusionManagePlasticRuleCommand");
+    let mut app = app_with(&[("solid.box", json!({"length": 10, "width": 10, "height": 10}))]);
+    app.start("plastic.manage_rules");
     let d = app.dialog.clone().unwrap();
     assert!(apply_commands(&app, &d).is_ok());
     app.session.selection = vec![Sel::Body { name: "Body1".into() }];
-    app.start("FusionAssignPlasticRuleCommand");
+    app.start("plastic.assign_rule");
     let c = apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(c[0].1["bodies"], json!(["Body1"]));
     assert_eq!(c[0].1["rule"], "ABS (1.5mm)");

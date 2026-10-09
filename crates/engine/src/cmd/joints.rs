@@ -13,21 +13,21 @@ use crate::params::{bad, bool_, num, str_, string_list, vec3};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("JointOrigin", "Joint Origin", joint_origin).at("SOLID", "CREATE").icon("joint_origin").params(
+    CommandSpec::new("joint.origin", "Joint Origin", joint_origin).at("SOLID", "CREATE").icon("joint_origin").params(
         "name?, occurrence?: id|name (default: from the pick), face: [x,y,z] (centre of a planar face) | circle: [x,y,z] (centre of a round end) | point: [x,y,z], z?: [x,y,z]",
     ),
-    CommandSpec::new("JointAssembleCmdNew", "Joint", joint).at("SOLID", "ASSEMBLE").icon("joint").key("J").params(
+    CommandSpec::new("joint.create", "Joint", joint).at("SOLID", "ASSEMBLE").icon("joint").key("J").params(
         "type: rigid|revolute|slider|cylindrical|pin_slot|planar|ball; a, b: joint origins ({occurrence, face|circle|point: [x,y,z] in world} | origin name); \
          values?: [angles in deg or expressions, distances]; limits?: [[min, max] | null…]; flip?: bool; offset?; angle?; name?",
     ),
-    CommandSpec::new("JointAsBuiltCmd", "As-Built Joint", as_built).at("SOLID", "ASSEMBLE").icon("as_built").params(
+    CommandSpec::new("joint.as_built", "As-Built Joint", as_built).at("SOLID", "ASSEMBLE").icon("as_built").params(
         "type, a: occurrence, b: occurrence (stay where they are); at?: joint origin (default: b's origin) — the joint's frame",
     ),
-    CommandSpec::new("RigidGroupCmd", "Rigid Group", rigid_group).at("SOLID", "ASSEMBLE").icon("rigid_group").params("occurrences: [ids or names] (move together, as they are)"),
-    CommandSpec::new("FusionMoveJointsCommand", "Drive Joints", drive).at("SOLID", "ASSEMBLE").icon("drive").params(
+    CommandSpec::new("joint.rigid_group", "Rigid Group", rigid_group).at("SOLID", "ASSEMBLE").icon("rigid_group").params("occurrences: [ids or names] (move together, as they are)"),
+    CommandSpec::new("joint.drive", "Drive Joints", drive).at("SOLID", "ASSEMBLE").icon("drive").params(
         "joint: id|name; value | values: [angles in deg or expressions, distances] (clamped to the limits)",
     ),
-    CommandSpec::new("FusionMotionRelationshipCommand", "Motion Link", motion_link)
+    CommandSpec::new("joint.motion_link", "Motion Link", motion_link)
         .at("SOLID", "ASSEMBLE")
         .icon("motion_link")
         .params("a, b: joints; ratio (b = ratio · a + offset); offset?; ia?, ib?: value indices (default 0)"),
@@ -36,7 +36,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("joint.delete", "Delete Joint", delete).params("joint: id|name (or origin: name, link: index)"),
     CommandSpec::new("joint.list", "List Joints", list).noundo().params("→ joints (type, occurrences, values, limits), origins, links, degrees of freedom, conflicts"),
     CommandSpec::new("joint.solve", "Solve Joints", solve_cmd).params("re-place the occurrences from the joints → conflicts, errors, dof"),
-    CommandSpec::new("InterferenceCheckCommand", "Interference", interference).at("SOLID", "INSPECT").icon("interference").noundo().params(
+    CommandSpec::new("inspect.interference", "Interference", interference).at("SOLID", "INSPECT").icon("interference").noundo().params(
         "bodies?: [names] (default: all, in world placement) → pairs that overlap with the overlap volume, area, bounding box and centre",
     ),
 ];
@@ -221,7 +221,7 @@ fn add_joint(s: &mut Session, j: Joint) -> Result<Value> {
         return Err(EngineError::Other("too many joints".into()));
     }
     if j.a.occurrence == j.b.occurrence {
-        return Err(bad("JointAssembleCmdNew", "a joint needs two different occurrences"));
+        return Err(bad("joint.create", "a joint needs two different occurrences"));
     }
     let id = j.id;
     let name = j.name.clone();
@@ -234,7 +234,7 @@ fn add_joint(s: &mut Session, j: Joint) -> Result<Value> {
 }
 
 fn joint_origin(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "JointOrigin";
+    let cmd = "joint.origin";
     let origin = origin_param(s, Some(p), cmd)?;
     let name = match str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
         Some(n) => n.to_string(),
@@ -254,7 +254,7 @@ fn kind_param(p: &Value, cmd: &str) -> Result<JointKind> {
 }
 
 fn joint(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "JointAssembleCmdNew";
+    let cmd = "joint.create";
     let kind = kind_param(p, cmd)?;
     let a = origin_param(s, p.get("a"), cmd)?;
     let b = origin_param(s, p.get("b"), cmd)?;
@@ -285,7 +285,7 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "JointAsBuiltCmd";
+    let cmd = "joint.as_built";
     let kind = kind_param(p, cmd)?;
     let (oa, ob) = (occurrence_id(s, p.get("a"), cmd)?, occurrence_id(s, p.get("b"), cmd)?);
     // The joint's frame in the world: the given origin, or B's component origin.
@@ -318,7 +318,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn rigid_group(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "RigidGroupCmd";
+    let cmd = "joint.rigid_group";
     let list = p.get("occurrences").and_then(Value::as_array).cloned().unwrap_or_default();
     if list.len() < 2 || list.len() > 1000 {
         return Err(bad(cmd, "`occurrences` must list 2…1000 occurrences"));
@@ -334,7 +334,7 @@ fn rigid_group(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn drive(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionMoveJointsCommand";
+    let cmd = "joint.drive";
     let id = joint_id(s, p.get("joint"), cmd)?;
     let kind = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.kind).ok_or_else(|| bad(cmd, "joint"))?;
     if kind == JointKind::Rigid {
@@ -364,7 +364,7 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn motion_link(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionMotionRelationshipCommand";
+    let cmd = "joint.motion_link";
     let (a, b) = (joint_id(s, p.get("a"), cmd)?, joint_id(s, p.get("b"), cmd)?);
     if a == b {
         return Err(bad(cmd, "link two different joints"));
@@ -523,7 +523,7 @@ fn solve_cmd(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn interference(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "InterferenceCheckCommand";
+    let cmd = "inspect.interference";
     let want = string_list(p, "bodies");
     let st = s.world_state();
     let bodies: Vec<&solvecraft_doc::ModelBody> =

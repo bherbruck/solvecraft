@@ -6,7 +6,7 @@
   "note": "Animating to Top or Bottom from iso, front or any orbit turns the view smoothly to the end: no frame (the last included) turns it more than 10 degrees."
  },
  {
-  "start": "PrimitiveBox"
+  "start": "solid.box"
  },
  {
   "key": "Escape"

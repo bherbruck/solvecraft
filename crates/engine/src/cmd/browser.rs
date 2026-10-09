@@ -385,10 +385,10 @@ mod tests {
     #[test]
     fn renamed_body_keeps_its_users() {
         let mut s = Session::default();
-        run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10}));
-        run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
         let [a, b] = [names(&s)[0].clone(), names(&s)[1].clone()];
-        run(&mut s, "FusionMoveCommand", json!({"bodies": [b.clone()], "translate": [0, 0, 5]}));
+        run(&mut s, "solid.move", json!({"bodies": [b.clone()], "translate": [0, 0, 5]}));
         run(&mut s, "body.rename", json!({"body": b, "name": "Lid"}));
         assert_eq!(names(&s), vec![a.clone(), "Lid".to_string()]);
         assert!(s.model.results.iter().all(|r| r.error.is_none()), "the move still finds its body");
@@ -396,18 +396,18 @@ mod tests {
         assert!(s.execute("body.rename", &json!({"body": "Lid", "name": a})).is_err());
         assert!(s.execute("body.rename", &json!({"body": "Nope", "name": "X"})).is_err());
         assert!(s.execute("body.rename", &json!({"body": "Lid", "name": " "})).is_err());
-        run(&mut s, "UndoCommand", json!({}));
+        run(&mut s, "edit.undo", json!({}));
         assert_eq!(names(&s)[1], b);
     }
 
     #[test]
     fn redefined_sketch_moves_its_extrude() {
         let mut s = Session::default();
-        let sk = run(&mut s, "SketchCreate", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
-        run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [10, 20]}));
-        run(&mut s, "SketchStop", json!({}));
-        run(&mut s, "Extrude", json!({"distance": 5}));
-        let zmax = |s: &mut Session| run(s, "MeasureCommand", json!({}))["bodies"][0]["bbox"]["max"][2].as_f64().unwrap();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5}));
+        let zmax = |s: &mut Session| run(s, "inspect.measure", json!({}))["bodies"][0]["bbox"]["max"][2].as_f64().unwrap();
         assert!((zmax(&mut s) - 5.0).abs() < 1e-6);
         run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "XZ"}));
         let z = zmax(&mut s);
@@ -419,8 +419,8 @@ mod tests {
     #[test]
     fn design_units_change_without_moving_geometry() {
         let mut s = Session::default();
-        run(&mut s, "PrimitiveBox", json!({"length": 20, "width": 10, "height": 5}));
-        let vol = |s: &mut Session| run(s, "MeasureCommand", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5}));
+        let vol = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
         let v0 = vol(&mut s);
         run(&mut s, "document.units", json!({"units": "in"}));
         assert_eq!(s.doc.units, "in");
@@ -430,14 +430,14 @@ mod tests {
         let mut s = Session::default();
         run(&mut s, "parameters.add", json!({"name": "w", "expression": "5", "unit": ""}));
         run(&mut s, "parameters.add", json!({"name": "n", "expression": "3", "unit": ""}));
-        run(&mut s, "PrimitiveBox", json!({"length": "w", "width": 10, "height": 5}));
+        run(&mut s, "solid.box", json!({"length": "w", "width": 10, "height": 5}));
         let b = s.model.state().bodies[0].name.clone();
-        run(&mut s, "PatternRectangular", json!({"bodies": [b], "dir1": [1, 0, 0], "count1": "n", "spacing1": 20}));
+        run(&mut s, "solid.pattern.rectangular", json!({"bodies": [b], "dir1": [1, 0, 0], "count1": "n", "spacing1": 20}));
         let v0 = vol(&mut s);
         let r = run(&mut s, "document.units", json!({"units": "cm"}));
         assert!((vol(&mut s) - v0).abs() < 1e-6, "{r}");
         assert!(s.doc.param("n").is_some_and(|p| p.expr == "3"), "the count stays bare");
-        run(&mut s, "UndoCommand", json!({}));
+        run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.units, "mm");
     }
 
@@ -457,15 +457,15 @@ mod tests {
         for p in [json!({}), json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": -1}}), json!({"camera": "x"})] {
             assert!(s.execute("view.save", &p).is_err(), "{p}");
         }
-        run(&mut s, "UndoCommand", json!({}));
+        run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.named_views.len(), 2);
     }
 
     #[test]
     fn groups_hold_items_and_follow_renames() {
         let mut s = Session::default();
-        run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10}));
-        run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
         let [a, b] = [names(&s)[0].clone(), names(&s)[1].clone()];
         let g = run(&mut s, "browser.group", json!({"folder": "bodies", "items": [a.clone()]}))["group"].as_u64().unwrap();
         assert_eq!(s.doc.browser_groups[0].name, "Group1");
@@ -495,7 +495,7 @@ mod tests {
         ] {
             assert!(s.execute(c, &p).is_err(), "{c} {p}");
         }
-        run(&mut s, "UndoCommand", json!({}));
+        run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.browser_groups.len(), 1, "ungroup undoes");
     }
 }

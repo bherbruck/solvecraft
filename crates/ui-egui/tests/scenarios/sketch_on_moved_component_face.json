@@ -8,14 +8,14 @@
  {
   "call": "engine.execute",
   "params": {
-   "command": "FusionCreateNewComponentCommand",
+   "command": "component.create",
    "params": {}
   }
  },
  {
   "call": "engine.execute",
   "params": {
-   "command": "PrimitiveBox",
+   "command": "solid.box",
    "params": {
     "length": 40,
     "width": 30,
@@ -75,7 +75,7 @@
   }
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {

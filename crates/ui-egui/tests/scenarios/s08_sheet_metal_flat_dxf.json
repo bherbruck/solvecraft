@@ -6,7 +6,7 @@
   }
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -14,7 +14,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -36,7 +36,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "call": "ui.view",
@@ -45,7 +45,7 @@
   }
  },
  {
-  "start": "FusionSheetMetalFlangeCommand"
+  "start": "sheet.flange"
  },
  {
   "click": {
@@ -75,7 +75,7 @@
   "shot": "s08_base"
  },
  {
-  "start": "FusionSheetMetalFlangeCommand"
+  "start": "sheet.flange"
  },
  {
   "click": {
@@ -100,7 +100,7 @@
   "shot": "s08_flange"
  },
  {
-  "start": "FusionSheetMetalFlatPatternCmd"
+  "start": "sheet.flat_pattern"
  },
  {
   "widget": "Export DXF\u2026"

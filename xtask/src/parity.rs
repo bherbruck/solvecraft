@@ -3,7 +3,8 @@
 //! `xtask/data/fusion-catalog.tsv` lists the toolbar commands of Fusion's Design workspace as
 //! `tab \t panel \t command id \t command name` (ids and names only, nothing else). It is
 //! derived from the local, uncommitted `plan/fusion/menu-tree.json` with `--refresh`. A catalog
-//! entry is live when SolveCraft registers a command with the same id.
+//! entry is live when SolveCraft registers the command `xtask/data/fusion-ids.tsv` maps its id to
+//! (SolveCraft uses its own ids).
 
 use std::path::Path;
 use std::process::Command;
@@ -31,10 +32,19 @@ const HEADLINE: &[&str] = &["SOLID", "SKETCH"];
 /// figure; the rest of Fusion is deferred and listed separately.
 const IN_SCOPE_TABS: &[&str] = &["SOLID", "SKETCH", "ASSEMBLY", "SHEET METAL"];
 /// The PLASTIC commands in scope (enclosure features).
-const PLASTIC_SUBSET: &[&str] = &["FusionBossCommand", "FusionRibCommand", "FusionWebCommand", "FusionLipCommand", "FusionSnapFitCommand"];
+/// (SolveCraft ids, matched through the catalog-id map.)
+const PLASTIC_SUBSET: &[&str] = &["plastic.boss", "solid.rib", "solid.web", "plastic.lip", "plastic.snap_fit"];
 
-fn in_scope(e: &Entry) -> bool {
-    IN_SCOPE_TABS.contains(&e.tab.as_str()) || (e.tab == "PLASTIC" && PLASTIC_SUBSET.contains(&e.id.as_str()))
+/// Catalog id → SolveCraft id.
+fn id_map(s: &str) -> std::collections::HashMap<String, String> {
+    s.lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .filter_map(|l| l.split_once('\t').map(|(a, b)| (a.trim().to_string(), b.trim().to_string())))
+        .collect()
+}
+
+fn in_plastic_subset(e: &Entry, map: &std::collections::HashMap<String, String>) -> bool {
+    e.tab == "PLASTIC" && map.get(&e.id).is_some_and(|ours| PLASTIC_SUBSET.contains(&ours.as_str()))
 }
 
 #[derive(Clone, Debug)]
@@ -121,7 +131,10 @@ pub fn run(root: &Path, refresh: bool) -> Result<(), String> {
         .map_err(|e| format!("solvecraft-cli: {e}"))?;
     let cmds: Value = serde_json::from_slice(&out.stdout).map_err(|e| format!("commands JSON: {e}"))?;
     let ids: Vec<String> = cmds.as_array().into_iter().flatten().filter_map(|c| c["id"].as_str().map(str::to_string)).collect();
-    let live = |e: &Entry| ids.contains(&e.id);
+    let map_path = root.join("xtask/data/fusion-ids.tsv");
+    let map = id_map(&std::fs::read_to_string(&map_path).map_err(|e| format!("{}: {e}", map_path.display()))?);
+    let live = |e: &Entry| map.get(&e.id).is_some_and(|ours| ids.contains(ours));
+    let in_scope = |e: &Entry| IN_SCOPE_TABS.contains(&e.tab.as_str()) || in_plastic_subset(e, &map);
     let pct = |a: usize, b: usize| if b == 0 { 0.0 } else { 100.0 * a as f64 / b as f64 };
 
     let head: Vec<&Entry> = catalog.iter().filter(|e| HEADLINE.contains(&e.tab.as_str())).collect();
@@ -153,7 +166,7 @@ pub fn run(root: &Path, refresh: bool) -> Result<(), String> {
     for (t, p, l, n) in groups.iter().filter(|g| IN_SCOPE_TABS.contains(&g.0.as_str())) {
         md += &format!("| {t} | {p} | {l} | {n} | {:.0}% |\n", pct(*l, *n));
     }
-    let plastic: Vec<&Entry> = catalog.iter().filter(|e| e.tab == "PLASTIC" && PLASTIC_SUBSET.contains(&e.id.as_str())).collect();
+    let plastic: Vec<&Entry> = catalog.iter().filter(|e| in_plastic_subset(e, &map)).collect();
     md += &format!(
         "| PLASTIC | enclosure subset | {} | {} | {:.0}% |\n",
         plastic.iter().filter(|e| live(e)).count(),
@@ -166,11 +179,11 @@ pub fn run(root: &Path, refresh: bool) -> Result<(), String> {
     }
     md += "\n## Live (SOLID, SKETCH)\n\n";
     for e in head.iter().filter(|e| live(e)) {
-        md += &format!("- {} › {} › {} (`{}`)\n", e.tab, e.panel, e.name, e.id);
+        md += &format!("- {} › {} › {}\n", e.tab, e.panel, e.name);
     }
     md += "\n## Not yet (SOLID, SKETCH)\n\n";
     for e in head.iter().filter(|e| !live(e)) {
-        md += &format!("- {} › {} › {} (`{}`)\n", e.tab, e.panel, e.name, e.id);
+        md += &format!("- {} › {} › {}\n", e.tab, e.panel, e.name);
     }
     std::fs::write(root.join("docs/parity.md"), md).map_err(|e| format!("docs/parity.md: {e}"))?;
     println!(

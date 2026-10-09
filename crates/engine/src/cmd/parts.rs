@@ -18,7 +18,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parts.library", "Standard Parts", library)
         .noundo()
         .params("family? → families (name, standard, sizes, lengths) and, with family, each size's dimensions (mm)"),
-    CommandSpec::new("FusionFastenersCommand", "Insert Fastener", insert).at("SOLID", "INSERT").icon("fastener").params(
+    CommandSpec::new("parts.fastener", "Insert Fastener", insert).at("SOLID", "INSERT").icon("fastener").params(
         "the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction?, name?",
     ),
     CommandSpec::new("parts.insert", "Insert Part", insert).icon("fastener").params(
@@ -215,31 +215,31 @@ fn run(s: &mut Session, id: &str, p: Value) -> Result<Value> {
 
 /// A hex prism (across flats `af`) from z0 to z1, joined or cut.
 fn hex(s: &mut Session, af: f64, z0: f64, z1: f64, op: &str) -> Result<()> {
-    run(s, "SketchCreate", json!({"plane": "XY", "offset": z0}))?;
-    run(s, "ShapePolygonCircumscribed", json!({"center": [0, 0], "radius": af / 2.0, "sides": 6}))?;
-    run(s, "SketchStop", json!({}))?;
+    run(s, "sketch.create", json!({"plane": "XY", "offset": z0}))?;
+    run(s, "sketch.polygon.circumscribed", json!({"center": [0, 0], "radius": af / 2.0, "sides": 6}))?;
+    run(s, "sketch.finish", json!({}))?;
     let (dist, dir) = if z1 >= z0 { (z1 - z0, "positive") } else { (z0 - z1, "negative") };
-    run(s, "Extrude", json!({"distance": dist, "direction": dir, "operation": op}))?;
+    run(s, "solid.extrude", json!({"distance": dist, "direction": dir, "operation": op}))?;
     Ok(())
 }
 
 fn cyl(s: &mut Session, d: f64, z0: f64, z1: f64, op: &str) -> Result<()> {
-    run(s, "PrimitiveCylinder", json!({"diameter": d, "height": z1 - z0, "base": [0, 0, z0], "axis": [0, 0, 1], "operation": op}))?;
+    run(s, "solid.cylinder", json!({"diameter": d, "height": z1 - z0, "base": [0, 0, z0], "axis": [0, 0, 1], "operation": op}))?;
     Ok(())
 }
 
 /// A solid of revolution about z from a closed (r, z) outline, as one body or joined.
 fn revolve(s: &mut Session, pts: &[(f64, f64)], op: &str) -> Result<()> {
-    run(s, "SketchCreate", json!({"plane": "XZ"}))?;
+    run(s, "sketch.create", json!({"plane": "XZ"}))?;
     let points: Vec<[f64; 2]> = pts.iter().map(|(r, z)| [*r, *z]).collect();
-    run(s, "DrawPolyline", json!({"points": points, "closed": true}))?;
-    run(s, "SketchStop", json!({}))?;
-    run(s, "Revolve", json!({"axis": "y", "operation": op}))?;
+    run(s, "sketch.line", json!({"points": points, "closed": true}))?;
+    run(s, "sketch.finish", json!({}))?;
+    run(s, "solid.revolve", json!({"axis": "y", "operation": op}))?;
     Ok(())
 }
 
 fn thread(s: &mut Session, d: f64, pitch: f64, at: Vec3) {
-    let _ = run(s, "FusionThreadCommand", json!({"face": at, "designation": format!("M{}x{}", d, pitch)}));
+    let _ = run(s, "solid.thread", json!({"face": at, "designation": format!("M{}x{}", d, pitch)}));
     let _ = d;
 }
 
@@ -352,7 +352,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| part_name(&family, &size, &sh));
     let active = s.active_component;
-    let c = run(s, "FusionCreateNewComponentCommand", json!({"name": name}))?;
+    let c = run(s, "component.create", json!({"name": name}))?;
     let (comp, occ) = (c["component"].as_u64().unwrap_or(0), c["occurrence"].as_u64().unwrap_or(0));
     build(s, &sh)?;
     s.doc_mut().parts.insert(comp, solvecraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh) });
@@ -363,7 +363,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         // into the hole (the joint mates the part's −z with the face's outward z).
         let j = run(
             s,
-            "JointAssembleCmdNew",
+            "joint.create",
             json!({"type": "rigid", "a": {"occurrence": h, "circle": a}, "b": {"occurrence": occ, "point": [0, 0, 0], "z": [0, 0, -1]}, "name": format!("{name} seat")}),
         )?;
         out["joint"] = j["joint"].clone();
@@ -500,8 +500,8 @@ mod tests {
     #[test]
     fn a_screw_seats_in_a_hole_and_resizes() {
         let mut s = Session::default();
-        run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
-        run(&mut s, "FusionHoleCommand", json!({"position": [20, 15, 10], "diameter": 6.4}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 10], "diameter": 6.4}));
         // Pick the hole's rim at the top face.
         let r = run(&mut s, "parts.insert", json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "at": [23.2, 15, 10]}));
         assert!(r["joint"].is_number(), "{r}");

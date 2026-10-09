@@ -13,22 +13,22 @@ use crate::params::{bad, bool_, str_, vec3};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("EnableContactSetsCmd", "Enable Contact Sets", enable_sets).at("SOLID", "ASSEMBLE").icon("joint").params(
+    CommandSpec::new("contact.enable_sets", "Enable Contact Sets", enable_sets).at("SOLID", "ASSEMBLE").icon("joint").params(
         "enabled?: bool (default true) — driving joints and motion studies stop where bodies in one contact set would pass through each other",
     ),
-    CommandSpec::new("EnableAllContactCmd", "Enable All Contact", enable_all)
+    CommandSpec::new("contact.enable_all", "Enable All Contact", enable_all)
         .at("SOLID", "ASSEMBLE")
         .icon("joint")
         .params("every occurrence takes part in contact (one set of all)"),
-    CommandSpec::new("DisableAllContactCmd", "Disable Contact", disable_all).at("SOLID", "ASSEMBLE").icon("joint").params("contact off"),
-    CommandSpec::new("ContactSetCmd", "New Contact Set", new_set)
+    CommandSpec::new("contact.disable_all", "Disable Contact", disable_all).at("SOLID", "ASSEMBLE").icon("joint").params("contact off"),
+    CommandSpec::new("contact.create", "New Contact Set", new_set)
         .at("SOLID", "ASSEMBLE")
         .icon("joint")
         .params("occurrences: [ids or names] (two or more); name?"),
     CommandSpec::new("contact.edit", "Edit Contact Set", edit_set).params("set: id|name; occurrences?; name?; suppressed?: bool; delete?: bool"),
     CommandSpec::new("contact.list", "List Contact Sets", list_sets).noundo().params("→ sets, enabled, all"),
     CommandSpec::new("contact.check", "Check Contact", check).noundo().params("→ pairs in contact sets that pass through each other now"),
-    CommandSpec::new("FusionMotionStudyCommand", "Motion Study", study).at("SOLID", "ASSEMBLE").icon("joint").params(
+    CommandSpec::new("motion.study", "Motion Study", study).at("SOLID", "ASSEMBLE").icon("joint").params(
         "name?; study? (edit an existing one); steps? (timeline length, default 100); keys: [{joint, index?, points: [[step, value], …]}] \
          (values: degrees for angles, mm for distances, or expressions)",
     ),
@@ -285,7 +285,7 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)]) -> Result<Value
     Ok(json!({"values": values, "stopped_by_contact": stopped, "conflicts": sol.conflicts.len()}))
 }
 
-/// Drive one joint (FusionMoveJointsCommand), honouring contact sets.
+/// Drive one joint (joint.drive), honouring contact sets.
 pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>) -> Result<Value> {
     drive_with_contact(s, &[(id, q)])
 }
@@ -311,7 +311,7 @@ fn disable_all(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn new_set(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ContactSetCmd";
+    let cmd = "contact.create";
     let occ = occurrences(s, p, cmd)?;
     if occ.len() < 2 {
         return Err(bad(cmd, "a contact set needs two or more occurrences"));
@@ -387,7 +387,7 @@ fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
 }
 
 fn study(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionMotionStudyCommand";
+    let cmd = "motion.study";
     let existing = if p.get("study").is_some() { Some(study_index(s, p, cmd)?) } else { None };
     let steps = match p.get("steps") {
         Some(v) => {

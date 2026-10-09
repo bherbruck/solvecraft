@@ -24,11 +24,11 @@ const MAX_LINE: usize = 16 << 20;
 const MAX_BATCH: usize = 1000;
 
 const INSTRUCTIONS: &str = "SolveCraft is a parametric 3D CAD app in the style of Autodesk Fusion. Units are millimetres \
-and degrees in expressions (internally radians), Z is up. Model like in Fusion: `SketchCreate {plane: XY}`, draw \
-(`ShapeRectangleTwoPoint {p0, p1}`, `CircleCenterRadius {center, radius}`, `DrawPolyline {points, closed}`), constrain \
-and dimension (`SketchDimension {entities, value}`; values may name parameters), `SketchStop`, then features \
-(`Extrude {distance, operation?: new|join|cut|intersect}`, `Revolve`, `FusionFilletEdgesCommand {edges: [[x,y,z] point on \
-edge], radius}`, `FusionChamferCommand`, patterns, mirror, primitives). Use `batch` for several steps at once, \
+and degrees in expressions (internally radians), Z is up. Model like in Fusion: `sketch.create {plane: XY}`, draw \
+(`sketch.rectangle.two_point {p0, p1}`, `sketch.circle.center {center, radius}`, `sketch.line {points, closed}`), constrain \
+and dimension (`sketch.dimension {entities, value}`; values may name parameters), `sketch.finish`, then features \
+(`solid.extrude {distance, operation?: new|join|cut|intersect}`, `solid.revolve`, `solid.fillet {edges: [[x,y,z] point on \
+edge], radius}`, `solid.chamfer`, patterns, mirror, primitives). Use `batch` for several steps at once, \
 `list_commands` for ids and parameter docs, `inspect_design` / `measure` to verify, `list_edges` to find edge points, \
 `set_parameter` to drive the design and `screenshot` to look at it.";
 

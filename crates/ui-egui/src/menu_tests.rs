@@ -64,7 +64,7 @@ fn face_menu_hides_and_finds_the_body() {
 #[test]
 fn body_menu_isolates_renames_locks_and_deletes() {
     let mut app = sample_app();
-    app.run("PrimitiveBox", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
     let b = body(&app);
     let t = Target::Body { name: b.clone() };
     let items = context_menu::items(&app, &t);
@@ -119,9 +119,9 @@ fn sketch_menu_hides_and_moves_to_another_plane() {
 #[test]
 fn sketch_entities_offer_the_constraints_that_fit() {
     let mut app = sample_app();
-    app.run("SketchCreate", json!({"plane": "XY"})).unwrap();
-    app.run("DrawPolyline", json!({"points": [[0, 0], [10, 1]]})).unwrap();
-    app.run("DrawPolyline", json!({"points": [[0, 5], [10, 7]]})).unwrap();
+    app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [10, 1]]})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 5], [10, 7]]})).unwrap();
     let ids: Vec<String> = {
         let st = app.session.model.state();
         let ss = st.sketch(app.session.active_sketch.unwrap()).unwrap();
@@ -141,7 +141,7 @@ fn sketch_entities_offer_the_constraints_that_fit() {
 fn component_menu_activates_grounds_and_pastes() {
     let mut app = sample_app();
     let b = body(&app);
-    app.run("FusionCreateComponentsFromBodiesCommand", json!({"bodies": [b]})).unwrap();
+    app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
     let c = app.session.doc.components[0].id;
     let t = Target::Component { id: c };
     act(&mut app, &t, "Activate");
@@ -169,7 +169,7 @@ fn pick_runs_an_item_of_the_open_menu() {
 #[test]
 fn folder_and_group_menus_make_rename_and_drop_groups() {
     let mut app = sample_app();
-    app.run("PrimitiveBox", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
     let names: Vec<String> = app.session.model.state().bodies.iter().map(|b| b.name.clone()).collect();
     let items: Vec<_> = names.iter().map(|n| json!({"type": "body", "name": n})).collect();
     app.run("select.set", json!({ "items": items })).unwrap();
@@ -206,8 +206,8 @@ fn browser_folds_are_kept_in_the_preferences() {
 fn delete_key_handles_every_kind_and_asks_about_dependents() {
     use solvecraft_engine::Sel;
     let mut app = sample_app();
-    app.run("ConstructionPlaneOffsetFromPlaneCommand", json!({"base": "XY", "offset": 10})).unwrap();
-    app.run("PrimitiveBox", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
+    app.run("construct.plane.offset", json!({"base": "XY", "offset": 10})).unwrap();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
     let n = app.session.doc.features.len();
     // A body and a construction plane together: one undo step, no question.
     let b = app.session.model.state().bodies.last().unwrap().name.clone();
@@ -216,7 +216,7 @@ fn delete_key_handles_every_kind_and_asks_about_dependents() {
     assert!(app.menu.confirm.is_none());
     assert!(app.session.model.state().body(&b).is_none());
     assert!(app.session.doc.find_feature("Plane1").is_none());
-    app.run("UndoCommand", json!({})).unwrap();
+    app.run("edit.undo", json!({})).unwrap();
     assert_eq!(app.session.doc.features.len(), n);
     // A sketch with features built on it: the confirmation lists them first.
     let sk = app.session.doc.features.iter().find(|f| f.name == "Base").unwrap().id;
@@ -229,7 +229,7 @@ fn delete_key_handles_every_kind_and_asks_about_dependents() {
     crate::delete::delete_selection(&mut app);
     crate::delete::confirm(&mut app, true);
     assert!(app.session.doc.features.len() < n);
-    app.run("UndoCommand", json!({})).unwrap();
+    app.run("edit.undo", json!({})).unwrap();
     assert_eq!(app.session.doc.features.len(), n);
     // A face alone: not available yet, nothing changes.
     let b0 = app.session.model.state().bodies[0].name.clone();
@@ -243,7 +243,7 @@ fn delete_key_handles_every_kind_and_asks_about_dependents() {
 fn menu_delete_items_use_the_same_path() {
     let mut app = sample_app();
     let b = body(&app);
-    app.run("FusionCreateComponentsFromBodiesCommand", json!({"bodies": [b]})).unwrap();
+    app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
     let c = app.session.doc.components[0].id;
     act(&mut app, &Target::Component { id: c }, "Delete");
     assert!(app.session.doc.components.is_empty());
@@ -261,7 +261,7 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
     let data = solvecraft_engine::doc::canvas::base64_encode(&png);
-    let id = app.run("FusionAddCanvasCommand", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let id = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
     let t = Target::Canvas { id };
     act(&mut app, &t, "Show/Hide");
     assert!(!app.session.doc.canvases[0].visible);
@@ -273,7 +273,7 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     assert!(p.calibrate && (p.distance - 80.0).abs() < 1e-9, "starts from the image's width");
     act(&mut app, &t, "Delete");
     assert!(app.session.doc.canvases.is_empty());
-    app.run("UndoCommand", json!({})).unwrap();
+    app.run("edit.undo", json!({})).unwrap();
     assert_eq!(app.session.doc.canvases.len(), 1);
     // A canvas picked in the browser goes with the Delete key.
     app.tree.picked_canvases = vec![id];
@@ -373,7 +373,7 @@ fn v_toggles_what_is_selected() {
     assert!(app.ui.hidden_bodies.is_empty() && app.ui.hidden_origin.is_empty());
     assert!(crate::browser::sketch_visible(&app, sk));
     // Components picked in the browser hide their bodies.
-    app.run("FusionCreateComponentsFromBodiesCommand", json!({"bodies": [b.clone()]})).unwrap();
+    app.run("component.from_bodies", json!({"bodies": [b.clone()]})).unwrap();
     app.run("select.clear", json!({})).unwrap();
     app.tree.picked_components = vec![app.session.doc.components[0].id];
     context_menu::toggle_visibility(&mut app);
@@ -421,16 +421,16 @@ fn units_menu_changes_the_design_units_and_new_designs_take_the_preference() {
 fn an_uncaptured_move_asks_before_the_next_command() {
     let mut app = sample_app();
     let b = body(&app);
-    app.run("FusionCreateComponentsFromBodiesCommand", json!({"bodies": [b]})).unwrap();
+    app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
     let occ = app.session.doc.occurrences[0].id;
     app.run("occurrence.move", json!({"occurrence": occ, "translate": [10, 0, 0], "capture": false})).unwrap();
-    app.start("SketchCreate");
-    assert_eq!(app.tree.capture_prompt.as_deref(), Some("SketchCreate"), "asks first");
+    app.start("sketch.create");
+    assert_eq!(app.tree.capture_prompt.as_deref(), Some("sketch.create"), "asks first");
     assert!(app.dialog.is_none());
     crate::browser::answer_capture(&mut app, "cancel").unwrap();
     assert!(app.tree.capture_prompt.is_none() && !app.session.pending_moves.is_empty());
     // Revert, then the command goes ahead.
-    app.start("SketchCreate");
+    app.start("sketch.create");
     crate::browser::answer_capture(&mut app, "revert").unwrap();
     assert!(app.session.pending_moves.is_empty());
     assert!(app.dialog.is_some(), "Create Sketch started");

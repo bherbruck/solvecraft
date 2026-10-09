@@ -3,13 +3,13 @@
   "note": "User bug 4 (owner solvecraft-repo): moving a component carries its sketches, and a sketch on a body face follows the body."
  },
  {
-  "start": "FusionCreateNewComponentCommand"
+  "start": "component.create"
  },
  {
   "key": "Enter"
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -17,7 +17,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -39,7 +39,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "call": "ui.view",
@@ -48,7 +48,7 @@
   }
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "10"
@@ -57,7 +57,7 @@
   "key": "Enter"
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -69,7 +69,7 @@
   }
  },
  {
-  "start": "CircleCenterRadius"
+  "start": "sketch.circle.center"
  },
  {
   "click": {
@@ -91,7 +91,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "expect": {

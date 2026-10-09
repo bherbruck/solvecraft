@@ -1,8 +1,7 @@
 //! The SolveCraft engine.
 //!
-//! Every user-visible action is a command with a stable id. Ids are Fusion's command ids where
-//! Fusion has the command (`Extrude`, `SketchCreate`, `FusionFilletEdgesCommand`…) and dotted
-//! lower-case ids otherwise (`timeline.rollback`, `document.inspect`). Commands take JSON
+//! Every user-visible action is a command with a stable, dotted, lower-case id
+//! (`solid.extrude`, `sketch.create`, `solid.fillet`, `timeline.rollback`). Commands take JSON
 //! parameters and never open dialogs; the UI, the command palette, scripts, the CLI and the
 //! control channel all run the same commands through [`Session::execute`].
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -10,6 +9,7 @@
 
 pub mod cmd;
 pub mod frames;
+pub mod legacy_ids;
 pub mod params;
 pub mod recovery;
 pub mod sample;
@@ -390,7 +390,7 @@ impl Session {
         Ok(self.model.state())
     }
 
-    /// Measure one or two selections (see `MeasureCommand` with `items`); errors come back as
+    /// Measure one or two selections (see `inspect.measure` with `items`); errors come back as
     /// `{"error": …}`.
     pub fn measure_items(&self, items: &[Sel]) -> Value {
         let v = serde_json::to_value(items).unwrap_or(Value::Null);

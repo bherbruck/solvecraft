@@ -125,16 +125,16 @@ fn lip(groove: bool) -> Pl {
 /// The dialog for a plastic command.
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let (pl, inputs) = match id {
-        "FusionBossCommand" => (boss(), vec![SelInput::new("Position", PLANAR_FACES, false)]),
-        "FusionLipCommand" => (lip(false), vec![SelInput::new("Rim face", FACES, false)]),
-        "FusionSnapFitCommand" => (snap_fit(), vec![SelInput::new("Position", PLANAR_FACES, false)]),
-        "FusionRestCommand" => (rest(), vec![SelInput::new("Position", PLANAR_FACES, false)]),
-        "FusionManagePlasticRuleCommand" => {
+        "plastic.boss" => (boss(), vec![SelInput::new("Position", PLANAR_FACES, false)]),
+        "plastic.lip" => (lip(false), vec![SelInput::new("Rim face", FACES, false)]),
+        "plastic.snap_fit" => (snap_fit(), vec![SelInput::new("Position", PLANAR_FACES, false)]),
+        "plastic.rest" => (rest(), vec![SelInput::new("Position", PLANAR_FACES, false)]),
+        "plastic.manage_rules" => {
             let rules = app.session.doc.plastic_rules();
             let pick = app.session.doc.plastic.active.as_ref().and_then(|a| rules.iter().position(|r| &r.name == a)).unwrap_or(0);
             (Pl::Rules { pick, name: String::new(), values: Vec::new(), active: false, loaded: None }, vec![])
         }
-        "FusionAssignPlasticRuleCommand" => (Pl::Assign { rule: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
+        "plastic.assign_rule" => (Pl::Assign { rule: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
         _ => return None,
     };
     Some((Kind::Plastic(pl), inputs))
@@ -332,7 +332,7 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
             if app.session.doc.eval(ribs, ValueKind::Unitless).is_ok_and(|n| n >= 1.0) {
                 put(&mut p, &[("ribs", ribs), ("rib_thickness", rib_thickness), ("rib_length", rib_length), ("rib_offset", rib_offset)]);
             }
-            ("FusionBossCommand", p)
+            ("plastic.boss", p)
         }
         Pl::Lip { groove, width, height, gap, outside } => {
             let (body, at) = face.clone().ok_or("select the rim face first")?;
@@ -341,7 +341,7 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
             if *groove {
                 put(&mut p, &[("gap", gap)]);
             }
-            ("FusionLipCommand", p)
+            ("plastic.lip", p)
         }
         Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length } => {
             let mut p = placed("a point on a face")?;
@@ -356,7 +356,7 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
             {
                 p[key] = json!(v);
             }
-            ("FusionSnapFitCommand", p)
+            ("plastic.snap_fit", p)
         }
         Pl::Rest { round, width, length, height, draft, thickness } => {
             let mut p = placed("a point on a face")?;
@@ -366,7 +366,7 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
                 p["length"] = json!(length);
             }
             put(&mut p, &[("draft", draft), ("thickness", thickness)]);
-            ("FusionRestCommand", p)
+            ("plastic.rest", p)
         }
         Pl::Rules { pick, name, values, active, .. } => {
             let rules = app.session.doc.plastic_rules();
@@ -386,7 +386,7 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
                     p[*key] = json!(v);
                 }
             }
-            ("FusionManagePlasticRuleCommand", p)
+            ("plastic.manage_rules", p)
         }
         Pl::Assign { rule } => {
             let bodies: Vec<String> = inputs
@@ -399,7 +399,7 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
                 return Err("select bodies first".into());
             }
             let name = rule.checked_sub(1).and_then(|i| app.session.doc.plastic_rules().get(i).map(|r| r.name.clone())).unwrap_or_default();
-            ("FusionAssignPlasticRuleCommand", json!({"bodies": bodies, "rule": name}))
+            ("plastic.assign_rule", json!({"bodies": bodies, "rule": name}))
         }
     };
     if let Value::Object(m) = &mut p {
@@ -465,13 +465,13 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     }
                 }
             }
-            (b, "FusionBossCommand", *position)
+            (b, "plastic.boss", *position)
         }
         FeatureKind::Lip { face, width, height, groove, gap, outside, body } => {
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
-            (Pl::Lip { groove: *groove, width: width.clone(), height: height.clone(), gap: s(gap), outside: *outside }, "FusionLipCommand", *face)
+            (Pl::Lip { groove: *groove, width: width.clone(), height: height.clone(), gap: s(gap), outside: *outside }, "plastic.lip", *face)
         }
         FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, body } => {
             extra.insert("direction".into(), pt(*direction));
@@ -490,7 +490,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 catch_depth: catch_depth.clone(),
                 catch_length: catch_length.clone(),
             };
-            (f, "FusionSnapFitCommand", *position)
+            (f, "plastic.snap_fit", *position)
         }
         FeatureKind::Rest { position, direction, along, width, length, height, draft, thickness, body } => {
             extra.insert("direction".into(), pt(*direction));
@@ -508,7 +508,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 draft: s(draft),
                 thickness: s(thickness),
             };
-            (r, "FusionRestCommand", *position)
+            (r, "plastic.rest", *position)
         }
         _ => return None,
     };

@@ -70,7 +70,7 @@ Errors: an unknown tool or arguments that don't match the tool's schema are JSON
 result with `isError: true` and the engine's message, which the model can read and correct.
 
 `batch` rollback undoes as many steps as the batch added to the undo history; batches that
-themselves call `UndoCommand`, `NewDocumentCommand` or `doc.open` are not rolled back exactly.
+themselves call `edit.undo`, `file.new` or `doc.open` are not rolled back exactly.
 
 ## A typical session
 
@@ -78,14 +78,14 @@ themselves call `UndoCommand`, `NewDocumentCommand` or `doc.open` are not rolled
 → {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"me","version":"1"}}}
 → {"jsonrpc":"2.0","method":"notifications/initialized"}
 → {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"batch","arguments":{"commands":[
-     {"command":"SketchCreate","params":{"plane":"XY"}},
-     {"command":"ShapeRectangleTwoPoint","params":{"p0":[0,0],"p1":[40,30]}},
-     {"command":"SketchStop"},
-     {"command":"Extrude","params":{"distance":20}},
-     {"command":"FusionFilletEdgesCommand","params":{"edges":[[0,0,10]],"radius":3}},
-     {"command":"SketchCreate","params":{"plane":"XY"}},
-     {"command":"CircleCenterRadius","params":{"center":[20,15],"radius":5}},
-     {"command":"Extrude","params":{"distance":20,"operation":"cut"}}]}}}
+     {"command":"sketch.create","params":{"plane":"XY"}},
+     {"command":"sketch.rectangle.two_point","params":{"p0":[0,0],"p1":[40,30]}},
+     {"command":"sketch.finish"},
+     {"command":"solid.extrude","params":{"distance":20}},
+     {"command":"solid.fillet","params":{"edges":[[0,0,10]],"radius":3}},
+     {"command":"sketch.create","params":{"plane":"XY"}},
+     {"command":"sketch.circle.center","params":{"center":[20,15],"radius":5}},
+     {"command":"solid.extrude","params":{"distance":20,"operation":"cut"}}]}}}
 ← {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"ok\": true, \"completed\": 8, \"results\": [...]}"}]}}
 → {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"measure","arguments":{}}}
 ← … "total": {"volume_mm3": 22390.6, …}

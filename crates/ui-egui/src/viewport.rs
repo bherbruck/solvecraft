@@ -705,7 +705,7 @@ pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
         let cmds = crate::dialogs::apply_commands(app, d).ok()?;
         let (_, p) = cmds.into_iter().next()?;
         let mut scratch = app.session.scratch();
-        scratch.execute("FusionHalfSectionViewCommand", &p).ok()?;
+        scratch.execute("inspect.section", &p).ok()?;
         return scratch.section;
     }
     // Slice (Sketch Palette): cut the model at the plane of the sketch being edited.

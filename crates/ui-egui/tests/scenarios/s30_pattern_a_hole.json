@@ -3,7 +3,7 @@
   "note": "Pattern a hole (Object Type: Features), the beginner workflow box \u2192 hole \u2192 pattern."
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -11,7 +11,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -33,7 +33,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "call": "ui.view",
@@ -42,7 +42,7 @@
   }
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "15"
@@ -56,7 +56,7 @@
   }
  },
  {
-  "start": "FusionHoleCommand"
+  "start": "solid.hole"
  },
  {
   "click": {
@@ -85,7 +85,7 @@
   }
  },
  {
-  "start": "PatternRectangular"
+  "start": "solid.pattern.rectangular"
  },
  {
   "widget": "Bodies"

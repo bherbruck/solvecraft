@@ -10,7 +10,7 @@ use crate::params::{bad, bool_, str_};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("ChangeParameterCommand", "Change Parameters", change_param).at("SOLID", "MODIFY").icon("params").params(
+    CommandSpec::new("parameters.change", "Change Parameters", change_param).at("SOLID", "MODIFY").icon("params").params(
         "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\" (new parameters default to their value's unit), comment?, \
              favorite?: bool, new_name?: rename (references follow); or delete: name",
     ),
@@ -65,7 +65,7 @@ fn known(s: &Session, name: &str) -> bool {
 }
 
 fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ChangeParameterCommand";
+    let cmd = "parameters.change";
     if let Some(n) = str_(p, "delete") {
         s.doc_mut().remove_param(n.trim())?;
         return Ok(json!({"deleted": n.trim()}));

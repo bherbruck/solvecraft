@@ -13,11 +13,11 @@ use crate::params::{bad, num, str_, vec2};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("ImportDxfFileCommand", "Insert DXF", insert_dxf)
+    CommandSpec::new("sketch.insert_dxf", "Insert DXF", insert_dxf)
         .at("SKETCH", "INSERT")
         .icon("dxf")
         .params("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale?, tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)"),
-    CommandSpec::new("SketchImportSVG", "Insert SVG", insert_svg)
+    CommandSpec::new("sketch.insert_svg", "Insert SVG", insert_svg)
         .at("SKETCH", "INSERT")
         .icon("svg")
         .params("path | text: SVG; at?: [x,y] offset, scale?, tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)"),
@@ -123,7 +123,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         if let Some(n) = str_(p, "name") {
             cp["name"] = json!(n);
         }
-        let r = (super::find_command("SketchCreate").ok_or_else(|| bad(cmd, "SketchCreate"))?.run)(s, &cp)?;
+        let r = (super::find_command("sketch.create").ok_or_else(|| bad(cmd, "sketch.create"))?.run)(s, &cp)?;
         created = r.get("sketch").and_then(Value::as_u64);
     }
     let tol = num(p, "tolerance").filter(|t| t.is_finite() && *t > 0.0).unwrap_or(1e-4).clamp(1e-9, 10.0);
@@ -150,11 +150,11 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
 }
 
 fn insert_dxf(s: &mut Session, p: &Value) -> Result<Value> {
-    insert(s, p, "ImportDxfFileCommand", false)
+    insert(s, p, "sketch.insert_dxf", false)
 }
 
 fn insert_svg(s: &mut Session, p: &Value) -> Result<Value> {
-    insert(s, p, "SketchImportSVG", true)
+    insert(s, p, "sketch.insert_svg", true)
 }
 
 fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
@@ -201,14 +201,14 @@ mod tests {
     #[test]
     fn dxf_and_svg_round_trip_into_sketches() {
         let mut s = Session::default();
-        s.execute("SketchCreate", &json!({"plane": "XY"})).unwrap();
-        s.execute("ShapeRectangleTwoPoint", &json!({"p0": [0, 0], "p1": [30, 20]})).unwrap();
-        s.execute("CircleCenterRadius", &json!({"center": [10, 10], "radius": 4})).unwrap();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [30, 20]})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [10, 10], "radius": 4})).unwrap();
         let out = s.execute("sketch.export_dxf", &json!({})).unwrap();
         let dxf = out["dxf"].as_str().unwrap().to_string();
-        s.execute("SketchStop", &json!({})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
         // Insert it again as a new sketch, offset: same profiles.
-        let r = s.execute("ImportDxfFileCommand", &json!({"text": dxf, "at": [100, 0]})).unwrap();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf, "at": [100, 0]})).unwrap();
         assert_eq!(r["curves"], 5, "{r}");
         let id = r["sketch"].as_u64().unwrap();
         let ss = s.model.state().sketch(id).unwrap().clone();
@@ -219,19 +219,19 @@ mod tests {
         // SVG with a path and text, into the active sketch.
         let svg =
             r#"<svg width="40mm" height="40mm" viewBox="0 0 40 40"><path d="M0 0 H40 V40 H0 Z"/><text x="5" y="20" font-size="10">Hi</text></svg>"#;
-        let r = s.execute("SketchImportSVG", &json!({"text": svg})).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"text": svg})).unwrap();
         assert_eq!(r["curves"], 4, "{r}");
         assert_eq!(r["texts"], 1, "{r}");
-        assert!(s.execute("SketchImportSVG", &json!({"text": "<svg></svg>"})).is_err());
-        assert!(s.execute("ImportDxfFileCommand", &json!({"path": "/nonexistent.dxf"})).is_err());
-        s.execute("SketchStop", &json!({})).unwrap();
+        assert!(s.execute("sketch.insert_svg", &json!({"text": "<svg></svg>"})).is_err());
+        assert!(s.execute("sketch.insert_dxf", &json!({"path": "/nonexistent.dxf"})).is_err());
+        s.execute("sketch.finish", &json!({})).unwrap();
         // Ends that miss by 0.00005 still close the square; with a tighter tolerance they don't.
         let gappy = "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n10\n21\n0\n0\nLINE\n10\n10.00005\n20\n0\n11\n10\n21\n10\n0\nLINE\n10\n10\n20\n10\n11\n0\n21\n10\n0\nLINE\n10\n0\n20\n10.00003\n11\n0\n21\n0.00004\n0\nENDSEC\n0\nEOF\n";
         for (tol, n) in [(1e-4, 1), (1e-6, 0)] {
-            let r = s.execute("ImportDxfFileCommand", &json!({"text": gappy, "tolerance": tol})).unwrap();
+            let r = s.execute("sketch.insert_dxf", &json!({"text": gappy, "tolerance": tol})).unwrap();
             let ss = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
             assert_eq!(ss.profiles.len(), n, "tolerance {tol}");
-            s.execute("SketchStop", &json!({})).unwrap();
+            s.execute("sketch.finish", &json!({})).unwrap();
         }
     }
 }

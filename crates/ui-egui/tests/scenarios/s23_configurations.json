@@ -1,9 +1,9 @@
 [
  {
-  "note": "Configurations: a parameter column (d1) in the configuration table switches the design (FusionStartDesignConfigModeCmd)."
+  "note": "Configurations: a parameter column (d1) in the configuration table switches the design (config.configure)."
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -11,7 +11,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -33,7 +33,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchDimension"
+  "start": "sketch.dimension"
  },
  {
   "click": {
@@ -53,10 +53,10 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "10"
@@ -70,7 +70,7 @@
   }
  },
  {
-  "start": "FusionStartDesignConfigModeCmd"
+  "start": "config.configure"
  },
  {
   "widget": "Add Column"

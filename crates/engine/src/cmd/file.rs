@@ -9,22 +9,22 @@ use crate::params::{bad, bool_, str_, string_list};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("NewDocumentCommand", "New Design", new_doc).icon("new").key("Ctrl+N").noundo().params("name?"),
+    CommandSpec::new("file.new", "New Design", new_doc).icon("new").key("Ctrl+N").noundo().params("name?"),
     CommandSpec::new("doc.open", "Open", open)
         .icon("open")
         .key("Ctrl+O")
         .noundo()
         .params("path: .solvecraft design, or a .step/.stp file (opens as a new design)"),
-    CommandSpec::new("FusionImportCommandFromToolbar", "Insert STEP", insert_step)
+    CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
         .params("path: .step/.stp file (its bodies join the design as an Import base feature); name?"),
-    CommandSpec::new("ParaMeshInsertAlignCommand", "Insert Mesh", insert_mesh)
+    CommandSpec::new("file.insert_mesh", "Insert Mesh", insert_mesh)
         .at("SOLID", "INSERT")
         .icon("import")
         .params("path: .3mf or .stl file (its meshes join the design as mesh bodies); name?"),
-    CommandSpec::new("SaveDocumentCommand", "Save", save).icon("save").key("Ctrl+S").noundo().params("path? (default: current file)"),
-    CommandSpec::new("SaveDocumentAsCommand", "Save As", save_as).icon("save").noundo().params("path"),
+    CommandSpec::new("file.save", "Save", save).icon("save").key("Ctrl+S").noundo().params("path? (default: current file)"),
+    CommandSpec::new("file.save_as", "Save As", save_as).icon("save").noundo().params("path"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list)
         .noundo()
         .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
@@ -32,11 +32,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params("id (from doc.recovery_list); dir?; discard?: bool (delete the entry once open) — opens it with its file path, unsaved"),
     CommandSpec::new("doc.recovery_discard", "Discard Recovered Design", recovery_discard).noundo().params("id, or all: true; dir?"),
-    CommandSpec::new("ExportCommand", "Export", export)
+    CommandSpec::new("file.export", "Export", export)
         .icon("export")
         .noundo()
         .params("path; format?: stl|stla|obj|step|3mf (default from extension); bodies?: [names]"),
-    CommandSpec::new("FusionSaveAsSTLCommand", "Save As Mesh", save_stl).icon("export").noundo().params("path; bodies?: [names]; ascii?: bool"),
+    CommandSpec::new("file.save_mesh", "Save As Mesh", save_stl).icon("export").noundo().params("path; bodies?: [names]; ascii?: bool"),
 ];
 
 fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
@@ -103,7 +103,7 @@ fn add_mesh(s: &mut Session, path: &str, name: Option<&str>) -> Result<Value> {
 }
 
 fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ParaMeshInsertAlignCommand";
+    let cmd = "file.insert_mesh";
     let path = path_arg(p, cmd)?;
     if !solvecraft_io::is_mesh_path(path) {
         return Err(bad(cmd, "only 3MF and STL files (.3mf, .stl) can be inserted as meshes"));
@@ -112,7 +112,7 @@ fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionImportCommandFromToolbar";
+    let cmd = "file.insert_step";
     let path = path_arg(p, cmd)?;
     if !solvecraft_io::is_step_path(path) {
         return Err(bad(cmd, "only STEP files (.step, .stp) can be inserted"));
@@ -156,13 +156,13 @@ fn write(s: &mut Session, path: &str) -> Result<Value> {
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
     let path = match str_(p, "path") {
         Some(x) if !x.trim().is_empty() => x.to_string(),
-        _ => s.path.clone().ok_or_else(|| bad("SaveDocumentCommand", "the design has no file yet: give a `path`"))?,
+        _ => s.path.clone().ok_or_else(|| bad("file.save", "the design has no file yet: give a `path`"))?,
     };
     write(s, &path)
 }
 
 fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = path_arg(p, "SaveDocumentAsCommand")?.to_string();
+    let path = path_arg(p, "file.save_as")?.to_string();
     write(s, &path)
 }
 
@@ -180,13 +180,13 @@ fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Resu
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = path_arg(p, "ExportCommand")?;
+    let path = path_arg(p, "file.export")?;
     let format = Format::from_name(str_(p, "format").unwrap_or(path))?;
     export_to(s, path, format, &string_list(p, "bodies"))
 }
 
 fn save_stl(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = path_arg(p, "FusionSaveAsSTLCommand")?;
+    let path = path_arg(p, "file.save_mesh")?;
     let f = if bool_(p, "ascii").unwrap_or(false) { Format::StlAscii } else { Format::StlBinary };
     export_to(s, path, f, &string_list(p, "bodies"))
 }

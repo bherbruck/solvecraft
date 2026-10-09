@@ -26,16 +26,8 @@ const TYPE_LABELS: [&str; 7] = ["Rigid", "Revolute", "Slider", "Cylindrical", "P
 /// What a joint origin input accepts (snaps on faces, edges and vertices).
 const SNAPS: u16 = FACES | EDGES | VERTICES;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
-const MOVES: [&str; 8] = [
-    "JointAssembleCmdNew",
-    "JointAsBuiltCmd",
-    "FusionMoveJointsCommand",
-    "joint.edit",
-    "joint.limits",
-    "RigidGroupCmd",
-    "parts.insert",
-    "FusionFastenersCommand",
-];
+const MOVES: [&str; 8] =
+    ["joint.create", "joint.as_built", "joint.drive", "joint.edit", "joint.limits", "joint.rigid_group", "parts.insert", "parts.fastener"];
 
 #[derive(Clone, Debug)]
 pub enum Asm {
@@ -148,27 +140,25 @@ impl Asm {
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let s = &app.session;
     let (asm, inputs) = match id {
-        "FusionCreateNewComponentCommand" => {
-            (Asm::NewComponent { name: String::new(), activate: true }, vec![SelInput::new("Bodies (optional)", BODIES, true)])
-        }
-        "JointAssembleCmdNew" => (
+        "component.create" => (Asm::NewComponent { name: String::new(), activate: true }, vec![SelInput::new("Bodies (optional)", BODIES, true)]),
+        "joint.create" => (
             Asm::Joint(Box::new(JointForm::new(false))),
             vec![SelInput::new("Component 1", SNAPS, false), SelInput::new("Component 2", SNAPS, false)],
         ),
-        "JointAsBuiltCmd" => {
+        "joint.as_built" => {
             (Asm::Joint(Box::new(JointForm::new(true))), vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)])
         }
-        "JointOrigin" => (Asm::JointOrigin { name: String::new(), hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
-        "RigidGroupCmd" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
-        "FusionMoveJointsCommand" => {
+        "joint.origin" => (Asm::JointOrigin { name: String::new(), hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
+        "joint.rigid_group" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
+        "joint.drive" => {
             let joint = movable(s).first().copied().unwrap_or(0);
             (Asm::Drive { joint, values: current_values(s, joint), focus: true }, vec![])
         }
-        "FusionMotionRelationshipCommand" => {
+        "joint.motion_link" => {
             let b = usize::from(movable(s).len() > 1);
             (Asm::MotionLink { a: 0, b, ia: 0, ib: 0, ratio: "1".into(), offset: "0".into() }, vec![])
         }
-        "InterferenceCheckCommand" => {
+        "inspect.interference" => {
             (Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new() }, vec![SelInput::new("Bodies (all if none)", BODIES, true)])
         }
         _ => return None,
@@ -571,7 +561,7 @@ fn capital(s: &str) -> String {
 /// Run the check and find the overlapping volumes (world placement) to show in red.
 fn interference(app: &mut SolveApp, picked: &[Sel]) -> (Value, Vec<Mesh>) {
     let names: Vec<String> = picked.iter().filter_map(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None }).collect();
-    let r = match app.run("InterferenceCheckCommand", json!({ "bodies": names })) {
+    let r = match app.run("inspect.interference", json!({ "bodies": names })) {
         Ok(v) => v,
         Err(e) => return (json!({ "error": e }), Vec::new()),
     };
@@ -655,9 +645,9 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 if !name.trim().is_empty() {
                     p["name"] = json!(name.trim());
                 }
-                cmd("FusionCreateNewComponentCommand", p)
+                cmd("component.create", p)
             } else {
-                cmd("FusionCreateComponentsFromBodiesCommand", json!({ "bodies": bodies }))
+                cmd("component.from_bodies", json!({ "bodies": bodies }))
             }
         }
         Asm::Joint(f) => {
@@ -685,7 +675,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 if let Some(x) = sel_items(inputs, 1).first().and_then(|x| snap_of(s, x)) {
                     p["at"] = x.param;
                 }
-                return Ok(cmd("JointAsBuiltCmd", p));
+                return Ok(cmd("joint.as_built", p));
             }
             let (a, b) = (snap(0, "component 1's joint origin")?, snap(1, "component 2's joint origin")?);
             if a.param.get("occurrence").is_some() && a.param.get("occurrence") == b.param.get("occurrence") {
@@ -697,31 +687,31 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.
             let p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
-            cmd("JointAssembleCmdNew", p)
+            cmd("joint.create", p)
         }
         Asm::JointOrigin { name, .. } => {
             let mut p = snap(0, "a snap")?.param;
             if !name.trim().is_empty() {
                 p["name"] = json!(name.trim());
             }
-            cmd("JointOrigin", p)
+            cmd("joint.origin", p)
         }
         Asm::RigidGroup => {
             let occs = occurrences(s, sel_items(inputs, 0));
             if occs.len() < 2 {
                 return Err("select two or more components".into());
             }
-            cmd("RigidGroupCmd", json!({ "occurrences": occs }))
+            cmd("joint.rigid_group", json!({ "occurrences": occs }))
         }
         Asm::Drive { joint, values, .. } => {
             let j = s.doc.assembly.joints.get(*joint).ok_or("no joint that moves yet")?;
-            cmd("FusionMoveJointsCommand", json!({"joint": j.id, "values": values}))
+            cmd("joint.drive", json!({"joint": j.id, "values": values}))
         }
         Asm::MotionLink { a, b, ia, ib, ratio, offset } => {
             let js = &s.doc.assembly.joints;
             let (Some(ja), Some(jb)) = (js.get(*a), js.get(*b)) else { return Err("needs two joints".into()) };
             let num = |e: &str| eval(e, ValueKind::Unitless);
-            cmd("FusionMotionRelationshipCommand", json!({"a": ja.id, "b": jb.id, "ia": ia, "ib": ib, "ratio": num(ratio)?, "offset": num(offset)?}))
+            cmd("joint.motion_link", json!({"a": ja.id, "b": jb.id, "ia": ia, "ib": ib, "ratio": num(ratio)?, "offset": num(offset)?}))
         }
         // The check runs from its Compute button; OK only closes.
         Asm::Interference { .. } => Vec::new(),
@@ -756,7 +746,7 @@ pub fn animate(app: &SolveApp, k: &Asm, cmds: &mut Vec<(String, Value)>) {
         .collect();
     let drive = match f.editing {
         Some(id) => Some(id),
-        None => match cmds.iter_mut().find(|(c, _)| c == "JointAssembleCmdNew") {
+        None => match cmds.iter_mut().find(|(c, _)| c == "joint.create") {
             Some((_, p)) => {
                 p["values"] = json!(values);
                 None
@@ -766,7 +756,7 @@ pub fn animate(app: &SolveApp, k: &Asm, cmds: &mut Vec<(String, Value)>) {
         },
     };
     if let Some(id) = drive {
-        cmds.push(("FusionMoveJointsCommand".into(), json!({"joint": id, "values": values})));
+        cmds.push(("joint.drive".into(), json!({"joint": id, "values": values})));
     }
 }
 

@@ -19,11 +19,11 @@ fn ids(v: &Value) -> Vec<String> {
 /// A new sketch with one rectangle of the given kind; returns its four side ids.
 fn rect(kind: &str) -> (Session, Vec<String>) {
     let mut s = Session::default();
-    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
     let r = match kind {
-        "center" => run(&mut s, "ShapeRectangleCenter", json!({"center": [3, 2], "corner": [13, 9]})),
-        "two" => run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [1, 1], "p1": [21, 15]})),
-        _ => run(&mut s, "ShapeRectangleThreePoint", json!({"p0": [0, 0], "p1": [20, 5], "p2": [18, 15]})),
+        "center" => run(&mut s, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [13, 9]})),
+        "two" => run(&mut s, "sketch.rectangle.two_point", json!({"p0": [1, 1], "p1": [21, 15]})),
+        _ => run(&mut s, "sketch.rectangle.three_point", json!({"p0": [0, 0], "p1": [20, 5], "p2": [18, 15]})),
     };
     let sides = ids(&r["curves"]);
     assert_eq!(sides.len(), 4, "{r}");
@@ -54,9 +54,9 @@ fn fresh_rectangles_have_the_expected_freedom() {
 fn rectangles_take_dimensions_without_conflict() {
     for k in KINDS {
         let (mut s, l) = rect(k);
-        run(&mut s, "SketchDimension", json!({"entities": [l[0]], "value": 30}));
+        run(&mut s, "sketch.dimension", json!({"entities": [l[0]], "value": 30}));
         healthy(&mut s, &format!("{k} width"));
-        run(&mut s, "SketchDimension", json!({"entities": [l[1]], "value": 12}));
+        run(&mut s, "sketch.dimension", json!({"entities": [l[1]], "value": 12}));
         let dof = healthy(&mut s, &format!("{k} width+height"));
         assert_eq!(dof, if k == "three" { 3 } else { 2 }, "{k}");
     }
@@ -72,12 +72,12 @@ fn rectangles_can_be_dragged_pinned_and_made_square() {
         run(&mut s, "sketch.move_point", json!({"point": format!("{}.end", l[2]), "to": [25, 22]}));
         healthy(&mut s, &format!("{k} drag other corner"));
         // Pin a corner to the origin.
-        run(&mut s, "ConstraintCoincident", json!({"a": format!("{}.start", l[0]), "b": "origin"}));
+        run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{}.start", l[0]), "b": "origin"}));
         healthy(&mut s, &format!("{k} corner on origin"));
         // Square: equal sides.
-        run(&mut s, "ConstraintEqual", json!({"a": l[0], "b": l[1]}));
+        run(&mut s, "sketch.constraint.equal", json!({"a": l[0], "b": l[1]}));
         healthy(&mut s, &format!("{k} square"));
-        run(&mut s, "SketchDimension", json!({"entities": [l[0]], "value": 10}));
+        run(&mut s, "sketch.dimension", json!({"entities": [l[0]], "value": 10}));
         let dof = healthy(&mut s, &format!("{k} square sized"));
         assert_eq!(dof, if k == "three" { 1 } else { 0 }, "{k}");
     }

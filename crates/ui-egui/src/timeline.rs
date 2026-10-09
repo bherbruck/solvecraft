@@ -62,7 +62,7 @@ fn delete_feature(app: &mut SolveApp, id: u64) {
     };
     let (with, fail) = (list("deleted_with_it"), list("would_fail"));
     if with.is_empty() && fail.is_empty() {
-        let _ = app.run("FusionDeleteCommand", json!({ "features": [id.to_string()] }));
+        let _ = app.run("timeline.delete", json!({ "features": [id.to_string()] }));
     } else {
         app.dialog = Some(crate::dialogs::Dialog::confirm_delete(id, with, fail));
     }
@@ -99,7 +99,7 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some(k) if k < n => json!({"position": k}),
                     _ => json!({}),
                 };
-                let _ = app.run("timeline.rollTo", pos);
+                let _ = app.run("timeline.roll_to", pos);
             }
             x += 24.0;
         }
@@ -223,7 +223,7 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.close();
                 }
                 if ui.button("Roll History Marker Here").clicked() {
-                    let _ = app.run("timeline.rollTo", json!({ "feature": id }));
+                    let _ = app.run("timeline.roll_to", json!({ "feature": id }));
                     ui.close();
                 }
                 if ui.button("Find in Browser").clicked() {
@@ -271,7 +271,7 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
             let slot = slot_at(&xs, end, pp.x);
             match dg {
                 Drag::Marker => {
-                    let _ = app.run("timeline.rollTo", if slot >= n { json!({}) } else { json!({ "position": slot }) });
+                    let _ = app.run("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
                 }
                 Drag::Feature(id) => {
                     let from = app.session.doc.feature_index(id).unwrap_or(0);

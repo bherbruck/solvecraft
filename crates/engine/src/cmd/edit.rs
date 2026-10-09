@@ -8,17 +8,17 @@ use crate::params::{bad, bool_, num, str_, string_list};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("UndoCommand", "Undo", undo).icon("undo").key("Ctrl+Z").noundo(),
-    CommandSpec::new("RedoCommand", "Redo", redo).icon("redo").key("Ctrl+Y").noundo(),
-    CommandSpec::new("FusionComputeAllCommand", "Compute All", compute_all).at("SOLID", "MODIFY").icon("compute").noundo(),
-    CommandSpec::new("FusionDeleteCommand", "Delete", delete)
+    CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo(),
+    CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo(),
+    CommandSpec::new("timeline.compute_all", "Compute All", compute_all).at("SOLID", "MODIFY").icon("compute").noundo(),
+    CommandSpec::new("timeline.delete", "Delete", delete)
         .at("SOLID", "MODIFY")
         .icon("delete")
         .key("Delete")
         .params("features: [id or name] (a sketch takes its dependent features with it)"),
-    CommandSpec::new("FusionRenameTimelineEntryCommand", "Rename", rename).params("feature: id|name, name"),
+    CommandSpec::new("timeline.rename", "Rename", rename).params("feature: id|name, name"),
     CommandSpec::new("timeline.rollback", "Move Timeline Marker", rollback).params("position: number of features to keep active (omit = end)"),
-    CommandSpec::new("timeline.rollTo", "Roll History Marker", rollback)
+    CommandSpec::new("timeline.roll_to", "Roll History Marker", rollback)
         .params("position: number of features to keep active (omit = end) | feature: id|name (the marker goes right after it)"),
     CommandSpec::new("timeline.reorder", "Reorder Feature", reorder)
         .params("feature: id|name, position: its new index; refused when a feature that worked would fail"),
@@ -75,7 +75,7 @@ fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionDeleteCommand";
+    let cmd = "timeline.delete";
     let mut keys = string_list(p, "features");
     if let Some(Value::Array(a)) = p.get("features") {
         keys.extend(a.iter().filter_map(Value::as_u64).map(|n| n.to_string()));
@@ -108,7 +108,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionRenameTimelineEntryCommand";
+    let cmd = "timeline.rename";
     let id = feature_id(s, p.get("feature"), cmd)?;
     let name =
         str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
@@ -125,7 +125,7 @@ fn rollback(s: &mut Session, p: &Value) -> Result<Value> {
     let n = s.doc.features.len();
     let pos = match p.get("feature") {
         Some(f) => {
-            let id = feature_id(s, Some(f), "timeline.rollTo")?;
+            let id = feature_id(s, Some(f), "timeline.roll_to")?;
             s.doc.feature_index(id).map(|i| i + 1)
         }
         None => num(p, "position").map(|x| x.max(0.0) as usize),
@@ -278,7 +278,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let id = feature_id(s, p.get("feature"), cmd)?;
     let cid = str_(p, "command").ok_or_else(|| bad(cmd, "`command` must name the feature's command"))?;
     let spec = super::find_command(cid).ok_or_else(|| bad(cmd, format!("no command `{cid}`")))?;
-    if cid.starts_with("timeline.") || cid.starts_with("select.") || cid.starts_with("Sketch") {
+    if spec.id.starts_with("timeline.") || spec.id.starts_with("select.") || spec.id.starts_with("sketch.") {
         return Err(bad(cmd, format!("`{cid}` does not make a feature")));
     }
     let params = p.get("params").cloned().unwrap_or_else(|| json!({}));

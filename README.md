@@ -69,10 +69,10 @@ A script is a JSON list of commands, the same ones the UI runs:
 
 ```json
 {"commands": [
-  {"command": "SketchCreate", "params": {"plane": "XY"}},
-  {"command": "ShapeRectangleTwoPoint", "params": {"p0": [0, 0], "p1": [40, 30]}},
-  {"command": "Extrude", "params": {"distance": 20}},
-  {"command": "FusionFilletEdgesCommand", "params": {"edges": [[0, 0, 10]], "radius": 3}}
+  {"command": "sketch.create", "params": {"plane": "XY"}},
+  {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 30]}},
+  {"command": "solid.extrude", "params": {"distance": 20}},
+  {"command": "solid.fillet", "params": {"edges": [[0, 0, 10]], "radius": 3}}
 ]}
 ```
 

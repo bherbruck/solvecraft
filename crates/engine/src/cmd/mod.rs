@@ -1,6 +1,6 @@
-//! The command registry. Ids follow Fusion's command ids where Fusion has the command; the
-//! toolbar placement (`tab`, `panel`) follows Fusion's Design workspace so the registry doubles
-//! as the parity metric (`cargo xtask parity`).
+//! The command registry. Ids are SolveCraft's own dotted ids (`solid.extrude`,
+//! `sketch.rectangle.two_point`); the toolbar placement (`tab`, `panel`) follows the familiar
+//! Design workspace layout. Ids used before the rename still resolve (`legacy_ids`).
 
 mod browser;
 mod clipboard;
@@ -165,5 +165,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
 
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
     let all = command_specs();
+    // Ids from before the rename still find their command.
+    let id = crate::legacy_ids::current_id(id);
     all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied()
 }

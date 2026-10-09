@@ -6,7 +6,7 @@
   }
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -14,7 +14,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -36,7 +36,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "call": "ui.view",
@@ -45,7 +45,7 @@
   }
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "30"
@@ -60,7 +60,7 @@
   }
  },
  {
-  "start": "FusionShellBodyCommand"
+  "start": "solid.shell"
  },
  {
   "click": {
@@ -98,7 +98,7 @@
   }
  },
  {
-  "start": "FusionBossCommand"
+  "start": "plastic.boss"
  },
  {
   "click": {
@@ -126,7 +126,7 @@
   "shot": "s13_boss"
  },
  {
-  "start": "FusionLipCommand"
+  "start": "plastic.lip"
  },
  {
   "click": {
@@ -160,7 +160,7 @@
   }
  },
  {
-  "start": "FusionSnapFitCommand"
+  "start": "plastic.snap_fit"
  },
  {
   "click": {

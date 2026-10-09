@@ -62,9 +62,9 @@ channel; see [mcp.md](mcp.md).
 ## Example
 
 ```text
-{"id":1,"method":"engine.execute","params":{"command":"SketchCreate","params":{"plane":"XY"}}}
-{"id":2,"method":"engine.execute","params":{"command":"ShapeRectangleTwoPoint","params":{"p0":[0,0],"p1":[40,30]}}}
-{"id":3,"method":"engine.execute","params":{"command":"Extrude","params":{"distance":20}}}
-{"id":4,"method":"engine.execute","params":{"command":"FusionFilletEdgesCommand","params":{"edges":[[0,0,10]],"radius":3}}}
+{"id":1,"method":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY"}}}
+{"id":2,"method":"engine.execute","params":{"command":"sketch.rectangle.two_point","params":{"p0":[0,0],"p1":[40,30]}}}
+{"id":3,"method":"engine.execute","params":{"command":"solid.extrude","params":{"distance":20}}}
+{"id":4,"method":"engine.execute","params":{"command":"solid.fillet","params":{"edges":[[0,0,10]],"radius":3}}}
 {"id":5,"method":"ui.screenshot","params":{"path":"/tmp/part.png"}}
 ```

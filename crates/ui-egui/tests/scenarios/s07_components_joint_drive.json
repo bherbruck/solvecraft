@@ -1,12 +1,12 @@
 [
  {
-  "start": "FusionCreateNewComponentCommand"
+  "start": "component.create"
  },
  {
   "key": "Enter"
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -14,7 +14,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -36,7 +36,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "call": "ui.view",
@@ -45,7 +45,7 @@
   }
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "10"
@@ -71,13 +71,13 @@
   }
  },
  {
-  "start": "FusionCreateNewComponentCommand"
+  "start": "component.create"
  },
  {
   "key": "Enter"
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -85,7 +85,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -107,7 +107,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "call": "ui.view",
@@ -116,7 +116,7 @@
   }
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "click": {
@@ -140,7 +140,7 @@
   }
  },
  {
-  "start": "JointAssembleCmdNew"
+  "start": "joint.create"
  },
  {
   "click": {
@@ -205,7 +205,7 @@
   }
  },
  {
-  "start": "FusionMoveJointsCommand"
+  "start": "joint.drive"
  },
  {
   "text": "90"

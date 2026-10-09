@@ -79,7 +79,7 @@ fn handshake_and_tools_list() {
     }
 
     let cmds = tool(&mut s, "list_commands", json!({"filter": "fillet"}));
-    assert!(cmds.as_array().unwrap().iter().any(|c| c["id"] == "FusionFilletEdgesCommand"), "{cmds}");
+    assert!(cmds.as_array().unwrap().iter().any(|c| c["id"] == "solid.fillet"), "{cmds}");
     assert!(cmds.as_array().unwrap().len() < 5);
 
     let res = call(&mut s, 5, "resources/list", json!({}));
@@ -98,14 +98,14 @@ fn agent_builds_box_fillet_hole() {
         &mut s,
         "batch",
         json!({"commands": [
-            {"command": "SketchCreate", "params": {"plane": "XY"}},
-            {"command": "ShapeRectangleTwoPoint", "params": {"p0": [0, 0], "p1": [40, 30]}},
-            {"command": "SketchStop"},
-            {"command": "Extrude", "params": {"distance": 20}},
-            {"command": "FusionFilletEdgesCommand", "params": {"edges": [[0, 0, 10]], "radius": 3}},
-            {"command": "SketchCreate", "params": {"plane": "XY"}},
-            {"command": "CircleCenterRadius", "params": {"center": [20, 15], "radius": 5}},
-            {"command": "Extrude", "params": {"distance": 20, "operation": "cut"}},
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 30]}},
+            {"command": "sketch.finish"},
+            {"command": "solid.extrude", "params": {"distance": 20}},
+            {"command": "solid.fillet", "params": {"edges": [[0, 0, 10]], "radius": 3}},
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.circle.center", "params": {"center": [20, 15], "radius": 5}},
+            {"command": "solid.extrude", "params": {"distance": 20, "operation": "cut"}},
         ]}),
     );
     assert_eq!(r["completed"], 8, "{r}");
@@ -169,7 +169,7 @@ fn agent_builds_box_fillet_hole() {
 fn parameters_drive_the_design() {
     let mut s = server();
     tool(&mut s, "set_parameter", json!({"name": "len", "value": "40 mm"}));
-    tool(&mut s, "execute", json!({"command": "PrimitiveBox", "params": {"length": "len", "width": 30, "height": "len / 2", "corner": [0, 0, 0]}}));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": "len", "width": 30, "height": "len / 2", "corner": [0, 0, 0]}}));
     assert!(rel(volume(&mut s), 40.0 * 30.0 * 20.0) < 1e-9);
     let r = tool(&mut s, "set_parameter", json!({"name": "len", "value": 50}));
     assert_eq!(r["value"], 50.0, "{r}");
@@ -182,20 +182,20 @@ fn parameters_drive_the_design() {
 #[test]
 fn batch_stops_at_first_error_and_rolls_back() {
     let mut s = server();
-    tool(&mut s, "execute", json!({"command": "PrimitiveBox", "params": {"length": 10, "width": 10, "height": 10}}));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
     let r = raw_tool(
         &mut s,
         "batch",
         json!({"commands": [
-            {"command": "PrimitiveSphere", "params": {"radius": 3, "center": [50, 0, 0]}},
-            {"command": "Extrude", "params": {"distance": "bogus +"}},
-            {"command": "PrimitiveSphere", "params": {"radius": 3, "center": [80, 0, 0]}},
+            {"command": "solid.sphere", "params": {"radius": 3, "center": [50, 0, 0]}},
+            {"command": "solid.extrude", "params": {"distance": "bogus +"}},
+            {"command": "solid.sphere", "params": {"radius": 3, "center": [80, 0, 0]}},
         ]}),
     );
     assert_eq!(r["result"]["isError"], true, "{r}");
     let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(body["failed"]["index"], 1, "{body}");
-    assert_eq!(body["failed"]["command"], "Extrude");
+    assert_eq!(body["failed"]["command"], "solid.extrude");
     assert_eq!(body["undone"], 1, "{body}");
     assert_eq!(body["results"].as_array().unwrap().len(), 1);
     // Only the first box is left, and its undo step is intact.
@@ -206,7 +206,7 @@ fn batch_stops_at_first_error_and_rolls_back() {
     let r = raw_tool(
         &mut s,
         "batch",
-        json!({"rollback": false, "commands": [{"command": "PrimitiveSphere", "params": {"radius": 3, "center": [50, 0, 0]}}, {"command": "NoSuchCommand"}]}),
+        json!({"rollback": false, "commands": [{"command": "solid.sphere", "params": {"radius": 3, "center": [50, 0, 0]}}, {"command": "NoSuchCommand"}]}),
     );
     assert_eq!(r["result"]["isError"], true);
     assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("NoSuchCommand"));
@@ -225,7 +225,7 @@ fn unknown_tools_and_bad_arguments_are_clean_errors() {
     assert_eq!(raw_tool(&mut s, "screenshot", json!({"view": "sideways"}))["error"]["code"], -32602);
     assert_eq!(call(&mut s, 1, "tools/call", json!({"arguments": {}}))["error"]["code"], -32602);
     // Engine errors are tool errors the model can read.
-    let r = raw_tool(&mut s, "execute", json!({"command": "Extrude", "params": {"distance": 10}}));
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.extrude", "params": {"distance": 10}}));
     assert_eq!(r["result"]["isError"], true, "{r}");
     let r = raw_tool(&mut s, "execute", json!({"command": "NoSuchCommand"}));
     assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("unknown command"));
@@ -253,7 +253,7 @@ fn hostile_values() -> Vec<Value> {
         json!("1/0"),
         json!([]),
         json!([1e308, -1e308]),
-        json!([{"command": "Extrude", "params": {"distance": 1e308}}]),
+        json!([{"command": "solid.extrude", "params": {"distance": 1e308}}]),
         json!([{"command": 7}, null, "x"]),
         json!({}),
         json!({"x": 1}),
@@ -265,7 +265,7 @@ fn hostile_values() -> Vec<Value> {
 #[test]
 fn hostile_arguments_never_panic() {
     let mut s = server();
-    tool(&mut s, "execute", json!({"command": "PrimitiveBox", "params": {"length": 10, "width": 10, "height": 10}}));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
     let defs = tool_definitions();
     let mut n = 0;
     for def in &defs {
@@ -295,7 +295,7 @@ fn hostile_arguments_never_panic() {
     let cmds = tool(&mut s, "list_commands", json!({}));
     for c in cmds.as_array().unwrap() {
         let id = c["id"].as_str().unwrap();
-        if matches!(id, "doc.open" | "SaveDocumentCommand" | "SaveDocumentAsCommand" | "ExportCommand" | "FusionSaveAsSTLCommand") {
+        if matches!(id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh") {
             continue;
         }
         for v in hostile_values() {

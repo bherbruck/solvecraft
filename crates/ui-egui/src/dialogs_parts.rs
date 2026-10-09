@@ -64,7 +64,7 @@ pub struct Pt {
 
 /// The dialog for Insert Part.
 pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
-    matches!(id, "FusionFastenersCommand" | "parts.insert").then(|| {
+    matches!(id, "parts.fastener" | "parts.insert").then(|| {
         (
             Kind::Part(Pt { family: 0, size: 0, length: None, name: String::new(), picture: None, lib: None }),
             vec![SelInput::new("Hole (optional)", FACES | EDGES, false)],
@@ -207,7 +207,7 @@ pub fn commands(app: &SolveApp, k: &Pt, inputs: &[SelInput]) -> Result<Vec<(Stri
     };
     let p = insert_params(&lib, k, inputs.first().and_then(|i| i.items.first()))?;
     // The toolbar's command when the engine has it (same parameters).
-    let id = if solvecraft_engine::find_command("FusionFastenersCommand").is_some() { "FusionFastenersCommand" } else { "parts.insert" };
+    let id = if solvecraft_engine::find_command("parts.fastener").is_some() { "parts.fastener" } else { "parts.insert" };
     Ok(vec![(id.into(), p)])
 }
 

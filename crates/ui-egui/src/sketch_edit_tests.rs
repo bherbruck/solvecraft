@@ -60,7 +60,7 @@ fn toolbar_finish_and_other_feature_edit_leave_the_sketch() {
     let marker = app.session.doc.marker;
     let id = first_sketch(&app);
     app.edit_sketch(id);
-    app.start("SketchStop");
+    app.start("sketch.finish");
     assert_eq!(app.session.active_sketch, None);
     assert_eq!(app.session.doc.marker, marker);
     // Double-clicking a solid feature while sketching finishes the sketch first.

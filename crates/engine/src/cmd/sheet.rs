@@ -13,31 +13,31 @@ use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("FusionSheetMetalFlangeCommand", "Flange", flange).at("SHEET METAL", "CREATE").icon("flange").params(
+    CommandSpec::new("sheet.flange", "Flange", flange).at("SHEET METAL", "CREATE").icon("flange").params(
         "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines) + distance (rule?, flip?, reverse?) | \
          edge: edges: [[x,y,z] on top/bottom edges] + height (to the outer face), angle? (default 90 deg), radius? (default: rule), \
          position?: inside|outside|middle, flip?, body?; type?: base|edge|contour (default from the inputs)",
     ),
-    CommandSpec::new("FusionSheetMetalHemFlangeCommand", "Hem", hem)
+    CommandSpec::new("sheet.hem", "Hem", hem)
         .at("SHEET METAL", "CREATE")
         .icon("hem")
         .params("edges: [[x,y,z] on sheet edges]; length (to the outer face); gap? (inner radius, default: rule); flip?; body?"),
-    CommandSpec::new("SheetMetalFoldCmd", "Fold", fold).at("SHEET METAL", "CREATE").icon("fold").params(
+    CommandSpec::new("sheet.fold", "Fold", fold).at("SHEET METAL", "CREATE").icon("fold").params(
         "line: sketch + curve (a sketch line on the sheet's base face; followed when the sketch changes) or points: [[x,y,z], [x,y,z]]; \
          angle? (default 90 deg); radius? (default: rule); position?: centerline|start|end|mould (where the line sits in the bend, default centerline); \
          fixed?: [x,y,z] on the side that stays (default: the larger side); flip? (fold the other way); body?",
     ),
-    CommandSpec::new("FusionSheetmetalUnfoldCommand", "Unfold", unfold).at("SHEET METAL", "MODIFY").icon("unfold").params("body? (default: the last sheet body) — all bends"),
+    CommandSpec::new("sheet.unfold", "Unfold", unfold).at("SHEET METAL", "MODIFY").icon("unfold").params("body? (default: the last sheet body) — all bends"),
     CommandSpec::new("sheet.refold", "Refold", refold).at("SHEET METAL", "MODIFY").icon("refold").params("body? (default: the last unfolded sheet)"),
-    CommandSpec::new("ConvertToSheetMetalCmd", "Convert to Sheet Metal", convert)
+    CommandSpec::new("sheet.convert", "Convert to Sheet Metal", convert)
         .at("SHEET METAL", "CREATE")
         .icon("convert_sheet")
         .params("body; face: [x,y,z] on its large flat face (a plate of even thickness); rule?"),
-    CommandSpec::new("FusionSheetMetalRulesCommand", "Sheet Metal Rules", rules).at("SHEET METAL", "MODIFY").icon("sheet_rules").params(
+    CommandSpec::new("sheet.manage_rules", "Sheet Metal Rules", rules).at("SHEET METAL", "MODIFY").icon("sheet_rules").params(
         "name (new or existing); thickness?, k_factor?, bend_radius?, relief_width?, relief_depth?, corner_relief?, hem_gap?, gap? (expressions; `Thickness` is the rule's); active?: bool; delete?: bool",
     ),
     CommandSpec::new("sheet.rules", "List Sheet Metal Rules", list_rules).noundo().params("→ rules with their expressions and values, and the active one"),
-    CommandSpec::new("FusionSheetMetalFlatPatternCmd", "Create Flat Pattern", flat_pattern)
+    CommandSpec::new("sheet.flat_pattern", "Create Flat Pattern", flat_pattern)
         .at("SHEET METAL", "CREATE")
         .icon("flat")
         .noundo()
@@ -60,13 +60,13 @@ fn points(p: &Value, k: &str, cmd: &str) -> Result<Vec<Vec3>> {
 fn rule_param(s: &Session, p: &Value, cmd: &str) -> Result<Option<String>> {
     match str_(p, "rule") {
         Some(r) if s.doc.sheet.rules.iter().any(|x| x.name == r) || r == SheetRule::steel().name => Ok(Some(r.to_string())),
-        Some(r) => Err(bad(cmd, format!("no sheet metal rule `{r}` (FusionSheetMetalRulesCommand makes one)"))),
+        Some(r) => Err(bad(cmd, format!("no sheet metal rule `{r}` (sheet.manage_rules makes one)"))),
         None => Ok(None),
     }
 }
 
 fn flange(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionSheetMetalFlangeCommand";
+    let cmd = "sheet.flange";
     let ty = match str_(p, "type") {
         Some(t) => t.to_ascii_lowercase(),
         None if p.get("edges").is_some() => "edge".into(),
@@ -123,7 +123,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn hem(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionSheetMetalHemFlangeCommand";
+    let cmd = "sheet.hem";
     let edges = points(p, "edges", cmd)?;
     let length = req_expr(cmd, p, "length")?;
     check_expr(s, &length, Kind::Length, cmd, "length")?;
@@ -139,7 +139,7 @@ fn hem(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn fold(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "SheetMetalFoldCmd";
+    let cmd = "sheet.fold";
     let (sketch, curve, a, b) = match p.get("points") {
         Some(v) => {
             let pts = v.as_array().map(|a| a.iter().filter_map(vec3).collect::<Vec<Vec3>>()).unwrap_or_default();
@@ -189,7 +189,7 @@ fn refold(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn convert(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ConvertToSheetMetalCmd";
+    let cmd = "sheet.convert";
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
@@ -200,7 +200,7 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn rules(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionSheetMetalRulesCommand";
+    let cmd = "sheet.manage_rules";
     let name = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` is required"))?.to_string();
     if bool_(p, "delete").unwrap_or(false) {
         let doc = s.doc_mut();
@@ -289,7 +289,7 @@ fn flat_json(sh: &SheetBody) -> Result<Value> {
 }
 
 fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
-    let sh = sheet_of(s, p, "FusionSheetMetalFlatPatternCmd")?;
+    let sh = sheet_of(s, p, "sheet.flat_pattern")?;
     flat_json(&sh)
 }
 

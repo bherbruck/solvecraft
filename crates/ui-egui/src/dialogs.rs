@@ -288,8 +288,8 @@ impl Dialog {
         let s = &app.session;
         let has_bodies = !s.world_state().bodies.is_empty();
         let mut d = match id {
-            "SketchCreate" => Dialog::new(Kind::Sketch, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)]),
-            "Extrude" => Dialog::new(
+            "sketch.create" => Dialog::new(Kind::Sketch, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)]),
+            "solid.extrude" => Dialog::new(
                 Kind::Extrude {
                     distance: "10 mm".into(),
                     direction: 0,
@@ -302,30 +302,30 @@ impl Dialog {
                 },
                 vec![SelInput::new("Profiles", PROFILES | PLANAR_FACES, true)],
             ),
-            "Revolve" => Dialog::new(
+            "solid.revolve" => Dialog::new(
                 Kind::Revolve { angle: "360 deg".into(), operation: 0 },
                 vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Axis", AXES, false)],
             ),
-            "FusionFilletEdgesCommand" => Dialog::new(fillet_kind("2 mm", false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
-            "FusionChamferCommand" => Dialog::new(fillet_kind("1 mm", true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
-            "FusionShellBodyCommand" => Dialog::new(Kind::Shell { thickness: "2 mm".into() }, vec![SelInput::new("Faces/Body", FACES, true)]),
-            "FusionDraftCommand" => Dialog::new(
+            "solid.fillet" => Dialog::new(fillet_kind("2 mm", false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.chamfer" => Dialog::new(fillet_kind("1 mm", true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.shell" => Dialog::new(Kind::Shell { thickness: "2 mm".into() }, vec![SelInput::new("Faces/Body", FACES, true)]),
+            "solid.draft" => Dialog::new(
                 Kind::Draft { angle: "5 deg".into() },
                 vec![SelInput::new("Faces", FACES, true), SelInput::new("Neutral plane", PLANES | PLANAR_FACES, false)],
             ),
-            "MirrorCommand" => {
+            "solid.mirror" => {
                 Dialog::new(Kind::Mirror, vec![SelInput::new("Objects", BODIES, true), SelInput::new("Mirror Plane", PLANES | PLANAR_FACES, false)])
             }
-            "FusionRibCommand" | "FusionWebCommand" => Dialog::new(
-                Kind::Rib { web: id == "FusionWebCommand", thickness: "2 mm".into(), depth: String::new(), flip: false },
+            "solid.rib" | "solid.web" => Dialog::new(
+                Kind::Rib { web: id == "solid.web", thickness: "2 mm".into(), depth: String::new(), flip: false },
                 vec![SelInput::new("Curves", CURVES, true)],
             ),
-            "EmbossCmd" => Dialog::new(Kind::Emboss { depth: "1 mm".into(), deboss: false }, vec![SelInput::new("Profiles", PROFILES, true)]),
-            "FusionReplaceFaceCommand" => Dialog::new(
+            "solid.emboss" => Dialog::new(Kind::Emboss { depth: "1 mm".into(), deboss: false }, vec![SelInput::new("Profiles", PROFILES, true)]),
+            "solid.replace_face" => Dialog::new(
                 Kind::ReplaceFace,
                 vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
             ),
-            "AlignCmd" => Dialog::new(
+            "solid.align" => Dialog::new(
                 Kind::Align { flip: false },
                 vec![
                     SelInput::new("Bodies", BODIES, true),
@@ -333,85 +333,78 @@ impl Dialog {
                     SelInput::new("To", FACES | selection::VERTICES, false),
                 ],
             ),
-            "SoftDeleteCommand" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
-            "PatternOnPath" => Dialog::new(
+            "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
+            "solid.pattern.path" => Dialog::new(
                 Kind::PathPattern { count: "4".into(), spacing: "20 mm".into() },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
             ),
-            "PrimitivePipe" => Dialog::new(Kind::Pipe { diameter: "5 mm".into(), wall: String::new() }, vec![SelInput::new("Path", CURVES, true)]),
-            "StockModelCommand" => Dialog::new(Kind::Stock { margin: "2 mm".into() }, vec![SelInput::new("Bodies (all if none)", BODIES, true)]),
-            "ConstructionPlaneOffsetFromPlaneCommand" => {
-                Dialog::new(Kind::OffsetPlane { offset: "10 mm".into() }, vec![SelInput::new("Plane", PLANES, false)])
-            }
-            "ConstructionPlaneAtAngleCommand" => Dialog::new(
+            "solid.pipe" => Dialog::new(Kind::Pipe { diameter: "5 mm".into(), wall: String::new() }, vec![SelInput::new("Path", CURVES, true)]),
+            "solid.bounding_solid" => Dialog::new(Kind::Stock { margin: "2 mm".into() }, vec![SelInput::new("Bodies (all if none)", BODIES, true)]),
+            "construct.plane.offset" => Dialog::new(Kind::OffsetPlane { offset: "10 mm".into() }, vec![SelInput::new("Plane", PLANES, false)]),
+            "construct.plane.at_angle" => Dialog::new(
                 Kind::AnglePlane { angle: "45 deg".into() },
                 vec![SelInput::new("Plane", PLANES, false), SelInput::new("Axis", AXES, false)],
             ),
-            "FusionSplitBodyCommand" => Dialog::new(
+            "solid.split_body" => Dialog::new(
                 Kind::Split,
                 vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting plane", PLANES | PLANAR_FACES, false)],
             ),
-            "ModifyScale" => Dialog::new(Kind::Scale { factor: "2".into() }, vec![SelInput::new("Bodies", BODIES, true)]),
-            "FusionOffsetFacesCommand" => {
-                Dialog::new(Kind::OffsetFaces { distance: "2 mm".into() }, vec![SelInput::new("Faces", PLANAR_FACES, true)])
-            }
-            "FusionThreadCommand" => {
+            "solid.scale" => Dialog::new(Kind::Scale { factor: "2".into() }, vec![SelInput::new("Bodies", BODIES, true)]),
+            "solid.offset_face" => Dialog::new(Kind::OffsetFaces { distance: "2 mm".into() }, vec![SelInput::new("Faces", PLANAR_FACES, true)]),
+            "solid.thread" => {
                 Dialog::new(Kind::Thread { designation: String::new(), length: String::new() }, vec![SelInput::new("Cylindrical face", FACES, false)])
             }
-            "PhysicalMaterialCommand" => Dialog::new(Kind::Material { index: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
-            "FusionHalfSectionViewCommand" => {
+            "material.assign" => Dialog::new(Kind::Material { index: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
+            "inspect.section" => {
                 Dialog::new(Kind::Section { offset: "0 mm".into(), flip: false }, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)])
             }
-            "MeasureCommand" => {
+            "inspect.measure" => {
                 Dialog::new(Kind::Measure { result: None, of: Vec::new() }, vec![SelInput::new("Items", FACES | EDGES | selection::VERTICES, true)])
             }
-            "PatternRectangular" => Dialog::new(
+            "solid.pattern.rectangular" => Dialog::new(
                 Kind::PatternRect { count: "3".into(), spacing: "20 mm".into(), count2: "1".into(), spacing2: "20 mm".into() },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Direction", AXES, false), SelInput::new("Direction 2", AXES, false)],
             ),
-            "PatternCircular" => Dialog::new(
+            "solid.pattern.circular" => Dialog::new(
                 Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXES, false)],
             ),
-            "SolidLoft" => Dialog::new(Kind::Loft { operation: usize::from(has_bodies) }, vec![SelInput::new("Profiles", PROFILES, true)]),
-            "Sweep" => Dialog::new(
+            "solid.loft" => Dialog::new(Kind::Loft { operation: usize::from(has_bodies) }, vec![SelInput::new("Profiles", PROFILES, true)]),
+            "solid.sweep" => Dialog::new(
                 Kind::Sweep { operation: usize::from(has_bodies) },
                 vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Path", CURVES, true)],
             ),
-            "FusionMoveCommand" => Dialog::new(crate::dialogs_move::kind(0), crate::dialogs_move::inputs(0)),
-            "FusionHoleCommand" => Dialog::new(hole_defaults(), vec![SelInput::new("Face", PLANAR_FACES, true)]),
-            "PrimitiveBox" => Dialog::new(
+            "solid.move" => Dialog::new(crate::dialogs_move::kind(0), crate::dialogs_move::inputs(0)),
+            "solid.hole" => Dialog::new(hole_defaults(), vec![SelInput::new("Face", PLANAR_FACES, true)]),
+            "solid.box" => Dialog::new(
                 Kind::Primitive {
-                    cmd: "PrimitiveBox",
+                    cmd: "solid.box",
                     fields: vec![("length", "20".into()), ("width", "20".into()), ("height", "20".into())],
                     operation: 0,
                 },
                 vec![],
             ),
-            "PrimitiveCylinder" => Dialog::new(
-                Kind::Primitive { cmd: "PrimitiveCylinder", fields: vec![("diameter", "20".into()), ("height", "20".into())], operation: 0 },
+            "solid.cylinder" => Dialog::new(
+                Kind::Primitive { cmd: "solid.cylinder", fields: vec![("diameter", "20".into()), ("height", "20".into())], operation: 0 },
                 vec![],
             ),
-            "PrimitiveSphere" => {
-                Dialog::new(Kind::Primitive { cmd: "PrimitiveSphere", fields: vec![("diameter", "20".into())], operation: 0 }, vec![])
+            "solid.sphere" => Dialog::new(Kind::Primitive { cmd: "solid.sphere", fields: vec![("diameter", "20".into())], operation: 0 }, vec![]),
+            "solid.torus" => {
+                Dialog::new(Kind::Primitive { cmd: "solid.torus", fields: vec![("major", "20".into()), ("minor", "5".into())], operation: 0 }, vec![])
             }
-            "PrimitiveTorus" => Dialog::new(
-                Kind::Primitive { cmd: "PrimitiveTorus", fields: vec![("major", "20".into()), ("minor", "5".into())], operation: 0 },
-                vec![],
-            ),
-            "PrimitiveCoil" => Dialog::new(
+            "solid.coil" => Dialog::new(
                 Kind::Primitive {
-                    cmd: "PrimitiveCoil",
+                    cmd: "solid.coil",
                     fields: vec![("diameter", "40".into()), ("revolutions", "4".into()), ("pitch", "8".into()), ("section_size", "3".into())],
                     operation: 0,
                 },
                 vec![],
             ),
-            "FusionCombineCommand" => Dialog::new(
+            "solid.combine" => Dialog::new(
                 Kind::Combine { operation: 1, keep_tools: false },
                 vec![SelInput::new("Target Body", BODIES, false), SelInput::new("Tool Bodies", BODIES, true)],
             ),
-            "ChangeParameterCommand" => Dialog::new(Kind::Params { new_name: String::new(), new_expr: String::new() }, vec![]),
+            "parameters.change" => Dialog::new(Kind::Params { new_name: String::new(), new_expr: String::new() }, vec![]),
             _ => {
                 let (kind, inputs) = crate::dialogs_assembly::start(app, id)
                     .or_else(|| crate::dialogs_sheet::start(app, id))
@@ -768,10 +761,10 @@ fn title(k: &Kind) -> &'static str {
         Kind::Move { .. } => "MOVE",
         Kind::Hole { .. } => "HOLE",
         Kind::Primitive { cmd, .. } => match *cmd {
-            "PrimitiveBox" => "BOX",
-            "PrimitiveCylinder" => "CYLINDER",
-            "PrimitiveSphere" => "SPHERE",
-            "PrimitiveCoil" => "COIL",
+            "solid.box" => "BOX",
+            "solid.cylinder" => "CYLINDER",
+            "solid.sphere" => "SPHERE",
+            "solid.coil" => "COIL",
             _ => "TORUS",
         },
         Kind::Combine { .. } => "COMBINE",
@@ -1627,7 +1620,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.dialog = Some(d);
     } else if let Some((_, marker)) = d.editing {
         // Editing done: put the timeline marker back where it was.
-        let _ = app.run("timeline.rollTo", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
+        let _ = app.run("timeline.roll_to", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
     }
 }
 
@@ -1640,7 +1633,7 @@ pub fn cancel(app: &mut SolveApp) {
     if let Some(d) = app.dialog.take()
         && let Some((_, marker)) = d.editing
     {
-        let _ = app.run("timeline.rollTo", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
+        let _ = app.run("timeline.roll_to", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
     }
 }
 
@@ -1681,7 +1674,7 @@ fn params_table(app: &mut SolveApp, ui: &mut egui::Ui, new_name: &mut String, ne
                 ui.data_mut(|dd| dd.insert_temp(id, e.clone()));
             }
             if r.lost_focus() && e != p.expr {
-                let _ = app.run("ChangeParameterCommand", json!({"name": p.name, "expression": e}));
+                let _ = app.run("parameters.change", json!({"name": p.name, "expression": e}));
                 ui.data_mut(|dd| dd.remove::<String>(id));
             }
             let v = vals.get(&p.name).map(|v| if p.unit == "deg" { format!("{:.3}°", v.v.to_degrees()) } else { format!("{:.4} {}", v.v, p.unit) });
@@ -1698,7 +1691,7 @@ fn params_table(app: &mut SolveApp, ui: &mut egui::Ui, new_name: &mut String, ne
         ui.add(egui::TextEdit::singleline(new_expr).hint_text("expression, e.g. 25 mm").desired_width(160.0));
         if ui.button("Add").clicked()
             && !new_name.is_empty()
-            && app.run("ChangeParameterCommand", json!({"name": new_name, "expression": new_expr})).is_ok()
+            && app.run("parameters.change", json!({"name": new_name, "expression": new_expr})).is_ok()
         {
             new_name.clear();
             new_expr.clear();
@@ -1715,7 +1708,7 @@ pub fn start_sketch(app: &mut SolveApp, sel: &Sel) {
         _ => return,
     };
     let before = app.cam;
-    if app.run("SketchCreate", json!({ "plane": plane })).is_ok() {
+    if app.run("sketch.create", json!({ "plane": plane })).is_ok() {
         app.pre_sketch_cam = Some(before);
         look_at_sketch(app);
         // On a face: look at the picked point, not the plane's origin (a corner of the face),
@@ -1817,11 +1810,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut out = Vec::new();
             let (sketch, idx) = profiles();
             if !sketch.is_null() {
-                out.push(("Extrude".to_string(), with(json!({"sketch": sketch, "profiles": idx}))));
+                out.push(("solid.extrude".to_string(), with(json!({"sketch": sketch, "profiles": idx}))));
             }
             // Each planar body face extrudes on its own.
             for p in face_points(0) {
-                out.push(("Extrude".to_string(), with(json!({ "face": p }))));
+                out.push(("solid.extrude".to_string(), with(json!({ "face": p }))));
             }
             return Ok(out);
         }
@@ -1835,7 +1828,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             let (sketch, idx) = profiles();
             (
-                "Revolve",
+                "solid.revolve",
                 json!({"sketch": sketch, "profiles": idx, "axis": axis, "angle": angle, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
         }
@@ -1879,27 +1872,27 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 if *ctype > 0 && *flip {
                     p["flip"] = json!(true);
                 }
-                ("FusionChamferCommand", p)
+                ("solid.chamfer", p)
             } else {
-                ("FusionFilletEdgesCommand", json!({"edges": edges, "radius": radius}))
+                ("solid.fillet", json!({"edges": edges, "radius": radius}))
             }
         }
         Kind::Shell { thickness } => {
             need(0, "faces to remove")?;
-            ("FusionShellBodyCommand", json!({"faces": face_points(0), "thickness": thickness}))
+            ("solid.shell", json!({"faces": face_points(0), "thickness": thickness}))
         }
         Kind::Draft { angle } => {
             need(0, "faces")?;
             need(1, "the neutral plane")?;
             let neutral = plane_value(s, sels(d, 1).first()).ok_or("the neutral plane must be a plane or a planar face")?;
-            ("FusionDraftCommand", json!({"faces": face_points(0), "angle": angle, "neutral": neutral}))
+            ("solid.draft", json!({"faces": face_points(0), "angle": angle, "neutral": neutral}))
         }
         Kind::Mirror => {
             need(0, "objects")?;
             need(1, "the mirror plane")?;
             let features = pattern_features(s, sels(d, 0));
             let plane = plane_value(s, sels(d, 1).first()).ok_or("the mirror plane must be a plane or a planar face")?;
-            ("MirrorCommand", json!({"features": features, "plane": plane}))
+            ("solid.mirror", json!({"features": features, "plane": plane}))
         }
         Kind::PatternRect { count, spacing, count2, spacing2 } => {
             need(0, "objects")?;
@@ -1915,7 +1908,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 p["count2"] = json!(count2);
                 p["spacing2"] = json!(spacing2);
             }
-            ("PatternRectangular", p)
+            ("solid.pattern.rectangular", p)
         }
         Kind::PatternCirc { count, angle } => {
             need(0, "objects")?;
@@ -1928,7 +1921,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 None => return Err("select an axis".into()),
             };
-            ("PatternCircular", json!({"features": pattern_features(s, sels(d, 0)), "axis": axis, "count": count, "angle": angle}))
+            ("solid.pattern.circular", json!({"features": pattern_features(s, sels(d, 0)), "axis": axis, "count": count, "angle": angle}))
         }
         Kind::Loft { operation } => {
             need(0, "profiles of two or more sketches")?;
@@ -1946,7 +1939,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 return Err("pick profiles in two or more sketches".into());
             }
             let sections: Vec<Value> = sections.into_iter().map(|(sk, v)| json!({"sketch": sk, "profiles": v})).collect();
-            ("SolidLoft", json!({"sections": sections, "operation": OPS.get(*operation).copied().unwrap_or("new")}))
+            ("solid.loft", json!({"sections": sections, "operation": OPS.get(*operation).copied().unwrap_or("new")}))
         }
         Kind::Sweep { operation } => {
             need(0, "a profile")?;
@@ -1955,7 +1948,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let path: Vec<String> = sels(d, 1).iter().filter_map(|x| if let Sel::SketchCurve { id } = x { Some(id.clone()) } else { None }).collect();
             let path_sketch = curves_sketch(app, &path, sketch.as_u64()).ok_or("the path curves must be in one sketch")?;
             (
-                "Sweep",
+                "solid.sweep",
                 json!({"sketch": sketch, "profiles": idx, "path_sketch": path_sketch, "path": path, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
         }
@@ -1965,7 +1958,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 Some(Sel::Plane { name }) => name.clone(),
                 _ => return Err("pick an origin or construction plane".into()),
             };
-            ("ConstructionPlaneOffsetFromPlaneCommand", json!({"base": base, "offset": offset}))
+            ("construct.plane.offset", json!({"base": base, "offset": offset}))
         }
         Kind::AnglePlane { angle } => {
             need(0, "a plane")?;
@@ -1981,7 +1974,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
             };
-            ("ConstructionPlaneAtAngleCommand", json!({"base": base, "axis": axis, "angle": angle}))
+            ("construct.plane.at_angle", json!({"base": base, "axis": axis, "angle": angle}))
         }
         Kind::Rib { web, thickness, depth, flip } => {
             need(0, "open sketch curves")?;
@@ -1991,12 +1984,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if !depth.trim().is_empty() {
                 p["depth"] = json!(depth);
             }
-            (if *web { "FusionWebCommand" } else { "FusionRibCommand" }, p)
+            (if *web { "solid.web" } else { "solid.rib" }, p)
         }
         Kind::Emboss { depth, deboss } => {
             need(0, "profiles")?;
             let (sketch, idx) = profiles();
-            ("EmbossCmd", json!({"sketch": sketch, "profiles": idx, "depth": depth, "mode": if *deboss { "deboss" } else { "emboss" }}))
+            ("solid.emboss", json!({"sketch": sketch, "profiles": idx, "depth": depth, "mode": if *deboss { "deboss" } else { "emboss" }}))
         }
         Kind::ReplaceFace => {
             need(0, "faces to move")?;
@@ -2007,7 +2000,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 Some(Sel::Face { point, .. }) => p["target_face"] = pt(*point),
                 _ => return Err("pick a plane or planar face".into()),
             }
-            ("FusionReplaceFaceCommand", p)
+            ("solid.replace_face", p)
         }
         Kind::Align { flip } => {
             need(0, "bodies")?;
@@ -2021,11 +2014,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     _ => return Err("pick faces or vertices".into()),
                 }
             }
-            ("AlignCmd", p)
+            ("solid.align", p)
         }
         Kind::Remove => {
             need(0, "bodies")?;
-            ("SoftDeleteCommand", json!({"bodies": body_names(0)}))
+            ("solid.remove", json!({"bodies": body_names(0)}))
         }
         Kind::PathPattern { count, spacing } => {
             need(0, "objects")?;
@@ -2038,7 +2031,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             } else {
                 p["bodies"] = json!(body_names(0));
             }
-            ("PatternOnPath", p)
+            ("solid.pattern.path", p)
         }
         Kind::Pipe { diameter, wall } => {
             need(0, "the path")?;
@@ -2048,14 +2041,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if !wall.trim().is_empty() {
                 p["wall"] = json!(wall);
             }
-            ("PrimitivePipe", p)
+            ("solid.pipe", p)
         }
         Kind::Stock { margin } => {
             let mut p = json!({"margin": margin});
             if !sels(d, 0).is_empty() {
                 p["bodies"] = json!(body_names(0));
             }
-            ("StockModelCommand", p)
+            ("solid.bounding_solid", p)
         }
         Kind::Split => {
             need(0, "the body to split")?;
@@ -2069,15 +2062,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 _ => return Err("pick a plane or a planar face".into()),
             };
-            ("FusionSplitBodyCommand", json!({"body": body, "plane": plane}))
+            ("solid.split_body", json!({"body": body, "plane": plane}))
         }
         Kind::Scale { factor } => {
             need(0, "bodies")?;
-            ("ModifyScale", json!({"bodies": body_names(0), "factor": factor}))
+            ("solid.scale", json!({"bodies": body_names(0), "factor": factor}))
         }
         Kind::OffsetFaces { distance } => {
             need(0, "planar faces")?;
-            ("FusionOffsetFacesCommand", json!({"faces": face_points(0), "distance": distance}))
+            ("solid.offset_face", json!({"faces": face_points(0), "distance": distance}))
         }
         Kind::Thread { designation, length } => {
             need(0, "a cylindrical face")?;
@@ -2088,12 +2081,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if !length.trim().is_empty() {
                 p["length"] = json!(length);
             }
-            ("FusionThreadCommand", p)
+            ("solid.thread", p)
         }
         Kind::Material { index } => {
             need(0, "bodies")?;
             let name = solvecraft_engine::doc::MATERIALS.get(*index).map(|(n, _)| *n).unwrap_or("Default");
-            ("PhysicalMaterialCommand", json!({"bodies": body_names(0), "material": name}))
+            ("material.assign", json!({"bodies": body_names(0), "material": name}))
         }
         Kind::Section { offset, flip } => {
             need(0, "a plane or planar face")?;
@@ -2113,9 +2106,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 _ => return Err("pick a plane or a planar face".into()),
             };
-            ("FusionHalfSectionViewCommand", json!({"plane": plane, "offset": offset, "flip": flip}))
+            ("inspect.section", json!({"plane": plane, "offset": offset, "flip": flip}))
         }
-        Kind::Move { .. } => return Ok(vec![("FusionMoveCommand".into(), crate::dialogs_move::params(app, d)?)]),
+        Kind::Move { .. } => return Ok(vec![("solid.move".into(), crate::dialogs_move::params(app, d)?)]),
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
             need(0, if opts.multiple { "sketch points" } else { "a face position" })?;
             let ty = match *kind {
@@ -2166,7 +2159,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     }
                     _ => {}
                 }
-                out.push(("FusionHoleCommand".to_string(), params));
+                out.push(("solid.hole".to_string(), params));
             }
             return Ok(out);
         }
@@ -2184,13 +2177,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let target = body_names(0).into_iter().next().unwrap_or_default();
             let tools: Vec<String> = body_names(1).into_iter().filter(|n| *n != target).collect();
             (
-                "FusionCombineCommand",
+                "solid.combine",
                 json!({"target": target, "tools": tools, "operation": OPS.get(*operation).copied().unwrap_or("join"), "keep_tools": keep_tools}),
             )
         }
-        Kind::EditParam { name, expr } => ("ChangeParameterCommand", json!({"name": name, "expression": expr})),
-        Kind::Rename { feature, name } => ("FusionRenameTimelineEntryCommand", json!({"feature": feature, "name": name})),
-        Kind::ConfirmDelete { feature, .. } => ("FusionDeleteCommand", json!({ "features": [feature.to_string()] })),
+        Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
+        Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
+        Kind::ConfirmDelete { feature, .. } => ("timeline.delete", json!({ "features": [feature.to_string()] })),
         Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::Preferences => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
         Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),
@@ -2380,7 +2373,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
     let start = |cmd: &str| Dialog::for_command(app, cmd);
     let mut d = match &f.kind {
         FeatureKind::Extrude { sketch, profiles, extent, operation, targets } => {
-            let mut d = start("Extrude")?;
+            let mut d = start("solid.extrude")?;
             d.kind = Kind::Extrude {
                 distance: extent.distance.clone(),
                 direction: match (extent.direction, &extent.distance2) {
@@ -2415,7 +2408,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets } => {
-            let mut d = start("Revolve")?;
+            let mut d = start("solid.revolve")?;
             d.kind = Kind::Revolve { angle: angle.clone(), operation: op_index(operation) };
             let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             if let Some(inp) = d.inputs.get_mut(0) {
@@ -2436,7 +2429,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         }
         FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } => {
             let chamfer = matches!(f.kind, FeatureKind::Chamfer { .. });
-            let mut d = start(if chamfer { "FusionChamferCommand" } else { "FusionFilletEdgesCommand" })?;
+            let mut d = start(if chamfer { "solid.chamfer" } else { "solid.fillet" })?;
             d.kind = fillet_kind(radius, chamfer);
             if let Kind::Fillet { chain, ctype, distance2, angle, flip, .. } = &mut d.kind {
                 *chain = false;
@@ -2458,7 +2451,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Shell { faces, thickness, .. } => {
-            let mut d = start("FusionShellBodyCommand")?;
+            let mut d = start("solid.shell")?;
             d.kind = Kind::Shell { thickness: thickness.clone() };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = faces.iter().filter_map(|p| face_sel(s, *p)).collect();
@@ -2466,7 +2459,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Draft { faces, angle, neutral, pull, .. } => {
-            let mut d = start("FusionDraftCommand")?;
+            let mut d = start("solid.draft")?;
             d.kind = Kind::Draft { angle: angle.clone() };
             if let Some(inp) = d.inputs.get_mut(0) {
                 inp.items = faces.iter().filter_map(|p| face_sel(s, *p)).collect();
@@ -2478,7 +2471,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Hole { position, direction, diameter, depth, hole, points, thread } => {
-            let mut d = start("FusionHoleCommand")?;
+            let mut d = start("solid.hole")?;
             let mut k = hole_defaults();
             if let Kind::Hole { diameter: dia, depth: dep, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = &mut k {
                 *dia = diameter.clone();
@@ -2527,9 +2520,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Box { corner, length, width, height, operation } => {
-            let mut d = start("PrimitiveBox")?;
+            let mut d = start("solid.box")?;
             d.kind = Kind::Primitive {
-                cmd: "PrimitiveBox",
+                cmd: "solid.box",
                 fields: vec![("length", length.clone()), ("width", width.clone()), ("height", height.clone())],
                 operation: op_index(operation),
             };
@@ -2537,9 +2530,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Cylinder { base, axis, radius, height, operation } => {
-            let mut d = start("PrimitiveCylinder")?;
+            let mut d = start("solid.cylinder")?;
             d.kind = Kind::Primitive {
-                cmd: "PrimitiveCylinder",
+                cmd: "solid.cylinder",
                 fields: vec![("radius", radius.clone()), ("height", height.clone())],
                 operation: op_index(operation),
             };
@@ -2548,15 +2541,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Sphere { center, radius, operation } => {
-            let mut d = start("PrimitiveSphere")?;
-            d.kind = Kind::Primitive { cmd: "PrimitiveSphere", fields: vec![("radius", radius.clone())], operation: op_index(operation) };
+            let mut d = start("solid.sphere")?;
+            d.kind = Kind::Primitive { cmd: "solid.sphere", fields: vec![("radius", radius.clone())], operation: op_index(operation) };
             d.extra.insert("center".into(), pt3(*center));
             d
         }
         FeatureKind::Torus { center, major, minor, operation } => {
-            let mut d = start("PrimitiveTorus")?;
+            let mut d = start("solid.torus")?;
             d.kind = Kind::Primitive {
-                cmd: "PrimitiveTorus",
+                cmd: "solid.torus",
                 fields: vec![("major", major.clone()), ("minor", minor.clone())],
                 operation: op_index(operation),
             };
@@ -2564,7 +2557,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Combine { target, tools, operation, keep_tools } => {
-            let mut d = start("FusionCombineCommand")?;
+            let mut d = start("solid.combine")?;
             d.kind = Kind::Combine { operation: op_index(operation).max(1), keep_tools: *keep_tools };
             if let Some(inp) = d.inputs.get_mut(0) {
                 inp.items = vec![Sel::Body { name: target.clone() }];
@@ -2575,7 +2568,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Mirror { features, plane, .. } => {
-            let mut d = start("MirrorCommand")?;
+            let mut d = start("solid.mirror")?;
             let ids: Vec<u64> = features.iter().filter_map(|n| s.doc.find_feature(n).map(|f| f.id)).collect();
             // Features that made no body of their own (a hole) were picked as features.
             let as_features = ids.iter().any(|id| !st.bodies.iter().any(|b| b.feature == *id));
@@ -2598,7 +2591,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let bodies: Vec<Sel> = st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect();
             let mut d = match pattern {
                 PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2 } => {
-                    let mut d = start("PatternRectangular")?;
+                    let mut d = start("solid.pattern.rectangular")?;
                     d.kind = Kind::PatternRect {
                         count: count1.clone(),
                         spacing: spacing1.clone(),
@@ -2622,7 +2615,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     d
                 }
                 PatternKind::Circular { origin, axis, count, angle } => {
-                    let mut d = start("PatternCircular")?;
+                    let mut d = start("solid.pattern.circular")?;
                     d.kind = Kind::PatternCirc { count: count.clone(), angle: angle.clone() };
                     match world_axis(*axis).filter(|_| origin.len() < 1e-9) {
                         Some(name) => {
@@ -2653,7 +2646,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Loft { sections, operation, targets } => {
-            let mut d = start("SolidLoft")?;
+            let mut d = start("solid.loft")?;
             d.kind = Kind::Loft { operation: op_index(operation) };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = sections
@@ -2670,7 +2663,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Sweep { sketch, profiles, path, operation, targets, .. } => {
-            let mut d = start("Sweep")?;
+            let mut d = start("solid.sweep")?;
             d.kind = Kind::Sweep { operation: op_index(operation) };
             let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             if let Some(inp) = d.inputs.get_mut(0) {
@@ -2685,7 +2678,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base, distance } } => {
-            let mut d = start("ConstructionPlaneOffsetFromPlaneCommand")?;
+            let mut d = start("construct.plane.offset")?;
             d.kind = Kind::OffsetPlane { offset: distance.clone() };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = plane_sel(s, base).into_iter().collect();
@@ -2693,7 +2686,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, axis_origin, axis_dir, angle } } => {
-            let mut d = start("ConstructionPlaneAtAngleCommand")?;
+            let mut d = start("construct.plane.at_angle")?;
             d.kind = Kind::AnglePlane { angle: angle.clone() };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = plane_sel(s, base).into_iter().collect();
@@ -2711,7 +2704,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Split { body, plane, .. } => {
-            let mut d = start("FusionSplitBodyCommand")?;
+            let mut d = start("solid.split_body")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.clone() }];
             }
@@ -2721,7 +2714,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Scale { bodies, origin, factor, factors } => {
-            let mut d = start("ModifyScale")?;
+            let mut d = start("solid.scale")?;
             d.kind = Kind::Scale { factor: factor.clone() };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect();
@@ -2733,7 +2726,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::OffsetFace { faces, distance, body } => {
-            let mut d = start("FusionOffsetFacesCommand")?;
+            let mut d = start("solid.offset_face")?;
             d.kind = Kind::OffsetFaces { distance: distance.clone() };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = faces.iter().filter_map(|p| face_sel(s, *p)).collect();
@@ -2744,7 +2737,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Thread { face, designation, length } => {
-            let mut d = start("FusionThreadCommand")?;
+            let mut d = start("solid.thread")?;
             d.kind = Kind::Thread { designation: designation.clone().unwrap_or_default(), length: length.clone().unwrap_or_default() };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = face_sel(s, *face).into_iter().collect();
@@ -2752,7 +2745,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::BoundingSolid { bodies, margin } => {
-            let mut d = start("StockModelCommand")?;
+            let mut d = start("solid.bounding_solid")?;
             d.kind = Kind::Stock { margin: margin.clone() };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect();
@@ -2760,7 +2753,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Pipe { path, diameter, wall, operation, targets, .. } => {
-            let mut d = start("PrimitivePipe")?;
+            let mut d = start("solid.pipe")?;
             d.kind = Kind::Pipe { diameter: diameter.clone(), wall: wall.clone().unwrap_or_default() };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = path.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
@@ -2772,7 +2765,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Emboss { sketch, profiles, depth, deboss, targets } => {
-            let mut d = start("EmbossCmd")?;
+            let mut d = start("solid.emboss")?;
             d.kind = Kind::Emboss { depth: depth.clone(), deboss: *deboss };
             let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             if let Some(inp) = d.inputs.first_mut() {
@@ -2784,7 +2777,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Rib { curves, thickness, depth, flip, web, .. } => {
-            let mut d = start(if *web { "FusionWebCommand" } else { "FusionRibCommand" })?;
+            let mut d = start(if *web { "solid.web" } else { "solid.rib" })?;
             d.kind = Kind::Rib { web: *web, thickness: thickness.clone(), depth: depth.clone().unwrap_or_default(), flip: *flip };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = curves.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
@@ -2792,7 +2785,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::ReplaceFace { faces, target, body } => {
-            let mut d = start("FusionReplaceFaceCommand")?;
+            let mut d = start("solid.replace_face")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = faces.iter().filter_map(|p| face_sel(s, *p)).collect();
             }
@@ -2805,14 +2798,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Remove { bodies } => {
-            let mut d = start("SoftDeleteCommand")?;
+            let mut d = start("solid.remove")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect();
             }
             d
         }
         FeatureKind::Move { bodies, translate, rotate_axis, angle } => {
-            let mut d = start("FusionMoveCommand")?;
+            let mut d = start("solid.move")?;
             crate::dialogs_move::for_feature(&mut d, bodies, translate, *rotate_axis, angle.as_ref());
             d
         }

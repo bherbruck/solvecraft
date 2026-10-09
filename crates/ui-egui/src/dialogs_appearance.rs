@@ -107,7 +107,7 @@ pub struct Ap {
 
 /// The dialog for the Appearance command.
 pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
-    (id == "AppearanceCommand").then(|| {
+    (id == "appearance.assign").then(|| {
         (
             Kind::Appearance(Ap { faces: false, color: [196, 199, 204], opacity: 1.0, look: None, category: 0, note: None }),
             vec![SelInput::new("Objects", BODIES, true)],
@@ -151,7 +151,7 @@ fn apply_params(targets: &[Sel], color: [u8; 3], opacity: f32, look: Option<&str
 /// The commands OK runs: the current look on the picked objects (nothing when none are picked).
 pub fn commands(k: &Ap, inputs: &[SelInput]) -> Vec<(String, Value)> {
     let items = inputs.first().map(|i| i.items.as_slice()).unwrap_or(&[]);
-    apply_params(items, k.color, k.opacity, k.look.as_deref()).map(|p| vec![("AppearanceCommand".to_string(), p)]).unwrap_or_default()
+    apply_params(items, k.color, k.opacity, k.look.as_deref()).map(|p| vec![("appearance.assign".to_string(), p)]).unwrap_or_default()
 }
 
 /// What a swatch dropped now would land on: the face or body under the cursor in the viewport,
@@ -267,7 +267,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
     if ui.add_enabled(!picked.is_empty(), egui::Button::new("Apply to selection")).clicked()
         && let Some(p) = apply_params(&picked, k.color, k.opacity, k.look.as_deref())
     {
-        k.note = Some(match app.run("AppearanceCommand", p) {
+        k.note = Some(match app.run("appearance.assign", p) {
             Ok(_) => format!("applied to {} item(s)", picked.len()),
             Err(e) => e,
         });
@@ -321,7 +321,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         k.opacity = look.opacity;
         k.look = (look.category != "In This Design").then(|| look.name.clone());
         if let Some(p) = apply_params(&targets, look.color, look.opacity, k.look.as_deref()) {
-            k.note = Some(match app.run("AppearanceCommand", p) {
+            k.note = Some(match app.run("appearance.assign", p) {
                 Ok(_) => format!("{} on {}", look.name, target_names(&targets)),
                 Err(e) => e,
             });
@@ -358,8 +358,8 @@ mod tests {
 
     fn app() -> SolveApp {
         let mut s = Session::default();
-        s.execute("PrimitiveBox", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
-        s.execute("PrimitiveBox", &json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]})).unwrap();
         SolveApp::new(s, Services::default())
     }
 
@@ -377,7 +377,7 @@ mod tests {
     fn ok_applies_the_look_to_the_objects() {
         let mut a = app();
         a.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Body2".into() }];
-        a.start("AppearanceCommand");
+        a.start("appearance.assign");
         let mut d = a.dialog.clone().unwrap();
         assert_eq!(d.inputs[0].items.len(), 2);
         if let Kind::Appearance(k) = &mut d.kind {
@@ -385,7 +385,7 @@ mod tests {
             k.look = Some("Paint - Red".into());
         }
         let c = apply_commands(&a, &d).unwrap();
-        assert_eq!(c[0].0, "AppearanceCommand");
+        assert_eq!(c[0].0, "appearance.assign");
         assert_eq!(c[0].1["color"], "#c42824");
         assert_eq!(c[0].1["bodies"], json!(["Body1", "Body2"]));
         for (id, p) in c {

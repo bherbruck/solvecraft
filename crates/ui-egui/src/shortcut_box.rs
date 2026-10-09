@@ -34,7 +34,10 @@ impl ShortcutBox {
     }
     pub fn load(&mut self, v: &Value) {
         let list = |k: &str| -> Vec<String> {
-            v.get(k).and_then(Value::as_array).map(|a| a.iter().take(64).filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
+            v.get(k)
+                .and_then(Value::as_array)
+                .map(|a| a.iter().take(64).filter_map(|x| x.as_str().map(|id| solvecraft_engine::legacy_ids::current_id(id).to_string())).collect())
+                .unwrap_or_default()
         };
         self.recent = list("recent");
         self.pinned = list("pinned");
@@ -272,16 +275,16 @@ mod tests {
     #[test]
     fn search_finds_by_name_id_and_panel_and_puts_recent_first() {
         let mut app = SolveApp::new(solvecraft_engine::Session::default(), Default::default());
-        assert_eq!(search(&app, "extr").first().map(|x| x.0), Some("Extrude"));
-        assert_eq!(search(&app, "FusionFilletEdges").first().map(|x| x.0), Some("FusionFilletEdgesCommand"));
-        assert!(search(&app, "constraints").iter().any(|x| x.0 == "ConstraintParallel"), "by panel");
-        app.sbox.used("FusionShellBodyCommand");
-        app.sbox.used("Revolve");
+        assert_eq!(search(&app, "extr").first().map(|x| x.0), Some("solid.extrude"));
+        assert_eq!(search(&app, "solid.fil").first().map(|x| x.0), Some("solid.fillet"));
+        assert!(search(&app, "constraints").iter().any(|x| x.0 == "sketch.constraint.parallel"), "by panel");
+        app.sbox.used("solid.shell");
+        app.sbox.used("solid.revolve");
         let all = search(&app, "");
-        assert_eq!((all[0].0, all[1].0), ("Revolve", "FusionShellBodyCommand"));
-        app.sbox.toggle_pin("Extrude");
+        assert_eq!((all[0].0, all[1].0), ("solid.revolve", "solid.shell"));
+        app.sbox.toggle_pin("solid.extrude");
         let mut other = SolveApp::new(solvecraft_engine::Session::default(), Default::default());
         other.sbox.load(&app.sbox.prefs());
-        assert_eq!((other.sbox.pinned.clone(), other.sbox.recent.len()), (vec!["Extrude".to_string()], 2));
+        assert_eq!((other.sbox.pinned.clone(), other.sbox.recent.len()), (vec!["solid.extrude".to_string()], 2));
     }
 }

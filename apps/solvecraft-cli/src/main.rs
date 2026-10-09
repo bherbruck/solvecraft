@@ -150,13 +150,13 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         _ => {}
     }
     for out in flags(args, "--out") {
-        s.execute("ExportCommand", &json!({"path": out})).map_err(|e| e.to_string())?;
+        s.execute("file.export", &json!({"path": out})).map_err(|e| e.to_string())?;
     }
     if let Some(p) = flag(args, "--save") {
-        s.execute("SaveDocumentAsCommand", &json!({"path": p})).map_err(|e| e.to_string())?;
+        s.execute("file.save_as", &json!({"path": p})).map_err(|e| e.to_string())?;
     }
     if !args.iter().any(|a| a == "--quiet") {
-        let m = s.execute("MeasureCommand", &json!({})).map_err(|e| e.to_string())?;
+        let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
         println!("{}", pretty(&m));
     }
     Ok(())
@@ -165,7 +165,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let path = flag(args, "--in").or_else(|| positional(args).map(String::as_str)).ok_or_else(|| USAGE.to_string())?;
     let mut s = load(path)?;
-    let m = s.execute("MeasureCommand", &json!({})).map_err(|e| e.to_string())?;
+    let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
     let d = s.execute("document.inspect", &json!({})).map_err(|e| e.to_string())?;
     let out = json!({
         "body_count": m["body_count"],
@@ -239,7 +239,7 @@ fn cmd_save_stress(args: &[String]) -> Result<(), String> {
     s.doc_mut().params.extend(filler);
     for r in 0..rounds {
         s.doc_mut().set_param("save_round", &r.to_string(), None, None).map_err(|e| e.to_string())?;
-        s.execute("SaveDocumentCommand", &json!({ "path": path })).map_err(|e| e.to_string())?;
+        s.execute("file.save", &json!({ "path": path })).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -266,10 +266,10 @@ fn cmd_bench_edit(args: &[String]) -> Result<(), String> {
         Ok(())
     };
     let expr = expr.replace("{old}", &old);
-    time(&mut s, "edit", "ChangeParameterCommand", json!({"name": param, "expression": expr}))?;
-    time(&mut s, "set back", "ChangeParameterCommand", json!({"name": param, "expression": old}))?;
-    time(&mut s, "undo", "UndoCommand", json!({}))?;
-    time(&mut s, "redo", "RedoCommand", json!({}))?;
+    time(&mut s, "edit", "parameters.change", json!({"name": param, "expression": expr}))?;
+    time(&mut s, "set back", "parameters.change", json!({"name": param, "expression": old}))?;
+    time(&mut s, "undo", "edit.undo", json!({}))?;
+    time(&mut s, "redo", "edit.redo", json!({}))?;
     println!("{}", pretty(&json!(out)));
     Ok(())
 }

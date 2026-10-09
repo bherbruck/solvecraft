@@ -10,7 +10,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.90"
 authors = ["SolveCraft contributors"]
-repository = "https://github.com/storytold/solvecraft"
+repository = "https://github.com/bherbruck/solvecraft"
 
 [workspace.dependencies]
 # internal

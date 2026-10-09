@@ -92,8 +92,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         (1..).map(|k| format!("{prefix}{k}")).find(|c| !taken.contains(c)).unwrap_or_default()
     };
     let (mo, inputs) = match id {
-        "ContactSetCmd" => (Mo::ContactSet { name: n("Contact Set", "contact.list"), check: None }, vec![SelInput::new("Components", BODIES, true)]),
-        "FusionMotionStudyCommand" => (
+        "contact.create" => (Mo::ContactSet { name: n("Contact Set", "contact.list"), check: None }, vec![SelInput::new("Components", BODIES, true)]),
+        "motion.study" => (
             Mo::MotionStudy {
                 name: n("Motion Study", "motion.list"),
                 study: None,
@@ -108,7 +108,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             vec![],
         ),
         "explode.create" => (Mo::Explode { name: n("Exploded View", "explode.list"), scale: 1.0, shown: None, saved: None, error: None }, vec![]),
-        "FusionShowDesignConfigPanelCmd" | "FusionStartDesignConfigModeCmd" => (Mo::Configurations { new_row: String::new(), error: None }, vec![]),
+        "config.table" | "config.configure" => (Mo::Configurations { new_row: String::new(), error: None }, vec![]),
         _ => return None,
     };
     Some((Kind::Motion(mo), inputs))
@@ -240,7 +240,7 @@ fn moved(before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
 fn study_pose(app: &SolveApp, params: &Value, step: u32) -> Result<BTreeMap<u64, Mat>, String> {
     let mut sc = app.session.scratch();
     let name = params["study"].as_str().or(params["name"].as_str()).unwrap_or_default().to_string();
-    sc.execute("FusionMotionStudyCommand", params).map_err(|e| e.to_string())?;
+    sc.execute("motion.study", params).map_err(|e| e.to_string())?;
     sc.execute("motion.play", &json!({"study": name, "step": step})).map_err(|e| e.to_string())?;
     Ok(moved(&app.session, &sc))
 }
@@ -272,7 +272,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             row_label(ui, "Contact");
             let mut on = list.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             if ui.checkbox(&mut on, "enabled").changed() {
-                let _ = app.run("EnableContactSetsCmd", json!({ "enabled": on }));
+                let _ = app.run("contact.enable_sets", json!({ "enabled": on }));
             }
             ui.end_row();
             for s in list.get("sets").and_then(Value::as_array).cloned().unwrap_or_default() {
@@ -471,7 +471,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             }
         }
         Mo::Configurations { new_row, error } => {
-            let v = app.session.execute("FusionShowDesignConfigPanelCmd", &json!({})).unwrap_or(Value::Null);
+            let v = app.session.execute("config.table", &json!({})).unwrap_or(Value::Null);
             let mut tb = table(&v);
             // Bare numbers show with their parameter's unit ("40" is 40 mm), as Fusion shows them.
             let kinds = app.session.doc.all_param_exprs();
@@ -579,7 +579,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                     // The first column starts the table (with a Default row of the current values).
                     let (id, p) = if tb.columns.is_empty() {
                         (
-                            "FusionStartDesignConfigModeCmd",
+                            "config.configure",
                             match p.get("param") {
                                 Some(n) => json!({ "params": [n] }),
                                 None => json!({ "features": [p.get("feature")] }),
@@ -651,10 +651,10 @@ pub fn commands(app: &SolveApp, k: &Mo, inputs: &[SelInput]) -> Result<Vec<(Stri
                 // Only managing the sets: nothing to add.
                 return Ok(Vec::new());
             }
-            vec![("ContactSetCmd".into(), json!({"name": name, "occurrences": occs}))]
+            vec![("contact.create".into(), json!({"name": name, "occurrences": occs}))]
         }
         Mo::MotionStudy { name, study, steps, tracks, .. } => {
-            vec![("FusionMotionStudyCommand".into(), study_params(&app.session, name, study.as_deref(), steps, tracks)?)]
+            vec![("motion.study".into(), study_params(&app.session, name, study.as_deref(), steps, tracks)?)]
         }
         Mo::Explode { name, scale, .. } => {
             vec![("explode.create".into(), json!({"name": name, "scale": scale})), ("explode.show".into(), json!({ "view": name }))]
@@ -723,11 +723,11 @@ mod tests {
         let mut s = Session::default();
         for (name, x) in [("A", 0), ("B", 30)] {
             s.execute("component.activate", &json!({"component": "root"})).unwrap();
-            s.execute("FusionCreateNewComponentCommand", &json!({ "name": name })).unwrap();
-            s.execute("PrimitiveBox", &json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+            s.execute("component.create", &json!({ "name": name })).unwrap();
+            s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
         }
         s.execute(
-            "JointAssembleCmdNew",
+            "joint.create",
             &json!({"type": "revolute", "a": {"occurrence": "A:1", "face": [10, 10, 10]}, "b": {"occurrence": "B:1", "face": [40, 10, 0]}}),
         )
         .unwrap();

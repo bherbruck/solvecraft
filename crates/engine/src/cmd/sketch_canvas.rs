@@ -9,11 +9,11 @@ use crate::params::{bad, bool_, num, str_, vec2};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("FusionAddCanvasCommand", "Canvas", add_canvas)
+    CommandSpec::new("canvas.insert", "Canvas", add_canvas)
         .at("SKETCH", "INSERT")
         .icon("canvas")
         .params("path | data (base64 PNG or JPEG); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?"),
-    CommandSpec::new("FusionAddEditDecalCommand", "Decal", add_decal)
+    CommandSpec::new("canvas.decal", "Decal", add_decal)
         .at("SKETCH", "INSERT")
         .icon("decal")
         .params("path | data; face: [x,y,z] on a planar face (the image is centred there); width?: mm; angle?: deg; opacity?: (default 1)"),
@@ -79,11 +79,11 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
 }
 
 fn add_canvas(s: &mut Session, p: &Value) -> Result<Value> {
-    make(s, p, "FusionAddCanvasCommand", false)
+    make(s, p, "canvas.insert", false)
 }
 
 fn add_decal(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionAddEditDecalCommand";
+    let cmd = "canvas.decal";
     let face = p.get("face").cloned().ok_or_else(|| bad(cmd, "`face` must be a point [x,y,z] on a planar face"))?;
     let mut q = p.clone();
     if let Some(o) = q.as_object_mut() {
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn canvas_insert_edit_calibrate_save() {
         let mut s = Session::default();
-        let r = s.execute("FusionAddCanvasCommand", &json!({"data": png(400, 200), "plane": "XZ", "width": 80})).unwrap();
+        let r = s.execute("canvas.insert", &json!({"data": png(400, 200), "plane": "XZ", "width": 80})).unwrap();
         let id = r["canvas"].as_u64().unwrap();
         let c = s.doc.canvases[0].clone();
         assert_eq!(c.pixels, [400, 200]);
@@ -188,12 +188,12 @@ mod tests {
         assert_eq!(back.canvases, s.doc.canvases);
         s.execute("canvas.delete", &json!({"canvas": id})).unwrap();
         assert!(s.doc.canvases.is_empty());
-        s.execute("UndoCommand", &json!({})).unwrap();
+        s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(s.doc.canvases.len(), 1);
-        assert!(s.execute("FusionAddCanvasCommand", &json!({"data": "bm9wZQ=="})).is_err());
+        assert!(s.execute("canvas.insert", &json!({"data": "bm9wZQ=="})).is_err());
         // A decal on the top face of a box.
-        s.execute("PrimitiveBox", &json!({"length": 30, "width": 30, "height": 10})).unwrap();
-        let r = s.execute("FusionAddEditDecalCommand", &json!({"data": png(10, 10), "face": [15, 15, 10], "width": 20})).unwrap();
+        s.execute("solid.box", &json!({"length": 30, "width": 30, "height": 10})).unwrap();
+        let r = s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [15, 15, 10], "width": 20})).unwrap();
         assert!(r["canvas"].is_u64());
     }
 }

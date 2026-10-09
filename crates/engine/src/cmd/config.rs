@@ -9,10 +9,10 @@ use crate::params::{bad, bool_, str_, string_list};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("FusionStartDesignConfigModeCmd", "Configure", configure).at("SOLID", "CONFIGURE").icon("params").params(
+    CommandSpec::new("config.configure", "Configure", configure).at("SOLID", "CONFIGURE").icon("params").params(
         "params?: [parameter names]; features?: [feature names] (columns to add; with no rows yet, a \"Default\" row takes the current values)",
     ),
-    CommandSpec::new("FusionShowDesignConfigPanelCmd", "Display Configuration Table", show)
+    CommandSpec::new("config.table", "Display Configuration Table", show)
         .at("SOLID", "CONFIGURE")
         .icon("params")
         .noundo()
@@ -54,7 +54,7 @@ fn add_column(s: &mut Session, c: Column, cmd: &str) -> Result<()> {
 }
 
 fn configure(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionStartDesignConfigModeCmd";
+    let cmd = "config.configure";
     for n in string_list(p, "params") {
         let c = column_of(s, &json!({ "param": n }), cmd)?;
         add_column(s, c, cmd)?;
@@ -196,17 +196,17 @@ mod tests {
     }
 
     fn volume(s: &mut Session) -> f64 {
-        run(s, "MeasureCommand", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+        run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
     }
 
     #[test]
     fn configurations_switch_sizes_and_suppressions() {
         let mut s = Session::default();
-        run(&mut s, "ChangeParameterCommand", json!({"name": "len", "expression": "40 mm"}));
-        run(&mut s, "PrimitiveBox", json!({"length": "len", "width": 20, "height": 10}));
-        run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [[0, 0, 5]], "radius": 3}));
+        run(&mut s, "parameters.change", json!({"name": "len", "expression": "40 mm"}));
+        run(&mut s, "solid.box", json!({"length": "len", "width": 20, "height": 10}));
+        run(&mut s, "solid.fillet", json!({"edges": [[0, 0, 5]], "radius": 3}));
         let fillet = s.doc.features.last().map(|f| f.name.clone()).unwrap_or_default();
-        let t = run(&mut s, "FusionStartDesignConfigModeCmd", json!({"params": ["len"], "features": [fillet]}));
+        let t = run(&mut s, "config.configure", json!({"params": ["len"], "features": [fillet]}));
         assert_eq!(t["rows"][0]["name"], "Default");
         run(&mut s, "config.row", json!({"name": "Long", "values": {"len": "80 mm"}}));
         run(&mut s, "config.row", json!({"name": "Sharp", "from": "Long", "values": {fillet.clone(): true}}));
@@ -216,17 +216,17 @@ mod tests {
         assert!((volume(&mut s) - (16000.0 - (9.0 - std::f64::consts::PI * 9.0 / 4.0) * 10.0)).abs() < 0.5, "{}", volume(&mut s));
         run(&mut s, "config.activate", json!({"row": "Sharp"}));
         assert!((volume(&mut s) - 16000.0).abs() < 1e-6);
-        let t = run(&mut s, "FusionShowDesignConfigPanelCmd", json!({}));
+        let t = run(&mut s, "config.table", json!({}));
         assert_eq!((t["active"].as_str(), t["matches"].as_bool()), (Some("Sharp"), Some(true)), "{t}");
         // Undo goes back to the previous configuration's values.
-        run(&mut s, "UndoCommand", json!({}));
+        run(&mut s, "edit.undo", json!({}));
         assert!(volume(&mut s) > 15000.0 && volume(&mut s) < 16000.0);
         // Renaming the parameter keeps the column; editing it by hand breaks the match.
         run(&mut s, "parameters.rename", json!({"name": "len", "new_name": "length"}));
-        let t = run(&mut s, "FusionShowDesignConfigPanelCmd", json!({}));
+        let t = run(&mut s, "config.table", json!({}));
         assert_eq!(t["columns"][0], "param:length", "{t}");
-        run(&mut s, "ChangeParameterCommand", json!({"name": "length", "expression": "50 mm"}));
-        assert_eq!(run(&mut s, "FusionShowDesignConfigPanelCmd", json!({}))["matches"], false);
+        run(&mut s, "parameters.change", json!({"name": "length", "expression": "50 mm"}));
+        assert_eq!(run(&mut s, "config.table", json!({}))["matches"], false);
         // Bad input.
         assert!(s.execute("config.row", &json!({"name": "X", "values": {"nope": 1}})).is_err());
         assert!(s.execute("config.activate", &json!({"row": "Missing"})).is_err());
@@ -234,6 +234,6 @@ mod tests {
         assert!(s.execute("config.activate", &json!({"row": "Broken"})).is_err());
         run(&mut s, "config.row", json!({"name": "Broken", "delete": true}));
         run(&mut s, "config.column", json!({"feature": fillet, "delete": true}));
-        assert_eq!(run(&mut s, "FusionShowDesignConfigPanelCmd", json!({}))["columns"].as_array().map(Vec::len), Some(1));
+        assert_eq!(run(&mut s, "config.table", json!({}))["columns"].as_array().map(Vec::len), Some(1));
     }
 }

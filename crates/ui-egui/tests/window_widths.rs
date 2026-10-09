@@ -19,7 +19,7 @@ fn window_widths(h: &Harness) -> Vec<(String, f32)> {
 
 fn fresh() -> Harness {
     let mut h = Harness::new();
-    h.call("engine.execute", json!({"command": "PrimitiveBox", "params": {"length": 40, "width": 30, "height": 20}}));
+    h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}));
     h.frames(3);
     h
 }
@@ -65,7 +65,7 @@ fn command_dialogs_shrink_to_their_content_within_limits() {
 fn common_dialogs_are_not_stretched() {
     // Simple dialogs have room to spare: they must not be pushed out to the maximum.
     let mut h = fresh();
-    for id in ["Extrude", "FusionFilletEdgesCommand", "FusionShellBodyCommand", "FusionMoveCommand", "FusionHoleCommand"] {
+    for id in ["solid.extrude", "solid.fillet", "solid.shell", "solid.move", "solid.hole"] {
         h.call("ui.start", json!({"command": id}));
         h.frames(6);
         let w: f32 = window_widths(&h).iter().map(|x| x.1).fold(0.0, f32::max);

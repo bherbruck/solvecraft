@@ -122,32 +122,32 @@ mod tests {
     }
 
     fn volume(s: &mut Session) -> f64 {
-        run(s, "MeasureCommand", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+        run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
     }
 
     #[test]
     fn copy_paste_sketch_and_extrude() {
         let mut s = Session::default();
-        run(&mut s, "ChangeParameterCommand", json!({"name": "w", "expression": "10 mm"}));
-        run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "S"}));
-        run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [10, 10]}));
-        run(&mut s, "ConstraintCoincident", json!({"a": "p1", "b": "origin"}));
-        run(&mut s, "SketchDimension", json!({"entities": ["l1"], "value": "w"}));
-        run(&mut s, "SketchDimension", json!({"entities": ["l2"], "value": 10}));
-        run(&mut s, "SketchStop", json!({}));
-        run(&mut s, "Extrude", json!({"sketch": "S", "distance": 5}));
+        run(&mut s, "parameters.change", json!({"name": "w", "expression": "10 mm"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.constraint.coincident", json!({"a": "p1", "b": "origin"}));
+        run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "w"}));
+        run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": 10}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": 5}));
         assert!((volume(&mut s) - 500.0).abs() < 1e-6);
         run(&mut s, "timeline.copy", json!({"features": ["S", "Extrude1"]}));
         let r = run(&mut s, "timeline.paste", json!({"translate": [30, 0, 0]}));
         assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
-        assert_eq!(run(&mut s, "MeasureCommand", json!({}))["body_count"], 2);
+        assert_eq!(run(&mut s, "inspect.measure", json!({}))["body_count"], 2);
         assert!((volume(&mut s) - 1000.0).abs() < 1e-6);
         // The copy's dimensions are its own, still driven by the user parameter.
-        run(&mut s, "ChangeParameterCommand", json!({"name": "w", "expression": "20 mm"}));
+        run(&mut s, "parameters.change", json!({"name": "w", "expression": "20 mm"}));
         assert!((volume(&mut s) - 2000.0).abs() < 1e-6);
         let pasted_extrude = r["pasted"][1]["name"].as_str().unwrap_or_default().to_string();
         let d = s.doc.find_feature(&pasted_extrude).and_then(|f| f.param_names.first().cloned()).unwrap_or_default();
-        run(&mut s, "ChangeParameterCommand", json!({"name": d, "expression": "10"}));
+        run(&mut s, "parameters.change", json!({"name": d, "expression": "10"}));
         assert!((volume(&mut s) - 3000.0).abs() < 1e-6, "only the copy got thicker");
         assert!(s.execute("timeline.paste", &json!({"translate": "x"})).is_err());
         let mut t = Session::default();

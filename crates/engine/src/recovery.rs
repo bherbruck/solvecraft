@@ -207,7 +207,7 @@ mod tests {
         let mut s = Session::default();
         let mut a = Autosaver::new(&d, Duration::from_secs(3600)).unwrap();
         assert!(!a.save(&s).unwrap(), "nothing unsaved");
-        s.execute("PrimitiveBox", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
         assert!(!a.tick(&s, false).unwrap(), "not due yet");
         assert!(a.tick(&s, true).unwrap(), "after a big operation");
         assert!(!a.save(&s).unwrap(), "unchanged since the last autosave");
@@ -230,7 +230,7 @@ mod tests {
         let d = dir("clean");
         let mut s = Session::default();
         let mut a = Autosaver::new(&d, Duration::ZERO).unwrap();
-        s.execute("PrimitiveBox", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
         assert!(a.tick(&s, false).unwrap());
         s.mark_saved();
         a.tick(&s, false).unwrap();
@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(fs::read_dir(&d).unwrap().count(), 0);
         // Closing with unsaved changes keeps them for the next launch.
         let b = Autosaver::new(&d, Duration::ZERO).unwrap();
-        s.execute("PrimitiveBox", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
         b.close(&s);
         assert_eq!(orphans(&d).len(), 1);
         assert!(load(&d, "../etc").is_err());

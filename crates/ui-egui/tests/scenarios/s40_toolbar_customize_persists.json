@@ -18,11 +18,11 @@
  {
   "expect": {
    "shown_handles": [
-    "toolbar:Extrude",
-    "toolbar:Revolve"
+    "toolbar:solid.extrude",
+    "toolbar:solid.revolve"
    ],
    "hidden_handles": [
-    "toolbar:FusionShellBodyCommand"
+    "toolbar:solid.shell"
    ]
   }
  },
@@ -33,7 +33,7 @@
    "y": 80,
    "target": {
     "type": "toolbar_command",
-    "id": "FusionShellBodyCommand"
+    "id": "solid.shell"
    }
   }
  },
@@ -46,7 +46,7 @@
  {
   "expect": {
    "shown_handles": [
-    "toolbar:FusionShellBodyCommand"
+    "toolbar:solid.shell"
    ]
   }
  },
@@ -57,7 +57,7 @@
    "y": 80,
    "target": {
     "type": "toolbar_command",
-    "id": "Revolve"
+    "id": "solid.revolve"
    }
   }
  },
@@ -70,17 +70,17 @@
  {
   "expect": {
    "hidden_handles": [
-    "toolbar:Revolve"
+    "toolbar:solid.revolve"
    ]
   }
  },
  {
   "drag": [
    {
-    "handle": "toolbar:FusionShellBodyCommand"
+    "handle": "toolbar:solid.shell"
    },
    {
-    "handle": "toolbar:Extrude"
+    "handle": "toolbar:solid.extrude"
    }
   ],
   "steps": 12
@@ -88,8 +88,8 @@
  {
   "expect": {
    "handle_order": [
-    "toolbar:FusionShellBodyCommand",
-    "toolbar:Extrude"
+    "toolbar:solid.shell",
+    "toolbar:solid.extrude"
    ]
   }
  },
@@ -99,18 +99,18 @@
  {
   "expect": {
    "shown_handles": [
-    "toolbar:FusionShellBodyCommand"
+    "toolbar:solid.shell"
    ],
    "hidden_handles": [
-    "toolbar:Revolve"
+    "toolbar:solid.revolve"
    ]
   }
  },
  {
   "expect": {
    "handle_order": [
-    "toolbar:FusionShellBodyCommand",
-    "toolbar:Extrude"
+    "toolbar:solid.shell",
+    "toolbar:solid.extrude"
    ]
   }
  },

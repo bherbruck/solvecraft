@@ -73,10 +73,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             save(app);
         }
         if click(ui, "undo", "Undo (Ctrl+Z)") {
-            let _ = app.run("UndoCommand", json!({}));
+            let _ = app.run("edit.undo", json!({}));
         }
         if click(ui, "redo", "Redo (Ctrl+Y)") {
-            let _ = app.run("RedoCommand", json!({}));
+            let _ = app.run("edit.redo", json!({}));
         }
         if click(ui, "home", "Start page") {
             let rev = app.session.revision;
@@ -151,11 +151,11 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     close = true;
                 }
                 if item(ui, "Insert STEP…", "") {
-                    app.start("FusionImportCommandFromToolbar");
+                    app.start("file.insert_step");
                     close = true;
                 }
                 if item(ui, "Insert Mesh…", "") {
-                    app.start("ParaMeshInsertAlignCommand");
+                    app.start("file.insert_mesh");
                     close = true;
                 }
                 if item(ui, "Save", "Ctrl+S") {
@@ -211,7 +211,7 @@ pub fn save(app: &mut SolveApp) {
         return;
     }
     if app.session.path.is_some() {
-        let _ = app.run("SaveDocumentCommand", json!({}));
+        let _ = app.run("file.save", json!({}));
     } else {
         save_as(app);
     }
@@ -220,14 +220,14 @@ pub fn save(app: &mut SolveApp) {
 fn save_as(app: &mut SolveApp) {
     let name = format!("{}.{}", app.session.doc.name, solvecraft_engine::io::DESIGN_EXT);
     if let Some(p) = app.services.pick_save.as_ref().and_then(|f| f(&name, &[solvecraft_engine::io::DESIGN_EXT])) {
-        let _ = app.run("SaveDocumentAsCommand", json!({"path": p}));
+        let _ = app.run("file.save_as", json!({"path": p}));
     }
 }
 
 fn export(app: &mut SolveApp, ext: &str) {
     let name = format!("{}.{ext}", app.session.doc.name);
     if let Some(p) = app.services.pick_save.as_ref().and_then(|f| f(&name, &[ext]))
-        && app.run("ExportCommand", json!({"path": p})).is_ok()
+        && app.run("file.export", json!({"path": p})).is_ok()
     {
         app.set_status(format!("Exported {p}"), false);
     }
@@ -305,7 +305,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 } else {
                     (t.border, t.panel_header, t.border)
                 };
-                let icon = if c.id == "SketchStop" { "finish" } else { c.icon };
+                let icon = if c.id == "sketch.finish" { "finish" } else { c.icon };
                 icons::paint(&painter, br.shrink(6.0), icon, ink, fill, acc);
                 let tip = match &info.disabled_reason {
                     Some(why) => format!("{}\n{why}", c.label),
@@ -429,8 +429,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         use egui::Key;
         if mods.command {
             match k {
-                Key::Z => drop(app.run("UndoCommand", json!({}))),
-                Key::Y => drop(app.run("RedoCommand", json!({}))),
+                Key::Z => drop(app.run("edit.undo", json!({}))),
+                Key::Y => drop(app.run("edit.redo", json!({}))),
                 Key::S => save(app),
                 Key::N => crate::documents::new_design(app),
                 Key::O => {

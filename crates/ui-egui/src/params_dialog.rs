@@ -46,7 +46,7 @@ impl ParamsDialog {
     /// The command the live preview should run (a valid expression being edited).
     pub fn preview_commands(&self) -> Option<Vec<(String, Value)>> {
         let (n, e) = self.preview.as_ref()?;
-        Some(vec![("ChangeParameterCommand".to_string(), json!({"name": n, "expression": e}))])
+        Some(vec![("parameters.change".to_string(), json!({"name": n, "expression": e}))])
     }
 }
 
@@ -257,7 +257,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                 if sel != before
                     && let Some(u) = UNITS.get(sel)
                 {
-                    d.error = app.run("ChangeParameterCommand", json!({"name": r.name, "expression": r.expression, "unit": u})).err();
+                    d.error = app.run("parameters.change", json!({"name": r.name, "expression": r.expression, "unit": u})).err();
                 }
             } else {
                 ui.label(RichText::new(unit_label(&r.unit)).color(t.text_dim));
@@ -281,7 +281,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
             if resp.lost_focus() {
                 d.preview = None;
                 if e != r.expression {
-                    let res = app.run("ChangeParameterCommand", json!({"name": r.name, "expression": e}));
+                    let res = app.run("parameters.change", json!({"name": r.name, "expression": e}));
                     d.error = res.err();
                     if d.error.is_none() {
                         d.editing.remove(&r.name);

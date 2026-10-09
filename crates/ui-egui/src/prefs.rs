@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn orbiting_around_the_cursor_keeps_that_point_still() {
         let mut app = SolveApp::new(solvecraft_engine::Session::default(), Default::default());
-        app.run("PrimitiveBox", json!({"length": 40, "width": 40, "height": 40})).unwrap();
+        app.run("solid.box", json!({"length": 40, "width": 40, "height": 40})).unwrap();
         app.preferences.orbit_cursor = true;
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         app.fit_view();

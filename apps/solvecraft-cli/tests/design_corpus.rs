@@ -57,7 +57,7 @@ fn old_designs_open_and_evaluate_as_saved() {
             }
         }
         assert_eq!(s.doc.format, solvecraft_engine::doc::format::format_string(solvecraft_engine::doc::format::FORMAT), "{name}: upgraded");
-        let got = s.execute("MeasureCommand", &json!({})).unwrap();
+        let got = s.execute("inspect.measure", &json!({})).unwrap();
         if got["body_count"] != want["body_count"] && !known(&name, "body_count") {
             problems.push(format!("{name}: {} bodies, saved with {}", got["body_count"], want["body_count"]));
         }
@@ -145,7 +145,7 @@ fn at_mut<'a>(v: &'a mut Value, path: &[Value]) -> Option<&'a mut Value> {
 fn try_bytes(bytes: &[u8]) {
     if let Ok(doc) = solvecraft_engine::io::read_design(bytes) {
         let mut s = Session::new(doc);
-        let _ = s.execute("MeasureCommand", &json!({}));
+        let _ = s.execute("inspect.measure", &json!({}));
         let _ = s.execute("document.inspect", &json!({}));
     }
 }

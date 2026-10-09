@@ -353,11 +353,11 @@ impl SolveApp {
         match &r {
             Ok(_) => {
                 self.session.echo(format!("{id}: done"));
-                if matches!(id, "NewDocumentCommand" | "doc.open") {
+                if matches!(id, "file.new" | "doc.open") {
                     self.cam = Camera::default();
                     self.fit_view();
                 }
-                if matches!(id, "doc.open" | "SaveDocumentCommand" | "SaveDocumentAsCommand")
+                if matches!(id, "doc.open" | "file.save" | "file.save_as")
                     && let Some(p) = self.session.path.clone()
                 {
                     self.home.add_recent(&p);
@@ -387,7 +387,7 @@ impl SolveApp {
         }
         self.tool = None;
         self.home.open = false;
-        if matches!(id, "FusionImportCommandFromToolbar" | "ParaMeshInsertAlignCommand") {
+        if matches!(id, "file.insert_step" | "file.insert_mesh") {
             if let Some(p) = self.services.pick_open.as_ref().and_then(|f| f()) {
                 self.insert_path(&p);
             }
@@ -396,21 +396,21 @@ impl SolveApp {
         if !sketch_tools::start_hook(self, id) {
             return;
         }
-        if id == "ChangeParameterCommand" {
+        if id == "parameters.change" {
             params_dialog::open(self);
             return;
         }
-        if id == "SketchStop" {
+        if id == "sketch.finish" {
             self.finish_sketch();
             return;
         }
         // Press Pull: edges get a fillet, faces and profiles an extrude.
-        if id == "FusionPressPullCommand" {
+        if id == "solid.press_pull" {
             let edges = self.session.selection.iter().any(|s| matches!(s, solvecraft_engine::Sel::Edge { .. }));
-            return self.start(if edges { "FusionFilletEdgesCommand" } else { "Extrude" });
+            return self.start(if edges { "solid.fillet" } else { "solid.extrude" });
         }
         // Fix/Unfix: the selected sketch points and curves change at once, otherwise pick them.
-        if id == "ConstraintFix" {
+        if id == "sketch.constraint.fix" {
             let ents: Vec<String> = self
                 .session
                 .selection
@@ -433,7 +433,7 @@ impl SolveApp {
         }
         if let Some(spec) = solvecraft_engine::find_command(id)
             && (tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some())
-            && id != "SketchCreate"
+            && id != "sketch.create"
         {
             self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
         }
@@ -468,13 +468,13 @@ impl SolveApp {
         let Some(idx) = self.session.doc.feature_index(id) else { return };
         let marker = self.session.doc.marker;
         self.tool = None;
-        if self.run("timeline.rollTo", json!({ "position": idx })).is_err() {
+        if self.run("timeline.roll_to", json!({ "position": idx })).is_err() {
             return;
         }
         match dialogs::for_feature(self, id, marker) {
             Some(d) => self.dialog = Some(d),
             None => {
-                let _ = self.run("timeline.rollTo", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
+                let _ = self.run("timeline.roll_to", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
                 self.palette.text = format!("timeline.edit {{\"feature\": {id}, \"set\": {{}}}}");
                 self.ui.palette_open = true;
             }
@@ -496,9 +496,9 @@ impl SolveApp {
         self.dialog = None;
         let Some(idx) = self.session.doc.feature_index(id) else { return };
         let marker = self.session.doc.marker;
-        let rolled = marker.is_none_or(|m| m > idx + 1) && self.run("timeline.rollTo", json!({ "position": idx + 1 })).is_ok();
+        let rolled = marker.is_none_or(|m| m > idx + 1) && self.run("timeline.roll_to", json!({ "position": idx + 1 })).is_ok();
         let before = self.cam;
-        if self.run("SketchActivate", json!({ "sketch": id })).is_err() {
+        if self.run("sketch.edit", json!({ "sketch": id })).is_err() {
             if rolled {
                 self.restore_marker(marker);
             }
@@ -513,7 +513,7 @@ impl SolveApp {
     /// return to the view from before the sketch.
     pub fn finish_sketch(&mut self) {
         self.tool = None;
-        let _ = self.run("SketchStop", json!({}));
+        let _ = self.run("sketch.finish", json!({}));
         if let Some(marker) = self.pre_sketch_marker.take() {
             self.restore_marker(marker);
         }
@@ -523,7 +523,7 @@ impl SolveApp {
     }
 
     fn restore_marker(&mut self, marker: Option<usize>) {
-        let _ = self.run("timeline.rollTo", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
+        let _ = self.run("timeline.roll_to", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
     }
 
     /// Everything shown as selected: the selection plus the open dialog's inputs.
@@ -555,7 +555,7 @@ impl SolveApp {
     /// Insert a STEP file's bodies (an Import base feature) or a 3MF/STL file's meshes into the
     /// current design.
     pub fn insert_path(&mut self, path: &str) {
-        let cmd = if solvecraft_engine::io::is_mesh_path(path) { "ParaMeshInsertAlignCommand" } else { "FusionImportCommandFromToolbar" };
+        let cmd = if solvecraft_engine::io::is_mesh_path(path) { "file.insert_mesh" } else { "file.insert_step" };
         if let Ok(r) = self.run(cmd, json!({ "path": path })) {
             self.fit_view();
             if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {

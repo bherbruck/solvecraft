@@ -1,7 +1,7 @@
 {
   "commands": [
     {
-      "command": "SketchCreate",
+      "command": "sketch.create",
       "params": {
         "name": "Contour",
         "plane": {
@@ -24,7 +24,7 @@
       }
     },
     {
-      "command": "DrawPolyline",
+      "command": "sketch.line",
       "params": {
         "construction": false,
         "ids": [
@@ -43,7 +43,7 @@
       }
     },
     {
-      "command": "DrawPolyline",
+      "command": "sketch.line",
       "params": {
         "construction": false,
         "ids": [
@@ -59,7 +59,7 @@
       }
     },
     {
-      "command": "DrawPolyline",
+      "command": "sketch.line",
       "params": {
         "construction": false,
         "ids": [
@@ -75,11 +75,11 @@
       }
     },
     {
-      "command": "SketchStop",
+      "command": "sketch.finish",
       "params": {}
     },
     {
-      "command": "FusionSheetMetalFlangeCommand",
+      "command": "sheet.flange",
       "params": {
         "curves": [
           "l1",

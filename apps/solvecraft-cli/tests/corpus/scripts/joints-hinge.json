@@ -1,14 +1,14 @@
 {"commands": [
- {"command": "ChangeParameterCommand", "params": {"name": "open_angle", "expression": "90 deg"}},
- {"command": "FusionCreateNewComponentCommand", "params": {"name": "LeafA"}},
- {"command": "PrimitiveBox", "params": {"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0]}},
- {"command": "PrimitiveCylinder", "params": {"base": [0, 33, 4], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}},
+ {"command": "parameters.change", "params": {"name": "open_angle", "expression": "90 deg"}},
+ {"command": "component.create", "params": {"name": "LeafA"}},
+ {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0]}},
+ {"command": "solid.cylinder", "params": {"base": [0, 33, 4], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}},
  {"command": "component.activate", "params": {"component": "root"}},
- {"command": "FusionCreateNewComponentCommand", "params": {"name": "LeafB"}},
- {"command": "PrimitiveBox", "params": {"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0]}},
- {"command": "PrimitiveCylinder", "params": {"base": [0, 33, 4], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}},
+ {"command": "component.create", "params": {"name": "LeafB"}},
+ {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0]}},
+ {"command": "solid.cylinder", "params": {"base": [0, 33, 4], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}},
  {"command": "component.activate", "params": {"component": "root"}},
  {"command": "occurrence.ground", "params": {"occurrence": 2, "grounded": true}},
- {"command": "JointAssembleCmdNew", "params": {"type": "revolute", "a": {"occurrence": "LeafA", "circle": [1, 37, 4]}, "b": {"occurrence": "LeafB", "circle": [1, 37, 4]}, "name": "Hinge"}},
- {"command": "FusionMoveJointsCommand", "params": {"joint": "Hinge", "value": "open_angle"}}
+ {"command": "joint.create", "params": {"type": "revolute", "a": {"occurrence": "LeafA", "circle": [1, 37, 4]}, "b": {"occurrence": "LeafB", "circle": [1, 37, 4]}, "name": "Hinge"}},
+ {"command": "joint.drive", "params": {"joint": "Hinge", "value": "open_angle"}}
 ]}

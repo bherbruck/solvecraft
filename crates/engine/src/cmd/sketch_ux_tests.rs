@@ -20,7 +20,7 @@ fn sketch(s: &Session) -> Sketch {
 
 fn new_sketch() -> Session {
     let mut s = Session::default();
-    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
     s
 }
 
@@ -30,11 +30,11 @@ fn new_sketch() -> Session {
 #[test]
 fn every_dimension_kind_has_a_drawable_frame() {
     let mut s = new_sketch();
-    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [60, 40]}));
-    run(&mut s, "CircleCenterRadius", json!({"center": [30, 20], "radius": 8}));
-    run(&mut s, "ArcCenterTwoPoint", json!({"center": [100, 0], "start": [110, 0], "end": [100, 10]}));
-    run(&mut s, "DrawPolyline", json!({"points": [[-40, 0], [-10, 0]]}));
-    run(&mut s, "DrawPolyline", json!({"points": [[-40, 0], [-20, 25]]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [60, 40]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 20], "radius": 8}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [100, 0], "start": [110, 0], "end": [100, 10]}));
+    run(&mut s, "sketch.line", json!({"points": [[-40, 0], [-10, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[-40, 0], [-20, 25]]}));
     for (ents, ty) in [
         (json!(["l1"]), "auto"),
         (json!(["l2"]), "vertical"),
@@ -44,9 +44,9 @@ fn every_dimension_kind_has_a_drawable_frame() {
         (json!(["a1"]), "arc_length"),
         (json!(["l5", "l6"]), "angle"),
     ] {
-        run(&mut s, "SketchDimension", json!({"entities": ents, "type": ty}));
+        run(&mut s, "sketch.dimension", json!({"entities": ents, "type": ty}));
     }
-    run(&mut s, "SketchDimension", json!({"entities": ["c1.center", "l2"], "driven": true}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1.center", "l2"], "driven": true}));
     let sk = sketch(&s);
     let dims: Vec<_> = sk.constraints.iter().filter(|c| c.kind.is_dimension()).collect();
     assert_eq!(dims.len(), 8);
@@ -71,8 +71,8 @@ fn every_dimension_kind_has_a_drawable_frame() {
 #[test]
 fn dimension_text_is_stored_relative_to_the_dimension_and_follows_it() {
     let mut s = new_sketch();
-    run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [40, 0]]}));
-    let d = run(&mut s, "SketchDimension", json!({"entities": ["l1"], "text_at": [20, -8]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "text_at": [20, -8]}));
     let param = d["param"].as_str().unwrap_or_default().to_string();
     let text = |s: &Session| {
         let sk = sketch(s);
@@ -102,8 +102,8 @@ fn dimension_text_is_stored_relative_to_the_dimension_and_follows_it() {
 #[test]
 fn deleting_a_dimension_frees_its_parameter() {
     let mut s = new_sketch();
-    run(&mut s, "CircleCenterRadius", json!({"center": [0, 0], "radius": 5}));
-    let d = run(&mut s, "SketchDimension", json!({"entities": ["c1"]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["c1"]}));
     let param = d["param"].as_str().unwrap_or_default().to_string();
     let id = sketch(&s).constraints.iter().find(|c| c.param.as_deref() == Some(param.as_str())).map(|c| c.id.clone()).expect("dim");
     run(&mut s, "sketch.delete", json!({"entities": [id]}));
@@ -126,22 +126,22 @@ fn dof(s: &mut Session) -> i64 {
 #[test]
 fn fixed_points_survive_drags_and_solves_and_unfix_frees_them() {
     let mut s = new_sketch();
-    run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [30, 0], [30, 20]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0], [30, 20]]}));
     let free = dof(&mut s);
-    let r = run(&mut s, "ConstraintFix", json!({"entity": "l1.end"}));
+    let r = run(&mut s, "sketch.constraint.fix", json!({"entity": "l1.end"}));
     assert_eq!(r["result"]["fixed"], true);
     assert_eq!(dof(&mut s), free - 2);
     let corner = pt(&s, "l1.end");
     // Dragging the fixed point does nothing; dragging its neighbours never moves it.
     run(&mut s, "sketch.move_point", json!({"point": "l1.end", "to": [50, 50]}));
     assert_eq!(pt(&s, "l1.end"), corner);
-    run(&mut s, "ConstraintHorizontalVertical", json!({"line": "l2", "mode": "vertical"}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l2", "mode": "vertical"}));
     run(&mut s, "sketch.move_point", json!({"point": "l2.end", "to": [40, 25]}));
-    run(&mut s, "SketchDimension", json!({"entities": ["l1"], "value": 12}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 12}));
     assert!(pt(&s, "l1.end").dist(corner) < 1e-12, "{:?}", pt(&s, "l1.end"));
     assert!((pt(&s, "l1.start").dist(corner) - 12.0).abs() < 1e-6);
     // Unfix: the point moves again.
-    let r = run(&mut s, "ConstraintFix", json!({"entity": "l1.end"}));
+    let r = run(&mut s, "sketch.constraint.fix", json!({"entity": "l1.end"}));
     assert_eq!(r["result"]["fixed"], false);
     run(&mut s, "sketch.move_point", json!({"point": "l1.end", "to": [30, -5]}));
     assert!(pt(&s, "l1.end").dist(corner) > 1.0);
@@ -150,13 +150,13 @@ fn fixed_points_survive_drags_and_solves_and_unfix_frees_them() {
 #[test]
 fn fixing_curves_holds_their_points_and_radius() {
     let mut s = new_sketch();
-    run(&mut s, "CircleCenterRadius", json!({"center": [10, 10], "radius": 5}));
-    run(&mut s, "DrawPolyline", json!({"points": [[30, 0], [50, 0]]}));
-    run(&mut s, "ArcCenterTwoPoint", json!({"center": [0, 40], "start": [10, 40], "end": [0, 50]}));
-    run(&mut s, "CircleElipse", json!({"center": [60, 40], "major": [70, 40], "minor_radius": 4}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 5}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 0], [50, 0]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [0, 40], "start": [10, 40], "end": [0, 50]}));
+    run(&mut s, "sketch.ellipse", json!({"center": [60, 40], "major": [70, 40], "minor_radius": 4}));
     let free = dof(&mut s);
     // Multi-select fixes them all (circle 3, line 4, arc 5, ellipse 5 degrees of freedom).
-    let r = run(&mut s, "ConstraintFix", json!({"entities": ["c1", "l1", "a1", "e1"]}));
+    let r = run(&mut s, "sketch.constraint.fix", json!({"entities": ["c1", "l1", "a1", "e1"]}));
     assert_eq!(r["result"]["changed"], 4);
     assert_eq!(dof(&mut s), free - 17);
     let si = run(&mut s, "sketch.inspect", json!({}));
@@ -164,18 +164,18 @@ fn fixing_curves_holds_their_points_and_radius() {
     // A fixed circle keeps centre and radius; a dimension on it conflicts.
     run(&mut s, "sketch.move_point", json!({"point": "c1.center", "to": [0, 0]}));
     assert_eq!(pt(&s, "c1.center"), solvecraft_geom::Vec2::new(10.0, 10.0));
-    assert!(s.execute("SketchDimension", &json!({"entities": ["c1"], "value": 20})).is_err());
+    assert!(s.execute("sketch.dimension", &json!({"entities": ["c1"], "value": 20})).is_err());
     let r0 = sketch(&s).radius(0);
     assert_eq!(r0, Some(5.0));
     // Toggle without `fixed`: all fixed, so all are unfixed.
-    let r = run(&mut s, "ConstraintFix", json!({"entities": ["c1", "l1", "a1", "e1"]}));
+    let r = run(&mut s, "sketch.constraint.fix", json!({"entities": ["c1", "l1", "a1", "e1"]}));
     assert_eq!(r["result"]["fixed"], false);
     assert_eq!(dof(&mut s), free);
-    run(&mut s, "SketchDimension", json!({"entities": ["c1"], "type": "radius", "value": 7}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "radius", "value": 7}));
     assert!((sketch(&s).radius(0).unwrap_or(0.0) - 7.0).abs() < 1e-9);
     // Mixed selection: one fixed, one free → both end up fixed.
-    run(&mut s, "ConstraintFix", json!({"entity": "l1"}));
-    let r = run(&mut s, "ConstraintFix", json!({"entities": ["l1", "l1.start", "a1"]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "l1"}));
+    let r = run(&mut s, "sketch.constraint.fix", json!({"entities": ["l1", "l1.start", "a1"]}));
     assert_eq!(r["result"]["fixed"], true);
     assert!(sketch(&s).curves.iter().filter(|c| c.id == "l1" || c.id == "a1").all(|c| c.fixed));
 }
@@ -183,17 +183,17 @@ fn fixing_curves_holds_their_points_and_radius() {
 #[test]
 fn projected_geometry_counts_as_fixed() {
     let mut s = Session::default();
-    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
-    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [20, 10]}));
-    run(&mut s, "SketchStop", json!({}));
-    run(&mut s, "Extrude", json!({"distance": 5}));
-    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
-    let r = run(&mut s, "ProjectNewCmd", json!({"refs": [{"edge": [10, 0, 5]}]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"edge": [10, 0, 5]}]}));
     let sk = sketch(&s);
     let ci = sk.curves.iter().position(|c| c.link.is_some()).unwrap_or_else(|| panic!("projected: {r}"));
     let id = sk.curves[ci].id.clone();
     assert!(sk.curve_locked(ci));
-    let r = run(&mut s, "ConstraintFix", json!({"entity": id}));
+    let r = run(&mut s, "sketch.constraint.fix", json!({"entity": id}));
     // Already fixed: the toggle unfixes, which projected geometry ignores.
     assert_eq!(r["result"]["changed"], 0);
     assert!(sketch(&s).curve_locked(ci));
@@ -213,11 +213,11 @@ fn curve_ids(v: &Value) -> Vec<String> {
 #[test]
 fn construction_toggle_takes_shapes_out_of_profiles_and_back() {
     let mut s = new_sketch();
-    let rect = curve_ids(&run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [20, 10]})));
-    let slot = curve_ids(&run(&mut s, "ShapeSlotCenterToCenter", json!({"p0": [40, 5], "p1": [60, 5], "width": 6})));
-    let poly = curve_ids(&run(&mut s, "ShapePolygonInscribed", json!({"center": [0, 40], "radius": 8, "sides": 6})));
-    let circ = curve_ids(&run(&mut s, "CircleCenterRadius", json!({"center": [40, 40], "radius": 5})));
-    let ell = curve_ids(&run(&mut s, "CircleElipse", json!({"center": [70, 40], "major": [80, 40], "minor_radius": 4})));
+    let rect = curve_ids(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]})));
+    let slot = curve_ids(&run(&mut s, "sketch.slot.center_to_center", json!({"p0": [40, 5], "p1": [60, 5], "width": 6})));
+    let poly = curve_ids(&run(&mut s, "sketch.polygon.inscribed", json!({"center": [0, 40], "radius": 8, "sides": 6})));
+    let circ = curve_ids(&run(&mut s, "sketch.circle.center", json!({"center": [40, 40], "radius": 5})));
+    let ell = curve_ids(&run(&mut s, "sketch.ellipse", json!({"center": [70, 40], "major": [80, 40], "minor_radius": 4})));
     assert_eq!(profiles(&mut s), 5);
     for (shape, left) in [(&rect, 4), (&slot, 3), (&poly, 2), (&circ, 1), (&ell, 0)] {
         let r = run(&mut s, "sketch.construction", json!({ "curves": shape }));
@@ -240,12 +240,12 @@ fn construction_toggle_takes_shapes_out_of_profiles_and_back() {
 #[test]
 fn projected_geometry_can_become_construction() {
     let mut s = Session::default();
-    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
-    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [20, 10]}));
-    run(&mut s, "SketchStop", json!({}));
-    run(&mut s, "Extrude", json!({"distance": 5}));
-    run(&mut s, "SketchCreate", json!({"plane": "XY"}));
-    run(&mut s, "ProjectNewCmd", json!({"refs": [{"edge": [10, 0, 5]}]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [10, 0, 5]}]}));
     let id = sketch(&s).curves.iter().find(|c| c.link.is_some()).map(|c| c.id.clone()).expect("projected");
     let r = run(&mut s, "sketch.construction", json!({ "curves": [id.clone()] }));
     assert_eq!(r["changed"], 1);
@@ -273,8 +273,8 @@ fn same(a: &(Vec<solvecraft_geom::Vec2>, Option<f64>), b: &(Vec<solvecraft_geom:
 /// A free line l1 (5,3)–(45,3) and a circle c1 at (20,18) with radius 5.
 fn line_and_circle() -> Session {
     let mut s = new_sketch();
-    run(&mut s, "DrawPolyline", json!({"points": [[5, 3], [45, 3]]}));
-    run(&mut s, "CircleCenterRadius", json!({"center": [20, 18], "radius": 5}));
+    run(&mut s, "sketch.line", json!({"points": [[5, 3], [45, 3]]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 18], "radius": 5}));
     s
 }
 
@@ -291,40 +291,40 @@ fn tangent_moves_only_the_second_pick() {
     // Line then circle: only the circle moves (and keeps its size).
     let mut s = line_and_circle();
     let l0 = snap(&s, "l1");
-    run(&mut s, "ConstraintTangent", json!({"a": "l1", "b": "c1"}));
+    run(&mut s, "sketch.constraint.tangent", json!({"a": "l1", "b": "c1"}));
     assert!(same(&snap(&s, "l1"), &l0), "line moved: {:?}", snap(&s, "l1"));
     let c = snap(&s, "c1");
     assert!((c.1.unwrap_or(0.0) - 5.0).abs() < 1e-9 && (c.0[0].y - 8.0).abs() < 1e-6, "{c:?}");
     // Circle then line: only the line moves.
-    check_order(line_and_circle(), "ConstraintTangent", "c1", "l1");
+    check_order(line_and_circle(), "sketch.constraint.tangent", "c1", "l1");
 }
 
 #[test]
 fn a_fixed_second_pick_makes_the_first_move() {
     let mut s = line_and_circle();
-    run(&mut s, "ConstraintFix", json!({"entity": "l1"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "l1"}));
     let l0 = snap(&s, "l1");
     let c0 = snap(&s, "c1");
-    run(&mut s, "ConstraintTangent", json!({"a": "c1", "b": "l1"}));
+    run(&mut s, "sketch.constraint.tangent", json!({"a": "c1", "b": "l1"}));
     assert!(same(&snap(&s, "l1"), &l0));
     assert!(!same(&snap(&s, "c1"), &c0));
     // Fixed first: the second moves as usual.
     let mut s = line_and_circle();
-    run(&mut s, "ConstraintFix", json!({"entity": "c1"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "c1"}));
     let c0 = snap(&s, "c1");
-    run(&mut s, "ConstraintTangent", json!({"a": "c1", "b": "l1"}));
+    run(&mut s, "sketch.constraint.tangent", json!({"a": "c1", "b": "l1"}));
     assert!(same(&snap(&s, "c1"), &c0));
 }
 
 #[test]
 fn two_fully_constrained_entities_conflict_and_nothing_moves() {
     let mut s = line_and_circle();
-    run(&mut s, "ConstraintFix", json!({"entities": ["l1.start", "l1.end", "c1.center"]}));
-    run(&mut s, "SketchDimension", json!({"entities": ["c1"], "type": "radius", "value": 5}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities": ["l1.start", "l1.end", "c1.center"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "radius", "value": 5}));
     let si = run(&mut s, "sketch.inspect", json!({}));
     assert!(si["curves"].as_array().is_some_and(|c| c.iter().all(|c| c["fully_constrained"] == true)), "{si}");
     let before = sketch(&s);
-    let e = s.execute("ConstraintTangent", &json!({"a": "l1", "b": "c1"}));
+    let e = s.execute("sketch.constraint.tangent", &json!({"a": "l1", "b": "c1"}));
     assert!(e.is_err(), "{e:?}");
     assert_eq!(sketch(&s), before);
 }
@@ -333,22 +333,22 @@ fn two_fully_constrained_entities_conflict_and_nothing_moves() {
 fn line_pairs_keep_the_first_line() {
     let lines = || {
         let mut s = new_sketch();
-        run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [30, 2]]}));
-        run(&mut s, "DrawPolyline", json!({"points": [[5, 20], [25, 35]]}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 2]]}));
+        run(&mut s, "sketch.line", json!({"points": [[5, 20], [25, 35]]}));
         s
     };
     let len = |s: &Session, l: &str| {
         let p = snap(s, l).0;
         p[0].dist(p[1])
     };
-    for cmd in ["ConstraintParallel", "ConstraintPerpendicular", "ConstraintEqual", "ConstraintCollinear"] {
+    for cmd in ["sketch.constraint.parallel", "sketch.constraint.perpendicular", "sketch.constraint.equal", "sketch.constraint.collinear"] {
         check_order(lines(), cmd, "l1", "l2");
         check_order(lines(), cmd, "l2", "l1");
         // The second line turns and slides; only Equal changes its length.
         let mut s = lines();
         let l0 = len(&s, "l2");
         run(&mut s, cmd, json!({"a": "l1", "b": "l2"}));
-        if cmd != "ConstraintEqual" {
+        if cmd != "sketch.constraint.equal" {
             assert!((len(&s, "l2") - l0).abs() < 1e-6, "{cmd}: {l0} -> {}", len(&s, "l2"));
         } else {
             assert!((len(&s, "l2") - len(&s, "l1")).abs() < 1e-6);
@@ -360,17 +360,17 @@ fn line_pairs_keep_the_first_line() {
 fn circle_pairs_keep_the_first_circle() {
     let circles = || {
         let mut s = new_sketch();
-        run(&mut s, "CircleCenterRadius", json!({"center": [0, 0], "radius": 5}));
-        run(&mut s, "CircleCenterRadius", json!({"center": [30, 10], "radius": 8}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
+        run(&mut s, "sketch.circle.center", json!({"center": [30, 10], "radius": 8}));
         s
     };
-    for cmd in ["ConstraintConcentric", "ConstraintEqual", "ConstraintTangent"] {
+    for cmd in ["sketch.constraint.concentric", "sketch.constraint.equal", "sketch.constraint.tangent"] {
         check_order(circles(), cmd, "c1", "c2");
         check_order(circles(), cmd, "c2", "c1");
     }
     // Equal resizes the second to the first.
     let mut s = circles();
-    run(&mut s, "ConstraintEqual", json!({"a": "c2", "b": "c1"}));
+    run(&mut s, "sketch.constraint.equal", json!({"a": "c2", "b": "c1"}));
     assert!((snap(&s, "c1").1.unwrap_or(0.0) - 8.0).abs() < 1e-9);
 }
 
@@ -378,25 +378,25 @@ fn circle_pairs_keep_the_first_circle() {
 fn point_constraints_keep_the_first_pick() {
     let pts = || {
         let mut s = new_sketch();
-        run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [30, 0]]}));
-        run(&mut s, "DrawPolyline", json!({"points": [[10, 10], [20, 25]]}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]]}));
+        run(&mut s, "sketch.line", json!({"points": [[10, 10], [20, 25]]}));
         s
     };
-    check_order(pts(), "ConstraintCoincident", "l2.start", "l1.end");
-    check_order(pts(), "ConstraintCoincident", "l1.end", "l2.start");
+    check_order(pts(), "sketch.constraint.coincident", "l2.start", "l1.end");
+    check_order(pts(), "sketch.constraint.coincident", "l1.end", "l2.start");
     // Curve picked first, point second: the point goes onto the line.
-    check_order(pts(), "ConstraintCoincident", "l1", "l2.start");
+    check_order(pts(), "sketch.constraint.coincident", "l1", "l2.start");
     // Midpoint: the point stays, the line moves.
     let mut s = pts();
     let p0 = snap(&s, "l2.end");
-    run(&mut s, "ConstraintMidPoint", json!({"point": "l2.end", "line": "l1"}));
+    run(&mut s, "sketch.constraint.midpoint", json!({"point": "l2.end", "line": "l1"}));
     assert!(same(&snap(&s, "l2.end"), &p0));
     // Symmetry: the first point and the line stay, the second mirrors.
     let mut s = pts();
-    run(&mut s, "DrawPoint", json!({"point": [3, 7]}));
-    run(&mut s, "DrawPoint", json!({"point": [4, -9]}));
+    run(&mut s, "sketch.point", json!({"point": [3, 7]}));
+    run(&mut s, "sketch.point", json!({"point": [4, -9]}));
     let (a0, l0) = (snap(&s, "p1"), snap(&s, "l1"));
-    run(&mut s, "ConstraintSymmetry", json!({"a": "p1", "b": "p2", "line": "l1"}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": "p1", "b": "p2", "line": "l1"}));
     assert!(same(&snap(&s, "p1"), &a0) && same(&snap(&s, "l1"), &l0));
     assert!(pt(&s, "p2").dist(solvecraft_geom::Vec2::new(3.0, -7.0)) < 1e-6, "{:?}", pt(&s, "p2"));
 }
@@ -418,8 +418,8 @@ fn palette_options_are_kept_with_each_sketch() {
     assert!(v.hide_dimensions && v.no_snap && v.slice && v.three_d && !v.hide_points);
     // Another sketch starts with the defaults; the first keeps its options after finishing.
     let first = s.active_sketch.expect("sketch");
-    run(&mut s, "SketchStop", json!({}));
-    run(&mut s, "SketchCreate", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
     assert_eq!(sketch(&s).view, solvecraft_sketch::SketchView::default());
     let o = run(&mut s, "sketch.options", json!({"sketch": first}));
     assert_eq!(o["options"]["show_dimensions"], false);
@@ -430,7 +430,7 @@ fn palette_options_are_kept_with_each_sketch() {
     assert!(s.execute("sketch.options", &json!({"bogus": true})).is_err());
     // Undo restores the option.
     run(&mut s, "sketch.options", json!({"show_points": false}));
-    run(&mut s, "UndoCommand", json!({}));
+    run(&mut s, "edit.undo", json!({}));
     assert!(!sketch(&s).view.hide_points);
 }
 
@@ -448,7 +448,7 @@ fn v(x: f64, y: f64) -> solvecraft_geom::Vec2 {
 #[test]
 fn dragging_a_line_slides_it_and_an_end_keeps_the_other_end() {
     let mut s = new_sketch();
-    run(&mut s, "DrawPolyline", json!({"points": [[10, 10], [40, 20]]}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 10], [40, 20]]}));
     drag(&mut s, "l1", [25.0, 15.0], [30.0, 25.0]);
     assert!(pt(&s, "l1.start").dist(v(15.0, 20.0)) < 1e-9 && pt(&s, "l1.end").dist(v(45.0, 30.0)) < 1e-9);
     drag(&mut s, "l1.end", [45.0, 30.0], [50.0, 0.0]);
@@ -459,7 +459,7 @@ fn dragging_a_line_slides_it_and_an_end_keeps_the_other_end() {
 #[test]
 fn dragging_a_rectangle_side_moves_that_side_only() {
     let mut s = new_sketch();
-    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [10, 10], "p1": [40, 30]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [40, 30]}));
     // l2 is the right side (x = 40): dragged right, it stays vertical, the left side stays.
     let left = snap(&s, "l4");
     drag(&mut s, "l2", [40.0, 20.0], [50.0, 20.0]);
@@ -471,7 +471,7 @@ fn dragging_a_rectangle_side_moves_that_side_only() {
 #[test]
 fn dragging_circles_and_arcs() {
     let mut s = new_sketch();
-    run(&mut s, "CircleCenterRadius", json!({"center": [0, 0], "radius": 5}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
     // The edge changes the radius about a fixed centre; the centre moves the circle.
     drag(&mut s, "c1", [5.0, 0.0], [0.0, 8.0]);
     assert!((snap(&s, "c1").1.unwrap_or(0.0) - 8.0).abs() < 1e-9);
@@ -479,7 +479,7 @@ fn dragging_circles_and_arcs() {
     drag(&mut s, "c1.center", [0.0, 0.0], [20.0, 5.0]);
     assert!(pt(&s, "c1.center").dist(v(20.0, 5.0)) < 1e-9);
     assert!((snap(&s, "c1").1.unwrap_or(0.0) - 8.0).abs() < 1e-9);
-    run(&mut s, "ArcCenterTwoPoint", json!({"center": [50, 0], "start": [60, 0], "end": [50, 10]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [50, 0], "start": [60, 0], "end": [50, 10]}));
     drag(&mut s, "a1", [57.07, 7.07], [50.0 + 200f64.sqrt(), 200f64.sqrt()]);
     assert!(pt(&s, "a1.center").dist(v(50.0, 0.0)) < 1e-9);
     assert!((snap(&s, "a1").1.unwrap_or(0.0) - 20.0).abs() < 1e-9, "{:?}", snap(&s, "a1"));
@@ -489,16 +489,16 @@ fn dragging_circles_and_arcs() {
 #[test]
 fn constrained_geometry_resists_drags() {
     let mut s = new_sketch();
-    run(&mut s, "DrawPolyline", json!({"points": [[10, 10], [40, 10]]}));
-    run(&mut s, "ConstraintFix", json!({"entities": ["l1.start", "l1.end"]}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 10], [40, 10]]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities": ["l1.start", "l1.end"]}));
     let l0 = snap(&s, "l1");
     drag(&mut s, "l1", [25.0, 10.0], [25.0, 30.0]);
     assert!(same(&snap(&s, "l1"), &l0));
     // A horizontal line dragged at its end stays horizontal; its length dimension holds.
     let mut s = new_sketch();
-    run(&mut s, "DrawPolyline", json!({"points": [[10, 10], [40, 10]]}));
-    run(&mut s, "ConstraintHorizontalVertical", json!({"line": "l1"}));
-    run(&mut s, "SketchDimension", json!({"entities": ["l1"], "value": 30}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 10], [40, 10]]}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l1"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 30}));
     drag(&mut s, "l1.end", [40.0, 10.0], [45.0, 20.0]);
     let (a, b) = (pt(&s, "l1.start"), pt(&s, "l1.end"));
     assert!((a.y - b.y).abs() < 1e-6 && (a.dist(b) - 30.0).abs() < 1e-6, "{a:?} {b:?}");
@@ -507,12 +507,12 @@ fn constrained_geometry_resists_drags() {
 #[test]
 fn fully_constrained_feedback_is_per_entity() {
     let mut s = new_sketch();
-    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [10, 10], "p1": [50, 35]}));
-    run(&mut s, "CircleCenterRadius", json!({"center": [80, 20], "radius": 8}));
-    run(&mut s, "SketchDimension", json!({"entities": ["l1"], "value": 40}));
-    run(&mut s, "SketchDimension", json!({"entities": ["l2"], "value": 25}));
-    run(&mut s, "SketchDimension", json!({"entities": ["origin", "l1.start"], "type": "horizontal", "value": 10}));
-    run(&mut s, "SketchDimension", json!({"entities": ["origin", "l1.start"], "type": "vertical", "value": 10}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [50, 35]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [80, 20], "radius": 8}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 40}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": 25}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l1.start"], "type": "horizontal", "value": 10}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l1.start"], "type": "vertical", "value": 10}));
     let si = run(&mut s, "sketch.inspect", json!({}));
     assert_eq!(si["dof"], 3);
     for c in si["curves"].as_array().expect("curves") {
@@ -533,10 +533,10 @@ fn fully_constrained_feedback_is_per_entity() {
 #[test]
 fn chain_follows_shared_and_coincident_ends() {
     let mut s = new_sketch();
-    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [20, 10]}));
-    run(&mut s, "DrawPolyline", json!({"points": [[40, 0], [50, 0]]}));
-    run(&mut s, "DrawPolyline", json!({"points": [[50.5, 0], [60, 5]]}));
-    run(&mut s, "CircleCenterRadius", json!({"center": [80, 0], "radius": 3}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.line", json!({"points": [[40, 0], [50, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[50.5, 0], [60, 5]]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [80, 0], "radius": 3}));
     let chain = |s: &mut Session, c: &str| -> Vec<String> {
         let v = run(s, "sketch.chain", json!({"curve": c}));
         v["curves"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
@@ -545,7 +545,7 @@ fn chain_follows_shared_and_coincident_ends() {
     assert_eq!(chain(&mut s, "l5"), ["l5"]);
     assert_eq!(chain(&mut s, "c1"), ["c1"]);
     // Joined by a coincident constraint, the two lines are one chain.
-    run(&mut s, "ConstraintCoincident", json!({"a": "l5.end", "b": "l6.start"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "l5.end", "b": "l6.start"}));
     assert_eq!(chain(&mut s, "l6"), ["l6", "l5"]);
     assert!(s.execute("sketch.chain", &json!({"curve": "nope"})).is_err());
 }
@@ -553,9 +553,9 @@ fn chain_follows_shared_and_coincident_ends() {
 #[test]
 fn constraints_and_dimensions_can_be_selected_and_deleted_together() {
     let mut s = new_sketch();
-    run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [30, 0]]}));
-    run(&mut s, "ConstraintHorizontalVertical", json!({"line": "l1"}));
-    run(&mut s, "SketchDimension", json!({"entities": ["l1"], "value": 30}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]]}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l1"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 30}));
     let ids: Vec<String> = sketch(&s).constraints.iter().map(|c| c.id.clone()).collect();
     assert_eq!(ids.len(), 2);
     let items: Vec<Value> = ids.iter().map(|id| json!({"type": "sketch_constraint", "id": id})).collect();
@@ -603,14 +603,14 @@ fn three_d_curves_need_the_option_and_move_joined() {
 #[test]
 fn pipe_and_sweep_follow_3d_sketch_curves() {
     let mut s = Session::default();
-    run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
     run(&mut s, "sketch.options", json!({"sketch_3d": true}));
     let r = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 30], [20, 0, 30]]}));
     let mut path = curve_ids(&r);
     let sp = run(&mut s, "sketch.spline3d", json!({"points": [[20, 0, 30], [35, 10, 35], [50, 0, 50]]}));
     path.extend(curve_ids(&sp));
-    run(&mut s, "SketchStop", json!({}));
-    let p = run(&mut s, "PrimitivePipe", json!({"path_sketch": "Path", "path": path, "diameter": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    let p = run(&mut s, "solid.pipe", json!({"path_sketch": "Path", "path": path, "diameter": 4}));
     let si = run(&mut s, "document.inspect", json!({"measure": true}));
     let body = si["bodies"].as_array().and_then(|b| b.first()).cloned().unwrap_or_default();
     // The tube runs from the first line's start to the spline's end (radius 2 around them; the

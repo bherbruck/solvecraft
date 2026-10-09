@@ -5,7 +5,7 @@
   {"until": {"home": false}},
   {"expect": {"errors": 0, "bodies": 1, "name": "Sample Plate", "param": {"width": 80}}},
   {"shot": "s15_sample"},
-  {"start": "ChangeParameterCommand"},
+  {"start": "parameters.change"},
   {"widget": "80 mm"},
   {"key": "A", "cmd": true},
   {"text": "100 mm"},

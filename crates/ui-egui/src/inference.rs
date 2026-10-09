@@ -157,10 +157,10 @@ pub fn commit(app: &mut SolveApp, line: &str, end: Vec2) {
     let Some(i) = current().filter(|i| i.at.dist(end) < 1e-9) else { return };
     clear();
     let (cmd, params) = match i.kind {
-        Kind::Parallel => ("ConstraintParallel", json!({"a": i.curve, "b": line})),
-        Kind::Perpendicular => ("ConstraintPerpendicular", json!({"a": i.curve, "b": line})),
-        Kind::Tangent => ("ConstraintTangent", json!({"a": i.curve, "b": line})),
-        Kind::Extension => ("ConstraintCoincident", json!({"a": format!("{line}.end"), "b": i.curve})),
+        Kind::Parallel => ("sketch.constraint.parallel", json!({"a": i.curve, "b": line})),
+        Kind::Perpendicular => ("sketch.constraint.perpendicular", json!({"a": i.curve, "b": line})),
+        Kind::Tangent => ("sketch.constraint.tangent", json!({"a": i.curve, "b": line})),
+        Kind::Extension => ("sketch.constraint.coincident", json!({"a": format!("{line}.end"), "b": i.curve})),
     };
     // An inference that would over-constrain the sketch is simply not kept.
     let _ = app.session.execute(cmd, &params);
@@ -168,7 +168,7 @@ pub fn commit(app: &mut SolveApp, line: &str, end: Vec2) {
 
 /// The dashed guide of the current inference (its label is the snap hint) (while the Line tool is active).
 pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if app.tool.as_ref().is_none_or(|t| t.cmd != "DrawPolyline") {
+    if app.tool.as_ref().is_none_or(|t| t.cmd != "sketch.line") {
         return;
     }
     let Some(i) = current() else { return };

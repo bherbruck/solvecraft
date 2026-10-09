@@ -10,136 +10,136 @@ use crate::params::{bad, bool_, expr, num, req_vec2, str_, string_list, vec2, ve
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("SketchCreate", "Create Sketch", create_sketch)
+    CommandSpec::new("sketch.create", "Create Sketch", create_sketch)
         .at("SOLID", "CREATE")
         .icon("sketch")
         .params("plane: XY|XZ|YZ | {origin, x_dir, y_dir} | {face: [x,y,z]} (planar face at point), offset?: expr, name?"),
-    CommandSpec::new("SketchActivate", "Edit Sketch", edit_sketch).icon("sketch").params("sketch: id or name"),
-    CommandSpec::new("SketchStop", "Finish Sketch", finish_sketch).at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo(),
-    CommandSpec::new("DrawPolyline", "Line", draw_line)
+    CommandSpec::new("sketch.edit", "Edit Sketch", edit_sketch).icon("sketch").params("sketch: id or name"),
+    CommandSpec::new("sketch.finish", "Finish Sketch", finish_sketch).at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo(),
+    CommandSpec::new("sketch.line", "Line", draw_line)
         .at("SKETCH", "CREATE")
         .icon("line")
         .key("L")
         .enabled(in_sketch)
         .params("points: [[x,y] | \"l1.end\" | {at, ref}…], closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)"),
-    CommandSpec::new("ShapeRectangleTwoPoint", "2-Point Rectangle", rect_two_point)
+    CommandSpec::new("sketch.rectangle.two_point", "2-Point Rectangle", rect_two_point)
         .at("SKETCH", "CREATE")
         .icon("rect")
         .key("R")
         .enabled(in_sketch)
         .params("p0, p1: opposite corners [x,y]; construction?"),
-    CommandSpec::new("ShapeRectangleThreePoint", "3-Point Rectangle", rect_three_point)
+    CommandSpec::new("sketch.rectangle.three_point", "3-Point Rectangle", rect_three_point)
         .at("SKETCH", "CREATE")
         .icon("rect3")
         .enabled(in_sketch)
         .params("p0, p1: first edge; p2: point on the opposite edge"),
-    CommandSpec::new("ShapeRectangleCenter", "Center Rectangle", rect_center)
+    CommandSpec::new("sketch.rectangle.center", "Center Rectangle", rect_center)
         .at("SKETCH", "CREATE")
         .icon("rect_center")
         .enabled(in_sketch)
         .params("center, corner"),
-    CommandSpec::new("CircleCenterRadius", "Center Diameter Circle", circle_center)
+    CommandSpec::new("sketch.circle.center", "Center Diameter Circle", circle_center)
         .at("SKETCH", "CREATE")
         .icon("circle")
         .key("C")
         .enabled(in_sketch)
         .params("center: [x,y] or point ref, radius | diameter: number"),
-    CommandSpec::new("CircleTwoPoint", "2-Point Circle", circle_two)
+    CommandSpec::new("sketch.circle.two_point", "2-Point Circle", circle_two)
         .at("SKETCH", "CREATE")
         .icon("circle2")
         .enabled(in_sketch)
         .params("p0, p1: diameter ends"),
-    CommandSpec::new("CircleThreePoint", "3-Point Circle", circle_three)
+    CommandSpec::new("sketch.circle.three_point", "3-Point Circle", circle_three)
         .at("SKETCH", "CREATE")
         .icon("circle3")
         .enabled(in_sketch)
         .params("p0, p1, p2"),
-    CommandSpec::new("ArcThreePoint", "3-Point Arc", arc_three).at("SKETCH", "CREATE").icon("arc3").enabled(in_sketch).params("start, end, through"),
-    CommandSpec::new("ArcCenterTwoPoint", "Center Point Arc", arc_center)
+    CommandSpec::new("sketch.arc.three_point", "3-Point Arc", arc_three).at("SKETCH", "CREATE").icon("arc3").enabled(in_sketch).params("start, end, through"),
+    CommandSpec::new("sketch.arc.center_point", "Center Point Arc", arc_center)
         .at("SKETCH", "CREATE")
         .icon("arc_center")
         .enabled(in_sketch)
         .params("center, start, end (counter-clockwise from start) | center, start, sweep: signed degrees"),
-    CommandSpec::new("ShapePolygonInscribed", "Inscribed Polygon", polygon_inscribed)
+    CommandSpec::new("sketch.polygon.inscribed", "Inscribed Polygon", polygon_inscribed)
         .at("SKETCH", "CREATE")
         .icon("polygon")
         .enabled(in_sketch)
         .params("center, radius (to vertices), sides, angle?: deg"),
-    CommandSpec::new("ShapePolygonCircumscribed", "Circumscribed Polygon", polygon_circumscribed)
+    CommandSpec::new("sketch.polygon.circumscribed", "Circumscribed Polygon", polygon_circumscribed)
         .at("SKETCH", "CREATE")
         .icon("polygon")
         .enabled(in_sketch)
         .params("center, radius (to edge midpoints), sides, angle?: deg"),
-    CommandSpec::new("ShapePolygonEdge", "Edge Polygon", polygon_edge)
+    CommandSpec::new("sketch.polygon.edge", "Edge Polygon", polygon_edge)
         .at("SKETCH", "CREATE")
         .icon("polygon")
         .enabled(in_sketch)
         .params("p0, p1: one edge, sides"),
-    CommandSpec::new("ShapeSlotCenterToCenter", "Center to Center Slot", slot_c2c)
+    CommandSpec::new("sketch.slot.center_to_center", "Center to Center Slot", slot_c2c)
         .at("SKETCH", "CREATE")
         .icon("slot")
         .enabled(in_sketch)
         .params("p0, p1: arc centres, width"),
-    CommandSpec::new("ShapeSlotOverall", "Overall Slot", slot_overall)
+    CommandSpec::new("sketch.slot.overall", "Overall Slot", slot_overall)
         .at("SKETCH", "CREATE")
         .icon("slot")
         .enabled(in_sketch)
         .params("p0, p1: overall ends, width"),
-    CommandSpec::new("DrawPoint", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params("point: [x,y], id?"),
-    CommandSpec::new("SketchDimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
+    CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params("point: [x,y], id?"),
+    CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
         "entities: [refs], type?: auto|distance|horizontal|vertical|length|radius|diameter|angle, value?: number or expression (default: current)",
     ),
-    CommandSpec::new("ConstraintHorizontalVertical", "Horizontal/Vertical", c_horizontal_vertical)
+    CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", c_horizontal_vertical)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_hv")
         .enabled(in_sketch)
         .params("line: id | points: [a, b]; mode?: horizontal|vertical"),
-    CommandSpec::new("ConstraintCoincident", "Coincident", c_coincident)
+    CommandSpec::new("sketch.constraint.coincident", "Coincident", c_coincident)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_coincident")
         .enabled(in_sketch)
         .params("a: point, b: point or curve"),
-    CommandSpec::new("ConstraintTangent", "Tangent", c_tangent)
+    CommandSpec::new("sketch.constraint.tangent", "Tangent", c_tangent)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_tangent")
         .enabled(in_sketch)
         .params("a, b: curves"),
-    CommandSpec::new("ConstraintEqual", "Equal", c_equal)
+    CommandSpec::new("sketch.constraint.equal", "Equal", c_equal)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_equal")
         .enabled(in_sketch)
         .params("a, b: lines or circles/arcs"),
-    CommandSpec::new("ConstraintParallel", "Parallel", c_parallel)
+    CommandSpec::new("sketch.constraint.parallel", "Parallel", c_parallel)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_parallel")
         .enabled(in_sketch)
         .params("a, b: lines"),
-    CommandSpec::new("ConstraintPerpendicular", "Perpendicular", c_perpendicular)
+    CommandSpec::new("sketch.constraint.perpendicular", "Perpendicular", c_perpendicular)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_perpendicular")
         .enabled(in_sketch)
         .params("a, b: lines"),
-    CommandSpec::new("ConstraintFix", "Fix/UnFix", c_fix)
+    CommandSpec::new("sketch.constraint.fix", "Fix/UnFix", c_fix)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_fix")
         .enabled(in_sketch)
         .params("entity: point or curve | entities: [points and curves]; fixed?: bool (default: fix them all unless all are fixed, then unfix)"),
-    CommandSpec::new("ConstraintMidPoint", "MidPoint", c_midpoint)
+    CommandSpec::new("sketch.constraint.midpoint", "MidPoint", c_midpoint)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_midpoint")
         .enabled(in_sketch)
         .params("point, line"),
-    CommandSpec::new("ConstraintConcentric", "Concentric", c_concentric)
+    CommandSpec::new("sketch.constraint.concentric", "Concentric", c_concentric)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_concentric")
         .enabled(in_sketch)
         .params("a, b: circles/arcs"),
-    CommandSpec::new("ConstraintCollinear", "Collinear", c_collinear)
+    CommandSpec::new("sketch.constraint.collinear", "Collinear", c_collinear)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_collinear")
         .enabled(in_sketch)
         .params("a, b: lines"),
-    CommandSpec::new("ConstraintSymmetry", "Symmetry", c_symmetry)
+    CommandSpec::new("sketch.constraint.symmetry", "Symmetry", c_symmetry)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_symmetry")
         .enabled(in_sketch)
@@ -363,7 +363,7 @@ fn face_contains(m: &solvecraft_geom::Mesh, fi: usize, p: Vec3, tol: f64) -> boo
 }
 
 fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "SketchCreate";
+    let cmd = "sketch.create";
     let plane = plane_ref(s, p, cmd)?;
     // Validate the plane resolves.
     let (vals, _) = s.doc.param_values();
@@ -393,11 +393,11 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let key = match p.get("sketch") {
         Some(Value::Number(n)) => n.to_string(),
         Some(Value::String(x)) => x.clone(),
-        _ => return Err(bad("SketchActivate", "`sketch` must be an id or a name")),
+        _ => return Err(bad("sketch.edit", "`sketch` must be an id or a name")),
     };
-    let f = s.doc.find_feature(&key).ok_or_else(|| bad("SketchActivate", format!("no sketch `{key}`")))?;
+    let f = s.doc.find_feature(&key).ok_or_else(|| bad("sketch.edit", format!("no sketch `{key}`")))?;
     if !matches!(f.kind, FeatureKind::Sketch { .. }) {
-        return Err(bad("SketchActivate", format!("`{key}` is not a sketch")));
+        return Err(bad("sketch.edit", format!("`{key}` is not a sketch")));
     }
     let (id, name) = (f.id, f.name.clone());
     s.active_sketch = Some(id);
@@ -416,7 +416,7 @@ fn finish_sketch(s: &mut Session, _p: &Value) -> Result<Value> {
 // Drawing
 
 fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "DrawPolyline";
+    let cmd = "sketch.line";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let list = p.get("points").and_then(Value::as_array).cloned().ok_or_else(|| bad(cmd, "`points` must be a list"))?;
     if list.len() < 2 || list.len() > 10_000 {
@@ -527,7 +527,7 @@ fn rect_constraints(sk: &mut Sketch, l: &[usize]) -> Result<Vec<String>> {
 }
 
 fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ShapeRectangleTwoPoint";
+    let cmd = "sketch.rectangle.two_point";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
     if (a.x - b.x).abs() < 1e-9 || (a.y - b.y).abs() < 1e-9 {
         return Err(bad(cmd, "the corners must differ in x and y"));
@@ -543,7 +543,7 @@ fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ShapeRectangleCenter";
+    let cmd = "sketch.rectangle.center";
     let (c, k) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "corner")?);
     let h = Vec2::new((k.x - c.x).abs(), (k.y - c.y).abs());
     if h.x < 1e-9 || h.y < 1e-9 {
@@ -573,7 +573,7 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn rect_three_point(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ShapeRectangleThreePoint";
+    let cmd = "sketch.rectangle.three_point";
     let (a, b, c) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?, req_vec2(cmd, p, "p2")?);
     let d = (b - a).normalized().ok_or_else(|| bad(cmd, "p0 and p1 must differ"))?;
     let n = d.perp();
@@ -605,7 +605,7 @@ pub(super) fn radius_arg(p: &Value, cmd: &str) -> Result<f64> {
 }
 
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "CircleCenterRadius";
+    let cmd = "sketch.circle.center";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let r = radius_arg(p, cmd)?;
     let id = str_(p, "id").map(str::to_string);
@@ -619,7 +619,7 @@ fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn circle_two(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "CircleTwoPoint";
+    let cmd = "sketch.circle.two_point";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
     let r = a.dist(b) / 2.0;
     if r < 1e-9 {
@@ -647,7 +647,7 @@ pub(super) fn circumcircle(a: Vec2, b: Vec2, c: Vec2) -> Option<(Vec2, f64)> {
 }
 
 fn circle_three(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "CircleThreePoint";
+    let cmd = "sketch.circle.three_point";
     let (a, b, c) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?, req_vec2(cmd, p, "p2")?);
     let (o, r) = circumcircle(a, b, c).ok_or_else(|| bad(cmd, "the points are collinear"))?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
@@ -658,7 +658,7 @@ fn circle_three(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ArcThreePoint";
+    let cmd = "sketch.arc.three_point";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let id = str_(p, "id").map(str::to_string);
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
@@ -680,7 +680,7 @@ fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ArcCenterTwoPoint";
+    let cmd = "sketch.arc.center_point";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let id = str_(p, "id").map(str::to_string);
     let sweep = num(p, "sweep");
@@ -759,7 +759,7 @@ fn sides(p: &Value, cmd: &str) -> Result<usize> {
 }
 
 fn polygon_inscribed(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ShapePolygonInscribed";
+    let cmd = "sketch.polygon.inscribed";
     let c = req_vec2(cmd, p, "center")?;
     let r = radius_arg(p, cmd)?;
     let n = sides(p, cmd)?;
@@ -768,7 +768,7 @@ fn polygon_inscribed(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn polygon_circumscribed(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ShapePolygonCircumscribed";
+    let cmd = "sketch.polygon.circumscribed";
     let c = req_vec2(cmd, p, "center")?;
     let r = radius_arg(p, cmd)?;
     let n = sides(p, cmd)?;
@@ -777,7 +777,7 @@ fn polygon_circumscribed(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ShapePolygonEdge";
+    let cmd = "sketch.polygon.edge";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
     let n = sides(p, cmd)?;
     let e = a.dist(b);
@@ -816,14 +816,14 @@ pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w:
 }
 
 fn slot_c2c(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ShapeSlotCenterToCenter";
+    let cmd = "sketch.slot.center_to_center";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
     let w = num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))?;
     slot(s, p, cmd, a, b, w)
 }
 
 fn slot_overall(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ShapeSlotOverall";
+    let cmd = "sketch.slot.overall";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
     let w = num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))?;
     let d = (b - a).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
@@ -834,7 +834,7 @@ fn slot_overall(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "DrawPoint";
+    let cmd = "sketch.point";
     let at = req_vec2(cmd, p, "point")?;
     let id = str_(p, "id").map(str::to_string);
     let (pid, info) = edit(s, p, cmd, false, |sk, _| {
@@ -1018,7 +1018,7 @@ pub(super) fn reject_redundant(before: Option<usize>, info: &Value, cmd: &str) -
 }
 
 fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ConstraintHorizontalVertical";
+    let cmd = "sketch.constraint.horizontal_vertical";
     let mode = str_(p, "mode").map(str::to_ascii_lowercase);
     constrain(s, p, cmd, |sk| {
         if let Some(pts) = p.get("points").and_then(Value::as_array) {
@@ -1048,7 +1048,7 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ConstraintCoincident";
+    let cmd = "sketch.constraint.coincident";
     constrain(s, p, cmd, |sk| {
         let aref = p.get("a").and_then(Value::as_str).unwrap_or_default();
         let bref = p.get("b").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`b` must be a point or curve"))?;
@@ -1070,31 +1070,39 @@ fn two_curves(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize)> {
 }
 
 fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
-    constrain(s, p, "ConstraintTangent", |sk| two_curves(sk, p, "ConstraintTangent").map(|(a, b)| ConstraintKind::Tangent { a, b }))
+    constrain(s, p, "sketch.constraint.tangent", |sk| two_curves(sk, p, "sketch.constraint.tangent").map(|(a, b)| ConstraintKind::Tangent { a, b }))
 }
 fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
-    constrain(s, p, "ConstraintEqual", |sk| two_curves(sk, p, "ConstraintEqual").map(|(a, b)| ConstraintKind::Equal { a, b }))
+    constrain(s, p, "sketch.constraint.equal", |sk| two_curves(sk, p, "sketch.constraint.equal").map(|(a, b)| ConstraintKind::Equal { a, b }))
 }
 fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
-    constrain(s, p, "ConstraintParallel", |sk| two_curves(sk, p, "ConstraintParallel").map(|(a, b)| ConstraintKind::Parallel { a, b }))
+    constrain(s, p, "sketch.constraint.parallel", |sk| {
+        two_curves(sk, p, "sketch.constraint.parallel").map(|(a, b)| ConstraintKind::Parallel { a, b })
+    })
 }
 fn c_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
-    constrain(s, p, "ConstraintPerpendicular", |sk| two_curves(sk, p, "ConstraintPerpendicular").map(|(a, b)| ConstraintKind::Perpendicular { a, b }))
+    constrain(s, p, "sketch.constraint.perpendicular", |sk| {
+        two_curves(sk, p, "sketch.constraint.perpendicular").map(|(a, b)| ConstraintKind::Perpendicular { a, b })
+    })
 }
 fn c_concentric(s: &mut Session, p: &Value) -> Result<Value> {
-    constrain(s, p, "ConstraintConcentric", |sk| two_curves(sk, p, "ConstraintConcentric").map(|(a, b)| ConstraintKind::Concentric { a, b }))
+    constrain(s, p, "sketch.constraint.concentric", |sk| {
+        two_curves(sk, p, "sketch.constraint.concentric").map(|(a, b)| ConstraintKind::Concentric { a, b })
+    })
 }
 fn c_collinear(s: &mut Session, p: &Value) -> Result<Value> {
-    constrain(s, p, "ConstraintCollinear", |sk| two_curves(sk, p, "ConstraintCollinear").map(|(a, b)| ConstraintKind::Collinear { a, b }))
+    constrain(s, p, "sketch.constraint.collinear", |sk| {
+        two_curves(sk, p, "sketch.constraint.collinear").map(|(a, b)| ConstraintKind::Collinear { a, b })
+    })
 }
 fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ConstraintMidPoint";
+    let cmd = "sketch.constraint.midpoint";
     constrain(s, p, cmd, |sk| {
         Ok(ConstraintKind::Midpoint { p: point_ref(sk, p.get("point"), cmd, "point")?, l: curve_ref(sk, p.get("line"), cmd, "line")? })
     })
 }
 fn c_symmetry(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ConstraintSymmetry";
+    let cmd = "sketch.constraint.symmetry";
     let (ids, info) = edit(s, p, cmd, true, |sk, _| {
         let l = curve_ref(sk, p.get("line"), cmd, "line")?;
         let ra = p.get("a").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`a` must be a point or curve"))?;
@@ -1141,7 +1149,7 @@ fn round_center(sk: &Sketch, c: usize) -> Option<usize> {
 }
 
 fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ConstraintFix";
+    let cmd = "sketch.constraint.fix";
     let want = bool_(p, "fixed");
     let mut refs = string_list(p, "entities");
     if let Some(e) = str_(p, "entity") {
@@ -1207,7 +1215,7 @@ pub(super) fn line_pts(sk: &Sketch, l: usize) -> Option<(Vec2, Vec2)> {
 }
 
 fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "SketchDimension";
+    let cmd = "sketch.dimension";
     let ents = string_list(p, "entities");
     if ents.is_empty() || ents.len() > 2 {
         return Err(bad(cmd, "`entities` must list one or two sketch entities"));

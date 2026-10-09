@@ -6,7 +6,7 @@
 //! `.3mf`/`.stl` file as a new design holding mesh bodies.
 //!
 //! `--control <port>` (or `SOLVECRAFT_CONTROL_PORT`) starts a localhost JSON-lines control
-//! server: `{"id":1,"method":"engine.execute","params":{"command":"PrimitiveBox","params":{…}}}`.
+//! server: `{"id":1,"method":"engine.execute","params":{"command":"solid.box","params":{…}}}`.
 //! See `solvecraft_ui_egui::control` and docs/control-protocol.md.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]

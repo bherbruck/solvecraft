@@ -11,32 +11,32 @@ use crate::params::{bad, num, req_vec2, str_, string_list, vec2};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("ConstraintSmooth", "Curvature", c_smooth)
+    CommandSpec::new("sketch.constraint.curvature", "Curvature", c_smooth)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_smooth")
         .enabled(in_sketch)
         .params("a, b: two curves sharing an end point (curvature continuous, G2)"),
-    CommandSpec::new("SketchPolygonConstraintCmd", "Polygon", c_polygon)
+    CommandSpec::new("sketch.constraint.polygon", "Polygon", c_polygon)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_polygon")
         .enabled(in_sketch)
         .params("lines: [line ids] of a closed chain: equal sides with every corner on one circle (a regular polygon)"),
-    CommandSpec::new("SketchAutoConstraintAndDimCmd", "AutoConstrain", auto_constrain)
+    CommandSpec::new("sketch.auto_constrain", "AutoConstrain", auto_constrain)
         .at("SKETCH", "CONSTRAINTS")
         .icon("auto_constrain")
         .enabled(in_sketch)
         .params("tolerance?: mm (default 0.01), angle_tolerance?: deg (default 1), dimensions?: bool (default true): infer constraints, then dimension until fully constrained"),
-    CommandSpec::new("SketchAutoConstraintAndDimFromDatumCmd", "AutoConstrain from datum", auto_constrain_datum)
+    CommandSpec::new("sketch.auto_constrain_from_datum", "AutoConstrain from datum", auto_constrain_datum)
         .at("SKETCH", "CONSTRAINTS")
         .icon("auto_constrain")
         .enabled(in_sketch)
         .params("datum: point ref (default origin); like AutoConstrain with positions measured from the datum"),
-    CommandSpec::new("SketchAutoConstrainAndFinish", "Finish with AutoConstrain", auto_constrain_finish)
+    CommandSpec::new("sketch.finish_auto_constrain", "Finish with AutoConstrain", auto_constrain_finish)
         .at("SKETCH", "FINISH SKETCH")
         .icon("finish")
         .enabled(in_sketch)
         .params("like AutoConstrain, then Finish Sketch"),
-    CommandSpec::new("SketchConstrainer", "SketchConstrainer", smart_constrain)
+    CommandSpec::new("sketch.constrainer", "Sketch Constrainer", smart_constrain)
         .at("SKETCH", "CREATE")
         .icon("constrainer")
         .enabled(in_sketch)
@@ -55,7 +55,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 fn c_smooth(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ConstraintSmooth";
+    let cmd = "sketch.constraint.curvature";
     let mut before = None;
     let (id, info) = edit(s, p, cmd, true, |sk, _| {
         let a = curve(sk, p.get("a"), cmd)?;
@@ -73,7 +73,7 @@ fn curve(sk: &Sketch, v: Option<&Value>, cmd: &str) -> Result<usize> {
 }
 
 fn c_polygon(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "SketchPolygonConstraintCmd";
+    let cmd = "sketch.constraint.polygon";
     let ids = string_list(p, "lines");
     if ids.len() < 3 || ids.len() > 200 {
         return Err(bad(cmd, "`lines` must list 3 to 200 lines of a closed chain"));
@@ -258,13 +258,13 @@ fn auto(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
 }
 
 fn auto_constrain(s: &mut Session, p: &Value) -> Result<Value> {
-    auto(s, p, "SketchAutoConstraintAndDimCmd")
+    auto(s, p, "sketch.auto_constrain")
 }
 fn auto_constrain_datum(s: &mut Session, p: &Value) -> Result<Value> {
-    auto(s, p, "SketchAutoConstraintAndDimFromDatumCmd")
+    auto(s, p, "sketch.auto_constrain_from_datum")
 }
 fn auto_constrain_finish(s: &mut Session, p: &Value) -> Result<Value> {
-    let r = auto(s, p, "SketchAutoConstrainAndFinish")?;
+    let r = auto(s, p, "sketch.finish_auto_constrain")?;
     s.active_sketch = None;
     s.revision += 1;
     Ok(r)
@@ -343,7 +343,7 @@ fn guess(sk: &Sketch, ents: &[String], cmd: &str) -> Result<ConstraintKind> {
 }
 
 fn smart_constrain(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "SketchConstrainer";
+    let cmd = "sketch.constrainer";
     let ents = string_list(p, "entities");
     let mut before = None;
     let mut name = "";

@@ -36,14 +36,14 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
     use ValueKind::*;
     let b = DimBox::new;
     match (cmd, n) {
-        ("DrawPolyline", n) if n >= 1 => vec![b("Length", Length), b("Angle", Angle)],
-        ("ShapeRectangleTwoPoint" | "ShapeRectangleCenter", 1) => vec![b("Width", Length), b("Height", Length)],
-        ("CircleCenterRadius", 1) => vec![b("Diameter", Length)],
-        ("ArcCenterTwoPoint", 1) => vec![b("Radius", Length)],
-        ("ArcCenterTwoPoint", 2) => vec![b("Sweep", Angle)],
-        ("ShapePolygonInscribed" | "ShapePolygonCircumscribed", 1) => vec![b("Radius", Length), b("Sides", Unitless)],
-        ("ShapeSlotCenterToCenter" | "ShapeSlotOverall", 1) => vec![b("Length", Length)],
-        ("ShapeSlotCenterToCenter" | "ShapeSlotOverall", 2) => vec![b("Width", Length)],
+        ("sketch.line", n) if n >= 1 => vec![b("Length", Length), b("Angle", Angle)],
+        ("sketch.rectangle.two_point" | "sketch.rectangle.center", 1) => vec![b("Width", Length), b("Height", Length)],
+        ("sketch.circle.center", 1) => vec![b("Diameter", Length)],
+        ("sketch.arc.center_point", 1) => vec![b("Radius", Length)],
+        ("sketch.arc.center_point", 2) => vec![b("Sweep", Angle)],
+        ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => vec![b("Radius", Length), b("Sides", Unitless)],
+        ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => vec![b("Length", Length)],
+        ("sketch.slot.center_to_center" | "sketch.slot.overall", 2) => vec![b("Width", Length)],
         _ => Vec::new(),
     }
 }
@@ -67,31 +67,31 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
     let Some(a) = t.pts.last().map(|p| p.0) else { return h };
     let lk = |l: &str| locked(app, t, l);
     match (t.cmd, t.pts.len()) {
-        ("DrawPolyline", _) | ("ShapeSlotCenterToCenter" | "ShapeSlotOverall", 1) => {
+        ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => {
             let v = h - a;
             let len = lk("Length").unwrap_or(v.len());
             let ang = lk("Angle").unwrap_or_else(|| snap_axis(v.angle()));
             a + Vec2::from_angle(ang) * len
         }
-        ("ShapeRectangleTwoPoint", 1) => {
+        ("sketch.rectangle.two_point", 1) => {
             let d = h - a;
             Vec2::new(a.x + lk("Width").map_or(d.x, |w| w * sign(d.x)), a.y + lk("Height").map_or(d.y, |hh| hh * sign(d.y)))
         }
-        ("ShapeRectangleCenter", 1) => {
+        ("sketch.rectangle.center", 1) => {
             let d = h - a;
             Vec2::new(a.x + lk("Width").map_or(d.x, |w| w * 0.5 * sign(d.x)), a.y + lk("Height").map_or(d.y, |hh| hh * 0.5 * sign(d.y)))
         }
-        ("CircleCenterRadius", 1) => a + dir_or_x(h - a) * lk("Diameter").map_or((h - a).len(), |d| d * 0.5),
-        ("ArcCenterTwoPoint", 1) => a + dir_or_x(h - a) * lk("Radius").unwrap_or((h - a).len()),
-        ("ArcCenterTwoPoint", 2) => {
+        ("sketch.circle.center", 1) => a + dir_or_x(h - a) * lk("Diameter").map_or((h - a).len(), |d| d * 0.5),
+        ("sketch.arc.center_point", 1) => a + dir_or_x(h - a) * lk("Radius").unwrap_or((h - a).len()),
+        ("sketch.arc.center_point", 2) => {
             let c = t.pts.first().map(|p| p.0).unwrap_or(a);
             let r = (a - c).len();
             let a0 = (a - c).angle();
             let sweep = lk("Sweep").unwrap_or_else(|| ((h - c).angle() - a0).rem_euclid(std::f64::consts::TAU));
             c + Vec2::from_angle(a0 + sweep) * r
         }
-        ("ShapePolygonInscribed" | "ShapePolygonCircumscribed", 1) => a + dir_or_x(h - a) * lk("Radius").unwrap_or((h - a).len()),
-        ("ShapeSlotCenterToCenter" | "ShapeSlotOverall", 2) => match lk("Width") {
+        ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => a + dir_or_x(h - a) * lk("Radius").unwrap_or((h - a).len()),
+        ("sketch.slot.center_to_center" | "sketch.slot.overall", 2) => match lk("Width") {
             Some(w) => {
                 let c0 = t.pts.first().map(|p| p.0).unwrap_or(a);
                 let dir = dir_or_x(a - c0);
@@ -136,33 +136,33 @@ fn live(t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
     let first = t.pts.first().map(|p| p.0).unwrap_or(a);
     let off = 20.0 * px;
     match (t.cmd, t.pts.len()) {
-        ("DrawPolyline", _) | ("ShapeSlotCenterToCenter" | "ShapeSlotOverall", 1) => {
+        ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => {
             let v = e - a;
             let d = dir_or_x(v);
             let n = d.perp();
             vec![(v.len(), (a + e) * 0.5 + n * off), (v.angle(), a + d * (v.len() * 0.3).min(60.0 * px) - n * off)]
         }
-        ("ShapeRectangleTwoPoint", 1) => {
+        ("sketch.rectangle.two_point", 1) => {
             let (sx, sy) = (sign(e.x - a.x), sign(e.y - a.y));
             vec![
                 ((e.x - a.x).abs(), Vec2::new((a.x + e.x) * 0.5, a.y - sy * off)),
                 ((e.y - a.y).abs(), Vec2::new(e.x + sx * 2.0 * off, (a.y + e.y) * 0.5)),
             ]
         }
-        ("ShapeRectangleCenter", 1) => {
+        ("sketch.rectangle.center", 1) => {
             let d = e - a;
             let (sx, sy) = (sign(d.x), sign(d.y));
             vec![(2.0 * d.x.abs(), Vec2::new(a.x, a.y - d.y - sy * off)), (2.0 * d.y.abs(), Vec2::new(a.x + d.x + sx * 2.0 * off, a.y))]
         }
-        ("CircleCenterRadius", 1) => vec![(2.0 * (e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
-        ("ArcCenterTwoPoint", 1) | ("ShapePolygonInscribed" | "ShapePolygonCircumscribed", 1) => {
+        ("sketch.circle.center", 1) => vec![(2.0 * (e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
+        ("sketch.arc.center_point", 1) | ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => {
             vec![((e - a).len(), (a + e) * 0.5), (6.0, a + (e - a) * 0.5 + (e - a).perp() * 0.3)]
         }
-        ("ArcCenterTwoPoint", 2) => {
+        ("sketch.arc.center_point", 2) => {
             let a0 = (a - first).angle();
             vec![(((e - first).angle() - a0).rem_euclid(std::f64::consts::TAU), e)]
         }
-        ("ShapeSlotCenterToCenter" | "ShapeSlotOverall", 2) => {
+        ("sketch.slot.center_to_center" | "sketch.slot.overall", 2) => {
             let dir = dir_or_x(a - first);
             vec![(2.0 * dir.cross(e - first).abs(), e)]
         }
@@ -193,10 +193,10 @@ pub fn constraints(t: &Tool, curves: &[String]) -> Vec<(Vec<String>, &'static st
     let mut out = Vec::new();
     for b in t.dims.iter().filter(|b| b.locked) {
         let target = match (t.cmd, b.label) {
-            ("DrawPolyline", "Length") | ("ShapeRectangleTwoPoint" | "ShapeRectangleCenter", "Width") => curves.first().map(|c| (c, "length")),
-            ("ShapeRectangleTwoPoint" | "ShapeRectangleCenter", "Height") => curves.get(1).map(|c| (c, "length")),
-            ("CircleCenterRadius", "Diameter") => curves.first().map(|c| (c, "diameter")),
-            ("ArcCenterTwoPoint", "Radius") => curves.first().map(|c| (c, "radius")),
+            ("sketch.line", "Length") | ("sketch.rectangle.two_point" | "sketch.rectangle.center", "Width") => curves.first().map(|c| (c, "length")),
+            ("sketch.rectangle.two_point" | "sketch.rectangle.center", "Height") => curves.get(1).map(|c| (c, "length")),
+            ("sketch.circle.center", "Diameter") => curves.first().map(|c| (c, "diameter")),
+            ("sketch.arc.center_point", "Radius") => curves.first().map(|c| (c, "radius")),
             _ => None,
         };
         if let Some((c, ty)) = target {

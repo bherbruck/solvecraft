@@ -3,7 +3,7 @@
   "note": "Dragging sketch geometry snaps like Fusion: onto a point (coincident on release), level with a point (a dashed guide, no constraint), not at all with Ctrl held; a line dragged by its body snaps by its ends."
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -13,7 +13,7 @@
  {
   "call": "engine.execute",
   "params": {
-   "command": "DrawPolyline",
+   "command": "sketch.line",
    "params": {
     "points": [
      [
@@ -31,7 +31,7 @@
  {
   "call": "engine.execute",
   "params": {
-   "command": "DrawPolyline",
+   "command": "sketch.line",
    "params": {
     "points": [
      [
@@ -230,7 +230,7 @@
  {
   "call": "engine.execute",
   "params": {
-   "command": "DrawPolyline",
+   "command": "sketch.line",
    "params": {
     "points": [
      [

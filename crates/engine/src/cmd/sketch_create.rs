@@ -12,65 +12,65 @@ use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] =
     &[
-        CommandSpec::new("SketchMidpointLine", "Midpoint Line", midpoint_line)
+        CommandSpec::new("sketch.line.midpoint", "Midpoint Line", midpoint_line)
             .at("SKETCH", "CREATE")
             .icon("line_mid")
             .enabled(in_sketch)
             .params("mid: [x,y] or point ref, end: [x,y]; construction?"),
-        CommandSpec::new("ArcTangent", "Tangent Arc", arc_tangent).at("SKETCH", "CREATE").icon("arc_tangent").enabled(in_sketch).params(
+        CommandSpec::new("sketch.arc.tangent", "Tangent Arc", arc_tangent).at("SKETCH", "CREATE").icon("arc_tangent").enabled(in_sketch).params(
             "start: end point of a line or arc (\"l1.end\"), end: [x,y]; curve?: the curve to be tangent to (default: the one ending at start)",
         ),
-        CommandSpec::new("CircleTanTanRadius", "2-Tangent Circle", circle_tan_tan)
+        CommandSpec::new("sketch.circle.two_tangent", "2-Tangent Circle", circle_tan_tan)
             .at("SKETCH", "CREATE")
             .icon("circle_tt")
             .enabled(in_sketch)
             .params("curves: [two lines/circles/arcs], radius | diameter: expr, near: [x,y] (which of the solutions)"),
-        CommandSpec::new("CircleThreeTangent", "3-Tangent Circle", circle_three_tan)
+        CommandSpec::new("sketch.circle.three_tangent", "3-Tangent Circle", circle_three_tan)
             .at("SKETCH", "CREATE")
             .icon("circle_ttt")
             .enabled(in_sketch)
             .params("curves: [three lines/circles/arcs], near: [x,y] (which of the solutions)"),
-        CommandSpec::new("ShapeSlotCenterPoint", "Center Point Slot", slot_center_point)
+        CommandSpec::new("sketch.slot.center_point", "Center Point Slot", slot_center_point)
             .at("SKETCH", "CREATE")
             .icon("slot")
             .enabled(in_sketch)
             .params("center: slot centre, end: one arc centre, width"),
-        CommandSpec::new("ShapeArcSlotThreePoint", "Three Point Arc Slot", arc_slot_three)
+        CommandSpec::new("sketch.slot.arc_three_point", "Three Point Arc Slot", arc_slot_three)
             .at("SKETCH", "CREATE")
             .icon("arc_slot")
             .enabled(in_sketch)
             .params("start, through, end: points on the centre arc, width"),
-        CommandSpec::new("ShapeArcSlotCenterTwoPoint", "Center Point Arc Slot", arc_slot_center)
+        CommandSpec::new("sketch.slot.arc_center", "Center Point Arc Slot", arc_slot_center)
             .at("SKETCH", "CREATE")
             .icon("arc_slot")
             .enabled(in_sketch)
             .params("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise), width"),
-        CommandSpec::new("CircleElipse", "Ellipse", ellipse)
+        CommandSpec::new("sketch.ellipse", "Ellipse", ellipse)
             .at("SKETCH", "CREATE")
             .icon("ellipse")
             .enabled(in_sketch)
             .params("center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius"),
-        CommandSpec::new("DrawSpline", "Fit Point Spline", spline_fit)
+        CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", spline_fit)
             .at("SKETCH", "CREATE")
             .icon("spline")
             .enabled(in_sketch)
             .params("points: [[x,y] or point refs…] (2…500): the spline passes through them"),
-        CommandSpec::new("DrawCVMSpline3D", "Control Point Spline", spline_cv3)
+        CommandSpec::new("sketch.spline.control_point", "Control Point Spline", spline_cv3)
             .at("SKETCH", "CREATE")
             .icon("spline_cv")
             .enabled(in_sketch)
             .params("points: control points (2…500), cubic"),
-        CommandSpec::new("DrawCVMSpline5D", "Control Point Spline (Degree 5)", spline_cv5)
+        CommandSpec::new("sketch.spline.control_point_5", "Control Point Spline (Degree 5)", spline_cv5)
             .at("SKETCH", "CREATE")
             .icon("spline_cv")
             .enabled(in_sketch)
             .params("points: control points (2…500), degree 5"),
-        CommandSpec::new("ConicCurveCmd", "Conic Curve", conic)
+        CommandSpec::new("sketch.conic", "Conic Curve", conic)
             .at("SKETCH", "CREATE")
             .icon("conic")
             .enabled(in_sketch)
             .params("start, end, apex: [x,y] or point refs; rho?: 0…1 (default 0.5: parabola)"),
-        CommandSpec::new("BlendG1CurveSketchCmd", "Blend Curve", blend)
+        CommandSpec::new("sketch.blend_curve", "Blend Curve", blend)
             .at("SKETCH", "MODIFY")
             .icon("blend")
             .enabled(in_sketch)
@@ -78,7 +78,7 @@ pub static COMMANDS: &[CommandSpec] =
         CommandSpec::new("sketch.centerline", "Centerline", centerline)
             .enabled(in_sketch)
             .params("curves: [line ids], value?: bool (default toggles): centerline line type (not in profiles; an axis)"),
-        CommandSpec::new("MTextCmd", "Text", text)
+        CommandSpec::new("sketch.text", "Text", text)
             .at("SKETCH", "CREATE")
             .icon("text")
             .enabled(in_sketch)
@@ -107,7 +107,7 @@ fn text_source(p: &Value, cmd: &str, old: Option<(String, Vec2, f64, f64)>) -> R
 }
 
 fn text(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "MTextCmd";
+    let cmd = "sketch.text";
     if p.get("at").is_none() {
         return Err(bad(cmd, "`at` must be the baseline start [x, y]"));
     }
@@ -153,7 +153,7 @@ fn end_of(sk: &Sketch, pi: usize) -> Option<(usize, Vec2)> {
 }
 
 fn blend(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "BlendG1CurveSketchCmd";
+    let cmd = "sketch.blend_curve";
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let pa = req_parg(sk, p, "a", cmd)?.idx().ok_or_else(|| bad(cmd, "`a` must be the end point of a curve"))?;
         let pb = req_parg(sk, p, "b", cmd)?.idx().ok_or_else(|| bad(cmd, "`b` must be the end point of a curve"))?;
@@ -200,7 +200,7 @@ fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "CircleElipse";
+    let cmd = "sketch.ellipse";
     let (c, m) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "major")?);
     let u = (m - c).normalized().ok_or_else(|| bad(cmd, "the major axis end must differ from the centre"))?;
     let a = c.dist(m);
@@ -263,17 +263,17 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> R
 }
 
 fn spline_fit(s: &mut Session, p: &Value) -> Result<Value> {
-    spline(s, p, "DrawSpline", false, 3)
+    spline(s, p, "sketch.spline.fit_point", false, 3)
 }
 fn spline_cv3(s: &mut Session, p: &Value) -> Result<Value> {
-    spline(s, p, "DrawCVMSpline3D", true, 3)
+    spline(s, p, "sketch.spline.control_point", true, 3)
 }
 fn spline_cv5(s: &mut Session, p: &Value) -> Result<Value> {
-    spline(s, p, "DrawCVMSpline5D", true, 5)
+    spline(s, p, "sketch.spline.control_point_5", true, 5)
 }
 
 fn conic(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ConicCurveCmd";
+    let cmd = "sketch.conic";
     let rho = num(p, "rho").unwrap_or(0.5);
     if !(rho > 1e-6 && rho < 1.0 - 1e-6) {
         return Err(bad(cmd, "`rho` must be between 0 and 1"));
@@ -300,7 +300,7 @@ fn conic(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn midpoint_line(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "SketchMidpointLine";
+    let cmd = "sketch.line.midpoint";
     let end = req_vec2(cmd, p, "end")?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let m = req_parg(sk, p, "mid", cmd)?;
@@ -369,7 +369,7 @@ fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
 }
 
 fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ArcTangent";
+    let cmd = "sketch.arc.tangent";
     let end = req_vec2(cmd, p, "end")?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let st = req_parg(sk, p, "start", cmd)?;
@@ -458,7 +458,7 @@ fn tangent_circle(s: &mut Session, p: &Value, cmd: &str, n: usize, radius: Optio
 }
 
 fn circle_tan_tan(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "CircleTanTanRadius";
+    let cmd = "sketch.circle.two_tangent";
     let r = match (crate::params::expr(p, "radius"), num(p, "diameter")) {
         (Some(r), _) => r,
         (None, Some(d)) => format!("{}", d / 2.0),
@@ -468,7 +468,7 @@ fn circle_tan_tan(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn circle_three_tan(s: &mut Session, p: &Value) -> Result<Value> {
-    tangent_circle(s, p, "CircleThreeTangent", 3, None)
+    tangent_circle(s, p, "sketch.circle.three_tangent", 3, None)
 }
 
 fn width(p: &Value, cmd: &str) -> Result<f64> {
@@ -476,7 +476,7 @@ fn width(p: &Value, cmd: &str) -> Result<f64> {
 }
 
 fn slot_center_point(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ShapeSlotCenterPoint";
+    let cmd = "sketch.slot.center_point";
     let (c, e) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "end")?);
     let w = width(p, cmd)?;
     slot(s, p, cmd, c * 2.0 - e, e, w)
@@ -518,7 +518,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
 }
 
 fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ShapeArcSlotThreePoint";
+    let cmd = "sketch.slot.arc_three_point";
     let (a, t, b) = (req_vec2(cmd, p, "start")?, req_vec2(cmd, p, "through")?, req_vec2(cmd, p, "end")?);
     let w = width(p, cmd)?;
     let (o, r) = circumcircle(a, t, b).ok_or_else(|| bad(cmd, "the points are collinear"))?;
@@ -530,7 +530,7 @@ fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn arc_slot_center(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ShapeArcSlotCenterTwoPoint";
+    let cmd = "sketch.slot.arc_center";
     let (o, a, b) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "start")?, req_vec2(cmd, p, "end")?);
     let w = width(p, cmd)?;
     let r = o.dist(a);

@@ -14,36 +14,36 @@ use crate::params::{bad, bool_, str_, vec3};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("ProjectNewCmd", "Project", project_cmd).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).params(REFS_DOC),
-    CommandSpec::new("IntersectCmd", "Intersect", intersect_cmd).at("SKETCH", "CREATE").icon("intersect").enabled(in_sketch).params(
+    CommandSpec::new("sketch.project", "Project", project_cmd).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).params(REFS_DOC),
+    CommandSpec::new("sketch.intersect", "Intersect", intersect_cmd).at("SKETCH", "CREATE").icon("intersect").enabled(in_sketch).params(
         "refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane, linked",
     ),
-    CommandSpec::new("Include3DGeometry", "Include 3D Geometry", include_cmd)
+    CommandSpec::new("sketch.include_3d", "Include 3D Geometry", include_cmd)
         .at("SKETCH", "CREATE")
         .icon("include")
         .enabled(in_sketch)
         .params("refs: like Project (edges, vertices, sketch curves and points); curves out of the sketch plane are flattened onto it"),
-    CommandSpec::new("ProjectToSurface", "Project To Surface", project_to_surface)
+    CommandSpec::new("sketch.project_to_surface", "Project To Surface", project_to_surface)
         .at("SKETCH", "CREATE")
         .icon("project_surface")
         .enabled(in_sketch)
         .params("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?: projected along the active sketch's normal onto the face, as linked 3D curves"),
-    CommandSpec::new("IntersectionCurve", "Intersection Curve", intersection_curve)
+    CommandSpec::new("sketch.intersection_curve", "Intersection Curve", intersection_curve)
         .at("SKETCH", "CREATE")
         .icon("intersection_curve")
         .enabled(in_sketch)
         .params("a, b: {body} | {face: [x,y,z], body?}: where they meet, as linked 3D curves"),
-    CommandSpec::new("SpunProfileCmd", "Spun Profile", spun_profile)
+    CommandSpec::new("sketch.spun_profile", "Spun Profile", spun_profile)
         .at("SKETCH", "CREATE")
         .icon("spun")
         .enabled(in_sketch)
         .params("body: name, axis: a line of the active sketch (curve id) | X|Y|Z: the body's outline revolved about the axis, in the sketch plane"),
-    CommandSpec::new("SketchIsoparametricCurve", "Isoparametric Curve", iso_curve)
+    CommandSpec::new("sketch.isoparametric_curve", "Isoparametric Curve", iso_curve)
         .at("SKETCH", "CREATE")
         .icon("iso_curve")
         .enabled(in_sketch)
         .params("face: [x,y,z] point on the face (the curve passes through it), body?, direction?: u|v|[x,y,z] (default u): linked 3D curve"),
-    CommandSpec::new("FitCurvesToSectionCommand", "Fit Curves to Mesh Section", fit_section)
+    CommandSpec::new("sketch.fit_curves_to_section", "Fit Curves to Mesh Section", fit_section)
         .at("SKETCH", "CREATE")
         .icon("fit_section")
         .enabled(in_sketch)
@@ -176,15 +176,15 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind) -> Result<Va
 }
 
 fn project_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    run_links(s, p, "ProjectNewCmd", LinkKind::Project)
+    run_links(s, p, "sketch.project", LinkKind::Project)
 }
 
 fn intersect_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    run_links(s, p, "IntersectCmd", LinkKind::Intersect)
+    run_links(s, p, "sketch.intersect", LinkKind::Intersect)
 }
 
 fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    run_links(s, p, "Include3DGeometry", LinkKind::Include)
+    run_links(s, p, "sketch.include_3d", LinkKind::Include)
 }
 
 /// Add one link from `src` to the active sketch and report it.
@@ -204,7 +204,7 @@ fn one_link(s: &mut Session, cmd: &str, kind: LinkKind, src: LinkSource) -> Resu
 }
 
 fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ProjectToSurface";
+    let cmd = "sketch.project_to_surface";
     let at = p.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`face` must be a point [x,y,z] on the target face"))?;
     let body = str_(p, "body").unwrap_or("").to_string();
     let list = p.get("curves").and_then(Value::as_array).cloned().ok_or_else(|| bad(cmd, "`curves` must list {sketch, curve}"))?;
@@ -222,7 +222,7 @@ fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn intersection_curve(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "IntersectionCurve";
+    let cmd = "sketch.intersection_curve";
     let side = |k: &str| -> Result<LinkSource> {
         let v = p.get(k).ok_or_else(|| bad(cmd, format!("missing `{k}`")))?;
         match source(s, v, cmd)? {
@@ -235,7 +235,7 @@ fn intersection_curve(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn spun_profile(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "SpunProfileCmd";
+    let cmd = "sketch.spun_profile";
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must name a body"))?.to_string();
     let axis = str_(p, "axis").ok_or_else(|| bad(cmd, "`axis` must be a sketch line or X|Y|Z"))?;
     let (origin, dir) = match axis.to_ascii_uppercase().as_str() {
@@ -256,7 +256,7 @@ fn spun_profile(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn iso_curve(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "SketchIsoparametricCurve";
+    let cmd = "sketch.isoparametric_curve";
     let at = p.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`face` must be a point [x,y,z] on the face"))?;
     let body = str_(p, "body").unwrap_or("").to_string();
     let dir = match p.get("direction") {
@@ -271,7 +271,7 @@ fn iso_curve(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn fit_section(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FitCurvesToSectionCommand";
+    let cmd = "sketch.fit_curves_to_section";
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must name a body"))?.to_string();
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));

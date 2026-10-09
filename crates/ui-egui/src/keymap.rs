@@ -37,8 +37,13 @@ impl Keymap {
     }
     pub fn load(&mut self, v: &Value) {
         self.custom =
-            v.as_object().map(|o| o.iter().take(2000).filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect()).unwrap_or_default();
+            v.as_object().map(|o| o.iter().take(2000).filter_map(|(k, v)| Some((current(k), v.as_str()?.to_string()))).collect()).unwrap_or_default();
     }
+}
+
+/// Saved before the command ids were renamed: the current id.
+fn current(id: &str) -> String {
+    solvecraft_engine::legacy_ids::current_id(id).to_string()
 }
 
 /// A key press as a shortcut name: `E`, `Shift+E`, `Ctrl+Alt+K`, `F5`, `Delete`.
@@ -250,24 +255,24 @@ mod tests {
     #[test]
     fn rebinding_detects_conflicts_and_resets() {
         let mut a = app();
-        assert_eq!(effective(&a, "Extrude").as_deref(), Some("E"));
+        assert_eq!(effective(&a, "solid.extrude").as_deref(), Some("E"));
         // Shift+E is free.
-        bind(&mut a, "Extrude", "Shift+E", false).unwrap();
-        assert_eq!(commands_for(&a, "Shift+E"), vec!["Extrude"]);
+        bind(&mut a, "solid.extrude", "Shift+E", false).unwrap();
+        assert_eq!(commands_for(&a, "Shift+E"), vec!["solid.extrude"]);
         assert!(commands_for(&a, "E").is_empty());
         // M belongs to Move/Copy: refused, then taken over on request.
-        let e = bind(&mut a, "Revolve", "M", false).unwrap_err();
+        let e = bind(&mut a, "solid.revolve", "M", false).unwrap_err();
         assert!(e.contains("already used by Move/Copy"), "{e}");
-        bind(&mut a, "Revolve", "M", true).unwrap();
-        assert_eq!(commands_for(&a, "M"), vec!["Revolve"]);
-        assert_eq!(effective(&a, "FusionMoveCommand"), None);
-        assert!(bind(&mut a, "Revolve", "Ctrl+Z", false).is_err(), "reserved");
+        bind(&mut a, "solid.revolve", "M", true).unwrap();
+        assert_eq!(commands_for(&a, "M"), vec!["solid.revolve"]);
+        assert_eq!(effective(&a, "solid.move"), None);
+        assert!(bind(&mut a, "solid.revolve", "Ctrl+Z", false).is_err(), "reserved");
         // Kept between runs.
         let mut b = app();
         b.keymap.load(&a.keymap.prefs());
-        assert_eq!(effective(&b, "Revolve").as_deref(), Some("M"));
+        assert_eq!(effective(&b, "solid.revolve").as_deref(), Some("M"));
         reset(&mut b, None);
-        assert_eq!(effective(&b, "FusionMoveCommand").as_deref(), Some("M"));
+        assert_eq!(effective(&b, "solid.move").as_deref(), Some("M"));
         assert_eq!(key_name(egui::Key::K, egui::Modifiers { ctrl: true, shift: true, ..Default::default() }), "Ctrl+Shift+K");
     }
 }

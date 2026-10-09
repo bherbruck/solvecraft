@@ -445,20 +445,20 @@ mod tests {
     #[test]
     fn tabs_keep_their_own_design() {
         let mut a = app();
-        a.run("PrimitiveBox", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         a.session.selection = vec![solvecraft_engine::Sel::Body { name: "Body1".into() }];
         a.cam.distance = 123.0;
         new_design(&mut a);
         assert_eq!(a.docs.count(), 2);
         assert_eq!(a.docs.active, 1);
         assert!(a.session.doc.features.is_empty() && a.session.selection.is_empty());
-        a.run("PrimitiveSphere", json!({"diameter": 8})).unwrap();
-        a.run("PrimitiveSphere", json!({"diameter": 4})).unwrap();
+        a.run("solid.sphere", json!({"diameter": 8})).unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
         switch(&mut a, 0);
         assert_eq!(a.session.doc.features.len(), 1);
         assert_eq!(a.session.selection.len(), 1);
         assert!((a.cam.distance - 123.0).abs() < 1e-9);
-        a.run("UndoCommand", json!({})).unwrap();
+        a.run("edit.undo", json!({})).unwrap();
         assert!(a.session.doc.features.is_empty(), "undo is this design's");
         switch(&mut a, 1);
         assert_eq!(a.session.doc.features.len(), 2, "the other design kept its features");

@@ -13,49 +13,49 @@ use crate::params::{bad, bool_, expr, num, req_vec2, str_, string_list, vec2};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("FilletSketchCmd", "Fillet", fillet)
+    CommandSpec::new("sketch.fillet", "Fillet", fillet)
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
         .params("point: corner shared by two curves (\"l1.end\") | a, b: two lines or arcs meeting at a corner; radius: expr"),
-    CommandSpec::new("ChamferSketchEqualDistance", "Equal Distance Chamfer", chamfer_equal)
+    CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", chamfer_equal)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer")
         .enabled(in_sketch)
         .params("point | a, b: a corner of two lines; distance"),
-    CommandSpec::new("ChamferSketchDistanceAngle", "Distance and Angle Chamfer", chamfer_dist_angle)
+    CommandSpec::new("sketch.chamfer.distance_angle", "Distance and Angle Chamfer", chamfer_dist_angle)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer")
         .enabled(in_sketch)
         .params("point | a, b: a corner of two lines; distance: along a, angle: deg from a"),
-    CommandSpec::new("ChamferSketchDistanceDistance", "Two Distance Chamfer", chamfer_two)
+    CommandSpec::new("sketch.chamfer.two_distance", "Two Distance Chamfer", chamfer_two)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer")
         .enabled(in_sketch)
         .params("point | a, b: a corner of two lines; distance: along a, distance2: along b"),
-    CommandSpec::new("Offset", "Offset", offset)
+    CommandSpec::new("sketch.offset", "Offset", offset)
         .at("SKETCH", "MODIFY")
         .icon("offset")
         .key("O")
         .enabled(in_sketch)
         .params("curves: [ids], distance: number (positive = left of the chain, or toward `side`), side?: [x,y], chain?: bool (default true: the connected chain)"),
-    CommandSpec::new("TrimSketchCmd", "Trim", trim)
+    CommandSpec::new("sketch.trim", "Trim", trim)
         .at("SKETCH", "MODIFY")
         .icon("trim")
         .key("T")
         .enabled(in_sketch)
         .params("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it)"),
-    CommandSpec::new("ExtendSketchCmd", "Extend", extend)
+    CommandSpec::new("sketch.extend", "Extend", extend)
         .at("SKETCH", "MODIFY")
         .icon("extend")
         .enabled(in_sketch)
         .params("curve: id, at: [x,y] near the end to extend (to the nearest curve)"),
-    CommandSpec::new("BreakSketchCmd", "Break", break_cmd)
+    CommandSpec::new("sketch.break", "Break", break_cmd)
         .at("SKETCH", "MODIFY")
         .icon("break")
         .enabled(in_sketch)
         .params("curve: id, at: [x,y] (split at the nearest intersections around it) | params: split at points: [[x,y]…]"),
-    CommandSpec::new("SketchScaleCmd", "Sketch Scale", scale)
+    CommandSpec::new("sketch.scale", "Sketch Scale", scale)
         .at("SKETCH", "MODIFY")
         .icon("scale")
         .enabled(in_sketch)
@@ -63,17 +63,17 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.move", "Move/Copy Sketch Entities", move_copy)
         .enabled(in_sketch)
         .params("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool"),
-    CommandSpec::new("MirrorSketchCommand", "Mirror", mirror)
+    CommandSpec::new("sketch.mirror", "Mirror", mirror)
         .at("SKETCH", "CREATE")
         .icon("sketch_mirror")
         .enabled(in_sketch)
         .params("entities: [curve/point ids], line: mirror line id (symmetry constraints are added)"),
-    CommandSpec::new("CircularSketchPatternCommand", "Circular Pattern", pattern_circular)
+    CommandSpec::new("sketch.pattern.circular", "Circular Pattern", pattern_circular)
         .at("SKETCH", "CREATE")
         .icon("sketch_circ_pattern")
         .enabled(in_sketch)
         .params("entities: [ids], center: [x,y] or point ref, count: 2…500, angle?: total deg (default 360)"),
-    CommandSpec::new("RectangularSketchPatternCommand", "Rectangular Pattern", pattern_rect)
+    CommandSpec::new("sketch.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SKETCH", "CREATE")
         .icon("sketch_rect_pattern")
         .enabled(in_sketch)
@@ -253,7 +253,7 @@ fn bracket(sk: &Sketch, ci: usize, tq: f64) -> (Vec<(f64, Vec2, usize)>, bool) {
 }
 
 fn trim(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "TrimSketchCmd";
+    let cmd = "sketch.trim";
     let at = req_vec2(cmd, p, "at")?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
@@ -313,7 +313,7 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "BreakSketchCmd";
+    let cmd = "sketch.break";
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let ci = curve_arg(sk, p, cmd)?;
         if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
@@ -349,7 +349,7 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn extend(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ExtendSketchCmd";
+    let cmd = "sketch.extend";
     let at = req_vec2(cmd, p, "at")?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let ci = curve_arg(sk, p, cmd)?;
@@ -476,7 +476,7 @@ fn cut_corner(sk: &mut Sketch, la: usize, lb: usize, c: usize, fa: usize, fb: us
 }
 
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FilletSketchCmd";
+    let cmd = "sketch.fillet";
     let r_expr = expr(p, "radius").ok_or_else(|| bad(cmd, "`radius` must be a number or an expression"))?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let r = doc.eval(&r_expr, solvecraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
@@ -610,20 +610,20 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl FnOnce(f64) -> Res
 }
 
 fn chamfer_equal(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ChamferSketchEqualDistance";
+    let cmd = "sketch.chamfer.equal_distance";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
     chamfer(s, p, cmd, |_| Ok((d, d)))
 }
 
 fn chamfer_two(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ChamferSketchDistanceDistance";
+    let cmd = "sketch.chamfer.two_distance";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
     let d2 = num(p, "distance2").ok_or_else(|| bad(cmd, "`distance2` must be a number"))?;
     chamfer(s, p, cmd, |_| Ok((d, d2)))
 }
 
 fn chamfer_dist_angle(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ChamferSketchDistanceAngle";
+    let cmd = "sketch.chamfer.distance_angle";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
     let a = num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?.to_radians();
     chamfer(s, p, cmd, |phi| {
@@ -766,7 +766,7 @@ fn piece_dist(p: &Piece, q: Vec2) -> f64 {
 }
 
 fn offset(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "Offset";
+    let cmd = "sketch.offset";
     let ids = string_list(p, "curves");
     if ids.is_empty() {
         return Err(bad(cmd, "`curves` must list curves"));
@@ -988,7 +988,7 @@ fn copy_through(
 }
 
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "MirrorSketchCommand";
+    let cmd = "sketch.mirror";
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let (cs, ps) = entities(sk, p, cmd)?;
         let lid = str_(p, "line").ok_or_else(|| bad(cmd, "`line` must be the mirror line"))?;
@@ -1043,7 +1043,7 @@ fn rotate(c: Vec2, ang: f64) -> impl Fn(Vec2) -> Vec2 {
 }
 
 fn pattern_circular(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "CircularSketchPatternCommand";
+    let cmd = "sketch.pattern.circular";
     let n = count(p, "count", cmd)?;
     let total = num(p, "angle").unwrap_or(360.0);
     if !(total.abs() > 1e-9 && total.abs() <= 360.0) {
@@ -1066,7 +1066,7 @@ fn pattern_circular(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "RectangularSketchPatternCommand";
+    let cmd = "sketch.pattern.rectangular";
     let n1 = count(p, "count", cmd)?;
     let s1 = num(p, "spacing").ok_or_else(|| bad(cmd, "`spacing` must be a number"))?;
     let n2 = if p.get("count2").is_some() { count(p, "count2", cmd)? } else { 1 };
@@ -1134,7 +1134,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "SketchScaleCmd";
+    let cmd = "sketch.scale";
     let k = num(p, "factor").filter(|k| *k > 1e-9 && *k < 1e6).ok_or_else(|| bad(cmd, "`factor` must be a positive number"))?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let (cs, ps) = entities(sk, p, cmd)?;

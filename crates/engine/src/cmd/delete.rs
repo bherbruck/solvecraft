@@ -95,7 +95,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if !features.is_empty() {
         let ids: Vec<String> = features.iter().map(u64::to_string).collect();
-        sub(s, "FusionDeleteCommand", json!({ "features": ids }))?;
+        sub(s, "timeline.delete", json!({ "features": ids }))?;
         done = true;
     }
     // Bodies still there (not made by a feature deleted above) get a Remove feature.
@@ -103,7 +103,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     bodies.retain(|b| st.body(b).is_some());
     bodies.dedup();
     if !bodies.is_empty() {
-        sub(s, "SoftDeleteCommand", json!({ "bodies": bodies }))?;
+        sub(s, "solid.remove", json!({ "bodies": bodies }))?;
         done = true;
     }
     // An occurrence goes alone while its component has others; the last one takes the component.
@@ -174,12 +174,12 @@ mod tests {
     /// A sketch with a rectangle extruded into a body, a second box, and an offset plane.
     fn part() -> (Session, u64) {
         let mut s = Session::default();
-        let sk = run(&mut s, "SketchCreate", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
-        run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [10, 20]}));
-        run(&mut s, "SketchStop", json!({}));
-        run(&mut s, "Extrude", json!({"distance": 5}));
-        run(&mut s, "PrimitiveBox", json!({"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0]}));
-        run(&mut s, "ConstructionPlaneOffsetFromPlaneCommand", json!({"base": "XY", "offset": 10}));
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0]}));
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10}));
         (s, sk)
     }
 
@@ -192,7 +192,7 @@ mod tests {
         assert!(dry["deleted"].as_array().unwrap().len() >= 2, "the extrude goes with its sketch: {dry}");
         run(&mut s, "selection.delete", json!({"items": [{"type": "feature", "id": sk}]}));
         assert_eq!(bodies(&s), 1);
-        run(&mut s, "UndoCommand", json!({}));
+        run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.features.len(), n);
         assert_eq!(bodies(&s), 2);
     }
@@ -212,7 +212,7 @@ mod tests {
         assert!(s.doc.find_feature("Plane1").is_none());
         assert_eq!(r["skipped"][0], "the origin planes can't be deleted");
         assert_eq!(s.undo.len(), depth + 1);
-        run(&mut s, "UndoCommand", json!({}));
+        run(&mut s, "edit.undo", json!({}));
         assert_eq!((bodies(&s), s.doc.features.len()), (2, n));
     }
 
@@ -237,7 +237,7 @@ mod tests {
     fn occurrences_components_and_sketch_entities() {
         let (mut s, _) = part();
         let b = s.model.state().bodies[1].name.clone();
-        run(&mut s, "FusionCreateComponentsFromBodiesCommand", json!({"bodies": [b]}));
+        run(&mut s, "component.from_bodies", json!({"bodies": [b]}));
         let c = s.doc.components[0].id;
         let o1 = s.doc.occurrence_of(c).unwrap().id;
         run(&mut s, "occurrence.copy", json!({"component": c, "translate": [0, 30, 0]}));
@@ -249,8 +249,8 @@ mod tests {
         run(&mut s, "selection.delete", json!({"occurrences": [o2]}));
         assert!(s.doc.components.is_empty());
         // Sketch entities while sketching.
-        run(&mut s, "SketchCreate", json!({"plane": "XY"}));
-        run(&mut s, "DrawPolyline", json!({"points": [[0, 0], [10, 0]]}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
         let sk = s.active_sketch.unwrap();
         let id = s.model.state().sketch(sk).unwrap().sketch.curves[0].id.clone();
         run(&mut s, "selection.delete", json!({"items": [{"type": "sketch_curve", "id": id}]}));

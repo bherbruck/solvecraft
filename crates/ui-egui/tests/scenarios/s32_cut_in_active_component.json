@@ -3,13 +3,13 @@
   "note": "User bug 2 (owner solvecraft-params): with two components, a cut made in the active one leaves the other untouched."
  },
  {
-  "start": "FusionCreateNewComponentCommand"
+  "start": "component.create"
  },
  {
   "key": "Enter"
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -17,7 +17,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -39,7 +39,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "call": "ui.view",
@@ -48,7 +48,7 @@
   }
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "10"
@@ -74,13 +74,13 @@
   }
  },
  {
-  "start": "FusionCreateNewComponentCommand"
+  "start": "component.create"
  },
  {
   "key": "Enter"
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -88,7 +88,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -110,7 +110,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "call": "ui.view",
@@ -119,7 +119,7 @@
   }
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "20"
@@ -154,7 +154,7 @@
   }
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -173,7 +173,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -202,10 +202,10 @@
   }
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "widget": "New Body"

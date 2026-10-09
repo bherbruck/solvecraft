@@ -1,6 +1,6 @@
 [
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -8,7 +8,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -30,7 +30,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchDimension"
+  "start": "sketch.dimension"
  },
  {
   "click": {
@@ -50,10 +50,10 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "10"
@@ -67,7 +67,7 @@
   }
  },
  {
-  "start": "ChangeParameterCommand"
+  "start": "parameters.change"
  },
  {
   "shot": "s10_params"

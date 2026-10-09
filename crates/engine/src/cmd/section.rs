@@ -8,14 +8,14 @@ use super::CommandSpec;
 use crate::params::{bad, bool_, expr, vec3};
 use crate::{Result, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("FusionHalfSectionViewCommand", "Section Analysis", section)
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.section", "Section Analysis", section)
     .at("SOLID", "INSPECT")
     .icon("section")
     .noundo()
     .params("plane: XY|XZ|YZ | {origin, normal}; offset?: expr along the normal; flip?: bool; or clear: true")];
 
 fn section(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionHalfSectionViewCommand";
+    let cmd = "inspect.section";
     if bool_(p, "clear").unwrap_or(false) {
         s.section = None;
         s.revision += 1;

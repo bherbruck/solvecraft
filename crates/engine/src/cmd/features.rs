@@ -9,95 +9,95 @@ use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec2, vec3};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("Extrude", "Extrude", extrude)
+    CommandSpec::new("solid.extrude", "Extrude", extrude)
         .at("SOLID", "CREATE")
         .icon("extrude")
         .key("E")
         .params("distance: expr (or through_all: true); taper?: angle expr; sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [[curve ids]] | [{point:[x,y]}]; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); direction?: positive|negative|symmetric; distance2?; start_offset?; operation?: new|join|cut|intersect|auto (cut into a body, join out of one, else new); targets?: [body]; name?; body_name?"),
-    CommandSpec::new("Revolve", "Revolve", revolve)
+    CommandSpec::new("solid.revolve", "Revolve", revolve)
         .at("SOLID", "CREATE")
         .icon("revolve")
         .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world); angle?: expr (default 360 deg); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile), operation?, targets?, name?, body_name?"),
-    CommandSpec::new("Sweep", "Sweep", sweep)
+    CommandSpec::new("solid.sweep", "Sweep", sweep)
         .at("SOLID", "CREATE")
         .icon("sweep")
         .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; operation?"),
-    CommandSpec::new("SolidLoft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2 or more, in order); operation?"),
-    CommandSpec::new("PrimitiveBox", "Box", prim_box).at("SOLID", "CREATE").icon("box").params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z]; operation?"),
-    CommandSpec::new("PrimitiveCylinder", "Cylinder", prim_cylinder).at("SOLID", "CREATE").icon("cylinder").params("radius | diameter, height: expr; base?: [x,y,z]; axis?: [x,y,z]; operation?"),
-    CommandSpec::new("PrimitiveSphere", "Sphere", prim_sphere).at("SOLID", "CREATE").icon("sphere").params("radius | diameter: expr; center?: [x,y,z]; operation?"),
-    CommandSpec::new("PrimitiveTorus", "Torus", prim_torus).at("SOLID", "CREATE").icon("torus").params("major, minor: expr (radii); center?; operation?"),
-    CommandSpec::new("FusionFilletEdgesCommand", "Fillet", fillet)
+    CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2 or more, in order); operation?"),
+    CommandSpec::new("solid.box", "Box", prim_box).at("SOLID", "CREATE").icon("box").params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z]; operation?"),
+    CommandSpec::new("solid.cylinder", "Cylinder", prim_cylinder).at("SOLID", "CREATE").icon("cylinder").params("radius | diameter, height: expr; base?: [x,y,z]; axis?: [x,y,z]; operation?"),
+    CommandSpec::new("solid.sphere", "Sphere", prim_sphere).at("SOLID", "CREATE").icon("sphere").params("radius | diameter: expr; center?: [x,y,z]; operation?"),
+    CommandSpec::new("solid.torus", "Torus", prim_torus).at("SOLID", "CREATE").icon("torus").params("major, minor: expr (radii); center?; operation?"),
+    CommandSpec::new("solid.fillet", "Fillet", fillet)
         .at("SOLID", "MODIFY")
         .icon("fillet")
         .key("F")
         .params("edges: [[x,y,z] point on edge | {body, index}]; radius: expr; body?; type?: constant|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other); radius2?; start?: [x,y,z]"),
-    CommandSpec::new("FusionChamferCommand", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
-    CommandSpec::new("FusionCombineCommand", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool"),
-    CommandSpec::new("PatternRectangular", "Rectangular Pattern", pattern_rect)
+    CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
+    CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool"),
+    CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
         .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?"),
-    CommandSpec::new("PatternCircular", "Circular Pattern", pattern_circ)
+    CommandSpec::new("solid.pattern.circular", "Circular Pattern", pattern_circ)
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
         .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | {origin, dir}; count; angle? (default 360 deg)"),
-    CommandSpec::new("PatternOnPath", "Pattern on Path", pattern_path)
+    CommandSpec::new("solid.pattern.path", "Pattern on Path", pattern_path)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
         .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool"),
-    CommandSpec::new("MirrorCommand", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ | {origin, x_dir, y_dir}"),
-    CommandSpec::new("FusionHoleCommand", "Hole", hole)
+    CommandSpec::new("solid.mirror", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ | {origin, x_dir, y_dir}"),
+    CommandSpec::new("solid.hole", "Hole", hole)
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
         .params("position: [x,y,z] on a face | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch); direction?: [x,y,z] (default: into the face); diameter | thread (a tapped hole: the tap drill, major − pitch) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\" (cosmetic)"),
-    CommandSpec::new("PrimitivePipe", "Pipe", pipe)
+    CommandSpec::new("solid.pipe", "Pipe", pipe)
         .at("SOLID", "CREATE")
         .icon("pipe")
         .params("path_sketch: sketch; path: [curve ids in order]; diameter: expr; wall?: expr (hollow); operation?, targets?, name?, body_name?"),
-    CommandSpec::new("StockModelCommand", "Bounding Solid", bounding_solid)
+    CommandSpec::new("solid.bounding_solid", "Bounding Solid", bounding_solid)
         .at("SOLID", "CREATE")
         .icon("box")
         .params("bodies?: [names] (default: all); margin?: expr; name?, body_name?"),
-    CommandSpec::new("ModifyScale", "Scale", scale)
+    CommandSpec::new("solid.scale", "Scale", scale)
         .at("SOLID", "MODIFY")
         .icon("scale")
         .params("bodies: [names]; factor: expr | factors: [x, y, z] exprs; origin?: [x,y,z]"),
-    CommandSpec::new("FusionOffsetFacesCommand", "Offset Face", offset_face)
+    CommandSpec::new("solid.offset_face", "Offset Face", offset_face)
         .at("SOLID", "MODIFY")
         .icon("offset_face")
         .params("faces: [[x,y,z] points on planar faces]; distance: expr (positive: outward); body?"),
-    CommandSpec::new("FusionThreadCommand", "Thread", thread)
+    CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
         .icon("thread")
         .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); length?: expr (default: the whole face). Cosmetic: the model is unchanged, model.threads lists it"),
-    CommandSpec::new("FusionShellBodyCommand", "Shell", shell)
+    CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
         .params("faces: [[x,y,z] points on the faces to remove]; thickness: expr (inside); body?"),
-    CommandSpec::new("FusionDraftCommand", "Draft", draft)
+    CommandSpec::new("solid.draft", "Draft", draft)
         .at("SOLID", "MODIFY")
         .icon("draft")
         .params("faces: [[x,y,z]]; angle: expr; neutral: XY|XZ|YZ|plane name|{origin, normal}; pull?: [x,y,z] (default: neutral plane normal); body?"),
-    CommandSpec::new("ConstructionPlaneOffsetFromPlaneCommand", "Offset Plane", plane_offset)
+    CommandSpec::new("construct.plane.offset", "Offset Plane", plane_offset)
         .at("SOLID", "CONSTRUCT")
         .icon("plane")
         .params("base: XY|XZ|YZ|plane name; offset: expr; name?"),
-    CommandSpec::new("ConstructionPlaneAtAngleCommand", "Plane at Angle", plane_angle)
+    CommandSpec::new("construct.plane.at_angle", "Plane at Angle", plane_angle)
         .at("SOLID", "CONSTRUCT")
         .icon("plane")
         .params("base: XY|XZ|YZ|plane name; axis: X|Y|Z|{origin, dir}; angle: expr; name?"),
-    CommandSpec::new("FusionSplitBodyCommand", "Split Body", split_body)
+    CommandSpec::new("solid.split_body", "Split Body", split_body)
         .at("SOLID", "MODIFY")
         .icon("split")
         .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended)"),
-    CommandSpec::new("FusionPressPullCommand", "Press Pull", press_pull)
+    CommandSpec::new("solid.press_pull", "Press Pull", press_pull)
         .at("SOLID", "MODIFY")
         .icon("presspull")
         .key("Q")
         .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet)"),
-    CommandSpec::new("FusionMoveCommand", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr"),
+    CommandSpec::new("solid.move", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -316,7 +316,7 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
 }
 
 fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "Extrude";
+    let cmd = "solid.extrude";
     // A planar body face extrudes like a profile: its boundary is copied into a sketch on it.
     let (sketch, face_profile) = match p.get("face").and_then(vec3) {
         Some(fp) => {
@@ -363,7 +363,7 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "Revolve";
+    let cmd = "solid.revolve";
     // A planar body face revolves like a profile (its edges projected into a sketch on it).
     let (sketch, face_profile) = match p.get("face").and_then(vec3) {
         Some(fp) => {
@@ -404,7 +404,7 @@ fn radius_expr(p: &Value, cmd: &str) -> Result<String> {
 }
 
 fn prim_box(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "PrimitiveBox";
+    let cmd = "solid.box";
     let (l, w, h) = (req_expr(cmd, p, "length")?, req_expr(cmd, p, "width")?, req_expr(cmd, p, "height")?);
     for (e, n) in [(&l, "length"), (&w, "width"), (&h, "height")] {
         check_expr(s, e, Kind::Length, cmd, n)?;
@@ -421,7 +421,7 @@ fn prim_box(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn prim_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "PrimitiveCylinder";
+    let cmd = "solid.cylinder";
     let radius = radius_expr(p, cmd)?;
     let height = req_expr(cmd, p, "height")?;
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
@@ -432,7 +432,7 @@ fn prim_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn prim_sphere(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "PrimitiveSphere";
+    let cmd = "solid.sphere";
     let radius = radius_expr(p, cmd)?;
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
     let center = p.get("center").and_then(vec3).unwrap_or(Vec3::ZERO);
@@ -440,7 +440,7 @@ fn prim_sphere(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn prim_torus(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "PrimitiveTorus";
+    let cmd = "solid.torus";
     let (major, minor) = (req_expr(cmd, p, "major")?, req_expr(cmd, p, "minor")?);
     check_expr(s, &major, Kind::Length, cmd, "major")?;
     check_expr(s, &minor, Kind::Length, cmd, "minor")?;
@@ -474,7 +474,7 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
 /// Press Pull: a face moves along its normal (an extrude that joins outward or cuts inward); an
 /// edge is rounded (a fillet).
 fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionPressPullCommand";
+    let cmd = "solid.press_pull";
     let distance = req_expr(cmd, p, "distance")?;
     if p.get("edges").is_some() {
         return fillet(s, &json!({"edges": p.get("edges"), "radius": distance}));
@@ -503,7 +503,7 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(json!({"feature": f.id, "edited": f.name, key: new, "recomputed": out.get("recomputed")}));
         }
         // Another curved face moves along its normal.
-        let r = super::find_command("FusionOffsetFacesCommand").ok_or_else(|| bad(cmd, "FusionOffsetFacesCommand"))?;
+        let r = super::find_command("solid.offset_face").ok_or_else(|| bad(cmd, "solid.offset_face"))?;
         return (r.run)(s, &json!({"faces": [face], "distance": distance}));
     }
     let (dist, dir, op) = if d > 0.0 { (distance, "positive", "join") } else { (format!("-({distance})"), "negative", "cut") };
@@ -511,7 +511,7 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionFilletEdgesCommand";
+    let cmd = "solid.fillet";
     let edges = edge_points(s, p, cmd)?;
     let radius = req_expr(cmd, p, "radius")?;
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
@@ -531,7 +531,7 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn chamfer(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionChamferCommand";
+    let cmd = "solid.chamfer";
     let edges = edge_points(s, p, cmd)?;
     let distance = req_expr(cmd, p, "distance")?;
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
@@ -550,7 +550,7 @@ fn chamfer(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn combine(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionCombineCommand";
+    let cmd = "solid.combine";
     let target = str_(p, "target").ok_or_else(|| bad(cmd, "`target` must be a body name"))?.to_string();
     let tools = string_list(p, "tools");
     if tools.is_empty() {
@@ -564,7 +564,7 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionMoveCommand";
+    let cmd = "solid.move";
     let bodies = string_list(p, "bodies");
     if bodies.is_empty() {
         return Err(bad(cmd, "`bodies` must list bodies"));
@@ -658,7 +658,7 @@ fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<String>, Ve
 }
 
 fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "PatternRectangular";
+    let cmd = "solid.pattern.rectangular";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     let dir1 = p.get("dir1").and_then(vec3).ok_or_else(|| bad(cmd, "`dir1` must be [x, y, z]"))?;
     let count1 = req_expr(cmd, p, "count1")?;
@@ -678,7 +678,7 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "PatternCircular";
+    let cmd = "solid.pattern.circular";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     let (origin, axis) = axis_line(p, cmd)?;
     let count = req_expr(cmd, p, "count")?;
@@ -690,7 +690,7 @@ fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "PatternOnPath";
+    let cmd = "solid.pattern.path";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
     let path = string_list(p, "path");
@@ -716,7 +716,7 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "MirrorCommand";
+    let cmd = "solid.mirror";
     let bodies = string_list(p, "bodies");
     let features = if bodies.is_empty() { source_features(s, p, cmd)? } else { Vec::new() };
     let plane = match p.get("plane") {
@@ -760,7 +760,7 @@ pub fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solvecra
 }
 
 fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ConstructionPlaneOffsetFromPlaneCommand";
+    let cmd = "construct.plane.offset";
     let base = plane_param(s, p.get("base"), cmd)?;
     let d = req_expr(cmd, p, "offset")?;
     check_expr(s, &d, Kind::Length, cmd, "offset")?;
@@ -768,7 +768,7 @@ fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ConstructionPlaneAtAngleCommand";
+    let cmd = "construct.plane.at_angle";
     let base = plane_param(s, p.get("base"), cmd)?;
     let (axis_origin, axis_dir) = axis_line(p, cmd)?;
     let angle = req_expr(cmd, p, "angle")?;
@@ -781,7 +781,7 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionSplitBodyCommand";
+    let cmd = "solid.split_body";
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
@@ -846,7 +846,7 @@ fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
 }
 
 fn hole(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionHoleCommand";
+    let cmd = "solid.hole";
     // At sketch points: the holes go perpendicular to the sketch and follow its points.
     let points = match (p.get("sketch"), p.get("points")) {
         (Some(_), Some(_)) => {
@@ -951,7 +951,7 @@ fn face_points(p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
 }
 
 fn shell(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionShellBodyCommand";
+    let cmd = "solid.shell";
     let faces = face_points(p, cmd)?;
     let thickness = req_expr(cmd, p, "thickness")?;
     check_expr(s, &thickness, Kind::Length, cmd, "thickness")?;
@@ -959,7 +959,7 @@ fn shell(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn draft(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionDraftCommand";
+    let cmd = "solid.draft";
     let faces = face_points(p, cmd)?;
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
@@ -983,7 +983,7 @@ pub(super) fn sketch_id(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -
 }
 
 fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "Sweep";
+    let cmd = "solid.sweep";
     let sketch = feature_sketch(s, p, cmd)?;
     let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
     let path = string_list(p, "path");
@@ -1005,7 +1005,7 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn loft(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "SolidLoft";
+    let cmd = "solid.loft";
     let list = p.get("sections").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`sections` must be a list"))?;
     if list.len() < 2 || list.len() > 50 {
         return Err(bad(cmd, "a loft needs 2…50 sections"));
@@ -1028,7 +1028,7 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn thread(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionThreadCommand";
+    let cmd = "solid.thread";
     let face = p
         .get("face")
         .and_then(|v| vec3(v).or_else(|| v.get("point").and_then(vec3)))
@@ -1050,7 +1050,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "PrimitivePipe";
+    let cmd = "solid.pipe";
     let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
     let path = string_list(p, "path");
     if path.is_empty() {
@@ -1066,14 +1066,14 @@ fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn bounding_solid(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "StockModelCommand";
+    let cmd = "solid.bounding_solid";
     let margin = expr(p, "margin").unwrap_or_else(|| "0".into());
     check_expr(s, &margin, Kind::Length, cmd, "margin")?;
     add_feature(s, p, FeatureKind::BoundingSolid { bodies: string_list(p, "bodies"), margin })
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "ModifyScale";
+    let cmd = "solid.scale";
     let bodies = string_list(p, "bodies");
     if bodies.is_empty() {
         return Err(bad(cmd, "`bodies` must list bodies"));
@@ -1100,7 +1100,7 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn offset_face(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionOffsetFacesCommand";
+    let cmd = "solid.offset_face";
     let faces = face_points(p, cmd)?;
     let distance = req_expr(cmd, p, "distance")?;
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;

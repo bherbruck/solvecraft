@@ -31,7 +31,7 @@ fn check_case(dir: &str) -> Value {
     if let Err(e) = s.run_script(&script) {
         return json!({"case": name, "pass": false, "error": e.to_string()});
     }
-    let got = match s.execute("MeasureCommand", &json!({})) {
+    let got = match s.execute("inspect.measure", &json!({})) {
         Ok(m) => m,
         Err(e) => return json!({"case": name, "pass": false, "error": e.to_string()}),
     };
@@ -183,7 +183,7 @@ fn check_step_case(dir: &str) -> Value {
         Ok(v) => v,
         Err(e) => return json!({"case": name, "pass": false, "error": e.to_string()}),
     };
-    let got = match s.execute("MeasureCommand", &json!({})) {
+    let got = match s.execute("inspect.measure", &json!({})) {
         Ok(m) => m,
         Err(e) => return json!({"case": name, "pass": false, "error": e.to_string()}),
     };

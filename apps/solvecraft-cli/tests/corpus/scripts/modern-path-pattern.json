@@ -1,14 +1,14 @@
 {
   "commands": [
     {
-      "command": "SketchCreate",
+      "command": "sketch.create",
       "params": {
         "name": "Plate_sketch",
         "plane": "XY"
       }
     },
     {
-      "command": "DrawPolyline",
+      "command": "sketch.line",
       "params": {
         "construction": false,
         "ids": [
@@ -27,7 +27,7 @@
       }
     },
     {
-      "command": "DrawPolyline",
+      "command": "sketch.line",
       "params": {
         "construction": false,
         "ids": [
@@ -43,7 +43,7 @@
       }
     },
     {
-      "command": "DrawPolyline",
+      "command": "sketch.line",
       "params": {
         "construction": false,
         "ids": [
@@ -59,7 +59,7 @@
       }
     },
     {
-      "command": "DrawPolyline",
+      "command": "sketch.line",
       "params": {
         "construction": false,
         "ids": [
@@ -72,11 +72,11 @@
       }
     },
     {
-      "command": "SketchStop",
+      "command": "sketch.finish",
       "params": {}
     },
     {
-      "command": "Extrude",
+      "command": "solid.extrude",
       "params": {
         "body_names": [
           "Plate"
@@ -110,14 +110,14 @@
       }
     },
     {
-      "command": "SketchCreate",
+      "command": "sketch.create",
       "params": {
         "name": "PathSketch",
         "plane": "XY"
       }
     },
     {
-      "command": "ArcThreePoint",
+      "command": "sketch.arc.three_point",
       "params": {
         "end": [
           20,
@@ -135,7 +135,7 @@
       }
     },
     {
-      "command": "CircleCenterRadius",
+      "command": "sketch.circle.center",
       "params": {
         "center": "a1.start",
         "construction": false,
@@ -144,11 +144,11 @@
       }
     },
     {
-      "command": "SketchStop",
+      "command": "sketch.finish",
       "params": {}
     },
     {
-      "command": "Extrude",
+      "command": "solid.extrude",
       "params": {
         "body_names": [
           "Plate"
@@ -179,7 +179,7 @@
       }
     },
     {
-      "command": "PatternOnPath",
+      "command": "solid.pattern.path",
       "params": {
         "count": 7,
         "features": [

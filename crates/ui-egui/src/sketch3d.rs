@@ -3,7 +3,7 @@
 //! and to points already drawn in 3D; segments that stay on the plane are ordinary sketch lines.
 //! A drawn 3D point (or curve end) clicked without a tool gets a move triad: drag an arrow to
 //! move along X, Y or Z, or the square to move parallel to the sketch plane. Everything runs
-//! `sketch.line3d`, `sketch.spline3d`, `sketch.point3d`, `sketch.move3d` and `DrawPolyline`.
+//! `sketch.line3d`, `sketch.spline3d`, `sketch.point3d`, `sketch.move3d` and `sketch.line`.
 
 use std::cell::RefCell;
 
@@ -37,7 +37,7 @@ pub fn active(app: &SolveApp) -> bool {
 }
 
 fn takes(cmd: &str) -> bool {
-    matches!(cmd, "DrawPolyline" | "DrawSpline" | "DrawPoint")
+    matches!(cmd, "sketch.line" | "sketch.spline.fit_point" | "sketch.point")
 }
 
 /// Points drawn in 3D: (wire id, fit index, point).
@@ -122,17 +122,17 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
         set_chain(Some(tool.cmd), Vec::new());
     }
     match tool.cmd {
-        "DrawPoint" => {
+        "sketch.point" => {
             let r = match on_plane(app, p) {
-                Some(q) => app.run("DrawPoint", json!({"point": [q.x, q.y]})),
+                Some(q) => app.run("sketch.point", json!({"point": [q.x, q.y]})),
                 None => app.run("sketch.point3d", json!({"point": [p.x, p.y, p.z]})),
             };
             report(app, r);
         }
-        "DrawPolyline" => {
+        "sketch.line" => {
             if let Some(a) = chain().last().copied() {
                 let r = match (on_plane(app, a), on_plane(app, p)) {
-                    (Some(qa), Some(qb)) => app.run("DrawPolyline", json!({"points": [[qa.x, qa.y], [qb.x, qb.y]], "infer": true})),
+                    (Some(qa), Some(qb)) => app.run("sketch.line", json!({"points": [[qa.x, qa.y], [qb.x, qb.y]], "infer": true})),
                     _ => app.run("sketch.line3d", json!({"points": [[a.x, a.y, a.z], [p.x, p.y, p.z]]})),
                 };
                 report(app, r);
@@ -168,10 +168,10 @@ pub fn finish(app: &mut SolveApp) -> bool {
         set_chain(None, Vec::new());
         return false;
     }
-    if cmd == "DrawSpline" && pts.len() >= 2 {
+    if cmd == "sketch.spline.fit_point" && pts.len() >= 2 {
         let r = if pts.iter().all(|p| on_plane(app, *p).is_some()) {
             let q: Vec<Value> = pts.iter().filter_map(|p| on_plane(app, *p)).map(|q| json!([q.x, q.y])).collect();
-            app.run("DrawSpline", json!({ "points": q }))
+            app.run("sketch.spline.fit_point", json!({ "points": q }))
         } else {
             let q: Vec<Value> = pts.iter().map(|p| json!([p.x, p.y, p.z])).collect();
             app.run("sketch.spline3d", json!({ "points": q }))
@@ -195,7 +195,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
     if let Some((h, label)) = hover
         && let Some(s) = proj.to_screen(h)
     {
-        if t.cmd != "DrawPoint" && !pts.is_empty() {
+        if t.cmd != "sketch.point" && !pts.is_empty() {
             all.push(s);
         }
         painter.circle_stroke(s, if label == "Plane" { 3.0 } else { 6.0 }, stroke);
@@ -210,7 +210,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
             tk.text_dim,
         );
     }
-    if t.cmd == "DrawSpline" && all.len() >= 2 {
+    if t.cmd == "sketch.spline.fit_point" && all.len() >= 2 {
         let mut w: Vec<Vec3> = pts.clone();
         if let Some((h, _)) = hover {
             w.push(h);

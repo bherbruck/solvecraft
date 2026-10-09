@@ -8,7 +8,7 @@
   }
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "expect": {
@@ -34,7 +34,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "expect": {
@@ -61,7 +61,7 @@
   "key": "Escape"
  },
  {
-  "start": "ChangeParameterCommand"
+  "start": "parameters.change"
  },
  {
   "widget": "Close window"

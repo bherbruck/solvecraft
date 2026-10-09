@@ -30,22 +30,22 @@ fn sketch_point_world(s: &mut Session, sketch: &str, point: &str) -> Vec3 {
 }
 
 fn volume(s: &mut Session) -> f64 {
-    run(s, "MeasureCommand", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
+    run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
 }
 
 /// A component "Part" with a 30 x 20 x 10 block (sketch "Base" on XY, "Top" on its top face)
 /// and a construction plane, moved 50 mm along X.
 fn moved_part() -> Session {
     let mut s = Session::default();
-    run(&mut s, "FusionCreateNewComponentCommand", json!({"name": "Part"}));
-    run(&mut s, "SketchCreate", json!({"plane": "XY", "name": "Base"}));
-    run(&mut s, "ShapeRectangleTwoPoint", json!({"p0": [0, 0], "p1": [30, 20]}));
-    run(&mut s, "SketchStop", json!({}));
-    run(&mut s, "Extrude", json!({"distance": 10}));
-    run(&mut s, "SketchCreate", json!({"plane": {"face": [15, 10, 10]}, "name": "Top"}));
-    run(&mut s, "CircleCenterRadius", json!({"center": [15, 10], "radius": 3}));
-    run(&mut s, "SketchStop", json!({}));
-    run(&mut s, "ConstructionPlaneOffsetFromPlaneCommand", json!({"base": "XY", "offset": 25, "name": "Shelf"}));
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [15, 10, 10]}, "name": "Top"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [15, 10], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Shelf"}));
     run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [50, 0, 0]}));
     s
 }
@@ -73,19 +73,19 @@ fn world_picks_map_into_the_component() {
     let mut s = moved_part();
     let v0 = volume(&mut s);
     // The edge along X at the top front: world (65, 0, 10).
-    run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [[65, 0, 10]], "radius": 2}));
+    run(&mut s, "solid.fillet", json!({"edges": [[65, 0, 10]], "radius": 2}));
     assert!(volume(&mut s) < v0 - 1.0, "the fillet cut material");
     // A sketch on the moved top face sits at world z = 10 over the moved block.
-    run(&mut s, "SketchCreate", json!({"plane": {"face": [70, 10, 10]}, "name": "Pad"}));
-    run(&mut s, "CircleCenterRadius", json!({"center": [20, 10], "radius": 2}));
-    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [70, 10, 10]}, "name": "Pad"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 10], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
     let pad = sketch_point_world(&mut s, "Pad", "p1");
     assert!((pad.z - 10.0).abs() < 1e-6 && pad.x > 50.0, "{pad:?}");
     let v1 = volume(&mut s);
-    let h = run(&mut s, "FusionHoleCommand", json!({"position": [60, 10, 10], "diameter": 4, "depth": 5}));
+    let h = run(&mut s, "solid.hole", json!({"position": [60, 10, 10], "diameter": 4, "depth": 5}));
     assert!(volume(&mut s) < v1 - 1.0, "the hole cut material: {h}");
     // A box made at world (100, 0, 0) in the active (moved) component shows there.
-    run(&mut s, "PrimitiveBox", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0], "operation": "new"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0], "operation": "new"}));
     let last = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
     let (lo, _) = world_bbox(&s, &last);
     assert!(near(lo, Vec3::new(100.0, 0.0, 0.0)), "{lo:?}");
@@ -95,13 +95,13 @@ fn world_picks_map_into_the_component() {
 #[test]
 fn picks_on_an_instance_map_through_its_placement() {
     let mut s = Session::default();
-    run(&mut s, "FusionCreateNewComponentCommand", json!({"name": "Pin"}));
-    run(&mut s, "PrimitiveBox", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.create", json!({"name": "Pin"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     run(&mut s, "occurrence.copy", json!({"component": "Pin", "translate": [0, 40, 0]}));
     let v0 = volume(&mut s);
     // An edge of the second instance only (world y = 40).
-    run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [[5, 40, 10]], "radius": 2}));
+    run(&mut s, "solid.fillet", json!({"edges": [[5, 40, 10]], "radius": 2}));
     let v1 = volume(&mut s);
     assert!(v1 < v0 - 1.0, "{v0} {v1}");
 }
@@ -111,7 +111,7 @@ fn picks_on_an_instance_map_through_its_placement() {
 fn moving_bodies_between_components_keeps_their_place() {
     let mut s = moved_part();
     run(&mut s, "component.activate", json!({"component": "root"}));
-    run(&mut s, "PrimitiveBox", json!({"length": 4, "width": 4, "height": 4, "corner": [0, 40, 0], "body_name": "Loose"}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [0, 40, 0], "body_name": "Loose"}));
     let before = world_bbox(&s, "Loose");
     run(&mut s, "component.move_bodies", json!({"bodies": ["Loose"], "component": "Part"}));
     let after = world_bbox(&s, "Loose");
@@ -121,7 +121,7 @@ fn moving_bodies_between_components_keeps_their_place() {
     let moved = world_bbox(&s, "Loose");
     assert!(near(moved.0, before.0 + Vec3::new(0.0, 0.0, 10.0)), "{moved:?}");
     let v0 = volume(&mut s);
-    run(&mut s, "FusionFilletEdgesCommand", json!({"edges": [[2, 40, 14]], "radius": 1}));
+    run(&mut s, "solid.fillet", json!({"edges": [[2, 40, 14]], "radius": 1}));
     assert!(volume(&mut s) < v0 - 0.1);
     // Back to the root: still in place.
     run(&mut s, "component.move_bodies", json!({"bodies": ["Loose"], "component": "root"}));
@@ -133,14 +133,14 @@ fn moving_bodies_between_components_keeps_their_place() {
 #[test]
 fn sketch_on_a_face_follows_a_moved_body() {
     let mut s = Session::default();
-    run(&mut s, "PrimitiveBox", json!({"length": 20, "width": 20, "height": 10}));
-    run(&mut s, "SketchCreate", json!({"plane": {"face": [10, 10, 10]}, "name": "OnTop"}));
-    run(&mut s, "CircleCenterRadius", json!({"center": [10, 10], "radius": 2}));
-    run(&mut s, "SketchStop", json!({}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [10, 10, 10]}, "name": "OnTop"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
     // The move goes before the sketch in the timeline: the face the sketch is on moves up.
-    run(&mut s, "timeline.rollTo", json!({"position": 1}));
-    run(&mut s, "FusionMoveCommand", json!({"bodies": ["Body1"], "translate": [0, 0, 15]}));
-    run(&mut s, "timeline.rollTo", json!({}));
+    run(&mut s, "timeline.roll_to", json!({"position": 1}));
+    run(&mut s, "solid.move", json!({"bodies": ["Body1"], "translate": [0, 0, 15]}));
+    run(&mut s, "timeline.roll_to", json!({}));
     let c = sketch_point_world(&mut s, "OnTop", "p1");
     assert!((c.z - 25.0).abs() < 1e-6, "{c:?}");
 }

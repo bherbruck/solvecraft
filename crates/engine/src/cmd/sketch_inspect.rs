@@ -9,22 +9,22 @@ use crate::params::{bad, num, string_list, vec3};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("FusionCurvatureCombAnalysisCommand", "Curvature Comb Analysis", curvature_comb)
+    CommandSpec::new("inspect.curvature_comb", "Curvature Comb Analysis", curvature_comb)
         .at("SKETCH", "INSPECT")
         .icon("curvature_comb")
         .noundo()
         .params("curves?: [sketch curve ids] (sketch?: id|name, default active) | edges?: [[x,y,z] points on body edges]; density?: teeth per curve (default 40), scale?: comb length per unit curvature (default auto)"),
-    CommandSpec::new("FusionMinimumRadiusAnalysisCommand", "Minimum Radius Analysis", minimum_radius)
+    CommandSpec::new("inspect.minimum_radius", "Minimum Radius Analysis", minimum_radius)
         .at("SKETCH", "INSPECT")
         .icon("min_radius")
         .noundo()
         .params("curves?: [sketch curve ids] (sketch?) | edges?: [[x,y,z]…] | faces?: [[x,y,z]…] (default: every face of every body); the smallest radius of curvature of each and where it is"),
-    CommandSpec::new("FusionIsoCurveAnalysisCommand", "Isocurve Analysis", isocurves)
+    CommandSpec::new("inspect.isocurve", "Isocurve Analysis", isocurves)
         .at("SKETCH", "INSPECT")
         .icon("iso_analysis")
         .noundo()
         .params("faces: [[x,y,z]…] points on faces; count?: curves each way (default 8): the faces' isoparametric curves"),
-    CommandSpec::new("FusionCenterOfMassCommand", "Center of Mass", center_of_mass)
+    CommandSpec::new("inspect.center_of_mass", "Center of Mass", center_of_mass)
         .at("SKETCH", "INSPECT")
         .icon("center_of_mass")
         .noundo()
@@ -73,7 +73,7 @@ fn teeth_3d(pts: &[Vec3]) -> Vec<(Vec3, f64, Vec3)> {
 }
 
 fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionCurvatureCombAnalysisCommand";
+    let cmd = "inspect.curvature_comb";
     let density = num(p, "density").map(|d| d.clamp(2.0, 2000.0) as usize).unwrap_or(40);
     let st = s.model.state();
     let mut combs: Vec<(String, Vec<(Vec3, f64, Vec3)>)> = Vec::new();
@@ -210,7 +210,7 @@ fn face_min_radius(m: &solvecraft_geom::Mesh, face: u32) -> Option<(f64, Vec3)> 
 }
 
 fn minimum_radius(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionMinimumRadiusAnalysisCommand";
+    let cmd = "inspect.minimum_radius";
     let st = s.model.state();
     let mut items: Vec<(String, Option<(f64, Vec3)>)> = Vec::new();
     let curves = string_list(p, "curves");
@@ -282,7 +282,7 @@ fn minimum_radius(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionIsoCurveAnalysisCommand";
+    let cmd = "inspect.isocurve";
     let count = num(p, "count").map(|c| c.clamp(1.0, 100.0) as usize).unwrap_or(8);
     let faces = p.get("faces").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z]"))?;
     if faces.is_empty() {
@@ -302,7 +302,7 @@ fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionCenterOfMassCommand";
+    let cmd = "inspect.center_of_mass";
     let names = string_list(p, "bodies");
     let st = s.model.state();
     let mut out = Vec::new();
@@ -332,10 +332,10 @@ mod tests {
     #[test]
     fn curvature_combs() {
         let mut s = Session::default();
-        s.execute("SketchCreate", &json!({"plane": "XY"})).unwrap();
-        let c = s.execute("CircleCenterRadius", &json!({"center": [0, 0], "radius": 5})).unwrap()["curves"][0].clone();
-        let l = s.execute("DrawPolyline", &json!({"points": [[0, 20], [10, 20]]})).unwrap()["curves"][0].clone();
-        let r = s.execute("FusionCurvatureCombAnalysisCommand", &json!({"curves": [c, l], "density": 20})).unwrap();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let c = s.execute("sketch.circle.center", &json!({"center": [0, 0], "radius": 5})).unwrap()["curves"][0].clone();
+        let l = s.execute("sketch.line", &json!({"points": [[0, 20], [10, 20]]})).unwrap()["curves"][0].clone();
+        let r = s.execute("inspect.curvature_comb", &json!({"curves": [c, l], "density": 20})).unwrap();
         let circle = &r["combs"][0];
         assert!((circle["min_radius"].as_f64().unwrap() - 5.0).abs() < 1e-3, "{circle}");
         assert!(r["combs"][1]["min_radius"].is_null(), "a line is straight");
@@ -343,39 +343,39 @@ mod tests {
         let t = &circle["teeth"][3];
         let (a, b) = ((t[0][0].as_f64().unwrap(), t[0][1].as_f64().unwrap()), (t[1][0].as_f64().unwrap(), t[1][1].as_f64().unwrap()));
         assert!(b.0 * b.0 + b.1 * b.1 > a.0 * a.0 + a.1 * a.1);
-        s.execute("SketchStop", &json!({})).unwrap();
-        s.execute("PrimitiveCylinder", &json!({"base": [50, 0, 0], "radius": 8, "height": 10})).unwrap();
-        let r = s.execute("FusionCurvatureCombAnalysisCommand", &json!({"edges": [[58, 0, 10]]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.cylinder", &json!({"base": [50, 0, 0], "radius": 8, "height": 10})).unwrap();
+        let r = s.execute("inspect.curvature_comb", &json!({"edges": [[58, 0, 10]]})).unwrap();
         assert!((r["combs"][0]["min_radius"].as_f64().unwrap() - 8.0).abs() < 0.5, "{r}");
-        assert!(s.execute("FusionCurvatureCombAnalysisCommand", &json!({})).is_err());
+        assert!(s.execute("inspect.curvature_comb", &json!({})).is_err());
     }
 
     #[test]
     fn minimum_radius_and_center_of_mass() {
         let mut s = Session::default();
-        s.execute("SketchCreate", &json!({"plane": "XY"})).unwrap();
-        let e = s.execute("CircleElipse", &json!({"center": [0, 0], "major": [10, 0], "minor_radius": 4})).unwrap()["curves"][0].clone();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let e = s.execute("sketch.ellipse", &json!({"center": [0, 0], "major": [10, 0], "minor_radius": 4})).unwrap()["curves"][0].clone();
         // An ellipse's tightest bend is at the major axis ends: b²/a.
-        let r = s.execute("FusionMinimumRadiusAnalysisCommand", &json!({"curves": [e]})).unwrap();
+        let r = s.execute("inspect.minimum_radius", &json!({"curves": [e]})).unwrap();
         assert!((r["min_radius"].as_f64().unwrap() - 1.6).abs() < 1e-3, "{r}");
         assert!((r["at"][0].as_f64().unwrap().abs() - 10.0).abs() < 0.1, "{r}");
-        s.execute("SketchStop", &json!({})).unwrap();
-        s.execute("PrimitiveCylinder", &json!({"base": [50, 0, 0], "radius": 8, "height": 10})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.cylinder", &json!({"base": [50, 0, 0], "radius": 8, "height": 10})).unwrap();
         // The cylinder's side face: radius 8 (the mesh estimate is close).
-        let r = s.execute("FusionMinimumRadiusAnalysisCommand", &json!({"faces": [[58, 0, 5]]})).unwrap();
+        let r = s.execute("inspect.minimum_radius", &json!({"faces": [[58, 0, 5]]})).unwrap();
         assert!((r["min_radius"].as_f64().unwrap() - 8.0).abs() < 0.4, "{r}");
-        let r = s.execute("FusionMinimumRadiusAnalysisCommand", &json!({})).unwrap();
+        let r = s.execute("inspect.minimum_radius", &json!({})).unwrap();
         assert!((r["min_radius"].as_f64().unwrap() - 8.0).abs() < 0.4, "{r}");
         // Centre of mass: a box beside the cylinder.
-        s.execute("PrimitiveBox", &json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
-        let r = s.execute("FusionCenterOfMassCommand", &json!({})).unwrap();
+        s.execute("solid.box", &json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+        let r = s.execute("inspect.center_of_mass", &json!({})).unwrap();
         let (vb, vc) = (1000.0, std::f64::consts::PI * 640.0);
         let want = (5.0 * vb + 50.0 * vc) / (vb + vc);
         assert!((r["center"][0].as_f64().unwrap() - want).abs() < 0.1, "{r}");
         assert!((r["center"][2].as_f64().unwrap() - 5.0).abs() < 0.05, "{r}");
-        assert!(s.execute("FusionCenterOfMassCommand", &json!({"bodies": ["nope"]})).is_err());
+        assert!(s.execute("inspect.center_of_mass", &json!({"bodies": ["nope"]})).is_err());
         // Isocurves on the cylinder's side: rings around it and lines along it.
-        let r = s.execute("FusionIsoCurveAnalysisCommand", &json!({"faces": [[58, 0, 5]], "count": 4})).unwrap();
+        let r = s.execute("inspect.isocurve", &json!({"faces": [[58, 0, 5]], "count": 4})).unwrap();
         let curves = r["curves"].as_array().unwrap();
         let ring =
             |c: &Value| c.as_array().unwrap().iter().all(|q| ((q[0].as_f64().unwrap() - 50.0).hypot(q[1].as_f64().unwrap()) - 8.0).abs() < 0.2);
@@ -386,6 +386,6 @@ mod tests {
             z.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - z.iter().cloned().fold(f64::INFINITY, f64::min) < 1e-6
         };
         assert!(curves.iter().filter(|c| flat(c)).count() >= 4, "rings at constant height");
-        assert!(s.execute("FusionIsoCurveAnalysisCommand", &json!({"faces": []})).is_err());
+        assert!(s.execute("inspect.isocurve", &json!({"faces": []})).is_err());
     }
 }

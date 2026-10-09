@@ -110,297 +110,297 @@ Deferred until further notice (not in the in-scope figure): MESH, FORM, SURFACE 
 
 ## Live (SOLID, SKETCH)
 
-- SOLID › CREATE › Create Sketch (`SketchCreate`)
-- SOLID › CREATE › Extrude (`Extrude`)
-- SOLID › CREATE › Revolve (`Revolve`)
-- SOLID › CREATE › Sweep (`Sweep`)
-- SOLID › CREATE › Loft (`SolidLoft`)
-- SOLID › CREATE › Rib (`FusionRibCommand`)
-- SOLID › CREATE › Web (`FusionWebCommand`)
-- SOLID › CREATE › Emboss (`EmbossCmd`)
-- SOLID › CREATE › Hole (`FusionHoleCommand`)
-- SOLID › CREATE › Thread (`FusionThreadCommand`)
-- SOLID › CREATE › Box (`PrimitiveBox`)
-- SOLID › CREATE › Cylinder (`PrimitiveCylinder`)
-- SOLID › CREATE › Sphere (`PrimitiveSphere`)
-- SOLID › CREATE › Torus (`PrimitiveTorus`)
-- SOLID › CREATE › Coil (`PrimitiveCoil`)
-- SOLID › CREATE › Pipe (`PrimitivePipe`)
-- SOLID › CREATE › Bounding Solid (`StockModelCommand`)
-- SOLID › CREATE › Rectangular Pattern (`PatternRectangular`)
-- SOLID › CREATE › Circular Pattern (`PatternCircular`)
-- SOLID › CREATE › Pattern on Path (`PatternOnPath`)
-- SOLID › CREATE › Mirror (`MirrorCommand`)
-- SOLID › CREATE › Thicken (`FusionSurfaceThickenCommand`)
-- SOLID › CREATE › Joint Origin (`JointOrigin`)
-- SOLID › MODIFY › Press Pull (`FusionPressPullCommand`)
-- SOLID › MODIFY › Fillet (`FusionFilletEdgesCommand`)
-- SOLID › MODIFY › Chamfer (`FusionChamferCommand`)
-- SOLID › MODIFY › Shell (`FusionShellBodyCommand`)
-- SOLID › MODIFY › Draft (`FusionDraftCommand`)
-- SOLID › MODIFY › Scale (`ModifyScale`)
-- SOLID › MODIFY › Combine (`FusionCombineCommand`)
-- SOLID › MODIFY › Offset Face (`FusionOffsetFacesCommand`)
-- SOLID › MODIFY › Replace Face (`FusionReplaceFaceCommand`)
-- SOLID › MODIFY › Split Body (`FusionSplitBodyCommand`)
-- SOLID › MODIFY › Move/Copy (`FusionMoveCommand`)
-- SOLID › MODIFY › Align (`AlignCmd`)
-- SOLID › MODIFY › Delete (`FusionDeleteCommand`)
-- SOLID › MODIFY › Remove (`SoftDeleteCommand`)
-- SOLID › MODIFY › Physical Material (`PhysicalMaterialCommand`)
-- SOLID › MODIFY › Appearance (`AppearanceCommand`)
-- SOLID › MODIFY › Change Parameters (`ChangeParameterCommand`)
-- SOLID › MODIFY › Compute All (`FusionComputeAllCommand`)
-- SOLID › ASSEMBLE › Insert Component (`FusionImportCommandFromToolbar`)
-- SOLID › ASSEMBLE › New Component (`FusionCreateNewComponentCommand`)
-- SOLID › ASSEMBLE › Joint (`JointAssembleCmdNew`)
-- SOLID › ASSEMBLE › As-Built Joint (`JointAsBuiltCmd`)
-- SOLID › ASSEMBLE › Rigid Group (`RigidGroupCmd`)
-- SOLID › ASSEMBLE › Drive Joints (`FusionMoveJointsCommand`)
-- SOLID › ASSEMBLE › Motion Link (`FusionMotionRelationshipCommand`)
-- SOLID › ASSEMBLE › Motion Study (`FusionMotionStudyCommand`)
-- SOLID › ASSEMBLE › Enable Contact Sets (`EnableContactSetsCmd`)
-- SOLID › ASSEMBLE › Enable All Contact (`EnableAllContactCmd`)
-- SOLID › ASSEMBLE › Disable Contact (`DisableAllContactCmd`)
-- SOLID › ASSEMBLE › New Contact Set (`ContactSetCmd`)
-- SOLID › CONFIGURE › Configure (`FusionStartDesignConfigModeCmd`)
-- SOLID › CONFIGURE › Display Configuration Table (`FusionShowDesignConfigPanelCmd`)
-- SOLID › CONSTRUCT › Offset Plane (`ConstructionPlaneOffsetFromPlaneCommand`)
-- SOLID › CONSTRUCT › Plane at Angle (`ConstructionPlaneAtAngleCommand`)
-- SOLID › INSPECT › Measure (`MeasureCommand`)
-- SOLID › INSPECT › Interference (`InterferenceCheckCommand`)
-- SOLID › INSPECT › Section Analysis (`FusionHalfSectionViewCommand`)
-- SOLID › INSPECT › Curvature Comb Analysis (`FusionCurvatureCombAnalysisCommand`)
-- SOLID › INSPECT › Curvature Map Analysis (`FusionCurvatureMapAnalysisCommand`)
-- SOLID › INSPECT › Draft Analysis (`FusionDraftAnalysisCommand`)
-- SOLID › INSPECT › Environment Map Analysis (`FusionEnvironmentMapAnalysisCommand`)
-- SOLID › INSPECT › Isocurve Analysis (`FusionIsoCurveAnalysisCommand`)
-- SOLID › INSPECT › Zebra Analysis (`FusionZebraAnalysisCommand`)
-- SOLID › INSPECT › Accessibility Analysis (`FusionAccessibilityAnalysisCommand`)
-- SOLID › INSPECT › Center of Mass (`FusionCenterOfMassCommand`)
-- SOLID › INSPECT › Minimum Radius Analysis (`FusionMinimumRadiusAnalysisCommand`)
-- SOLID › INSERT › Decal (`FusionAddEditDecalCommand`)
-- SOLID › INSERT › Canvas (`FusionAddCanvasCommand`)
-- SOLID › INSERT › Insert SVG (`SketchImportSVG`)
-- SOLID › INSERT › Insert DXF (`ImportDxfFileCommand`)
-- SOLID › INSERT › Insert Mesh (`ParaMeshInsertAlignCommand`)
-- SOLID › INSERT › Insert Fastener (`FusionFastenersCommand`)
-- SOLID › POSITION › Capture Position (`SnapshotCmd`)
-- SOLID › POSITION › Revert Position (`AsBuiltPositionsCmd`)
-- SKETCH › CREATE › Line (`DrawPolyline`)
-- SKETCH › CREATE › Midpoint Line (`SketchMidpointLine`)
-- SKETCH › CREATE › SketchConstrainer (`SketchConstrainer`)
-- SKETCH › CREATE › 2-Point Rectangle (`ShapeRectangleTwoPoint`)
-- SKETCH › CREATE › 3-Point Rectangle (`ShapeRectangleThreePoint`)
-- SKETCH › CREATE › Center Rectangle (`ShapeRectangleCenter`)
-- SKETCH › CREATE › Center Diameter Circle (`CircleCenterRadius`)
-- SKETCH › CREATE › 2-Point Circle (`CircleTwoPoint`)
-- SKETCH › CREATE › 3-Point Circle (`CircleThreePoint`)
-- SKETCH › CREATE › 2-Tangent Circle (`CircleTanTanRadius`)
-- SKETCH › CREATE › 3-Tangent Circle (`CircleThreeTangent`)
-- SKETCH › CREATE › 3-Point Arc (`ArcThreePoint`)
-- SKETCH › CREATE › Center Point Arc (`ArcCenterTwoPoint`)
-- SKETCH › CREATE › Tangent Arc (`ArcTangent`)
-- SKETCH › CREATE › Circumscribed Polygon (`ShapePolygonCircumscribed`)
-- SKETCH › CREATE › Inscribed Polygon (`ShapePolygonInscribed`)
-- SKETCH › CREATE › Edge Polygon (`ShapePolygonEdge`)
-- SKETCH › CREATE › Ellipse (`CircleElipse`)
-- SKETCH › CREATE › Center to Center Slot (`ShapeSlotCenterToCenter`)
-- SKETCH › CREATE › Overall Slot (`ShapeSlotOverall`)
-- SKETCH › CREATE › Center Point Slot (`ShapeSlotCenterPoint`)
-- SKETCH › CREATE › Three Point Arc Slot (`ShapeArcSlotThreePoint`)
-- SKETCH › CREATE › Center Point Arc Slot (`ShapeArcSlotCenterTwoPoint`)
-- SKETCH › CREATE › Fit Point Spline (`DrawSpline`)
-- SKETCH › CREATE › Control Point Spline (`DrawCVMSpline3D`)
-- SKETCH › CREATE › Control Point Spline (`DrawCVMSpline5D`)
-- SKETCH › CREATE › Conic Curve (`ConicCurveCmd`)
-- SKETCH › CREATE › Point (`DrawPoint`)
-- SKETCH › CREATE › Text (`MTextCmd`)
-- SKETCH › CREATE › Fit Curves to Mesh Section (`FitCurvesToSectionCommand`)
-- SKETCH › CREATE › Mirror (`MirrorSketchCommand`)
-- SKETCH › CREATE › Circular Pattern (`CircularSketchPatternCommand`)
-- SKETCH › CREATE › Rectangular Pattern (`RectangularSketchPatternCommand`)
-- SKETCH › CREATE › Project (`ProjectNewCmd`)
-- SKETCH › CREATE › Intersect (`IntersectCmd`)
-- SKETCH › CREATE › Spun Profile (`SpunProfileCmd`)
-- SKETCH › CREATE › Include 3D Geometry (`Include3DGeometry`)
-- SKETCH › CREATE › Project To Surface (`ProjectToSurface`)
-- SKETCH › CREATE › Intersection Curve (`IntersectionCurve`)
-- SKETCH › CREATE › Isoparametric Curve (`SketchIsoparametricCurve`)
-- SKETCH › CREATE › Sketch Dimension (`SketchDimension`)
-- SKETCH › MODIFY › Fillet (`FilletSketchCmd`)
-- SKETCH › MODIFY › Equal Distance Chamfer (`ChamferSketchEqualDistance`)
-- SKETCH › MODIFY › Distance and Angle Chamfer (`ChamferSketchDistanceAngle`)
-- SKETCH › MODIFY › Two Distance Chamfer (`ChamferSketchDistanceDistance`)
-- SKETCH › MODIFY › Blend Curve (`BlendG1CurveSketchCmd`)
-- SKETCH › MODIFY › Offset (`Offset`)
-- SKETCH › MODIFY › Trim (`TrimSketchCmd`)
-- SKETCH › MODIFY › Extend (`ExtendSketchCmd`)
-- SKETCH › MODIFY › Break (`BreakSketchCmd`)
-- SKETCH › MODIFY › Sketch Scale (`SketchScaleCmd`)
-- SKETCH › MODIFY › Move/Copy (`FusionMoveCommand`)
-- SKETCH › MODIFY › Change Parameters (`ChangeParameterCommand`)
-- SKETCH › CONSTRAINTS › AutoConstrain (`SketchAutoConstraintAndDimCmd`)
-- SKETCH › CONSTRAINTS › AutoConstrain from datum (`SketchAutoConstraintAndDimFromDatumCmd`)
-- SKETCH › CONSTRAINTS › Horizontal/Vertical (`ConstraintHorizontalVertical`)
-- SKETCH › CONSTRAINTS › Coincident (`ConstraintCoincident`)
-- SKETCH › CONSTRAINTS › Tangent (`ConstraintTangent`)
-- SKETCH › CONSTRAINTS › Equal (`ConstraintEqual`)
-- SKETCH › CONSTRAINTS › Parallel (`ConstraintParallel`)
-- SKETCH › CONSTRAINTS › Perpendicular (`ConstraintPerpendicular`)
-- SKETCH › CONSTRAINTS › Fix/UnFix (`ConstraintFix`)
-- SKETCH › CONSTRAINTS › MidPoint (`ConstraintMidPoint`)
-- SKETCH › CONSTRAINTS › Concentric (`ConstraintConcentric`)
-- SKETCH › CONSTRAINTS › Collinear (`ConstraintCollinear`)
-- SKETCH › CONSTRAINTS › Symmetry (`ConstraintSymmetry`)
-- SKETCH › CONSTRAINTS › Curvature (`ConstraintSmooth`)
-- SKETCH › CONSTRAINTS › Polygon (`SketchPolygonConstraintCmd`)
-- SKETCH › CONFIGURE › Configure (`FusionStartDesignConfigModeCmd`)
-- SKETCH › CONFIGURE › Display Configuration Table (`FusionShowDesignConfigPanelCmd`)
-- SKETCH › INSPECT › Measure (`MeasureCommand`)
-- SKETCH › INSPECT › Interference (`InterferenceCheckCommand`)
-- SKETCH › INSPECT › Section Analysis (`FusionHalfSectionViewCommand`)
-- SKETCH › INSPECT › Curvature Comb Analysis (`FusionCurvatureCombAnalysisCommand`)
-- SKETCH › INSPECT › Curvature Map Analysis (`FusionCurvatureMapAnalysisCommand`)
-- SKETCH › INSPECT › Draft Analysis (`FusionDraftAnalysisCommand`)
-- SKETCH › INSPECT › Environment Map Analysis (`FusionEnvironmentMapAnalysisCommand`)
-- SKETCH › INSPECT › Isocurve Analysis (`FusionIsoCurveAnalysisCommand`)
-- SKETCH › INSPECT › Zebra Analysis (`FusionZebraAnalysisCommand`)
-- SKETCH › INSPECT › Accessibility Analysis (`FusionAccessibilityAnalysisCommand`)
-- SKETCH › INSPECT › Center of Mass (`FusionCenterOfMassCommand`)
-- SKETCH › INSPECT › Minimum Radius Analysis (`FusionMinimumRadiusAnalysisCommand`)
-- SKETCH › INSERT › Decal (`FusionAddEditDecalCommand`)
-- SKETCH › INSERT › Canvas (`FusionAddCanvasCommand`)
-- SKETCH › INSERT › Insert SVG (`SketchImportSVG`)
-- SKETCH › INSERT › Insert DXF (`ImportDxfFileCommand`)
-- SKETCH › INSERT › Insert Mesh (`ParaMeshInsertAlignCommand`)
-- SKETCH › INSERT › Insert Component (`FusionImportCommandFromToolbar`)
-- SKETCH › INSERT › Insert Fastener (`FusionFastenersCommand`)
-- SKETCH › FINISH SKETCH › Finish Sketch (`SketchStop`)
-- SKETCH › FINISH SKETCH › Finish with AutoConstrain (`SketchAutoConstrainAndFinish`)
+- SOLID › CREATE › Create Sketch
+- SOLID › CREATE › Extrude
+- SOLID › CREATE › Revolve
+- SOLID › CREATE › Sweep
+- SOLID › CREATE › Loft
+- SOLID › CREATE › Rib
+- SOLID › CREATE › Web
+- SOLID › CREATE › Emboss
+- SOLID › CREATE › Hole
+- SOLID › CREATE › Thread
+- SOLID › CREATE › Box
+- SOLID › CREATE › Cylinder
+- SOLID › CREATE › Sphere
+- SOLID › CREATE › Torus
+- SOLID › CREATE › Coil
+- SOLID › CREATE › Pipe
+- SOLID › CREATE › Bounding Solid
+- SOLID › CREATE › Rectangular Pattern
+- SOLID › CREATE › Circular Pattern
+- SOLID › CREATE › Pattern on Path
+- SOLID › CREATE › Mirror
+- SOLID › CREATE › Thicken
+- SOLID › CREATE › Joint Origin
+- SOLID › MODIFY › Press Pull
+- SOLID › MODIFY › Fillet
+- SOLID › MODIFY › Chamfer
+- SOLID › MODIFY › Shell
+- SOLID › MODIFY › Draft
+- SOLID › MODIFY › Scale
+- SOLID › MODIFY › Combine
+- SOLID › MODIFY › Offset Face
+- SOLID › MODIFY › Replace Face
+- SOLID › MODIFY › Split Body
+- SOLID › MODIFY › Move/Copy
+- SOLID › MODIFY › Align
+- SOLID › MODIFY › Delete
+- SOLID › MODIFY › Remove
+- SOLID › MODIFY › Physical Material
+- SOLID › MODIFY › Appearance
+- SOLID › MODIFY › Change Parameters
+- SOLID › MODIFY › Compute All
+- SOLID › ASSEMBLE › Insert Component
+- SOLID › ASSEMBLE › New Component
+- SOLID › ASSEMBLE › Joint
+- SOLID › ASSEMBLE › As-Built Joint
+- SOLID › ASSEMBLE › Rigid Group
+- SOLID › ASSEMBLE › Drive Joints
+- SOLID › ASSEMBLE › Motion Link
+- SOLID › ASSEMBLE › Motion Study
+- SOLID › ASSEMBLE › Enable Contact Sets
+- SOLID › ASSEMBLE › Enable All Contact
+- SOLID › ASSEMBLE › Disable Contact
+- SOLID › ASSEMBLE › New Contact Set
+- SOLID › CONFIGURE › Configure
+- SOLID › CONFIGURE › Display Configuration Table
+- SOLID › CONSTRUCT › Offset Plane
+- SOLID › CONSTRUCT › Plane at Angle
+- SOLID › INSPECT › Measure
+- SOLID › INSPECT › Interference
+- SOLID › INSPECT › Section Analysis
+- SOLID › INSPECT › Curvature Comb Analysis
+- SOLID › INSPECT › Curvature Map Analysis
+- SOLID › INSPECT › Draft Analysis
+- SOLID › INSPECT › Environment Map Analysis
+- SOLID › INSPECT › Isocurve Analysis
+- SOLID › INSPECT › Zebra Analysis
+- SOLID › INSPECT › Accessibility Analysis
+- SOLID › INSPECT › Center of Mass
+- SOLID › INSPECT › Minimum Radius Analysis
+- SOLID › INSERT › Decal
+- SOLID › INSERT › Canvas
+- SOLID › INSERT › Insert SVG
+- SOLID › INSERT › Insert DXF
+- SOLID › INSERT › Insert Mesh
+- SOLID › INSERT › Insert Fastener
+- SOLID › POSITION › Capture Position
+- SOLID › POSITION › Revert Position
+- SKETCH › CREATE › Line
+- SKETCH › CREATE › Midpoint Line
+- SKETCH › CREATE › SketchConstrainer
+- SKETCH › CREATE › 2-Point Rectangle
+- SKETCH › CREATE › 3-Point Rectangle
+- SKETCH › CREATE › Center Rectangle
+- SKETCH › CREATE › Center Diameter Circle
+- SKETCH › CREATE › 2-Point Circle
+- SKETCH › CREATE › 3-Point Circle
+- SKETCH › CREATE › 2-Tangent Circle
+- SKETCH › CREATE › 3-Tangent Circle
+- SKETCH › CREATE › 3-Point Arc
+- SKETCH › CREATE › Center Point Arc
+- SKETCH › CREATE › Tangent Arc
+- SKETCH › CREATE › Circumscribed Polygon
+- SKETCH › CREATE › Inscribed Polygon
+- SKETCH › CREATE › Edge Polygon
+- SKETCH › CREATE › Ellipse
+- SKETCH › CREATE › Center to Center Slot
+- SKETCH › CREATE › Overall Slot
+- SKETCH › CREATE › Center Point Slot
+- SKETCH › CREATE › Three Point Arc Slot
+- SKETCH › CREATE › Center Point Arc Slot
+- SKETCH › CREATE › Fit Point Spline
+- SKETCH › CREATE › Control Point Spline
+- SKETCH › CREATE › Control Point Spline
+- SKETCH › CREATE › Conic Curve
+- SKETCH › CREATE › Point
+- SKETCH › CREATE › Text
+- SKETCH › CREATE › Fit Curves to Mesh Section
+- SKETCH › CREATE › Mirror
+- SKETCH › CREATE › Circular Pattern
+- SKETCH › CREATE › Rectangular Pattern
+- SKETCH › CREATE › Project
+- SKETCH › CREATE › Intersect
+- SKETCH › CREATE › Spun Profile
+- SKETCH › CREATE › Include 3D Geometry
+- SKETCH › CREATE › Project To Surface
+- SKETCH › CREATE › Intersection Curve
+- SKETCH › CREATE › Isoparametric Curve
+- SKETCH › CREATE › Sketch Dimension
+- SKETCH › MODIFY › Fillet
+- SKETCH › MODIFY › Equal Distance Chamfer
+- SKETCH › MODIFY › Distance and Angle Chamfer
+- SKETCH › MODIFY › Two Distance Chamfer
+- SKETCH › MODIFY › Blend Curve
+- SKETCH › MODIFY › Offset
+- SKETCH › MODIFY › Trim
+- SKETCH › MODIFY › Extend
+- SKETCH › MODIFY › Break
+- SKETCH › MODIFY › Sketch Scale
+- SKETCH › MODIFY › Move/Copy
+- SKETCH › MODIFY › Change Parameters
+- SKETCH › CONSTRAINTS › AutoConstrain
+- SKETCH › CONSTRAINTS › AutoConstrain from datum
+- SKETCH › CONSTRAINTS › Horizontal/Vertical
+- SKETCH › CONSTRAINTS › Coincident
+- SKETCH › CONSTRAINTS › Tangent
+- SKETCH › CONSTRAINTS › Equal
+- SKETCH › CONSTRAINTS › Parallel
+- SKETCH › CONSTRAINTS › Perpendicular
+- SKETCH › CONSTRAINTS › Fix/UnFix
+- SKETCH › CONSTRAINTS › MidPoint
+- SKETCH › CONSTRAINTS › Concentric
+- SKETCH › CONSTRAINTS › Collinear
+- SKETCH › CONSTRAINTS › Symmetry
+- SKETCH › CONSTRAINTS › Curvature
+- SKETCH › CONSTRAINTS › Polygon
+- SKETCH › CONFIGURE › Configure
+- SKETCH › CONFIGURE › Display Configuration Table
+- SKETCH › INSPECT › Measure
+- SKETCH › INSPECT › Interference
+- SKETCH › INSPECT › Section Analysis
+- SKETCH › INSPECT › Curvature Comb Analysis
+- SKETCH › INSPECT › Curvature Map Analysis
+- SKETCH › INSPECT › Draft Analysis
+- SKETCH › INSPECT › Environment Map Analysis
+- SKETCH › INSPECT › Isocurve Analysis
+- SKETCH › INSPECT › Zebra Analysis
+- SKETCH › INSPECT › Accessibility Analysis
+- SKETCH › INSPECT › Center of Mass
+- SKETCH › INSPECT › Minimum Radius Analysis
+- SKETCH › INSERT › Decal
+- SKETCH › INSERT › Canvas
+- SKETCH › INSERT › Insert SVG
+- SKETCH › INSERT › Insert DXF
+- SKETCH › INSERT › Insert Mesh
+- SKETCH › INSERT › Insert Component
+- SKETCH › INSERT › Insert Fastener
+- SKETCH › FINISH SKETCH › Finish Sketch
+- SKETCH › FINISH SKETCH › Finish with AutoConstrain
 
 ## Not yet (SOLID, SKETCH)
 
-- SOLID › CREATE › Create Form (`TSplineBaseFeatureCreationCommand`)
-- SOLID › CREATE › Derive (`PushDeriveCommand`)
-- SOLID › CREATE › Automated Modeling (`AutomatedModelingCommand`)
-- SOLID › CREATE › Geometric Pattern (`FusionPatternGeometricCommand`)
-- SOLID › CREATE › Boundary Fill (`SurfaceSculpt`)
-- SOLID › CREATE › Find Features (`FusionFindFeaturesCommand`)
-- SOLID › CREATE › Fluid Volume (`EnclosureCommand`)
-- SOLID › CREATE › Create Base Feature (`BaseFeatureCreationCommand`)
-- SOLID › CREATE › Create Linked PCB (`PCBExternalComponentCreationCmd`)
-- SOLID › CREATE › Derive PCB (`PCBDeriveCmd`)
-- SOLID › CREATE › Create Unlinked PCB (`PCBCreateCmd`)
-- SOLID › CREATE › Generate Timeline (`TimelineBuilderCommand`)
-- SOLID › MODIFY › Edit Face (`EditFaceCommand`)
-- SOLID › MODIFY › Split Face (`FusionSplitFaceCommand`)
-- SOLID › MODIFY › Silhouette Split (`FusionPartingLineSplitCmd`)
-- SOLID › MODIFY › Arrange (`ArrangeCommand`)
-- SOLID › MODIFY › Remove Features (`FusionRemoveFeaturesCommand`)
-- SOLID › MODIFY › Remove Faces (`FusionRemoveFacesCommand`)
-- SOLID › MODIFY › Replace with Primitives (`ReplaceWithPrimitivesCommand`)
-- SOLID › MODIFY › Volumetric Lattice (`VolFieldCreateLatticeCommand`)
-- SOLID › MODIFY › Volumetric Texture (`VolFieldTextureCommand`)
-- SOLID › MODIFY › VolFieldModifyModelCommand (`VolFieldModifyModelCommand`)
-- SOLID › MODIFY › Manage Materials (`MaterialCommand`)
-- SOLID › MODIFY › Compute Unresolved (`FusionComputeUnresolvedCommand`)
-- SOLID › MODIFY › Convert (`TSpline2BRepCommand`)
-- SOLID › MODIFY › Bill of Materials (`MaterializedBomHybridCmd`)
-- SOLID › ASSEMBLE › Duplicate With Joints (`FusionDuplicateWithJointsCommand`)
-- SOLID › ASSEMBLE › Constrain Components (`AssemblyMateCommand`)
-- SOLID › ASSEMBLE › Align Constraint (`AlignConstraintCmd`)
-- SOLID › ASSEMBLE › Angle Constraint (`AngleConstraintCmd`)
-- SOLID › ASSEMBLE › Center Constraint (`MidplaneConstraintCmd`)
-- SOLID › ASSEMBLE › Tangent Constraint (`TangentConstraintCmd`)
-- SOLID › ASSEMBLE › Joint Constraint (`JointConstraintCmd`)
-- SOLID › ASSEMBLE › As-Built Constraint (`AsBuiltConstraintCmd`)
-- SOLID › CONFIGURE › Create Configuration Rules (`FusionConfigurationRulesCmd`)
-- SOLID › CONSTRUCT › User Coordinate System (UCS) (`CoordinateSystemCommand`)
-- SOLID › CONSTRUCT › Tangent Plane (`ConstructionTangentPlaneCommand`)
-- SOLID › CONSTRUCT › Midplane (`ConstructionMidPlaneCommand`)
-- SOLID › CONSTRUCT › Perpendicular Plane (`ConstructionPlanePerpendicularToPlaneCommand`)
-- SOLID › CONSTRUCT › Plane Through Two Edges (`ConstructionPlaneFromTwoEdgesCommand`)
-- SOLID › CONSTRUCT › Plane Through Three Points (`ConstructionPlaneFromThreePointsCommand`)
-- SOLID › CONSTRUCT › Plane Along Path (`ConstructionPlaneAlongPathCommand`)
-- SOLID › CONSTRUCT › Axis Through Cylinder/Cone/Torus (`ConstructionAxisThroughCylinderCommand`)
-- SOLID › CONSTRUCT › Axis Perpendicular To Face (`ConstructionAxisNormalToFaceCommand`)
-- SOLID › CONSTRUCT › Axis Through Two Planes (`ConstructionAxisFromTwoPlanesCommand`)
-- SOLID › CONSTRUCT › Axis Through Two Points (`ConstructionAxisThroughTwoPointsCommand`)
-- SOLID › CONSTRUCT › Axis Through Edge (`ConstructionAxisThroughEdgeCommand`)
-- SOLID › CONSTRUCT › Point At Vertex (`ConstructionPointFromPointCommand`)
-- SOLID › CONSTRUCT › Point Through Two Edges (`ConstructionPointThroughTwoEdgesCommand`)
-- SOLID › CONSTRUCT › Point Through Three Planes (`ConstructionPointFromThreePlanesCommand`)
-- SOLID › CONSTRUCT › Point At Center Of Circle/Sphere/Torus (`ConstructionPointFromCircleOrSphereCommand`)
-- SOLID › CONSTRUCT › Point At Edge And Plane (`ConstructionPointAtEdgeAndPlaneCommand`)
-- SOLID › CONSTRUCT › Point Along Path (`ConstructionPointAlongPathCommand`)
-- SOLID › INSPECT › Validate (`FusionSurfaceValidateCommand`)
-- SOLID › INSPECT › Component Connection Analysis (`FusionComponentConnectionAnalysisCommand`)
-- SOLID › INSPECT › DOF Analysis (`FusionDOFAnalysisCommand`)
-- SOLID › INSPECT › Edit Component Connection Analysis (`FusionEditComponentConnectionAnalysisCommand`)
-- SOLID › INSPECT › Fastener Stack Analysis (`FusionFastenerStackAnalysisCommand`)
-- SOLID › INSPECT › Find Similar Components (`SimilarPartsCommand`)
-- SOLID › INSPECT › Navigator (`GraphViewCmd`)
-- SOLID › INSPECT › Display Component Colors (`FusionViewColorCyclingToggleCmd`)
-- SOLID › INSPECT › Display Mesh Face Groups (`FacegroupsToggleCmd`)
-- SOLID › INSPECT › Assembly Statistics (`FusionAssemblyStatisticsCommand`)
-- SOLID › INSPECT › Change Summary (`ShowChangeAwarenessToolbarCmd`)
-- SOLID › INSPECT › History (`ShowHistoryToolbarCmd`)
-- SOLID › INSPECT › Sustainability Insights (`GravityClimate_ManufacturingSustainabilityInsights_MainDialog`)
-- SOLID › INSERT › Insert T-Spline (`TSplineImportCommand`)
-- SOLID › INSERT › Insert Derive (`PullDeriveCommand`)
-- SOLID › INSERT › Insert McMaster-Carr Component (`InsertMcMasterCarrComponentCommand`)
-- SOLID › INSERT › Insert a manufacturer part (`cadenasparts4cad`)
-- SOLID › INSERT › Insert TraceParts Supplier Components (`traceparts_insert`)
-- SOLID › ASSEMBLE › Add To Assembly (`NewAssemblyFromPartCommand`)
-- SOLID › SELECT › Select (`SelectCommand`)
-- SOLID › SELECT › Window Selection (`selectWindow`)
-- SOLID › SELECT › Freeform Selection (`selectFreeForm`)
-- SOLID › SELECT › Paint Selection (`selectPaint`)
-- SOLID › SELECT › Select By Name (`SelectByNameCommand`)
-- SOLID › SELECT › Select By Boundary (`SelectByBoundaryCommand`)
-- SOLID › SELECT › Select By Size (`FusionSelectBodiesBySizeCommand`)
-- SOLID › SELECT › Invert Selection (`SelectByInvertCommand`)
-- SOLID › SELECT › Seed And Boundary (`FusionSelectSeedAndBoundaryFacesCommand`)
-- SOLID › SELECT › Component Drag (`FusionDragCompControlsCmd`)
-- SOLID › SELECT › Select Body Priority (`SelectBodyPriorityCommand`)
-- SOLID › SELECT › Select Face Priority (`SelectFacePriorityCommand`)
-- SOLID › SELECT › Select Edge Priority (`SelectEdgePriorityCommand`)
-- SOLID › SELECT › Select Component Priority (`SelectComponentPriorityCommand`)
-- SOLID › SELECT › Selection Filters (`SelectionFilterCommand`)
-- SKETCH › CONFIGURE › Create Configuration Rules (`FusionConfigurationRulesCmd`)
-- SKETCH › INSPECT › Validate (`FusionSurfaceValidateCommand`)
-- SKETCH › INSPECT › Component Connection Analysis (`FusionComponentConnectionAnalysisCommand`)
-- SKETCH › INSPECT › DOF Analysis (`FusionDOFAnalysisCommand`)
-- SKETCH › INSPECT › Edit Component Connection Analysis (`FusionEditComponentConnectionAnalysisCommand`)
-- SKETCH › INSPECT › Fastener Stack Analysis (`FusionFastenerStackAnalysisCommand`)
-- SKETCH › INSPECT › Find Similar Components (`SimilarPartsCommand`)
-- SKETCH › INSPECT › Navigator (`GraphViewCmd`)
-- SKETCH › INSPECT › Display Component Colors (`FusionViewColorCyclingToggleCmd`)
-- SKETCH › INSPECT › Display Mesh Face Groups (`FacegroupsToggleCmd`)
-- SKETCH › INSPECT › Assembly Statistics (`FusionAssemblyStatisticsCommand`)
-- SKETCH › INSPECT › Change Summary (`ShowChangeAwarenessToolbarCmd`)
-- SKETCH › INSPECT › History (`ShowHistoryToolbarCmd`)
-- SKETCH › INSPECT › Sustainability Insights (`GravityClimate_ManufacturingSustainabilityInsights_MainDialog`)
-- SKETCH › INSERT › Insert T-Spline (`TSplineImportCommand`)
-- SKETCH › INSERT › Duplicate With Joints (`FusionDuplicateWithJointsCommand`)
-- SKETCH › INSERT › Insert Derive (`PullDeriveCommand`)
-- SKETCH › INSERT › Insert McMaster-Carr Component (`InsertMcMasterCarrComponentCommand`)
-- SKETCH › INSERT › Insert a manufacturer part (`cadenasparts4cad`)
-- SKETCH › INSERT › Insert TraceParts Supplier Components (`traceparts_insert`)
-- SKETCH › ASSEMBLE › Add To Assembly (`NewAssemblyFromPartCommand`)
-- SKETCH › SELECT › Select (`SelectCommand`)
-- SKETCH › SELECT › Window Selection (`selectWindow`)
-- SKETCH › SELECT › Freeform Selection (`selectFreeForm`)
-- SKETCH › SELECT › Paint Selection (`selectPaint`)
-- SKETCH › SELECT › Select By Name (`SelectByNameCommand`)
-- SKETCH › SELECT › Select By Boundary (`SelectByBoundaryCommand`)
-- SKETCH › SELECT › Select By Size (`FusionSelectBodiesBySizeCommand`)
-- SKETCH › SELECT › Invert Selection (`SelectByInvertCommand`)
-- SKETCH › SELECT › Seed And Boundary (`FusionSelectSeedAndBoundaryFacesCommand`)
-- SKETCH › SELECT › Component Drag (`FusionDragCompControlsCmd`)
-- SKETCH › SELECT › Select Body Priority (`SelectBodyPriorityCommand`)
-- SKETCH › SELECT › Select Face Priority (`SelectFacePriorityCommand`)
-- SKETCH › SELECT › Select Edge Priority (`SelectEdgePriorityCommand`)
-- SKETCH › SELECT › Select Component Priority (`SelectComponentPriorityCommand`)
-- SKETCH › SELECT › Selection Filters (`SelectionFilterCommand`)
+- SOLID › CREATE › Create Form
+- SOLID › CREATE › Derive
+- SOLID › CREATE › Automated Modeling
+- SOLID › CREATE › Geometric Pattern
+- SOLID › CREATE › Boundary Fill
+- SOLID › CREATE › Find Features
+- SOLID › CREATE › Fluid Volume
+- SOLID › CREATE › Create Base Feature
+- SOLID › CREATE › Create Linked PCB
+- SOLID › CREATE › Derive PCB
+- SOLID › CREATE › Create Unlinked PCB
+- SOLID › CREATE › Generate Timeline
+- SOLID › MODIFY › Edit Face
+- SOLID › MODIFY › Split Face
+- SOLID › MODIFY › Silhouette Split
+- SOLID › MODIFY › Arrange
+- SOLID › MODIFY › Remove Features
+- SOLID › MODIFY › Remove Faces
+- SOLID › MODIFY › Replace with Primitives
+- SOLID › MODIFY › Volumetric Lattice
+- SOLID › MODIFY › Volumetric Texture
+- SOLID › MODIFY › VolFieldModifyModelCommand
+- SOLID › MODIFY › Manage Materials
+- SOLID › MODIFY › Compute Unresolved
+- SOLID › MODIFY › Convert
+- SOLID › MODIFY › Bill of Materials
+- SOLID › ASSEMBLE › Duplicate With Joints
+- SOLID › ASSEMBLE › Constrain Components
+- SOLID › ASSEMBLE › Align Constraint
+- SOLID › ASSEMBLE › Angle Constraint
+- SOLID › ASSEMBLE › Center Constraint
+- SOLID › ASSEMBLE › Tangent Constraint
+- SOLID › ASSEMBLE › Joint Constraint
+- SOLID › ASSEMBLE › As-Built Constraint
+- SOLID › CONFIGURE › Create Configuration Rules
+- SOLID › CONSTRUCT › User Coordinate System (UCS)
+- SOLID › CONSTRUCT › Tangent Plane
+- SOLID › CONSTRUCT › Midplane
+- SOLID › CONSTRUCT › Perpendicular Plane
+- SOLID › CONSTRUCT › Plane Through Two Edges
+- SOLID › CONSTRUCT › Plane Through Three Points
+- SOLID › CONSTRUCT › Plane Along Path
+- SOLID › CONSTRUCT › Axis Through Cylinder/Cone/Torus
+- SOLID › CONSTRUCT › Axis Perpendicular To Face
+- SOLID › CONSTRUCT › Axis Through Two Planes
+- SOLID › CONSTRUCT › Axis Through Two Points
+- SOLID › CONSTRUCT › Axis Through Edge
+- SOLID › CONSTRUCT › Point At Vertex
+- SOLID › CONSTRUCT › Point Through Two Edges
+- SOLID › CONSTRUCT › Point Through Three Planes
+- SOLID › CONSTRUCT › Point At Center Of Circle/Sphere/Torus
+- SOLID › CONSTRUCT › Point At Edge And Plane
+- SOLID › CONSTRUCT › Point Along Path
+- SOLID › INSPECT › Validate
+- SOLID › INSPECT › Component Connection Analysis
+- SOLID › INSPECT › DOF Analysis
+- SOLID › INSPECT › Edit Component Connection Analysis
+- SOLID › INSPECT › Fastener Stack Analysis
+- SOLID › INSPECT › Find Similar Components
+- SOLID › INSPECT › Navigator
+- SOLID › INSPECT › Display Component Colors
+- SOLID › INSPECT › Display Mesh Face Groups
+- SOLID › INSPECT › Assembly Statistics
+- SOLID › INSPECT › Change Summary
+- SOLID › INSPECT › History
+- SOLID › INSPECT › Sustainability Insights
+- SOLID › INSERT › Insert T-Spline
+- SOLID › INSERT › Insert Derive
+- SOLID › INSERT › Insert McMaster-Carr Component
+- SOLID › INSERT › Insert a manufacturer part
+- SOLID › INSERT › Insert TraceParts Supplier Components
+- SOLID › ASSEMBLE › Add To Assembly
+- SOLID › SELECT › Select
+- SOLID › SELECT › Window Selection
+- SOLID › SELECT › Freeform Selection
+- SOLID › SELECT › Paint Selection
+- SOLID › SELECT › Select By Name
+- SOLID › SELECT › Select By Boundary
+- SOLID › SELECT › Select By Size
+- SOLID › SELECT › Invert Selection
+- SOLID › SELECT › Seed And Boundary
+- SOLID › SELECT › Component Drag
+- SOLID › SELECT › Select Body Priority
+- SOLID › SELECT › Select Face Priority
+- SOLID › SELECT › Select Edge Priority
+- SOLID › SELECT › Select Component Priority
+- SOLID › SELECT › Selection Filters
+- SKETCH › CONFIGURE › Create Configuration Rules
+- SKETCH › INSPECT › Validate
+- SKETCH › INSPECT › Component Connection Analysis
+- SKETCH › INSPECT › DOF Analysis
+- SKETCH › INSPECT › Edit Component Connection Analysis
+- SKETCH › INSPECT › Fastener Stack Analysis
+- SKETCH › INSPECT › Find Similar Components
+- SKETCH › INSPECT › Navigator
+- SKETCH › INSPECT › Display Component Colors
+- SKETCH › INSPECT › Display Mesh Face Groups
+- SKETCH › INSPECT › Assembly Statistics
+- SKETCH › INSPECT › Change Summary
+- SKETCH › INSPECT › History
+- SKETCH › INSPECT › Sustainability Insights
+- SKETCH › INSERT › Insert T-Spline
+- SKETCH › INSERT › Duplicate With Joints
+- SKETCH › INSERT › Insert Derive
+- SKETCH › INSERT › Insert McMaster-Carr Component
+- SKETCH › INSERT › Insert a manufacturer part
+- SKETCH › INSERT › Insert TraceParts Supplier Components
+- SKETCH › ASSEMBLE › Add To Assembly
+- SKETCH › SELECT › Select
+- SKETCH › SELECT › Window Selection
+- SKETCH › SELECT › Freeform Selection
+- SKETCH › SELECT › Paint Selection
+- SKETCH › SELECT › Select By Name
+- SKETCH › SELECT › Select By Boundary
+- SKETCH › SELECT › Select By Size
+- SKETCH › SELECT › Invert Selection
+- SKETCH › SELECT › Seed And Boundary
+- SKETCH › SELECT › Component Drag
+- SKETCH › SELECT › Select Body Priority
+- SKETCH › SELECT › Select Face Priority
+- SKETCH › SELECT › Select Edge Priority
+- SKETCH › SELECT › Select Component Priority
+- SKETCH › SELECT › Selection Filters

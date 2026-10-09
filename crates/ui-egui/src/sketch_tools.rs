@@ -39,16 +39,16 @@ thread_local! {
 /// Commands registered on one panel that Fusion also lists on another: the analyses (sketch
 /// INSPECT) on SOLID INSPECT, and Interference (SOLID INSPECT) on sketch INSPECT.
 const ALSO_IN: &[(&str, &str, &str)] = &[
-    ("SOLID", "INSPECT", "FusionZebraAnalysisCommand"),
-    ("SOLID", "INSPECT", "FusionDraftAnalysisCommand"),
-    ("SOLID", "INSPECT", "FusionCurvatureMapAnalysisCommand"),
-    ("SOLID", "INSPECT", "FusionEnvironmentMapAnalysisCommand"),
-    ("SOLID", "INSPECT", "FusionAccessibilityAnalysisCommand"),
-    ("SOLID", "INSPECT", "FusionMinimumRadiusAnalysisCommand"),
-    ("SOLID", "INSPECT", "FusionIsoCurveAnalysisCommand"),
-    ("SOLID", "INSPECT", "FusionCurvatureCombAnalysisCommand"),
-    ("SOLID", "INSPECT", "FusionCenterOfMassCommand"),
-    ("SKETCH", "INSPECT", "InterferenceCheckCommand"),
+    ("SOLID", "INSPECT", "inspect.zebra"),
+    ("SOLID", "INSPECT", "inspect.draft"),
+    ("SOLID", "INSPECT", "inspect.curvature_map"),
+    ("SOLID", "INSPECT", "inspect.environment_map"),
+    ("SOLID", "INSPECT", "inspect.accessibility"),
+    ("SOLID", "INSPECT", "inspect.minimum_radius"),
+    ("SOLID", "INSPECT", "inspect.isocurve"),
+    ("SOLID", "INSPECT", "inspect.curvature_comb"),
+    ("SOLID", "INSPECT", "inspect.center_of_mass"),
+    ("SKETCH", "INSPECT", "inspect.interference"),
 ];
 
 /// A panel's commands plus the ones it shares with another panel (see [`ALSO_IN`]).
@@ -74,19 +74,19 @@ pub fn also_in<'a>(
 fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     let Ok(v) = app.run(cmd, p) else { return };
     let mark = match cmd {
-        "FusionCenterOfMassCommand" => v3(&v["center"]).map(|c| (c, "Center of mass".to_string())),
+        "inspect.center_of_mass" => v3(&v["center"]).map(|c| (c, "Center of mass".to_string())),
         _ => v3(&v["at"]).zip(v["min_radius"].as_f64()).map(|(c, r)| (c, format!("R min {r:.3} mm"))),
     };
     if let Some(m) = mark {
         MARKS.with(|k| k.borrow_mut().push(m));
-    } else if cmd == "FusionMinimumRadiusAnalysisCommand" {
+    } else if cmd == "inspect.minimum_radius" {
         app.set_status("Minimum radius: it is straight (no curvature)", false);
     }
 }
 
 /// Isocurve analysis lines.
 fn iso_lines(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if app.tool.as_ref().map(|t| t.cmd) != Some("FusionIsoCurveAnalysisCommand") {
+    if app.tool.as_ref().map(|t| t.cmd) != Some("inspect.isocurve") {
         ISO.with(|i| i.borrow_mut().clear());
         return;
     }
@@ -104,7 +104,7 @@ fn iso_lines(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 
 /// Analysis markers: a target with its label.
 fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if !app.tool.as_ref().is_some_and(|t| matches!(t.cmd, "FusionMinimumRadiusAnalysisCommand" | "FusionCenterOfMassCommand")) {
+    if !app.tool.as_ref().is_some_and(|t| matches!(t.cmd, "inspect.minimum_radius" | "inspect.center_of_mass")) {
         MARKS.with(|m| m.borrow_mut().clear());
         return;
     }
@@ -128,19 +128,12 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
     // Surface analyses toggle: a second click turns the same one off.
     use solvecraft_engine::SurfaceAnalysis as A;
     let same = match (id, app.session.analysis) {
-        ("FusionZebraAnalysisCommand", Some(A::Zebra { .. })) => Some(true),
-        ("FusionDraftAnalysisCommand", Some(A::Draft { .. })) => Some(true),
-        ("FusionCurvatureMapAnalysisCommand", Some(A::Curvature { .. })) => Some(true),
-        ("FusionEnvironmentMapAnalysisCommand", Some(A::Environment)) => Some(true),
-        ("FusionAccessibilityAnalysisCommand", Some(A::Access { .. })) => Some(true),
-        (
-            "FusionZebraAnalysisCommand"
-            | "FusionDraftAnalysisCommand"
-            | "FusionCurvatureMapAnalysisCommand"
-            | "FusionEnvironmentMapAnalysisCommand"
-            | "FusionAccessibilityAnalysisCommand",
-            _,
-        ) => Some(false),
+        ("inspect.zebra", Some(A::Zebra { .. })) => Some(true),
+        ("inspect.draft", Some(A::Draft { .. })) => Some(true),
+        ("inspect.curvature_map", Some(A::Curvature { .. })) => Some(true),
+        ("inspect.environment_map", Some(A::Environment)) => Some(true),
+        ("inspect.accessibility", Some(A::Access { .. })) => Some(true),
+        ("inspect.zebra" | "inspect.draft" | "inspect.curvature_map" | "inspect.environment_map" | "inspect.accessibility", _) => Some(false),
         _ => None,
     };
     if let Some(on) = same {
@@ -150,7 +143,7 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         }
         return false;
     }
-    if id == "FusionCenterOfMassCommand" {
+    if id == "inspect.center_of_mass" {
         // The whole model at once; the tool stays for picking single bodies.
         MARKS.with(|m| m.borrow_mut().clear());
         DEFERRED.with(|d| d.set(true));
@@ -163,7 +156,7 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         }
         return false;
     }
-    if !matches!(id, "FusionAddCanvasCommand" | "FusionAddEditDecalCommand") {
+    if !matches!(id, "canvas.insert" | "canvas.decal") {
         return true;
     }
     let path = app.services.pick_open.as_ref().and_then(|f| f());
@@ -178,7 +171,7 @@ fn v3(v: &Value) -> Option<Vec3> {
 
 /// Curvature combs: teeth and the envelope through their tips.
 fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if app.tool.as_ref().map(|t| t.cmd) != Some("FusionCurvatureCombAnalysisCommand") {
+    if app.tool.as_ref().map(|t| t.cmd) != Some("inspect.curvature_comb") {
         COMBS.with(|c| c.borrow_mut().clear());
         return;
     }
@@ -243,7 +236,7 @@ pub fn refine_snap(
         None => PREV.with(Cell::get),
     };
     // Line tool: the tangent point of a circle or arc (before plain "on the curve").
-    let line_tool = app.tool.as_ref().is_none_or(|t| t.cmd == "DrawPolyline");
+    let line_tool = app.tool.as_ref().is_none_or(|t| t.cmd == "sketch.line");
     if best.is_none()
         && line_tool
         && let Some(prev) = prev
@@ -346,25 +339,25 @@ enum Mode {
 
 fn mode(id: &str) -> Option<Mode> {
     Some(match id {
-        "ProjectNewCmd" | "IntersectCmd" | "Include3DGeometry" | "FitCurvesToSectionCommand" | "SketchIsoparametricCurve" => Mode::ModelRef,
-        "FusionCurvatureCombAnalysisCommand" | "FusionAddCanvasCommand" | "FusionAddEditDecalCommand" => Mode::ModelRef,
-        "FusionMinimumRadiusAnalysisCommand" | "FusionCenterOfMassCommand" | "FusionIsoCurveAnalysisCommand" => Mode::ModelRef,
-        "TrimSketchCmd" | "ExtendSketchCmd" | "BreakSketchCmd" => Mode::CurveAt,
-        "SketchMidpointLine" => Mode::Points(2),
-        "ArcTangent" => Mode::Points(2),
-        "CircleElipse" | "ConicCurveCmd" | "ShapeSlotCenterPoint" => Mode::Points(3),
-        "ShapeArcSlotThreePoint" | "ShapeArcSlotCenterTwoPoint" => Mode::Points(4),
-        "DrawSpline" | "DrawCVMSpline3D" | "DrawCVMSpline5D" => Mode::Points(0),
-        "MTextCmd" => Mode::Points(1),
-        "BlendG1CurveSketchCmd" => Mode::Points(2),
-        "Offset" => Mode::Entities(1),
-        "FilletSketchCmd" | "ChamferSketchEqualDistance" | "ChamferSketchDistanceAngle" | "ChamferSketchDistanceDistance" => Mode::Entities(1),
-        "ConstraintSmooth" | "CircleTanTanRadius" => Mode::Entities(2),
-        "CircleThreeTangent" => Mode::Entities(3),
-        "SketchConstrainer" | "SketchPolygonConstraintCmd" => Mode::Entities(0),
+        "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.fit_curves_to_section" | "sketch.isoparametric_curve" => Mode::ModelRef,
+        "inspect.curvature_comb" | "canvas.insert" | "canvas.decal" => Mode::ModelRef,
+        "inspect.minimum_radius" | "inspect.center_of_mass" | "inspect.isocurve" => Mode::ModelRef,
+        "sketch.trim" | "sketch.extend" | "sketch.break" => Mode::CurveAt,
+        "sketch.line.midpoint" => Mode::Points(2),
+        "sketch.arc.tangent" => Mode::Points(2),
+        "sketch.ellipse" | "sketch.conic" | "sketch.slot.center_point" => Mode::Points(3),
+        "sketch.slot.arc_three_point" | "sketch.slot.arc_center" => Mode::Points(4),
+        "sketch.spline.fit_point" | "sketch.spline.control_point" | "sketch.spline.control_point_5" => Mode::Points(0),
+        "sketch.text" => Mode::Points(1),
+        "sketch.blend_curve" => Mode::Points(2),
+        "sketch.offset" => Mode::Entities(1),
+        "sketch.fillet" | "sketch.chamfer.equal_distance" | "sketch.chamfer.distance_angle" | "sketch.chamfer.two_distance" => Mode::Entities(1),
+        "sketch.constraint.curvature" | "sketch.circle.two_tangent" => Mode::Entities(2),
+        "sketch.circle.three_tangent" => Mode::Entities(3),
+        "sketch.constrainer" | "sketch.constraint.polygon" => Mode::Entities(0),
         "sketch.centerline" => Mode::Entities(1),
-        "MirrorSketchCommand" | "CircularSketchPatternCommand" | "RectangularSketchPatternCommand" => Mode::EntitiesThen,
-        "ProjectToSurface" | "IntersectionCurve" | "SpunProfileCmd" => Mode::Steps,
+        "sketch.mirror" | "sketch.pattern.circular" | "sketch.pattern.rectangular" => Mode::EntitiesThen,
+        "sketch.project_to_surface" | "sketch.intersection_curve" | "sketch.spun_profile" => Mode::Steps,
         _ => return None,
     })
 }
@@ -388,46 +381,48 @@ pub fn tool_for(id: &str) -> Option<Tool> {
 pub fn hint(id: &str) -> Option<String> {
     Some(
         match id {
-            "ProjectNewCmd" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
-            "IntersectCmd" => "Intersect: click faces or edges to cut with the sketch plane",
-            "Include3DGeometry" => "Include 3D Geometry: click edges or vertices",
-            "FitCurvesToSectionCommand" => "Fit Curves to Mesh Section: click a body",
-            "SketchIsoparametricCurve" => "Isoparametric Curve: click a point on a face (Shift: along)",
-            "FusionCurvatureCombAnalysisCommand" => "Curvature comb: click sketch curves or model edges",
-            "FusionMinimumRadiusAnalysisCommand" => "Minimum radius: click sketch curves, edges or faces",
-            "FusionCenterOfMassCommand" => "Center of mass of all bodies; click a body for its own",
-            "FusionIsoCurveAnalysisCommand" => "Isocurves: click faces",
-            "FusionAddCanvasCommand" => "Canvas: click a plane or a planar face where the image's centre goes",
-            "FusionAddEditDecalCommand" => "Decal: click a planar face where the image's centre goes",
-            "TrimSketchCmd" => "Trim: click the piece of a curve to remove",
-            "ExtendSketchCmd" => "Extend: click a curve near the end to extend",
-            "BreakSketchCmd" => "Break: click a curve where it should split",
-            "SketchMidpointLine" => "Midpoint line: click the middle, then an end",
-            "ArcTangent" => "Tangent arc: click the end of a line or arc, then the arc's end",
-            "CircleElipse" => "Ellipse: click the centre, the end of the major axis, then a point on it",
-            "ConicCurveCmd" => "Conic: click the start, the end, then the apex",
-            "ShapeSlotCenterPoint" => "Slot: click the centre, an arc centre, then the width",
-            "ShapeArcSlotThreePoint" => "Arc slot: click start, a point on the arc, the end, then the width",
-            "ShapeArcSlotCenterTwoPoint" => "Arc slot: click the centre, the start, the end, then the width",
-            "DrawSpline" => "Spline: click fit points; right-click to finish",
-            "DrawCVMSpline3D" | "DrawCVMSpline5D" => "Control point spline: click control points; right-click to finish",
-            "MTextCmd" => "Text: click where the text starts",
-            "BlendG1CurveSketchCmd" => "Blend curve: click the ends of two curves",
-            "Offset" => "Offset: click a curve (its chain is offset), then the side and distance",
-            "FilletSketchCmd" => "Fillet: click the corner of two lines",
-            "ChamferSketchEqualDistance" | "ChamferSketchDistanceAngle" | "ChamferSketchDistanceDistance" => "Chamfer: click the corner of two lines",
-            "ConstraintSmooth" => "Curvature: click two curves that share an end",
-            "CircleTanTanRadius" => "2-tangent circle: click two curves (the circle goes near the second click)",
-            "CircleThreeTangent" => "3-tangent circle: click three curves",
-            "SketchConstrainer" => "Constrain: click one or two entities; right-click to apply",
-            "SketchPolygonConstraintCmd" => "Polygon: click the lines of a closed chain; right-click to apply",
+            "sketch.project" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
+            "sketch.intersect" => "Intersect: click faces or edges to cut with the sketch plane",
+            "sketch.include_3d" => "Include 3D Geometry: click edges or vertices",
+            "sketch.fit_curves_to_section" => "Fit Curves to Mesh Section: click a body",
+            "sketch.isoparametric_curve" => "Isoparametric Curve: click a point on a face (Shift: along)",
+            "inspect.curvature_comb" => "Curvature comb: click sketch curves or model edges",
+            "inspect.minimum_radius" => "Minimum radius: click sketch curves, edges or faces",
+            "inspect.center_of_mass" => "Center of mass of all bodies; click a body for its own",
+            "inspect.isocurve" => "Isocurves: click faces",
+            "canvas.insert" => "Canvas: click a plane or a planar face where the image's centre goes",
+            "canvas.decal" => "Decal: click a planar face where the image's centre goes",
+            "sketch.trim" => "Trim: click the piece of a curve to remove",
+            "sketch.extend" => "Extend: click a curve near the end to extend",
+            "sketch.break" => "Break: click a curve where it should split",
+            "sketch.line.midpoint" => "Midpoint line: click the middle, then an end",
+            "sketch.arc.tangent" => "Tangent arc: click the end of a line or arc, then the arc's end",
+            "sketch.ellipse" => "Ellipse: click the centre, the end of the major axis, then a point on it",
+            "sketch.conic" => "Conic: click the start, the end, then the apex",
+            "sketch.slot.center_point" => "Slot: click the centre, an arc centre, then the width",
+            "sketch.slot.arc_three_point" => "Arc slot: click start, a point on the arc, the end, then the width",
+            "sketch.slot.arc_center" => "Arc slot: click the centre, the start, the end, then the width",
+            "sketch.spline.fit_point" => "Spline: click fit points; right-click to finish",
+            "sketch.spline.control_point" | "sketch.spline.control_point_5" => "Control point spline: click control points; right-click to finish",
+            "sketch.text" => "Text: click where the text starts",
+            "sketch.blend_curve" => "Blend curve: click the ends of two curves",
+            "sketch.offset" => "Offset: click a curve (its chain is offset), then the side and distance",
+            "sketch.fillet" => "Fillet: click the corner of two lines",
+            "sketch.chamfer.equal_distance" | "sketch.chamfer.distance_angle" | "sketch.chamfer.two_distance" => {
+                "Chamfer: click the corner of two lines"
+            }
+            "sketch.constraint.curvature" => "Curvature: click two curves that share an end",
+            "sketch.circle.two_tangent" => "2-tangent circle: click two curves (the circle goes near the second click)",
+            "sketch.circle.three_tangent" => "3-tangent circle: click three curves",
+            "sketch.constrainer" => "Constrain: click one or two entities; right-click to apply",
+            "sketch.constraint.polygon" => "Polygon: click the lines of a closed chain; right-click to apply",
             "sketch.centerline" => "Centerline: click lines",
-            "MirrorSketchCommand" => "Mirror: click entities, right-click, then click the mirror line",
-            "CircularSketchPatternCommand" => "Circular pattern: click entities, right-click, then click the centre",
-            "RectangularSketchPatternCommand" => "Rectangular pattern: click entities, right-click, then click two points (direction and spacing)",
-            "ProjectToSurface" => "Project to surface: click curves of other sketches, right-click, then click the face",
-            "IntersectionCurve" => "Intersection curve: click two faces",
-            "SpunProfileCmd" => "Spun profile: click the body, then the axis line",
+            "sketch.mirror" => "Mirror: click entities, right-click, then click the mirror line",
+            "sketch.pattern.circular" => "Circular pattern: click entities, right-click, then click the centre",
+            "sketch.pattern.rectangular" => "Rectangular pattern: click entities, right-click, then click two points (direction and spacing)",
+            "sketch.project_to_surface" => "Project to surface: click curves of other sketches, right-click, then click the face",
+            "sketch.intersection_curve" => "Intersection curve: click two faces",
+            "sketch.spun_profile" => "Spun profile: click the body, then the axis line",
             _ => return None,
         }
         .to_string(),
@@ -521,7 +516,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
     let at = sketch_point_at(app, proj, pos);
     let cmd = tool.cmd;
     match m {
-        Mode::ModelRef if cmd == "FusionCurvatureCombAnalysisCommand" => {
+        Mode::ModelRef if cmd == "inspect.curvature_comb" => {
             let params = hits.iter().find_map(|h| match h {
                 Hit::SketchCurve { sketch, id, .. } => Some(json!({"sketch": sketch, "curves": [id]})),
                 Hit::Edge { mid, .. } => Some(json!({"edges": [[mid.x, mid.y, mid.z]]})),
@@ -537,7 +532,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 }
             }
         }
-        Mode::ModelRef if cmd == "FusionIsoCurveAnalysisCommand" => {
+        Mode::ModelRef if cmd == "inspect.isocurve" => {
             let face = hits.iter().find_map(|h| if let Hit::Face { point, .. } = h { Some(*point) } else { None });
             if let Some(at) = face
                 && let Ok(v) = app.run(cmd, json!({"faces": [[at.x, at.y, at.z]]}))
@@ -549,21 +544,21 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 }
             }
         }
-        Mode::ModelRef if matches!(cmd, "FusionMinimumRadiusAnalysisCommand" | "FusionCenterOfMassCommand") => {
+        Mode::ModelRef if matches!(cmd, "inspect.minimum_radius" | "inspect.center_of_mass") => {
             let params = hits.iter().find_map(|h| match (cmd, h) {
-                ("FusionMinimumRadiusAnalysisCommand", Hit::SketchCurve { sketch, id, .. }) => Some(json!({"sketch": sketch, "curves": [id]})),
-                ("FusionMinimumRadiusAnalysisCommand", Hit::Edge { mid, .. }) => Some(json!({"edges": [[mid.x, mid.y, mid.z]]})),
-                ("FusionMinimumRadiusAnalysisCommand", Hit::Face { point, .. }) => Some(json!({"faces": [[point.x, point.y, point.z]]})),
-                ("FusionCenterOfMassCommand", Hit::Face { body, .. }) => Some(json!({"bodies": [body]})),
+                ("inspect.minimum_radius", Hit::SketchCurve { sketch, id, .. }) => Some(json!({"sketch": sketch, "curves": [id]})),
+                ("inspect.minimum_radius", Hit::Edge { mid, .. }) => Some(json!({"edges": [[mid.x, mid.y, mid.z]]})),
+                ("inspect.minimum_radius", Hit::Face { point, .. }) => Some(json!({"faces": [[point.x, point.y, point.z]]})),
+                ("inspect.center_of_mass", Hit::Face { body, .. }) => Some(json!({"bodies": [body]})),
                 _ => None,
             });
             if let Some(p) = params {
                 analysis(app, cmd, p);
             }
         }
-        Mode::ModelRef if matches!(cmd, "FusionAddCanvasCommand" | "FusionAddEditDecalCommand") => {
+        Mode::ModelRef if matches!(cmd, "canvas.insert" | "canvas.decal") => {
             let Some(path) = IMAGE.with(|i| i.borrow().clone()) else { return };
-            let decal = cmd == "FusionAddEditDecalCommand";
+            let decal = cmd == "canvas.decal";
             let target = hits.iter().find_map(|h| match h {
                 Hit::Face { point, .. } => Some((json!({"face": [point.x, point.y, point.z]}), *point)),
                 Hit::Plane { name, point } if !decal => Some((json!(name), *point)),
@@ -599,12 +594,12 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             let r = hits.iter().find_map(|h| model_ref(app, h));
             let Some(r) = r else { return };
             match cmd {
-                "FitCurvesToSectionCommand" => {
+                "sketch.fit_curves_to_section" => {
                     if let Some(b) = r.get("body").and_then(Value::as_str) {
                         let _ = app.run(cmd, json!({"body": b}));
                     }
                 }
-                "SketchIsoparametricCurve" => {
+                "sketch.isoparametric_curve" => {
                     if r.get("face").is_some() {
                         let along = SHIFT.with(Cell::get);
                         let _ = app.run(cmd, json!({"face": r["face"], "body": r["body"], "direction": if along { "v" } else { "u" }}));
@@ -629,14 +624,14 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             }
         }
         Mode::Entities(n) => {
-            if cmd == "Offset" && !tool.picks.is_empty() {
+            if cmd == "sketch.offset" && !tool.picks.is_empty() {
                 if let Some((p, _)) = at {
                     offset_side(app, tool, p);
                 }
                 return;
             }
             let Some((id, is_point)) = sketch_entity(app, &hits) else { return };
-            if cmd == "Offset" {
+            if cmd == "sketch.offset" {
                 // First the curve, then the side point.
                 if tool.picks.is_empty() && !is_point {
                     tool.picks.push(id);
@@ -645,7 +640,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 }
                 return;
             }
-            if cmd.starts_with("Fillet") || cmd.starts_with("Chamfer") {
+            if cmd == "sketch.fillet" || cmd.starts_with("sketch.chamfer.") {
                 if is_point {
                     run_corner(app, cmd, &id);
                 }
@@ -672,13 +667,13 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             if tool.picks.last().is_some_and(|x| x == "|") {
                 let ents: Vec<String> = tool.picks.iter().filter(|x| *x != "|").cloned().collect();
                 match cmd {
-                    "MirrorSketchCommand" => {
+                    "sketch.mirror" => {
                         if let Some((line, false)) = sketch_entity(app, &hits) {
                             let _ = app.run(cmd, json!({"entities": ents, "line": line}));
                             tool.picks.clear();
                         }
                     }
-                    "CircularSketchPatternCommand" => {
+                    "sketch.pattern.circular" => {
                         if let Some(p) = at {
                             let _ = app.run(cmd, json!({"entities": ents, "center": arg(&p), "count": 6}));
                             tool.picks.clear();
@@ -707,7 +702,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             }
         }
         Mode::Steps => match cmd {
-            "IntersectionCurve" => {
+            "sketch.intersection_curve" => {
                 if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)).filter(|r| r.get("face").is_some()) {
                     tool.picks.push(r.to_string());
                     if tool.picks.len() >= 2 {
@@ -718,7 +713,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                     }
                 }
             }
-            "SpunProfileCmd" => {
+            "sketch.spun_profile" => {
                 if tool.picks.is_empty() {
                     if let Some(b) =
                         hits.iter().find_map(|h| model_ref(app, h)).and_then(|r| r.get("body").and_then(Value::as_str).map(str::to_string))
@@ -731,7 +726,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 }
             }
             _ => {
-                // ProjectToSurface: curves of other sketches, then (after a right-click) a face.
+                // sketch.project_to_surface: curves of other sketches, then (after a right-click) a face.
                 let staged = tool.picks.last().is_some_and(|x| x == "|");
                 if staged {
                     if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)).filter(|r| r.get("face").is_some()) {
@@ -751,26 +746,26 @@ fn run_points(app: &mut SolveApp, t: &Tool) {
     let p = &t.pts;
     let width = |a: Vec2, b: Vec2, c: Vec2| -> f64 { 2.0 * (b - a).normalized().map(|d| d.cross(c - a).abs()).unwrap_or(1.0) };
     let params = match (t.cmd, p.as_slice()) {
-        ("SketchMidpointLine", [m, e]) => json!({"mid": arg(m), "end": xy(e.0)}),
-        ("ArcTangent", [s, e]) => json!({"start": arg(s), "end": xy(e.0)}),
-        ("CircleElipse", [c, m, q]) => json!({"center": xy(c.0), "major": xy(m.0), "minor": xy(q.0)}),
-        ("ConicCurveCmd", [a, b, x]) => json!({"start": arg(a), "end": arg(b), "apex": arg(x)}),
-        ("ShapeSlotCenterPoint", [c, e, w]) => json!({"center": xy(c.0), "end": xy(e.0), "width": width(c.0, e.0, w.0).max(1e-3)}),
-        ("ShapeArcSlotThreePoint", [a, th, b, w]) => {
+        ("sketch.line.midpoint", [m, e]) => json!({"mid": arg(m), "end": xy(e.0)}),
+        ("sketch.arc.tangent", [s, e]) => json!({"start": arg(s), "end": xy(e.0)}),
+        ("sketch.ellipse", [c, m, q]) => json!({"center": xy(c.0), "major": xy(m.0), "minor": xy(q.0)}),
+        ("sketch.conic", [a, b, x]) => json!({"start": arg(a), "end": arg(b), "apex": arg(x)}),
+        ("sketch.slot.center_point", [c, e, w]) => json!({"center": xy(c.0), "end": xy(e.0), "width": width(c.0, e.0, w.0).max(1e-3)}),
+        ("sketch.slot.arc_three_point", [a, th, b, w]) => {
             json!({"start": xy(a.0), "through": xy(th.0), "end": xy(b.0), "width": (2.0 * w.0.dist(b.0)).max(1e-3)})
         }
-        ("ShapeArcSlotCenterTwoPoint", [c, a, b, w]) => {
+        ("sketch.slot.arc_center", [c, a, b, w]) => {
             let r = c.0.dist(a.0);
             json!({"center": xy(c.0), "start": xy(a.0), "end": xy(b.0), "width": (2.0 * (w.0.dist(c.0) - r).abs()).max(1e-3)})
         }
-        ("DrawSpline" | "DrawCVMSpline3D" | "DrawCVMSpline5D", pts) if pts.len() >= 2 => {
+        ("sketch.spline.fit_point" | "sketch.spline.control_point" | "sketch.spline.control_point_5", pts) if pts.len() >= 2 => {
             json!({"points": pts.iter().map(arg).collect::<Vec<_>>()})
         }
-        ("BlendG1CurveSketchCmd", [a, b]) => match (&a.1, &b.1) {
+        ("sketch.blend_curve", [a, b]) => match (&a.1, &b.1) {
             (Some(x), Some(y)) => json!({"a": x, "b": y}),
             _ => return,
         },
-        ("MTextCmd", [at]) => {
+        ("sketch.text", [at]) => {
             let at = at.0;
             TEXT.with(|t| *t.borrow_mut() = Some((at, String::new())));
             return;
@@ -783,9 +778,9 @@ fn run_points(app: &mut SolveApp, t: &Tool) {
 fn run_corner(app: &mut SolveApp, cmd: &str, point: &str) {
     let size = round_nice(corner_len(app, point) * 0.2);
     let params = match cmd {
-        "FilletSketchCmd" => json!({"point": point, "radius": size}),
-        "ChamferSketchDistanceAngle" => json!({"point": point, "distance": size, "angle": 45}),
-        "ChamferSketchDistanceDistance" => json!({"point": point, "distance": size, "distance2": size}),
+        "sketch.fillet" => json!({"point": point, "radius": size}),
+        "sketch.chamfer.distance_angle" => json!({"point": point, "distance": size, "angle": 45}),
+        "sketch.chamfer.two_distance" => json!({"point": point, "distance": size, "distance2": size}),
         _ => json!({"point": point, "distance": size}),
     };
     if let Ok(v) = app.run(cmd, params)
@@ -798,19 +793,19 @@ fn run_corner(app: &mut SolveApp, cmd: &str, point: &str) {
 fn run_entities(app: &mut SolveApp, t: &Tool) {
     let k = &t.picks;
     let params = match t.cmd {
-        "ConstraintSmooth" => json!({"a": k[0], "b": k[1]}),
-        "CircleTanTanRadius" => {
+        "sketch.constraint.curvature" => json!({"a": k[0], "b": k[1]}),
+        "sketch.circle.two_tangent" => {
             let r = round_nice(curve_len(app, &k[0]).min(curve_len(app, &k[1])) * 0.1);
             let near = t.pts.last().map(|p| xy(p.0)).unwrap_or(json!([0, 0]));
             json!({"curves": k, "radius": r, "near": near})
         }
-        "CircleThreeTangent" => {
+        "sketch.circle.three_tangent" => {
             // Start inside the three picks.
             let c = t.pts.iter().fold(Vec2::ZERO, |a, p| a + p.0) / t.pts.len().max(1) as f64;
             json!({"curves": k, "near": xy(c)})
         }
-        "SketchConstrainer" => json!({"entities": k}),
-        "SketchPolygonConstraintCmd" => json!({"lines": k}),
+        "sketch.constrainer" => json!({"entities": k}),
+        "sketch.constraint.polygon" => json!({"lines": k}),
         _ => return,
     };
     let _ = app.run(t.cmd, params);
@@ -847,7 +842,7 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
 
 /// Offset: the second click sets the side and distance.
 fn offset_side(app: &mut SolveApp, tool: &mut Tool, p: Vec2) -> bool {
-    if tool.cmd != "Offset" || tool.picks.is_empty() {
+    if tool.cmd != "sketch.offset" || tool.picks.is_empty() {
         return false;
     }
     let st = app.session.world_state();
@@ -857,7 +852,7 @@ fn offset_side(app: &mut SolveApp, tool: &mut Tool, p: Vec2) -> bool {
         .map(|sh| sh.dist(p))
         .unwrap_or(0.0);
     if d > 1e-6 {
-        let _ = app.run("Offset", json!({"curves": [tool.picks[0]], "distance": d, "side": xy(p)}));
+        let _ = app.run("sketch.offset", json!({"curves": [tool.picks[0]], "distance": d, "side": xy(p)}));
     }
     tool.picks.clear();
     true
@@ -1011,7 +1006,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     snap_hint(app, painter, proj);
     combs(app, painter, proj);
     if DEFERRED.with(|d| d.replace(false)) {
-        analysis(app, "FusionCenterOfMassCommand", json!({}));
+        analysis(app, "inspect.center_of_mass", json!({}));
     }
     marks(app, painter, proj);
     iso_lines(app, painter, proj);
@@ -1042,7 +1037,7 @@ fn text_entry(app: &mut SolveApp, ctx: &egui::Context) {
         Some(true) => {
             if !text.trim().is_empty() {
                 let h = round_nice(app.cam.half_height() * 0.1);
-                let _ = app.run("MTextCmd", json!({"text": text, "at": xy(at), "height": h}));
+                let _ = app.run("sketch.text", json!({"text": text, "at": xy(at), "height": h}));
             }
         }
         Some(false) => {}

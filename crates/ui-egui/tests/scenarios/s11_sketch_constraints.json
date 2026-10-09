@@ -1,6 +1,6 @@
 [
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -8,7 +8,7 @@
   }
  },
  {
-  "start": "DrawPolyline"
+  "start": "sketch.line"
  },
  {
   "click": {
@@ -63,7 +63,7 @@
   }
  },
  {
-  "start": "CircleCenterRadius"
+  "start": "sketch.circle.center"
  },
  {
   "click": {
@@ -85,7 +85,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchDimension"
+  "start": "sketch.dimension"
  },
  {
   "click": {
@@ -170,7 +170,7 @@
   }
  },
  {
-  "start": "ConstraintFix"
+  "start": "sketch.constraint.fix"
  },
  {
   "click": {
@@ -208,7 +208,7 @@
   }
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "expect": {

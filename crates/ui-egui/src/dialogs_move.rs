@@ -1,5 +1,5 @@
 //! Move/Copy: the move types (Free Move, Translate, Rotate, Point to Point, Point to Position),
-//! their rows and inputs, the triad on the canvas and the FusionMoveCommand they make. Nothing
+//! their rows and inputs, the triad on the canvas and the solid.move they make. Nothing
 //! moves until a value is typed or the triad is dragged.
 
 use serde_json::{Value, json};
@@ -165,7 +165,7 @@ fn deg(v: f64) -> String {
     format!("{} deg", if s == "-0" || s.is_empty() { "0" } else { s })
 }
 
-/// The FusionMoveCommand parameters (bodies, translate, axis, angle).
+/// The solid.move parameters (bodies, translate, axis, angle).
 pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     let Kind::Move { mode, x, y, z, rx, ry, rz, angle } = &d.kind else { return Err("not a move".into()) };
     let bodies = body_names(d);

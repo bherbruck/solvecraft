@@ -1,6 +1,6 @@
 [
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -8,7 +8,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -30,7 +30,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "call": "ui.view",
@@ -39,7 +39,7 @@
   }
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "15"
@@ -48,7 +48,7 @@
   "key": "Enter"
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -74,7 +74,7 @@
   }
  },
  {
-  "start": "DrawPolyline"
+  "start": "sketch.line"
  },
  {
   "click": {
@@ -126,10 +126,10 @@
   }
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
-  "start": "PrimitivePipe"
+  "start": "solid.pipe"
  },
  {
   "click": {

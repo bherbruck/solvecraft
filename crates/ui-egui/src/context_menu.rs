@@ -113,8 +113,8 @@ impl Item {
 fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let info = solvecraft_engine::find_command(id).map(|c| c.info(&app.session));
     let shortcut = match id {
-        "UndoCommand" => "Ctrl+Z".to_string(),
-        "RedoCommand" => "Ctrl+Y".to_string(),
+        "edit.undo" => "Ctrl+Z".to_string(),
+        "edit.redo" => "Ctrl+Y".to_string(),
         _ => crate::keymap::effective(app, id).unwrap_or_default(),
     };
     Item {
@@ -257,23 +257,23 @@ pub fn radial_items(app: &SolveApp) -> Vec<Item> {
         return vec![
             repeat,
             delete,
-            cmd(app, "DrawPolyline", "Line"),
-            cmd(app, "ShapeRectangleTwoPoint", "Rectangle"),
+            cmd(app, "sketch.line", "Line"),
+            cmd(app, "sketch.rectangle.two_point", "Rectangle"),
             act("ui.finishSketch", "Finish Sketch", "finish"),
-            cmd(app, "CircleCenterRadius", "Circle"),
-            cmd(app, "UndoCommand", "Undo").on(!app.session.undo.is_empty()),
-            cmd(app, "SketchDimension", "Sketch Dimension"),
+            cmd(app, "sketch.circle.center", "Circle"),
+            cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()),
+            cmd(app, "sketch.dimension", "Sketch Dimension"),
         ];
     }
     vec![
         repeat,
         delete,
-        cmd(app, "FusionPressPullCommand", "Press Pull"),
-        cmd(app, "FusionHoleCommand", "Hole"),
-        cmd(app, "SketchCreate", "Create Sketch"),
-        cmd(app, "Extrude", "Extrude"),
-        cmd(app, "UndoCommand", "Undo").on(!app.session.undo.is_empty()),
-        cmd(app, "FusionMoveCommand", "Move/Copy"),
+        cmd(app, "solid.press_pull", "Press Pull"),
+        cmd(app, "solid.hole", "Hole"),
+        cmd(app, "sketch.create", "Create Sketch"),
+        cmd(app, "solid.extrude", "Extrude"),
+        cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()),
+        cmd(app, "solid.move", "Move/Copy"),
     ]
 }
 
@@ -330,23 +330,23 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     if app.session.active_sketch.is_some() {
         v.extend(sketch_entity_items(app));
         v.push(Item::sep());
-        v.push(cmd(app, "TrimSketchCmd", "Trim"));
-        v.push(cmd(app, "Offset", "Offset"));
+        v.push(cmd(app, "sketch.trim", "Trim"));
+        v.push(cmd(app, "sketch.offset", "Offset"));
         v.push(Item::sep());
         v.push(act("ui.finishSketch", "Finish Sketch", "finish"));
         v.push(Item::sep());
-        v.push(cmd(app, "UndoCommand", "Undo").on(!app.session.undo.is_empty()));
-        v.push(cmd(app, "RedoCommand", "Redo").on(!app.session.redo.is_empty()));
+        v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
+        v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
         return v;
     }
     if has(|s| matches!(s, Sel::Face { .. })) {
         let face = sel.iter().find_map(|s| if let Sel::Face { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
         let (feature, sketch) = body_feature_and_sketch(app, &face);
         let hidden = app.ui.hidden_bodies.contains(&face);
-        v.push(cmd(app, "SketchCreate", "Create Sketch"));
-        v.push(cmd(app, "Extrude", "Extrude"));
-        v.push(cmd(app, "ConstructionPlaneOffsetFromPlaneCommand", "Offset Plane"));
-        v.push(cmd(app, "FusionShellBodyCommand", "Shell"));
+        v.push(cmd(app, "sketch.create", "Create Sketch"));
+        v.push(cmd(app, "solid.extrude", "Extrude"));
+        v.push(cmd(app, "construct.plane.offset", "Offset Plane"));
+        v.push(cmd(app, "solid.shell", "Shell"));
         v.push(act("ui.editFeature", "Edit Feature", "").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
         v.push(Item::sep());
@@ -359,13 +359,13 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.findBrowser", "Find in Browser", "").with(json!({ "body": face })));
         v.push(act("ui.findTimeline", "Find in Timeline", "").with(json!({ "body": face })));
         v.push(Item::sep());
-        v.push(cmd(app, "FusionPressPullCommand", "Press Pull"));
-        v.push(cmd(app, "MeasureCommand", "Measure"));
+        v.push(cmd(app, "solid.press_pull", "Press Pull"));
+        v.push(cmd(app, "inspect.measure", "Measure"));
     } else if has(|s| matches!(s, Sel::Edge { .. })) {
         let body = sel.iter().find_map(|s| if let Sel::Edge { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
         let hidden = app.ui.hidden_bodies.contains(&body);
-        v.push(cmd(app, "FusionFilletEdgesCommand", "Fillet"));
-        v.push(cmd(app, "FusionChamferCommand", "Chamfer"));
+        v.push(cmd(app, "solid.fillet", "Fillet"));
+        v.push(cmd(app, "solid.chamfer", "Chamfer"));
         v.push(Item::sep());
         v.push(act("ui.delete", "Delete", "delete").key("Del"));
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [body] })));
@@ -373,12 +373,12 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.findBrowser", "Find in Browser", "").with(json!({ "body": body })));
         v.push(Item::sep());
         v.push(act("ui.tangentChain", "Select Tangent Chain", ""));
-        v.push(cmd(app, "MeasureCommand", "Measure"));
+        v.push(cmd(app, "inspect.measure", "Measure"));
     } else if has(|s| matches!(s, Sel::Body { .. })) {
         v.extend(body_items(app, &sel_bodies(app), false));
     } else if has(|s| matches!(s, Sel::Profile { .. })) {
-        v.push(cmd(app, "Extrude", "Extrude"));
-        v.push(cmd(app, "Revolve", "Revolve"));
+        v.push(cmd(app, "solid.extrude", "Extrude"));
+        v.push(cmd(app, "solid.revolve", "Revolve"));
     } else {
         // Empty space.
         v.push(act("ui.nav", "Pan", "pan").with(json!({ "mode": "pan" })));
@@ -391,11 +391,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.showAll", "Show All", "eye").on(anything_hidden));
         v.push(act("ui.showAll", "Unisolate", "").on(!app.ui.hidden_bodies.is_empty()));
         v.push(Item::sep());
-        v.push(cmd(app, "Extrude", "Extrude"));
-        v.push(cmd(app, "FusionFilletEdgesCommand", "Fillet"));
+        v.push(cmd(app, "solid.extrude", "Extrude"));
+        v.push(cmd(app, "solid.fillet", "Fillet"));
         v.push(Item::sep());
-        v.push(cmd(app, "UndoCommand", "Undo").on(!app.session.undo.is_empty()));
-        v.push(cmd(app, "RedoCommand", "Redo").on(!app.session.redo.is_empty()));
+        v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
+        v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
         v.push(Item::sep());
         if app.session.section.is_some() {
             v.push(act("ui.unsection", "Remove Section", "section"));
@@ -418,7 +418,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     let items = json!(bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>());
     let mut v = vec![
         act("ui.moveBodies", "Move/Copy", "move").key("M").with(json!({ "bodies": names })).on(!locked),
-        cmd(app, "FusionCreateComponentsFromBodiesCommand", "Create Components from Bodies").with(json!({ "bodies": names })),
+        cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })),
         Item::sep(),
         act("ui.material", "Physical Material", "").with(json!({ "bodies": names })),
         act("ui.appearance", "Appearance", "").key("A").on(false),
@@ -428,7 +428,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         act("ui.export", "Export…", "export").with(json!({ "bodies": names })),
         Item::sep(),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": items })).on(!locked),
-        cmd(app, "SoftDeleteCommand", "Remove").with(json!({ "bodies": names })).on(!locked),
+        cmd(app, "solid.remove", "Remove").with(json!({ "bodies": names })).on(!locked),
         act("ui.rename", "Rename", "").with(json!({ "body": bodies.first() })).on(one),
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
@@ -499,19 +499,15 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
         v.push(cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })));
         v.push(act("ui.moveOccurrence", "Move/Copy", "move").key("M").with(json!({ "occurrence": oid })).on(!grounded && occ.is_some()));
-        v.push(cmd(app, "SnapshotCmd", "Capture Position").on(!app.session.pending_moves.is_empty()));
-        v.push(cmd(app, "AsBuiltPositionsCmd", "Revert Position").on(!app.session.pending_moves.is_empty()));
+        v.push(cmd(app, "component.capture_position", "Capture Position").on(!app.session.pending_moves.is_empty()));
+        v.push(cmd(app, "component.revert_position", "Revert Position").on(!app.session.pending_moves.is_empty()));
         v.push(Item::sep());
     } else {
         v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
     }
-    v.push(cmd(app, "FusionCreateNewComponentCommand", "New Component").with(json!({ "parent": id })));
+    v.push(cmd(app, "component.create", "New Component").with(json!({ "parent": id })));
     if id == 0 {
-        v.push(
-            cmd(app, "FusionCreateComponentsFromBodiesCommand", "Create Components from Bodies")
-                .with(json!({ "bodies": names }))
-                .on(!bodies.is_empty()),
-        );
+        v.push(cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     }
     v.push(Item::sep());
     v.push(act("ui.material", "Physical Material", "").with(json!({ "bodies": names })).on(!bodies.is_empty()));
@@ -568,10 +564,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     }
     let mut v = Vec::new();
     if curves.is_empty() && points.is_empty() {
-        v.push(cmd(app, "DrawPolyline", "Line"));
-        v.push(cmd(app, "ShapeRectangleTwoPoint", "Rectangle"));
-        v.push(cmd(app, "CircleCenterRadius", "Circle"));
-        v.push(cmd(app, "SketchDimension", "Sketch Dimension"));
+        v.push(cmd(app, "sketch.line", "Line"));
+        v.push(cmd(app, "sketch.rectangle.two_point", "Rectangle"));
+        v.push(cmd(app, "sketch.circle.center", "Circle"));
+        v.push(cmd(app, "sketch.dimension", "Sketch Dimension"));
         return v;
     }
     let ents: Vec<String> = curves.iter().chain(points.iter()).cloned().collect();
@@ -581,41 +577,41 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     }
     v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })));
     v.push(act("ui.delete", "Delete", "delete").key("Del"));
-    v.push(cmd(app, "SketchDimension", "Sketch Dimension").with(json!({ "entities": ents })).on(ents.len() <= 2));
+    v.push(cmd(app, "sketch.dimension", "Sketch Dimension").with(json!({ "entities": ents })).on(ents.len() <= 2));
     let mut c = Vec::new();
     let n = ents.len();
     let (l, r, p) = (lines.len(), rounds.len(), points.len());
     if l == 1 && n == 1 {
-        c.push(cmd(app, "ConstraintHorizontalVertical", "Horizontal/Vertical").with(json!({ "line": lines[0] })));
+        c.push(cmd(app, "sketch.constraint.horizontal_vertical", "Horizontal/Vertical").with(json!({ "line": lines[0] })));
     }
     if p == 2 && n == 2 {
-        c.push(cmd(app, "ConstraintCoincident", "Coincident").with(json!({ "a": points[0], "b": points[1] })));
-        c.push(cmd(app, "ConstraintHorizontalVertical", "Horizontal/Vertical").with(json!({ "points": points })));
+        c.push(cmd(app, "sketch.constraint.coincident", "Coincident").with(json!({ "a": points[0], "b": points[1] })));
+        c.push(cmd(app, "sketch.constraint.horizontal_vertical", "Horizontal/Vertical").with(json!({ "points": points })));
     }
     if p == 1 && curves.len() == 1 && n == 2 {
-        c.push(cmd(app, "ConstraintCoincident", "Coincident").with(json!({ "a": picked[0], "b": picked[1] })));
+        c.push(cmd(app, "sketch.constraint.coincident", "Coincident").with(json!({ "a": picked[0], "b": picked[1] })));
         if l == 1 {
-            c.push(cmd(app, "ConstraintMidPoint", "MidPoint").with(json!({ "point": points[0], "line": lines[0] })));
+            c.push(cmd(app, "sketch.constraint.midpoint", "MidPoint").with(json!({ "point": points[0], "line": lines[0] })));
         }
     }
     if l == 2 && n == 2 {
         let ab = json!({ "a": lines[0], "b": lines[1] });
-        c.push(cmd(app, "ConstraintParallel", "Parallel").with(ab.clone()));
-        c.push(cmd(app, "ConstraintPerpendicular", "Perpendicular").with(ab.clone()));
-        c.push(cmd(app, "ConstraintCollinear", "Collinear").with(ab.clone()));
-        c.push(cmd(app, "ConstraintEqual", "Equal").with(ab));
+        c.push(cmd(app, "sketch.constraint.parallel", "Parallel").with(ab.clone()));
+        c.push(cmd(app, "sketch.constraint.perpendicular", "Perpendicular").with(ab.clone()));
+        c.push(cmd(app, "sketch.constraint.collinear", "Collinear").with(ab.clone()));
+        c.push(cmd(app, "sketch.constraint.equal", "Equal").with(ab));
     }
     if r == 2 && n == 2 {
         let ab = json!({ "a": rounds[0], "b": rounds[1] });
-        c.push(cmd(app, "ConstraintConcentric", "Concentric").with(ab.clone()));
-        c.push(cmd(app, "ConstraintEqual", "Equal").with(ab.clone()));
-        c.push(cmd(app, "ConstraintTangent", "Tangent").with(ab));
+        c.push(cmd(app, "sketch.constraint.concentric", "Concentric").with(ab.clone()));
+        c.push(cmd(app, "sketch.constraint.equal", "Equal").with(ab.clone()));
+        c.push(cmd(app, "sketch.constraint.tangent", "Tangent").with(ab));
     }
     if l == 1 && r == 1 && n == 2 {
-        c.push(cmd(app, "ConstraintTangent", "Tangent").with(json!({ "a": picked[0], "b": picked[1] })));
+        c.push(cmd(app, "sketch.constraint.tangent", "Tangent").with(json!({ "a": picked[0], "b": picked[1] })));
     }
     if p == 2 && l == 1 && n == 3 {
-        c.push(cmd(app, "ConstraintSymmetry", "Symmetry").with(json!({ "a": points[0], "b": points[1], "line": lines[0] })));
+        c.push(cmd(app, "sketch.constraint.symmetry", "Symmetry").with(json!({ "a": points[0], "b": points[1], "line": lines[0] })));
     }
     if !c.is_empty() {
         v.push(Item::heading("Constraints"));
@@ -678,7 +674,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.moveBodies" => {
             let items: Vec<Value> = bodies.iter().map(|b| json!({"type": "body", "name": b})).collect();
             let _ = app.run("select.set", json!({ "items": items }));
-            app.start("FusionMoveCommand");
+            app.start("solid.move");
         }
         "ui.rename" => {
             let what = if let Some(b) = p.get("body").and_then(Value::as_str) {
@@ -700,7 +696,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             };
             start_rename(app, what, at);
         }
-        "ui.properties" => match app.session.execute("MeasureCommand", &json!({ "bodies": bodies })) {
+        "ui.properties" => match app.session.execute("inspect.measure", &json!({ "bodies": bodies })) {
             Ok(v) => app.menu.props = Some((if bodies.len() == 1 { bodies.join("") } else { format!("{} bodies", bodies.len()) }, v)),
             Err(e) => app.set_status(e.to_string(), true),
         },
@@ -708,7 +704,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let name = bodies.first().cloned().unwrap_or_else(|| app.session.doc.name.clone());
             if let Some(path) = app.services.pick_save.as_ref().and_then(|f| f(&format!("{name}.step"), &["step", "stp", "igs", "stl", "3mf", "obj"]))
             {
-                let _ = app.run("ExportCommand", json!({ "path": path, "bodies": bodies }));
+                let _ = app.run("file.export", json!({ "path": path, "bodies": bodies }));
             }
         }
         "ui.findBrowser" => {
@@ -728,11 +724,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.tangentChain" => tangent_chain(app),
         "ui.origin" => app.ui.show_origin = !app.ui.show_origin,
         "ui.clear" => drop(app.run("select.clear", json!({}))),
-        "ui.unsection" => drop(app.run("FusionHalfSectionViewCommand", json!({"clear": true}))),
+        "ui.unsection" => drop(app.run("inspect.section", json!({"clear": true}))),
         "ui.fit" => app.animate_view("fit"),
         "ui.home" => app.animate_view("home"),
         // One command for the whole selection: all fixed unless all already are.
-        "ui.fix" => drop(app.run("ConstraintFix", json!({ "entities": strs(&p, "entities") }))),
+        "ui.fix" => drop(app.run("sketch.constraint.fix", json!({ "entities": strs(&p, "entities") }))),
         "ui.editSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
                 app.edit_sketch(id);
@@ -827,12 +823,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.material" => {
             let items: Vec<Value> = bodies.iter().map(|b| json!({"type": "body", "name": b})).collect();
             let _ = app.run("select.set", json!({ "items": items }));
-            app.start("PhysicalMaterialCommand");
+            app.start("material.assign");
         }
         "ui.saveMesh" => {
             let name = bodies.first().cloned().unwrap_or_else(|| app.session.doc.name.clone());
             if let Some(path) = app.services.pick_save.as_ref().and_then(|f| f(&format!("{name}.stl"), &["stl"])) {
-                let _ = app.run("FusionSaveAsSTLCommand", json!({ "path": path, "bodies": bodies }));
+                let _ = app.run("file.save_mesh", json!({ "path": path, "bodies": bodies }));
             }
         }
         "ui.exportDxf" => {
@@ -848,7 +844,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 let n = app.session.world_state().sketch(id).map_or(0, |s| s.profiles.len());
                 let items: Vec<Value> = (0..n).map(|i| json!({"type": "profile", "sketch": id, "index": i})).collect();
                 let _ = app.run("select.set", json!({ "items": items }));
-                app.start("Extrude");
+                app.start("solid.extrude");
             }
         }
         "ui.lookAt" => {
@@ -1000,7 +996,7 @@ fn commit_rename(app: &mut SolveApp, r: &Rename) {
                 }
             }
         }
-        RenameWhat::Feature(f) => drop(app.run("FusionRenameTimelineEntryCommand", json!({ "feature": f, "name": name }))),
+        RenameWhat::Feature(f) => drop(app.run("timeline.rename", json!({ "feature": f, "name": name }))),
         RenameWhat::Component(c) => drop(app.run("component.rename", json!({ "component": c, "name": name }))),
         RenameWhat::Group(g) => crate::browser::group_action(app, "ui.renameGroup", &json!({ "group": g, "name": name })),
         RenameWhat::Canvas(c) => drop(app.run("canvas.edit", json!({ "canvas": c, "name": name }))),

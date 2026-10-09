@@ -6,7 +6,7 @@
   "choose_file": "pic.png"
  },
  {
-  "start": "FusionAddCanvasCommand"
+  "start": "canvas.insert"
  },
  {
   "click": {

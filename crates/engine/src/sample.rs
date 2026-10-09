@@ -5,30 +5,30 @@ use serde_json::{Value, json};
 
 pub fn script() -> Value {
     json!({"commands": [
-        {"command": "ChangeParameterCommand", "params": {"name": "width", "expression": "80 mm", "comment": "plate width"}},
-        {"command": "ChangeParameterCommand", "params": {"name": "depth", "expression": "50 mm"}},
-        {"command": "ChangeParameterCommand", "params": {"name": "thickness", "expression": "8 mm"}},
-        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Base"}},
-        {"command": "ShapeRectangleTwoPoint", "params": {"p0": [0, 0], "p1": [80, 50]}},
-        {"command": "ConstraintCoincident", "params": {"a": "p1", "b": "origin"}},
-        {"command": "SketchDimension", "params": {"entities": ["l1"], "value": "width"}},
-        {"command": "SketchDimension", "params": {"entities": ["l2"], "value": "depth"}},
-        {"command": "SketchStop", "params": {}},
-        {"command": "Extrude", "params": {"distance": "thickness", "body_name": "Plate"}},
-        {"command": "FusionFilletEdgesCommand", "params": {"edges": [[0, 0, 4], [80, 0, 4], [80, 50, 4], [0, 50, 4]], "radius": "6 mm"}},
-        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Holes"}},
-        {"command": "CircleCenterRadius", "params": {"center": [12, 25], "diameter": 8}},
-        {"command": "CircleCenterRadius", "params": {"center": [68, 25], "diameter": 8}},
-        {"command": "SketchStop", "params": {}},
-        {"command": "Extrude", "params": {"distance": "thickness", "operation": "cut", "name": "Holes"}},
-        {"command": "SketchCreate", "params": {"plane": {"face": [40, 25, 8]}, "name": "Boss"}},
-        {"command": "CircleCenterRadius", "params": {"center": [40, 25], "diameter": 24}},
-        {"command": "SketchStop", "params": {}},
-        {"command": "Extrude", "params": {"distance": 14, "operation": "join", "name": "Boss"}},
-        {"command": "SketchCreate", "params": {"plane": {"face": [40, 37, 22]}, "name": "Bore"}},
-        {"command": "CircleCenterRadius", "params": {"center": [40, 25], "diameter": 12}},
-        {"command": "SketchStop", "params": {}},
-        {"command": "Extrude", "params": {"distance": 22, "direction": "negative", "operation": "cut", "name": "Bore"}},
+        {"command": "parameters.change", "params": {"name": "width", "expression": "80 mm", "comment": "plate width"}},
+        {"command": "parameters.change", "params": {"name": "depth", "expression": "50 mm"}},
+        {"command": "parameters.change", "params": {"name": "thickness", "expression": "8 mm"}},
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Base"}},
+        {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [80, 50]}},
+        {"command": "sketch.constraint.coincident", "params": {"a": "p1", "b": "origin"}},
+        {"command": "sketch.dimension", "params": {"entities": ["l1"], "value": "width"}},
+        {"command": "sketch.dimension", "params": {"entities": ["l2"], "value": "depth"}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": "thickness", "body_name": "Plate"}},
+        {"command": "solid.fillet", "params": {"edges": [[0, 0, 4], [80, 0, 4], [80, 50, 4], [0, 50, 4]], "radius": "6 mm"}},
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Holes"}},
+        {"command": "sketch.circle.center", "params": {"center": [12, 25], "diameter": 8}},
+        {"command": "sketch.circle.center", "params": {"center": [68, 25], "diameter": 8}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": "thickness", "operation": "cut", "name": "Holes"}},
+        {"command": "sketch.create", "params": {"plane": {"face": [40, 25, 8]}, "name": "Boss"}},
+        {"command": "sketch.circle.center", "params": {"center": [40, 25], "diameter": 24}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": 14, "operation": "join", "name": "Boss"}},
+        {"command": "sketch.create", "params": {"plane": {"face": [40, 37, 22]}, "name": "Bore"}},
+        {"command": "sketch.circle.center", "params": {"center": [40, 25], "diameter": 12}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": 22, "direction": "negative", "operation": "cut", "name": "Bore"}},
     ]})
 }
 
@@ -53,14 +53,14 @@ pub fn samples() -> Vec<Sample> {
 
 fn bracket() -> Value {
     json!({"commands": [
-        {"command": "FusionSheetMetalRulesCommand", "params": {"name": "Steel 2mm", "thickness": "2 mm", "bend_radius": "Thickness", "active": true}},
-        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Base"}},
-        {"command": "ShapeRectangleTwoPoint", "params": {"p0": [0, 0], "p1": [120, 60]}},
-        {"command": "SketchStop", "params": {}},
-        {"command": "FusionSheetMetalFlangeCommand", "params": {"sketch": "Base"}},
-        {"command": "FusionSheetMetalFlangeCommand", "params": {"edges": [[60, 0, 2], [60, 60, 2]], "height": 30}},
-        {"command": "FusionSheetMetalFlangeCommand", "params": {"edges": [[120, 30, 2]], "height": 20, "angle": "60 deg"}},
-        {"command": "FusionSheetMetalHemFlangeCommand", "params": {"edges": [[0, 30, 2]], "length": 8}},
+        {"command": "sheet.manage_rules", "params": {"name": "Steel 2mm", "thickness": "2 mm", "bend_radius": "Thickness", "active": true}},
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Base"}},
+        {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [120, 60]}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "sheet.flange", "params": {"sketch": "Base"}},
+        {"command": "sheet.flange", "params": {"edges": [[60, 0, 2], [60, 60, 2]], "height": 30}},
+        {"command": "sheet.flange", "params": {"edges": [[120, 30, 2]], "height": 20, "angle": "60 deg"}},
+        {"command": "sheet.hem", "params": {"edges": [[0, 30, 2]], "length": 8}},
     ]})
 }
 
@@ -69,70 +69,70 @@ fn hinge() -> Value {
     for name in ["Leaf A", "Leaf B"] {
         cmds.extend([
             json!({"command": "component.activate", "params": {"component": "root"}}),
-            json!({"command": "FusionCreateNewComponentCommand", "params": {"name": name}}),
-            json!({"command": "PrimitiveBox", "params": {"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0]}}),
-            json!({"command": "PrimitiveCylinder", "params": {"base": [0, 33, 4], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}}),
+            json!({"command": "component.create", "params": {"name": name}}),
+            json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0]}}),
+            json!({"command": "solid.cylinder", "params": {"base": [0, 33, 4], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}}),
         ]);
     }
     cmds.extend([
         json!({"command": "component.activate", "params": {"component": "root"}}),
         json!({"command": "occurrence.ground", "params": {"occurrence": "Leaf A:1", "grounded": true}}),
-        json!({"command": "JointAssembleCmdNew", "params": {"type": "revolute", "name": "Hinge",
+        json!({"command": "joint.create", "params": {"type": "revolute", "name": "Hinge",
             "a": {"occurrence": "Leaf A:1", "circle": [1, 37, 4]}, "b": {"occurrence": "Leaf B:1", "circle": [1, 37, 4]},
             "limits": [["0 deg", "180 deg"]]}}),
-        json!({"command": "FusionMoveJointsCommand", "params": {"joint": "Hinge", "value": 60}}),
+        json!({"command": "joint.drive", "params": {"joint": "Hinge", "value": 60}}),
     ]);
     json!({ "commands": cmds })
 }
 
 fn enclosure() -> Value {
     json!({"commands": [
-        {"command": "PrimitiveBox", "params": {"length": 80, "width": 50, "height": 30, "body_name": "Enclosure"}},
-        {"command": "FusionShellBodyCommand", "params": {"faces": [[40, 25, 30]], "thickness": 2}},
-        {"command": "FusionLipCommand", "params": {"face": [1, 25, 30], "width": 1, "height": 2}},
-        {"command": "FusionSnapFitCommand", "params": {"position": [40, 44, 2], "hook": [0, -1, 0], "length": 14, "thickness": 1.5, "width": 6, "catch_depth": 1, "catch_length": 2}},
-        {"command": "FusionBossCommand", "params": {"position": [10, 10, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}},
-        {"command": "FusionBossCommand", "params": {"position": [70, 40, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}},
-        {"command": "FusionRestCommand", "params": {"position": [40, 25, 2], "width": 16, "length": 24, "height": 3}},
+        {"command": "solid.box", "params": {"length": 80, "width": 50, "height": 30, "body_name": "Enclosure"}},
+        {"command": "solid.shell", "params": {"faces": [[40, 25, 30]], "thickness": 2}},
+        {"command": "plastic.lip", "params": {"face": [1, 25, 30], "width": 1, "height": 2}},
+        {"command": "plastic.snap_fit", "params": {"position": [40, 44, 2], "hook": [0, -1, 0], "length": 14, "thickness": 1.5, "width": 6, "catch_depth": 1, "catch_length": 2}},
+        {"command": "plastic.boss", "params": {"position": [10, 10, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}},
+        {"command": "plastic.boss", "params": {"position": [70, 40, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}},
+        {"command": "plastic.rest", "params": {"position": [40, 25, 2], "width": 16, "length": 24, "height": 3}},
     ]})
 }
 
 fn flange() -> Value {
     json!({"commands": [
-        {"command": "ChangeParameterCommand", "params": {"name": "bolts", "expression": "6", "unit": "", "comment": "number of bolt holes"}},
-        {"command": "ChangeParameterCommand", "params": {"name": "pcd", "expression": "70 mm", "comment": "bolt circle diameter"}},
-        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Disc"}},
-        {"command": "CircleCenterRadius", "params": {"center": [0, 0], "diameter": 100}},
-        {"command": "SketchStop", "params": {}},
-        {"command": "Extrude", "params": {"distance": 10, "body_name": "Flange", "name": "Disc"}},
-        {"command": "SketchCreate", "params": {"plane": {"face": [0, 0, 10]}, "name": "Hub"}},
-        {"command": "CircleCenterRadius", "params": {"center": [0, 0], "diameter": 44}},
-        {"command": "SketchStop", "params": {}},
-        {"command": "Extrude", "params": {"distance": 16, "operation": "join", "name": "Hub"}},
-        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Bore"}},
-        {"command": "CircleCenterRadius", "params": {"center": [0, 0], "diameter": 24}},
-        {"command": "SketchStop", "params": {}},
-        {"command": "Extrude", "params": {"distance": 26, "operation": "cut", "name": "Bore"}},
-        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Bolt"}},
-        {"command": "CircleCenterRadius", "params": {"center": [35, 0], "diameter": 9}},
-        {"command": "SketchStop", "params": {}},
-        {"command": "Extrude", "params": {"distance": 10, "operation": "cut", "name": "BoltHole"}},
-        {"command": "PatternCircular", "params": {"features": ["BoltHole"], "axis": "Z", "count": "bolts"}},
+        {"command": "parameters.change", "params": {"name": "bolts", "expression": "6", "unit": "", "comment": "number of bolt holes"}},
+        {"command": "parameters.change", "params": {"name": "pcd", "expression": "70 mm", "comment": "bolt circle diameter"}},
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Disc"}},
+        {"command": "sketch.circle.center", "params": {"center": [0, 0], "diameter": 100}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": 10, "body_name": "Flange", "name": "Disc"}},
+        {"command": "sketch.create", "params": {"plane": {"face": [0, 0, 10]}, "name": "Hub"}},
+        {"command": "sketch.circle.center", "params": {"center": [0, 0], "diameter": 44}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": 16, "operation": "join", "name": "Hub"}},
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Bore"}},
+        {"command": "sketch.circle.center", "params": {"center": [0, 0], "diameter": 24}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": 26, "operation": "cut", "name": "Bore"}},
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Bolt"}},
+        {"command": "sketch.circle.center", "params": {"center": [35, 0], "diameter": 9}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": 10, "operation": "cut", "name": "BoltHole"}},
+        {"command": "solid.pattern.circular", "params": {"features": ["BoltHole"], "axis": "Z", "count": "bolts"}},
     ]})
 }
 
 fn vents() -> Value {
     json!({"commands": [
-        {"command": "ChangeParameterCommand", "params": {"name": "cols", "expression": "6", "unit": ""}},
-        {"command": "ChangeParameterCommand", "params": {"name": "rows", "expression": "3", "unit": ""}},
-        {"command": "ChangeParameterCommand", "params": {"name": "pitch", "expression": "16 mm", "comment": "slot spacing"}},
-        {"command": "PrimitiveBox", "params": {"length": 120, "width": 80, "height": 4, "body_name": "Plate"}},
-        {"command": "FusionFilletEdgesCommand", "params": {"edges": [[0, 0, 2], [120, 0, 2], [120, 80, 2], [0, 80, 2]], "radius": "8 mm"}},
-        {"command": "SketchCreate", "params": {"plane": "XY", "name": "Slot"}},
-        {"command": "ShapeRectangleTwoPoint", "params": {"p0": [18, 12], "p1": [24, 26]}},
-        {"command": "SketchStop", "params": {}},
-        {"command": "Extrude", "params": {"distance": 4, "operation": "cut", "name": "Vent"}},
-        {"command": "PatternRectangular", "params": {"features": ["Vent"], "dir1": [1, 0, 0], "count1": "cols", "spacing1": "pitch",
+        {"command": "parameters.change", "params": {"name": "cols", "expression": "6", "unit": ""}},
+        {"command": "parameters.change", "params": {"name": "rows", "expression": "3", "unit": ""}},
+        {"command": "parameters.change", "params": {"name": "pitch", "expression": "16 mm", "comment": "slot spacing"}},
+        {"command": "solid.box", "params": {"length": 120, "width": 80, "height": 4, "body_name": "Plate"}},
+        {"command": "solid.fillet", "params": {"edges": [[0, 0, 2], [120, 0, 2], [120, 80, 2], [0, 80, 2]], "radius": "8 mm"}},
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Slot"}},
+        {"command": "sketch.rectangle.two_point", "params": {"p0": [18, 12], "p1": [24, 26]}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": 4, "operation": "cut", "name": "Vent"}},
+        {"command": "solid.pattern.rectangular", "params": {"features": ["Vent"], "dir1": [1, 0, 0], "count1": "cols", "spacing1": "pitch",
             "dir2": [0, 1, 0], "count2": "rows", "spacing2": "22 mm"}},
     ]})
 }

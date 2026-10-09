@@ -12,7 +12,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 }
 
 fn volume(s: &mut Session) -> f64 {
-    run(s, "MeasureCommand", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
+    run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
 }
 
 /// A box with a drilled hole (cone tip) shells: the cavity is the box shrunk by the wall and the
@@ -21,15 +21,15 @@ fn volume(s: &mut Session) -> f64 {
 fn shell_a_box_with_a_drilled_hole() {
     use std::f64::consts::PI;
     let mut s = Session::default();
-    run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 30, "height": 20}));
-    run(&mut s, "FusionHoleCommand", json!({"position": [20, 15, 20], "diameter": 8, "depth": 10, "type": "drilled", "tip_angle": 118}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "solid.hole", json!({"position": [20, 15, 20], "diameter": 8, "depth": 10, "type": "drilled", "tip_angle": 118}));
     let v_body = volume(&mut s);
     let (r, t) = (4.0, 2.0);
     let a = (59.0f64).to_radians();
     // Cylinder depth from the measured body: 24000 − π r² h − π r² (r / tan α) / 3.
     let h = (24000.0 - v_body - PI * r * r * (r / a.tan()) / 3.0) / (PI * r * r);
     assert!(h > 9.0 && h < 11.0, "{h}");
-    run(&mut s, "FusionShellBodyCommand", json!({"faces": [[5, 5, 20]], "thickness": t}));
+    run(&mut s, "solid.shell", json!({"faces": [[5, 5, 20]], "thickness": t}));
     let v_shell = volume(&mut s);
     let apex = 20.0 - h - r / a.tan() - t / a.sin();
     let big_r = r + t;
@@ -45,8 +45,8 @@ fn shell_a_box_with_a_drilled_hole() {
 fn offset_cone_and_sphere_faces() {
     use std::f64::consts::PI;
     let mut s = Session::default();
-    run(&mut s, "PrimitiveSphere", json!({"center": [0, 0, 0], "radius": 10}));
-    let r = run(&mut s, "FusionOffsetFacesCommand", json!({"faces": [[10, 0, 0]], "distance": 2}));
+    run(&mut s, "solid.sphere", json!({"center": [0, 0, 0], "radius": 10}));
+    let r = run(&mut s, "solid.offset_face", json!({"faces": [[10, 0, 0]], "distance": 2}));
     let v = volume(&mut s);
     assert!((v - 4.0 / 3.0 * PI * 1728.0).abs() < 1e-3 * v, "{v} {r}");
 }
@@ -56,10 +56,10 @@ fn offset_cone_and_sphere_faces() {
 fn offset_torus_face() {
     use std::f64::consts::PI;
     let mut s = Session::default();
-    run(&mut s, "PrimitiveTorus", json!({"major": 20, "minor": 5}));
+    run(&mut s, "solid.torus", json!({"major": 20, "minor": 5}));
     let v0 = volume(&mut s);
     assert!((v0 - 2.0 * PI * PI * 20.0 * 25.0).abs() < 1e-3 * v0, "{v0}");
-    run(&mut s, "FusionOffsetFacesCommand", json!({"faces": [[25, 0, 0]], "distance": 1}));
+    run(&mut s, "solid.offset_face", json!({"faces": [[25, 0, 0]], "distance": 1}));
     let v = volume(&mut s);
     assert!((v - 2.0 * PI * PI * 20.0 * 36.0).abs() < 1e-3 * v, "{v}");
 }

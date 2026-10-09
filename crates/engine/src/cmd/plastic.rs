@@ -12,26 +12,26 @@ use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("FusionBossCommand", "Boss", boss).at("PLASTIC", "CREATE").icon("boss").params(
+    CommandSpec::new("plastic.boss", "Boss", boss).at("PLASTIC", "CREATE").icon("boss").params(
         "position: [x,y,z] on a face; direction? (default: out of the face); diameter, height; hole_diameter?, hole_depth? (default: to the face); \
          draft? (angle), fillet? (root radius); ribs? (count), rib_thickness?, rib_length? (out from the wall), rib_offset? (below the top); body?",
     ),
-    CommandSpec::new("FusionLipCommand", "Lip", lip).at("PLASTIC", "CREATE").icon("lip").params(
+    CommandSpec::new("plastic.lip", "Lip", lip).at("PLASTIC", "CREATE").icon("lip").params(
         "face: [x,y,z] on the rim face of a shelled body; width, height; type?: lip|groove; gap? (groove clearance); side?: inside|outside (which rim edge); body?",
     ),
-    CommandSpec::new("FusionSnapFitCommand", "Snap Fit", snap_fit).at("PLASTIC", "CREATE").icon("snap").params(
+    CommandSpec::new("plastic.snap_fit", "Snap Fit", snap_fit).at("PLASTIC", "CREATE").icon("snap").params(
         "position: [x,y,z] on a face; direction? (default: out of the face); hook: [x,y,z] (the catch's direction); length, thickness, width, catch_depth, catch_length; body?",
     ),
-    CommandSpec::new("FusionRestCommand", "Rest", rest).at("PLASTIC", "CREATE").icon("rest").params(
+    CommandSpec::new("plastic.rest", "Rest", rest).at("PLASTIC", "CREATE").icon("rest").params(
         "position: [x,y,z] on a face (the rest's centre); direction? (default: out of the face); width (round: the diameter); length? (a rectangle, along `along`); along?: [x,y,z]; \
          height; draft? (angle; default: the body's plastic rule); thickness? (wall of a hollow rest); body?",
     ),
-    CommandSpec::new("FusionManagePlasticRuleCommand", "Manage Plastic Rules", manage_rules).at("PLASTIC", "SETUP").icon("plastic_rule").params(
+    CommandSpec::new("plastic.manage_rules", "Manage Plastic Rules", manage_rules).at("PLASTIC", "SETUP").icon("plastic_rule").params(
         "name (library or new rule; a new one starts from `from`, default ABS (1.5mm)); from?; material?; thickness?, nominal_radius?, clearance?, knife_edge?, \
          reveal_height?, thickness_variation?, draft?, max_thickness?, min_thickness?, min_draft? (expressions; `Thickness` is the rule's); active?: bool (rule for bodies without one); \
          delete?: bool (a design rule; a library rule goes back to the library values)",
     ),
-    CommandSpec::new("FusionAssignPlasticRuleCommand", "Assign Plastic Rule", assign_rule).at("PLASTIC", "SETUP").icon("plastic_assign").params(
+    CommandSpec::new("plastic.assign_rule", "Assign Plastic Rule", assign_rule).at("PLASTIC", "SETUP").icon("plastic_assign").params(
         "bodies: [names]; rule: name (empty: no rule) — plastic features on these bodies take its draft and clearance as defaults",
     ),
     CommandSpec::new("plastic.rules", "List Plastic Rules", list_rules).noundo().params("→ rules with their expressions and values, the active rule and the rules assigned to bodies"),
@@ -53,7 +53,7 @@ fn rule_json(s: &Session, r: &PlasticRule) -> Value {
 }
 
 fn manage_rules(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionManagePlasticRuleCommand";
+    let cmd = "plastic.manage_rules";
     let name = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` is required"))?.to_string();
     if bool_(p, "delete").unwrap_or(false) {
         let doc = s.doc_mut();
@@ -116,7 +116,7 @@ fn manage_rules(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn assign_rule(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionAssignPlasticRuleCommand";
+    let cmd = "plastic.assign_rule";
     let bodies = string_list(p, "bodies");
     if bodies.is_empty() || bodies.len() > 10_000 {
         return Err(bad(cmd, "`bodies` must list bodies"));
@@ -147,7 +147,7 @@ fn list_rules(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn rest(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionRestCommand";
+    let cmd = "plastic.rest";
     let (position, direction) = placed(s, p, cmd)?;
     let along = match p.get("along") {
         Some(v) => Some(
@@ -199,7 +199,7 @@ fn placed(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3)> {
 }
 
 fn boss(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionBossCommand";
+    let cmd = "plastic.boss";
     let (position, direction) = placed(s, p, cmd)?;
     let kind = FeatureKind::Boss {
         position,
@@ -220,7 +220,7 @@ fn boss(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn lip(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionLipCommand";
+    let cmd = "plastic.lip";
     let face = p.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on the rim face"))?;
     let groove = match str_(p, "type").map(str::to_ascii_lowercase).as_deref() {
         None | Some("lip") => false,
@@ -245,7 +245,7 @@ fn lip(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn snap_fit(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionSnapFitCommand";
+    let cmd = "plastic.snap_fit";
     let (position, direction) = placed(s, p, cmd)?;
     let hook = p.get("hook").and_then(vec3).and_then(|h| h.normalized()).ok_or_else(|| bad(cmd, "`hook` must be the catch's direction [x, y, z]"))?;
     if hook.cross(direction).len() < 1e-6 {
@@ -281,7 +281,7 @@ mod tests {
     }
 
     fn volume(s: &mut Session) -> f64 {
-        run(s, "MeasureCommand", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+        run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
     }
 
     fn rel(a: f64, b: f64) -> f64 {
@@ -291,17 +291,17 @@ mod tests {
     #[test]
     fn boss_with_hole_fillet_and_ribs() {
         let mut s = Session::default();
-        run(&mut s, "PrimitiveBox", json!({"length": 60, "width": 60, "height": 3, "body_name": "Plate"}));
-        run(&mut s, "FusionBossCommand", json!({"position": [30, 30, 3], "diameter": 10, "height": 12, "hole_diameter": 4}));
+        run(&mut s, "solid.box", json!({"length": 60, "width": 60, "height": 3, "body_name": "Plate"}));
+        run(&mut s, "plastic.boss", json!({"position": [30, 30, 3], "diameter": 10, "height": 12, "hole_diameter": 4}));
         let want = 10800.0 + PI * 25.0 * 12.0 - PI * 4.0 * 12.0;
         assert!(rel(volume(&mut s), want) < 1e-3, "{} {want}", volume(&mut s));
-        assert_eq!(run(&mut s, "MeasureCommand", json!({}))["body_count"], 1);
+        assert_eq!(run(&mut s, "inspect.measure", json!({}))["body_count"], 1);
         // Ribs add t·l·h each.
         let mut t = Session::default();
-        run(&mut t, "PrimitiveBox", json!({"length": 60, "width": 60, "height": 3}));
+        run(&mut t, "solid.box", json!({"length": 60, "width": 60, "height": 3}));
         run(
             &mut t,
-            "FusionBossCommand",
+            "plastic.boss",
             json!({"position": [30, 30, 3], "diameter": 10, "height": 12, "ribs": 4, "rib_thickness": 1.5, "rib_length": 6, "rib_offset": 2}),
         );
         let ribs = 4.0 * 1.5 * 6.0 * 10.0;
@@ -309,52 +309,52 @@ mod tests {
         let v = volume(&mut t) - 10800.0 - PI * 25.0 * 12.0;
         assert!(v > ribs && v < ribs * 1.05, "{v} {ribs}");
         let mut u = Session::default();
-        run(&mut u, "PrimitiveBox", json!({"length": 60, "width": 60, "height": 3}));
-        run(&mut u, "FusionBossCommand", json!({"position": [30, 30, 3], "diameter": 10, "height": 12, "fillet": 2, "draft": 1}));
+        run(&mut u, "solid.box", json!({"length": 60, "width": 60, "height": 3}));
+        run(&mut u, "plastic.boss", json!({"position": [30, 30, 3], "diameter": 10, "height": 12, "fillet": 2, "draft": 1}));
         assert!(volume(&mut u) > 10800.0 + PI * 25.0 * 10.0);
-        assert!(u.execute("FusionBossCommand", &json!({"position": [30, 30, 3], "diameter": 10, "height": 12, "hole_diameter": 20})).is_err());
+        assert!(u.execute("plastic.boss", &json!({"position": [30, 30, 3], "diameter": 10, "height": 12, "hole_diameter": 20})).is_err());
     }
 
     #[test]
     fn lip_and_groove_on_a_shelled_box() {
         let shelled = || {
             let mut s = Session::default();
-            run(&mut s, "PrimitiveBox", json!({"length": 80, "width": 50, "height": 30}));
-            run(&mut s, "FusionShellBodyCommand", json!({"faces": [[40, 25, 30]], "thickness": 2}));
+            run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 30}));
+            run(&mut s, "solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2}));
             s
         };
         let mut s = shelled();
         let v0 = volume(&mut s);
-        run(&mut s, "FusionLipCommand", json!({"face": [1, 25, 30], "width": 1, "height": 2}));
+        run(&mut s, "plastic.lip", json!({"face": [1, 25, 30], "width": 1, "height": 2}));
         // Inside band 1 wide along the inner edge (76 x 46): (76+2)(46+2) − 76·46 = 248, 2 high.
         assert!(rel(volume(&mut s) - v0, 248.0 * 2.0) < 1e-6, "{}", volume(&mut s) - v0);
         let mut g = shelled();
-        run(&mut g, "FusionLipCommand", json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": "groove", "side": "outside"}));
+        run(&mut g, "plastic.lip", json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": "groove", "side": "outside"}));
         // Outside band along the outer edge (80 x 50): 80·50 − 78·48 = 256, 2 deep.
         assert!(rel(v0 - volume(&mut g), 256.0 * 2.0) < 1e-6, "{}", v0 - volume(&mut g));
-        assert!(g.execute("FusionLipCommand", &json!({"face": [40, 25, 0], "width": 1, "height": 2})).is_err(), "a face without an inner edge");
+        assert!(g.execute("plastic.lip", &json!({"face": [40, 25, 0], "width": 1, "height": 2})).is_err(), "a face without an inner edge");
     }
 
     #[test]
     fn snap_fit_arm_and_catch() {
         let mut s = Session::default();
-        run(&mut s, "PrimitiveBox", json!({"length": 40, "width": 40, "height": 4}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 4}));
         let v0 = volume(&mut s);
         run(
             &mut s,
-            "FusionSnapFitCommand",
+            "plastic.snap_fit",
             json!({"position": [20, 20, 4], "hook": [1, 0, 0], "length": 15, "thickness": 1.5, "width": 6, "catch_depth": 1, "catch_length": 3}),
         );
         let want = 1.5 * 15.0 * 6.0 + 0.5 * 1.0 * 3.0 * 6.0;
         assert!(rel(volume(&mut s) - v0, want) < 1e-6, "{}", volume(&mut s) - v0);
-        let m = run(&mut s, "MeasureCommand", json!({}));
+        let m = run(&mut s, "inspect.measure", json!({}));
         assert!((m["bodies"][0]["bbox"]["max"][0].as_f64().unwrap_or(0.0) - 40.0).abs() < 1e-9);
-        assert!(s.execute("FusionSnapFitCommand", &json!({"position": [5, 5, 4], "direction": [0, 0, 1], "hook": [0, 0, 1], "length": 15, "thickness": 1.5, "width": 6, "catch_depth": 1, "catch_length": 3})).is_err());
+        assert!(s.execute("plastic.snap_fit", &json!({"position": [5, 5, 4], "direction": [0, 0, 1], "hook": [0, 0, 1], "length": 15, "thickness": 1.5, "width": 6, "catch_depth": 1, "catch_length": 3})).is_err());
     }
 
     fn plate() -> (Session, f64) {
         let mut s = Session::default();
-        run(&mut s, "PrimitiveBox", json!({"length": 60, "width": 60, "height": 3}));
+        run(&mut s, "solid.box", json!({"length": 60, "width": 60, "height": 3}));
         let v0 = volume(&mut s);
         (s, v0)
     }
@@ -363,27 +363,27 @@ mod tests {
     fn rest_pads() {
         // Rectangle 20 x 10, 4 high: 800.
         let (mut s, v0) = plate();
-        run(&mut s, "FusionRestCommand", json!({"position": [30, 30, 3], "width": 10, "length": 20, "along": [1, 0, 0], "height": 4}));
+        run(&mut s, "plastic.rest", json!({"position": [30, 30, 3], "width": 10, "length": 20, "along": [1, 0, 0], "height": 4}));
         assert!(rel(volume(&mut s) - v0, 800.0) < 1e-6, "{}", volume(&mut s) - v0);
-        let m = run(&mut s, "MeasureCommand", json!({}));
+        let m = run(&mut s, "inspect.measure", json!({}));
         assert!((m["bodies"][0]["bbox"]["max"][2].as_f64().unwrap_or(0.0) - 7.0).abs() < 1e-9);
         // Round, diameter 10: π·25·4.
         let (mut r, v0) = plate();
-        run(&mut r, "FusionRestCommand", json!({"position": [30, 30, 3], "width": 10, "height": 4}));
+        run(&mut r, "plastic.rest", json!({"position": [30, 30, 3], "width": 10, "height": 4}));
         assert!(rel(volume(&mut r) - v0, PI * 25.0 * 4.0) < 1e-3, "{}", volume(&mut r) - v0);
         // Hollow, wall 1: (20·10 − 18·8)·4 = 224.
         let (mut h, v0) = plate();
-        run(&mut h, "FusionRestCommand", json!({"position": [30, 30, 3], "width": 10, "length": 20, "height": 4, "thickness": 1}));
+        run(&mut h, "plastic.rest", json!({"position": [30, 30, 3], "width": 10, "length": 20, "height": 4, "thickness": 1}));
         assert!(rel(volume(&mut h) - v0, 224.0) < 1e-6, "{}", volume(&mut h) - v0);
         // Drafted 2°: the section shrinks by 2·s·tan 2° each way at height s.
         let (mut d, v0) = plate();
-        run(&mut d, "FusionRestCommand", json!({"position": [30, 30, 3], "width": 10, "length": 20, "height": 4, "draft": "2 deg"}));
+        run(&mut d, "plastic.rest", json!({"position": [30, 30, 3], "width": 10, "length": 20, "height": 4, "draft": "2 deg"}));
         let a = 2f64.to_radians().tan();
         let want = 800.0 - a * 30.0 * 16.0 + 4.0 / 3.0 * a * a * 64.0;
         assert!(rel(volume(&mut d) - v0, want) < 1e-6, "{} {want}", volume(&mut d) - v0);
         // A wall thicker than half the width, or a draft that closes the top, is refused.
-        assert!(d.execute("FusionRestCommand", &json!({"position": [10, 10, 3], "width": 4, "height": 4, "thickness": 2})).is_err());
-        assert!(d.execute("FusionRestCommand", &json!({"position": [10, 10, 3], "width": 4, "height": 40, "draft": 10})).is_err());
+        assert!(d.execute("plastic.rest", &json!({"position": [10, 10, 3], "width": 4, "height": 4, "thickness": 2})).is_err());
+        assert!(d.execute("plastic.rest", &json!({"position": [10, 10, 3], "width": 4, "height": 40, "draft": 10})).is_err());
     }
 
     #[test]
@@ -395,31 +395,31 @@ mod tests {
         assert_eq!(list["rules"][0]["values"]["nominal_radius"], 0.75);
         assert_eq!(list["rules"][3]["values"]["thickness"].as_f64().map(|t| (t - 2.54).abs() < 1e-9), Some(true));
         // A new rule from ABS: Thickness-based values follow its thickness.
-        let r = run(&mut s, "FusionManagePlasticRuleCommand", json!({"name": "Thick ABS", "thickness": 3, "draft": "1.5 deg"}));
+        let r = run(&mut s, "plastic.manage_rules", json!({"name": "Thick ABS", "thickness": 3, "draft": "1.5 deg"}));
         assert_eq!(r["rule"]["values"]["nominal_radius"], 1.5);
-        assert!(s.execute("FusionManagePlasticRuleCommand", &json!({"name": "Bad", "draft": "3 mm"})).is_err());
+        assert!(s.execute("plastic.manage_rules", &json!({"name": "Bad", "draft": "3 mm"})).is_err());
         // Assigned to the plate: a boss without a draft takes the rule's 1.5°.
-        let body = run(&mut s, "MeasureCommand", json!({}))["bodies"][0]["name"].as_str().unwrap_or_default().to_string();
-        run(&mut s, "FusionAssignPlasticRuleCommand", json!({"bodies": [body], "rule": "Thick ABS"}));
-        run(&mut s, "FusionBossCommand", json!({"position": [30, 30, 3], "diameter": 10, "height": 12}));
+        let body = run(&mut s, "inspect.measure", json!({}))["bodies"][0]["name"].as_str().unwrap_or_default().to_string();
+        run(&mut s, "plastic.assign_rule", json!({"bodies": [body], "rule": "Thick ABS"}));
+        run(&mut s, "plastic.boss", json!({"position": [30, 30, 3], "diameter": 10, "height": 12}));
         let rt = 5.0 - 12.0 * 1.5f64.to_radians().tan();
         let want = PI * 12.0 / 3.0 * (25.0 + 5.0 * rt + rt * rt);
         assert!(rel(volume(&mut s) - v0, want) < 1e-3, "{} {want}", volume(&mut s) - v0);
         // Editing the rule rebuilds the boss.
-        run(&mut s, "FusionManagePlasticRuleCommand", json!({"name": "Thick ABS", "draft": "0 deg"}));
+        run(&mut s, "plastic.manage_rules", json!({"name": "Thick ABS", "draft": "0 deg"}));
         assert!(rel(volume(&mut s) - v0, PI * 25.0 * 12.0) < 1e-3, "{}", volume(&mut s) - v0);
-        assert!(s.execute("FusionAssignPlasticRuleCommand", &json!({"bodies": [body], "rule": "Nope"})).is_err());
-        assert!(s.execute("FusionAssignPlasticRuleCommand", &json!({"bodies": ["Nope"], "rule": "Thick ABS"})).is_err());
+        assert!(s.execute("plastic.assign_rule", &json!({"bodies": [body], "rule": "Nope"})).is_err());
+        assert!(s.execute("plastic.assign_rule", &json!({"bodies": ["Nope"], "rule": "Thick ABS"})).is_err());
     }
 
     #[test]
     fn groove_takes_the_rule_clearance() {
         let mut g = Session::default();
-        run(&mut g, "PrimitiveBox", json!({"length": 80, "width": 50, "height": 30}));
-        run(&mut g, "FusionShellBodyCommand", json!({"faces": [[40, 25, 30]], "thickness": 2}));
+        run(&mut g, "solid.box", json!({"length": 80, "width": 50, "height": 30}));
+        run(&mut g, "solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2}));
         let v0 = volume(&mut g);
-        run(&mut g, "FusionManagePlasticRuleCommand", json!({"name": "ABS (1.5mm)", "active": true}));
-        run(&mut g, "FusionLipCommand", json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": "groove", "side": "outside"}));
+        run(&mut g, "plastic.manage_rules", json!({"name": "ABS (1.5mm)", "active": true}));
+        run(&mut g, "plastic.lip", json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": "groove", "side": "outside"}));
         // Width and depth grow by the 0.1 clearance: (80·50 − 77.8·47.8)·2.1.
         let want = (4000.0 - 77.8 * 47.8) * 2.1;
         assert!(rel(v0 - volume(&mut g), want) < 1e-6, "{} {want}", v0 - volume(&mut g));

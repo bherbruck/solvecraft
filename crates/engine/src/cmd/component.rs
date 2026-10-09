@@ -12,11 +12,11 @@ use crate::params::{bad, bool_, num, str_, string_list, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("FusionCreateNewComponentCommand", "New Component", new_component)
+    CommandSpec::new("component.create", "New Component", new_component)
         .at("SOLID", "ASSEMBLE")
         .icon("component")
         .params("name?, parent?: component id or name (default: the active one); activate?: bool (default true)"),
-    CommandSpec::new("FusionCreateComponentsFromBodiesCommand", "Create Components from Bodies", from_bodies)
+    CommandSpec::new("component.from_bodies", "Create Components from Bodies", from_bodies)
         .icon("component")
         .params("bodies: [names] → one new component per body, named after it"),
     CommandSpec::new("component.activate", "Activate Component", activate).noundo().params("component: id or name (0 or \"root\" for the design)"),
@@ -31,8 +31,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("occurrence.move", "Move Occurrence", move_occurrence)
         .params("occurrence; translate?: [x,y,z]; axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; capture?: bool (default true; false keeps it pending until Capture Position)"),
     CommandSpec::new("occurrence.ground", "Ground", ground).params("occurrence; grounded?: bool (default toggles)"),
-    CommandSpec::new("SnapshotCmd", "Capture Position", capture).at("SOLID", "POSITION").icon("capture").params("keeps pending occurrence moves"),
-    CommandSpec::new("AsBuiltPositionsCmd", "Revert Position", revert).at("SOLID", "POSITION").icon("revert").noundo().params("drops pending occurrence moves"),
+    CommandSpec::new("component.capture_position", "Capture Position", capture).at("SOLID", "POSITION").icon("capture").params("keeps pending occurrence moves"),
+    CommandSpec::new("component.revert_position", "Revert Position", revert).at("SOLID", "POSITION").icon("revert").noundo().params("drops pending occurrence moves"),
 ];
 
 fn key(v: Option<&Value>) -> Option<String> {
@@ -58,7 +58,7 @@ fn translation(t: Vec3) -> Mat {
 }
 
 fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionCreateNewComponentCommand";
+    let cmd = "component.create";
     let parent = if p.get("parent").is_some() { component(s, p, "parent", cmd)? } else { s.active_component };
     let id = s.doc_mut().add_component(str_(p, "name"), parent)?;
     if p.get("activate").and_then(Value::as_bool).unwrap_or(true) {
@@ -70,7 +70,7 @@ fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn from_bodies(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "FusionCreateComponentsFromBodiesCommand";
+    let cmd = "component.from_bodies";
     let bodies = string_list(p, "bodies");
     if bodies.is_empty() || bodies.len() > 1000 {
         return Err(bad(cmd, "`bodies` must list 1…1000 body names"));

@@ -10,8 +10,8 @@ fn two_boxes() -> SolveApp {
     let mut s = Session::default();
     for (name, x) in [("A", 0), ("B", 30)] {
         s.execute("component.activate", &json!({"component": "root"})).unwrap();
-        s.execute("FusionCreateNewComponentCommand", &json!({ "name": name })).unwrap();
-        s.execute("PrimitiveBox", &json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        s.execute("component.create", &json!({ "name": name })).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
     }
     s.execute("component.activate", &json!({"component": "root"})).unwrap();
     s.execute("occurrence.ground", &json!({"occurrence": "A:1", "grounded": true})).unwrap();
@@ -28,7 +28,7 @@ fn occ(app: &SolveApp, name: &str) -> u64 {
 #[test]
 fn joint_from_two_snaps() {
     let mut app = two_boxes();
-    app.start("JointAssembleCmdNew");
+    app.start("joint.create");
     let mut d = app.dialog.clone().unwrap();
     let (fa, fb) = (face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap(), face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
     assert!(apply_commands(&app, &d).is_err(), "no snaps yet");
@@ -42,7 +42,7 @@ fn joint_from_two_snaps() {
     }
     let c = apply_commands(&app, &d).unwrap();
     let (id, p) = &c[0];
-    assert_eq!(id, "JointAssembleCmdNew");
+    assert_eq!(id, "joint.create");
     assert_eq!(p["type"], "revolute");
     assert_eq!(p["a"]["occurrence"], occ(&app, "A"));
     assert_eq!(p["b"]["occurrence"], occ(&app, "B"));
@@ -70,7 +70,7 @@ fn joint_from_two_snaps() {
 #[test]
 fn joint_and_drive_preview_on_the_placed_model() {
     let mut app = two_boxes();
-    app.start("JointAssembleCmdNew");
+    app.start("joint.create");
     let mut d = app.dialog.clone().unwrap();
     d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
     d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
@@ -91,20 +91,20 @@ fn joint_and_drive_preview_on_the_placed_model() {
     for (id, p) in apply_commands(&app, &d).unwrap() {
         app.run(&id, p).unwrap();
     }
-    app.start("FusionMoveJointsCommand");
+    app.start("joint.drive");
     let mut d = app.dialog.clone().unwrap();
     if let Kind::Assembly(Asm::Drive { values, .. }) = &mut d.kind {
         assert_eq!(values, &vec!["0 deg".to_string()]);
         values[0] = "30 deg".into();
     }
     let cmds = apply_commands(&app, &d).unwrap();
-    assert_eq!(cmds[0].0, "FusionMoveJointsCommand");
+    assert_eq!(cmds[0].0, "joint.drive");
     let b = world_preview(&app.session, &cmds, colors).unwrap().unwrap();
     assert_eq!(b.replaced, vec!["Body2".to_string()]);
     // Features preview as before while nothing is placed away from its frame, and on the
     // placed model once something is (B moved by its joint).
-    assert!(world_preview(&two_boxes().session, &[("Extrude".into(), json!({}))], colors).is_none());
-    assert!(world_preview(&app.session, &[("Extrude".into(), json!({}))], colors).is_some());
+    assert!(world_preview(&two_boxes().session, &[("solid.extrude".into(), json!({}))], colors).is_none());
+    assert!(world_preview(&app.session, &[("solid.extrude".into(), json!({}))], colors).is_some());
 }
 
 /// Edit Joint changes type, alignment and limits of the joint in place.
@@ -112,11 +112,8 @@ fn joint_and_drive_preview_on_the_placed_model() {
 fn edit_joint_runs_edit_and_limits() {
     let mut app = two_boxes();
     let (a, b) = (occ(&app, "A"), occ(&app, "B"));
-    app.run(
-        "JointAssembleCmdNew",
-        json!({"type": "slider", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}}),
-    )
-    .unwrap();
+    app.run("joint.create", json!({"type": "slider", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}}))
+        .unwrap();
     let id = app.session.doc.assembly.joints[0].id;
     let mut d = edit_joint(&app, id).unwrap();
     assert!(d.inputs.is_empty());
@@ -141,19 +138,19 @@ fn edit_joint_runs_edit_and_limits() {
 fn component_picks_become_occurrences() {
     let mut app = two_boxes();
     app.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Body2".into() }];
-    app.start("JointAsBuiltCmd");
+    app.start("joint.as_built");
     let d = app.dialog.clone().unwrap();
     let c = apply_commands(&app, &d).unwrap();
     assert_eq!(c[0].1["a"], occ(&app, "A"));
     assert_eq!(c[0].1["b"], occ(&app, "B"));
     app.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Body2".into() }];
-    app.start("RigidGroupCmd");
+    app.start("joint.rigid_group");
     let c = apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(c[0].1["occurrences"], json!([occ(&app, "A"), occ(&app, "B")]));
     app.dialog = None;
-    app.start("FusionCreateNewComponentCommand");
+    app.start("component.create");
     let c = apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(c[0].0, "FusionCreateNewComponentCommand");
+    assert_eq!(c[0].0, "component.create");
 }
 
 /// Round edges snap to their centre; straight ones are not circles.
@@ -180,7 +177,7 @@ fn text_at(out: &egui::FullOutput, text: &str) -> Option<egui::Pos2> {
 #[test]
 fn ok_click_survives_a_busy_preview() {
     let mut app = two_boxes();
-    app.start("JointAssembleCmdNew");
+    app.start("joint.create");
     let mut d = app.dialog.take().unwrap();
     d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
     d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
@@ -215,7 +212,7 @@ fn ok_click_survives_a_busy_preview() {
 #[test]
 fn face_snaps_mate_face_to_face() {
     let mut app = two_boxes();
-    app.start("JointAssembleCmdNew");
+    app.start("joint.create");
     let mut d = app.dialog.clone().unwrap();
     d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
     d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 10.0)).unwrap());
@@ -246,12 +243,9 @@ fn face_snaps_mate_face_to_face() {
 fn drive_value_takes_the_keyboard() {
     let mut app = two_boxes();
     let (a, b) = (occ(&app, "A"), occ(&app, "B"));
-    app.run(
-        "JointAssembleCmdNew",
-        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}}),
-    )
-    .unwrap();
-    app.start("FusionMoveJointsCommand");
+    app.run("joint.create", json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}}))
+        .unwrap();
+    app.start("joint.drive");
     let ctx = egui::Context::default();
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
     let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {

@@ -15,7 +15,7 @@ fn ms(t: Instant) -> f64 {
 /// them, built straight into the document.
 fn big(n: usize) -> Session {
     let mut s = Session::default();
-    s.execute("SketchCreate", &json!({"plane": "XY"})).unwrap();
+    s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
     let id = s.active_sketch.unwrap();
     let mut doc = (*s.doc).clone();
     let sk = doc.sketch_mut(id).unwrap();
@@ -67,7 +67,7 @@ fn sketch_perf() {
         s.execute("sketch.snap", &json!({"at": [10.0, 0.2], "from": [0, 0], "radius": 1})).unwrap();
         let snap = ms(t);
         let t = Instant::now();
-        s.execute("DrawPolyline", &json!({"points": [[-50, -50], [-40, -45]]})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[-50, -50], [-40, -45]]})).unwrap();
         let add = ms(t);
         let t = Instant::now();
         s.execute("sketch.move_point", &json!({"point": "p1", "to": [1, 1]})).unwrap();

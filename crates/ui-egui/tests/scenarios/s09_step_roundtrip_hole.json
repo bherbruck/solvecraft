@@ -1,6 +1,6 @@
 [
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -8,7 +8,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -30,10 +30,10 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
-  "start": "Extrude"
+  "start": "solid.extrude"
  },
  {
   "text": "15"
@@ -99,7 +99,7 @@
   }
  },
  {
-  "start": "FusionHoleCommand"
+  "start": "solid.hole"
  },
  {
   "click": {

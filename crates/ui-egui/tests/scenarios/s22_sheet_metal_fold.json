@@ -1,6 +1,6 @@
 [
  {
-  "note": "Target: sheet metal plate folded along a sketch line (SheetMetalFoldCmd, solvecraft-params; dialog by solvecraft-dialogs). Adjust the dialog steps when it lands."
+  "note": "Target: sheet metal plate folded along a sketch line (sheet.fold, solvecraft-params; dialog by solvecraft-dialogs). Adjust the dialog steps when it lands."
  },
  {
   "call": "ui.set",
@@ -9,7 +9,7 @@
   }
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -17,7 +17,7 @@
   }
  },
  {
-  "start": "ShapeRectangleTwoPoint"
+  "start": "sketch.rectangle.two_point"
  },
  {
   "click": {
@@ -39,7 +39,7 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
   "call": "ui.view",
@@ -48,7 +48,7 @@
   }
  },
  {
-  "start": "FusionSheetMetalFlangeCommand"
+  "start": "sheet.flange"
  },
  {
   "click": {
@@ -69,7 +69,7 @@
   }
  },
  {
-  "start": "SketchCreate"
+  "start": "sketch.create"
  },
  {
   "click": {
@@ -81,7 +81,7 @@
   }
  },
  {
-  "start": "DrawPolyline"
+  "start": "sketch.line"
  },
  {
   "click": {
@@ -106,10 +106,10 @@
   "key": "Escape"
  },
  {
-  "start": "SketchStop"
+  "start": "sketch.finish"
  },
  {
-  "start": "SheetMetalFoldCmd"
+  "start": "sheet.fold"
  },
  {
   "click": {
@@ -139,7 +139,7 @@
   "shot": "s22_folded"
  },
  {
-  "start": "FusionSheetMetalFlatPatternCmd"
+  "start": "sheet.flat_pattern"
  },
  {
   "widget": "Export DXF\u2026"

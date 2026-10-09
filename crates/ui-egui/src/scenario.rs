@@ -3,7 +3,7 @@
 //! drags, toolbar starts) the way a person would use it, with checks on the result.
 //!
 //! A scenario is a JSON list of steps:
-//! - `{"start": "Extrude"}`: a toolbar click; `{"key": "E", "shift"?, "cmd"?}`; `{"text": "20"}`
+//! - `{"start": "solid.extrude"}`: a toolbar click; `{"key": "E", "shift"?, "cmd"?}`; `{"text": "20"}`
 //! - `{"widget": "Revolute", "near"?: "Type"}`: click a dialog field, choice or button by its
 //!   text (with `near`: the one in that label's row)
 //! - `{"click": AT, "double"?, "shift"?, "ctrl"?, "button"?}`, `{"move": AT}`,
@@ -650,7 +650,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 // {body, min?: [x|null, y|null, z|null], max?: […]}: where a body is (±1e-3 mm).
                 let name = v["body"].as_str().unwrap_or_default();
                 // Where it is in the assembly (measured as placed).
-                let m = h.call("engine.execute", json!({"command": "MeasureCommand", "params": {"bodies": [name]}}))["result"].clone();
+                let m = h.call("engine.execute", json!({"command": "inspect.measure", "params": {"bodies": [name]}}))["result"].clone();
                 let b = m["bodies"].as_array().and_then(|a| a.first()).cloned().ok_or_else(|| format!("no body {name}: {m}"))?;
                 for side in ["min", "max"] {
                     for (i, want) in v[side].as_array().into_iter().flatten().enumerate() {
@@ -682,7 +682,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
             "body_volume" => {
                 // {body, volume}: one body's volume.
                 let name = v["body"].as_str().unwrap_or_default();
-                let m = h.call("engine.execute", json!({"command": "MeasureCommand", "params": {"bodies": [name]}}))["result"].clone();
+                let m = h.call("engine.execute", json!({"command": "inspect.measure", "params": {"bodies": [name]}}))["result"].clone();
                 let got = m["bodies"][0]["volume_mm3"].as_f64().unwrap_or(f64::NAN);
                 approx(got, &v["volume"], &format!("{name} volume"))?;
             }
