@@ -438,7 +438,7 @@ fn an_uncaptured_move_asks_before_the_next_command() {
     // Capture keeps the move.
     app.dialog = None;
     app.run("occurrence.move", json!({"occurrence": occ, "translate": [10, 0, 0], "capture": false})).unwrap();
-    app.start("Extrude");
+    app.start("solid.extrude");
     crate::browser::answer_capture(&mut app, "capture").unwrap();
     assert_eq!(app.session.doc.occurrences[0].transform[3][0], 10.0);
     assert!(crate::browser::answer_capture(&mut app, "capture").is_err(), "nothing waits now");
