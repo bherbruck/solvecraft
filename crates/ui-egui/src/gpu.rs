@@ -318,18 +318,30 @@ fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: 
 /// Opaque model surfaces: cut by the section plane, the inside shows as a flat cap colour.
 @fragment
 fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    // Derivatives first, in uniform control flow (browsers' WGSL compilers reject them after
+    // a branch that returns; the whole shader module then fails and nothing is drawn).
+    let k = curvature(i);
     if (clipped(i.wp)) { discard; }
     if (!front && length(u.clip.xyz) > 0.5) {
         return out_color(u.cap);
     }
     if (u.ana.x > 0.5 && length(i.n) > 0.5) {
-        return analysis(i);
+        return analysis(i, k);
     }
     return shade(i);
 }
 
-/// Surface analysis colours: zebra stripes, draft angle bands, curvature map.
-fn analysis(i: TOut) -> vec4<f32> {
+/// How fast the normal turns across the pixel (per mm).
+fn curvature(i: TOut) -> f32 {
+    let nn = normalize(i.n);
+    let kx = length(dpdx(nn)) / max(length(dpdx(i.wp)), 1e-6);
+    let ky = length(dpdy(nn)) / max(length(dpdy(i.wp)), 1e-6);
+    return max(kx, ky);
+}
+
+/// Surface analysis colours: zebra stripes, draft angle bands, curvature map (`k`: the
+/// surface's curvature here, worked out by the caller).
+fn analysis(i: TOut, k: f32) -> vec4<f32> {
     let v = normalize(u.back.xyz);
     var n = normalize(i.n);
     if (dot(n, v) < 0.0) { n = -n; }
@@ -385,10 +397,7 @@ fn analysis(i: TOut) -> vec4<f32> {
         return out_color(vec4<f32>(c * lit, 1.0));
     }
     // Curvature from how fast the normal turns across the pixel.
-    let nn = normalize(i.n);
-    let kx = length(dpdx(nn)) / max(length(dpdx(i.wp)), 1e-6);
-    let ky = length(dpdy(nn)) / max(length(dpdy(i.wp)), 1e-6);
-    let t = clamp(max(kx, ky) * u.ana.y, 0.0, 1.0);
+    let t = clamp(k * u.ana.y, 0.0, 1.0);
     let c = select(mix(vec3<f32>(0.10, 0.80, 0.25), vec3<f32>(0.90, 0.15, 0.10), t * 2.0 - 1.0),
                    mix(vec3<f32>(0.15, 0.35, 0.95), vec3<f32>(0.10, 0.80, 0.25), t * 2.0), t < 0.5);
     return out_color(vec4<f32>(c * lit, 1.0));
@@ -511,8 +520,8 @@ fn vs_img(@location(0) p: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) a:
 
 @fragment
 fn fs_img(i: IOut) -> @location(0) vec4<f32> {
-    if (clipped(i.wp)) { discard; }
     let c = textureSample(img_t, img_s, i.uv);
+    if (clipped(i.wp)) { discard; }
     return out_color(vec4<f32>(c.rgb, c.a * i.a));
 }
 
@@ -953,5 +962,82 @@ mod tests {
     fn shader_is_valid() {
         let module = naga::front::wgsl::parse_str(super::SHADER).unwrap_or_else(|e| panic!("{}", e.emit_to_string(super::SHADER)));
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
+    }
+
+    /// Derivatives and implicit-lod sampling run only in uniform control flow: browsers' WGSL
+    /// compilers (Tint) reject them after a branch, and the whole viewport shader then fails,
+    /// a black screen on the web (naga accepts it). Every fragment entry point makes such calls
+    /// (directly or through a helper) before its first branch or return.
+    #[test]
+    fn derivatives_only_in_uniform_control_flow() {
+        // Without comments (their words are not code).
+        let src: String = super::SHADER.lines().map(|l| l.split("//").next().unwrap_or("")).collect::<Vec<_>>().join("\n");
+        let src = src.as_str();
+        let derivs = ["dpdx(", "dpdy(", "fwidth(", "textureSample("];
+        // Functions: name -> body.
+        let mut fns: Vec<(String, String, bool)> = Vec::new();
+        let mut rest = src;
+        let mut fragment = false;
+        while let Some(at) = rest.find("fn ") {
+            let before = &rest[..at];
+            if before.contains("@fragment") {
+                fragment = true;
+            }
+            let Some(open) = rest[at..].find('{') else { break };
+            let name = rest[at + 3..].split('(').next().unwrap_or("").trim().to_string();
+            let start = at + open;
+            let mut depth = 0;
+            let mut end = start;
+            for (k, ch) in rest[start..].char_indices() {
+                match ch {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = start + k;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            fns.push((name, rest[start..=end].to_string(), fragment));
+            fragment = false;
+            rest = &rest[end + 1..];
+        }
+        // Helpers that take derivatives (directly or through another helper).
+        let mut uses: Vec<String> = Vec::new();
+        for _ in 0..8 {
+            for (n, body, _) in &fns {
+                if !uses.contains(n) && (derivs.iter().any(|d| body.contains(d)) || uses.iter().any(|u| body.contains(&format!("{u}(")))) {
+                    uses.push(n.clone());
+                }
+            }
+        }
+        for (n, body, frag) in &fns {
+            let calls: Vec<usize> = derivs
+                .iter()
+                .map(|d| d.to_string())
+                .chain(uses.iter().map(|u| format!("{u}(")))
+                .flat_map(|c| body.match_indices(&c).map(|(i, _)| i).collect::<Vec<_>>())
+                .collect();
+            if calls.is_empty() {
+                continue;
+            }
+            if !*frag {
+                // A helper: its own derivatives must come before any branch or return in it.
+                let first = ["if (", "return", "discard"].iter().filter_map(|k| body.find(k)).min().unwrap_or(usize::MAX);
+                for d in derivs {
+                    if let Some(i) = body.find(d) {
+                        assert!(i < first, "{n}: {d} after a branch");
+                    }
+                }
+                continue;
+            }
+            let first = ["if (", "return", "discard"].iter().filter_map(|k| body.find(k)).min().unwrap_or(usize::MAX);
+            for c in calls {
+                assert!(c < first, "fragment {n}: a derivative after a branch or return: {}", &body[c..(c + 40).min(body.len())]);
+            }
+        }
     }
 }
