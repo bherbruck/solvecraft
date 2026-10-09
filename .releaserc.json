@@ -1,0 +1,23 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    [
+      "@semantic-release/exec",
+      {
+        "analyzeCommitsCmd": "printf 'patch\\n'",
+        "prepareCmd": "node .github/scripts/set-workspace-version.cjs ${nextRelease.version} && cargo metadata --format-version 1 --no-deps > /dev/null",
+        "publishCmd": "gh workflow run release.yml --ref v${nextRelease.version} --field publish=true"
+      }
+    ],
+    "@semantic-release/release-notes-generator",
+    [
+      "@semantic-release/git",
+      {
+        "assets": ["Cargo.toml", "Cargo.lock"],
+        "message": "chore(release): ${nextRelease.version} [skip ci]"
+      }
+    ]
+  ]
+}

@@ -1,0 +1,39 @@
+name: Semantic release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: semantic-release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Analyze and release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx --yes \
+            --package semantic-release@25.0.9 \
+            --package @semantic-release/commit-analyzer@13.0.1 \
+            --package @semantic-release/release-notes-generator@14.1.1 \
+            --package @semantic-release/github@12.0.10 \
+            --package @semantic-release/exec@7.1.0 \
+            --package @semantic-release/git@10.0.1 \
+            semantic-release
