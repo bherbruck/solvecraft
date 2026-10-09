@@ -1,7 +1,20 @@
 SolveCraft is an open-source parametric 3D CAD application in pure Rust: sketch on a plane,
 constrain and dimension the sketch, turn profiles into solids on a feature timeline, and change a
-parameter to watch the timeline rebuild. This is the first public build, a **pre-release**: it is
-early, and we'd like your bug reports.
+parameter to watch the timeline rebuild. This is a **pre-release**: it is early, and we'd like
+your bug reports.
+
+## Fixed since v0.1.0
+
+- **Quitting with unsaved changes now asks first** ([#33](https://github.com/bherbruck/solvecraft/issues/33)):
+  "Save changes to <name>?" with Save, Don't Save and Cancel, once per unsaved design, for the
+  title bar's ×, File ▸ Quit, Alt+F4 / Cmd+Q and the window manager. The web app asks through
+  the browser's "leave site?" prompt.
+- **Web: a new design no longer shows a black screen** in browsers with WebGPU
+  ([#34](https://github.com/bherbruck/solvecraft/issues/34)); the viewport shader compiles there now.
+- **README demo:** a short GIF at the top shows an agent building an enclosure over MCP and then
+  editing its parameters. The full video is attached below.
+
+## Links
 
 - **Documentation:** https://bherbruck.github.io/solvecraft/
 - **Try it in the browser:** https://bherbruck.github.io/solvecraft/app/ (`?sample` opens a sample part)
@@ -36,11 +49,11 @@ attached video shows an agent building an enclosure through the UI and MCP.
 
 | File | What |
 |---|---|
-| `solvecraft-v0.1.0-windows-x86_64.zip` | Windows 10/11: `solvecraft.exe` (the app) and `solvecraft-cli.exe` |
-| `solvecraft-v0.1.0-linux-x86_64.tar.gz` | Linux x86_64 (glibc 2.35 or newer): `solvecraft` and `solvecraft-cli` |
-| `SolveCraft-v0.1.0-x86_64.AppImage` | Linux, the app as one file: `chmod +x` and run it |
-| `solvecraft-v0.1.0-macos-universal.zip` | macOS 11 or newer, Apple silicon and Intel: `SolveCraft.app` and `solvecraft-cli` |
-| `solvecraft-v0.1.0-web.zip` | the web app, to host yourself (any static server; HTTPS or localhost for saving files) |
+| `solvecraft-v0.1.1-windows-x86_64.zip` | Windows 10/11: `solvecraft.exe` (the app) and `solvecraft-cli.exe` |
+| `solvecraft-v0.1.1-linux-x86_64.tar.gz` | Linux x86_64 (glibc 2.35 or newer): `solvecraft` and `solvecraft-cli` |
+| `SolveCraft-v0.1.1-x86_64.AppImage` | Linux, the app as one file: `chmod +x` and run it |
+| `solvecraft-v0.1.1-macos-universal.zip` | macOS 11 or newer, Apple silicon and Intel: `SolveCraft.app` and `solvecraft-cli` |
+| `solvecraft-v0.1.1-web.zip` | the web app, to host yourself (any static server; HTTPS or localhost for saving files) |
 | `SHA256SUMS` | checksums: `sha256sum -c SHA256SUMS` |
 
 ### The binaries are not signed
