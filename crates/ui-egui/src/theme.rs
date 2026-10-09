@@ -60,6 +60,8 @@ pub struct Tokens {
     pub axis_z: Color32,
     /// Construction planes.
     pub construction_plane: Color32,
+    /// Construction axes and points.
+    pub construction_geom: Color32,
     // ---- bodies and live previews ----
     pub body: Color32,
     pub body_edge: Color32,
@@ -164,6 +166,7 @@ impl Tokens {
             axis_y: Color32::from_rgb(0, 255, 0),
             axis_z: Color32::from_rgb(2, 2, 248),
             construction_plane: Color32::from_rgba_unmultiplied_const(249, 184, 134, 70),
+            construction_geom: Color32::from_rgb(232, 140, 48),
             body: Color32::from_rgb(176, 186, 198),
             body_edge: Color32::from_rgb(40, 44, 52),
             manipulator: Color32::from_rgb(40, 110, 220),

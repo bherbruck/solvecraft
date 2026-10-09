@@ -23,6 +23,8 @@ fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Pattern { .. } => "pattern_circ",
         FeatureKind::Mirror { .. } => "mirror",
         FeatureKind::ConstructionPlane { .. } => "plane",
+        FeatureKind::ConstructionAxis { .. } => "axis",
+        FeatureKind::ConstructionPoint { .. } => "point",
         FeatureKind::Hole { .. } => "hole",
         FeatureKind::Loft { .. } => "loft",
         FeatureKind::Sweep { .. } => "sweep",

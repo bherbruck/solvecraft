@@ -2286,14 +2286,13 @@ fn curves_sketch(app: &SolveApp, ids: &[String], not: Option<u64>) -> Option<u64
 /// sketch line).
 pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
     match sel {
-        Sel::Axis { name } => Some((
-            Vec3::ZERO,
-            match name.as_str() {
-                "X" => Vec3::X,
-                "Y" => Vec3::Y,
-                _ => Vec3::Z,
-            },
-        )),
+        Sel::Axis { name } => match name.as_str() {
+            "X" => Some((Vec3::ZERO, Vec3::X)),
+            "Y" => Some((Vec3::ZERO, Vec3::Y)),
+            "Z" => Some((Vec3::ZERO, Vec3::Z)),
+            // A construction axis.
+            n => solvecraft_engine::view::construction_axes(&app.session).into_iter().find(|(_, an, _, _)| an == n).map(|(_, _, o, d)| (o, d)),
+        },
         Sel::SketchCurve { id } => {
             let st = app.session.world_state();
             let sid = curves_sketch(app, std::slice::from_ref(id), None)?;

@@ -404,6 +404,43 @@ pub fn origin_axes(app: &SolveApp) -> Vec<(&'static str, Vec3)> {
     [("X", Vec3::X), ("Y", Vec3::Y), ("Z", Vec3::Z)].into_iter().filter(|(n, _)| !app.ui.hidden_origin.iter().any(|h| h == n)).collect()
 }
 
+/// Construction axes shown, as segments: across the model where the axis passes it (a little
+/// past it either side), at least the origin axes' length around the axis's origin: (name,
+/// from, to).
+pub fn construction_axis_segments(app: &SolveApp) -> Vec<(String, Vec3, Vec3)> {
+    let h = origin_size(app.cam.half_height()) * AXIS_LEN;
+    let bb = solvecraft_engine::view::bounds(&app.session);
+    solvecraft_engine::view::construction_axes(&app.session)
+        .into_iter()
+        .filter(|(_, n, _, _)| !app.ui.hidden_origin.contains(n))
+        .map(|(_, name, o, d)| {
+            let (mut lo, mut hi) = (-h, h);
+            if !bb.is_empty() {
+                for i in 0..8 {
+                    let c = Vec3::new(
+                        if i & 1 == 0 { bb.min.x } else { bb.max.x },
+                        if i & 2 == 0 { bb.min.y } else { bb.max.y },
+                        if i & 4 == 0 { bb.min.z } else { bb.max.z },
+                    );
+                    let t = (c - o).dot(d);
+                    lo = lo.min(t - h * 0.3);
+                    hi = hi.max(t + h * 0.3);
+                }
+            }
+            (name, o + d * lo, o + d * hi)
+        })
+        .collect()
+}
+
+/// Construction points shown: (name, position).
+pub fn construction_points(app: &SolveApp) -> Vec<(String, Vec3)> {
+    solvecraft_engine::view::construction_points(&app.session)
+        .into_iter()
+        .filter(|(_, n, _)| !app.ui.hidden_origin.contains(n))
+        .map(|(_, n, p)| (n, p))
+        .collect()
+}
+
 /// Construction planes drawn as squares around their origin: (name, normal, quad).
 pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
     let h = origin_size(app.cam.half_height()) * 1.2;
@@ -645,6 +682,15 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
             let dd = seg_dist(pos, a, b);
             if dd < 5.0 && besta.as_ref().is_none_or(|(bd, _)| dd < *bd) {
                 besta = Some((dd, Hit::Axis { name: name.into() }));
+            }
+        }
+    }
+    // Construction axes, picked like the origin axes.
+    for (name, a, b) in construction_axis_segments(app) {
+        if let (Some(a), Some(b)) = (proj.to_screen(a), proj.to_screen(b)) {
+            let dd = seg_dist(pos, a, b);
+            if dd < 5.0 && besta.as_ref().is_none_or(|(bd, _)| dd < *bd) {
+                besta = Some((dd, Hit::Axis { name }));
             }
         }
     }
@@ -969,6 +1015,27 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
         while a < size * AXIS_LEN {
             sc.line((dir * a).to_f32(), (dir * (a + dash)).to_f32(), c4(col), w * 0.75, false);
             a += dash * 2.0;
+        }
+    }
+    // Construction axes (dashed, the length of the origin axes either side) and points (a
+    // small star), in the construction colour.
+    for (name, a, b) in construction_axis_segments(app) {
+        let on = sel.iter().any(|x| matches!(x, Sel::Axis { name: n } if *n == name)) || matches!(hover, Some(Hit::Axis { name: n }) if *n == name);
+        let col = c4(if on { t.sel_edge } else { t.construction_geom });
+        let w = if on { 3.0 } else { 1.6 };
+        let len = a.dist(b);
+        let dash = size * 0.08;
+        let mut s = 0.0;
+        while s < len {
+            let e = (s + dash).min(len);
+            sc.line(a.lerp(b, s / len).to_f32(), a.lerp(b, e / len).to_f32(), col, w, false);
+            s += dash * 1.6;
+        }
+    }
+    for (_, p) in construction_points(app) {
+        let r = size * 0.04;
+        for d in [Vec3::X, Vec3::Y, Vec3::Z] {
+            sc.line((p - d * r).to_f32(), (p + d * r).to_f32(), c4(t.construction_geom), 2.0, true);
         }
     }
     // Selected things.
@@ -2111,6 +2178,30 @@ mod tests {
             }
         }
         assert_eq!(regions, 26);
+    }
+
+    #[test]
+    fn construction_axes_span_the_model_and_points_show() {
+        let mut s = solvecraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        s.execute("construct.axis.two_points", &json!({"a": {"vertex": [0, 0, 20]}, "b": {"vertex": [40, 30, 20]}})).unwrap();
+        s.execute("construct.point.vertex", &json!({"point": {"vertex": [40, 0, 20]}})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        let axes = construction_axis_segments(&app);
+        assert_eq!(axes.len(), 1);
+        let (name, a, b) = axes[0].clone();
+        // The segment runs through both points and past them.
+        let d = (b - a).normalized().unwrap();
+        for p in [Vec3::new(0.0, 0.0, 20.0), Vec3::new(40.0, 30.0, 20.0)] {
+            let t = (p - a).dot(d);
+            assert!(t > 0.0 && t < a.dist(b) && (a + d * t).dist(p) < 1e-6, "{p:?} not on {a:?}..{b:?}");
+        }
+        assert_eq!(construction_points(&app).len(), 1);
+        // It is an axis for dialogs (pattern directions, revolve axes), and hiding it hides it.
+        let (o, dir) = crate::dialogs::axis_of(&app, &Sel::Axis { name: name.clone() }).unwrap();
+        assert!(o.dist(Vec3::new(0.0, 0.0, 20.0)) < 1e-6 && dir.dist(d) < 1e-6);
+        app.ui.hidden_origin.push(name);
+        assert!(construction_axis_segments(&app).is_empty());
     }
 
     #[test]
