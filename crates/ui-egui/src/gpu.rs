@@ -173,6 +173,9 @@ struct Batches {
     tris: Option<Batch>,
     trans: Option<Batch>,
     glass: Option<Batch>,
+    /// The glass triangles as built, and the view direction they were last sorted for.
+    glass_cpu: Vec<u8>,
+    glass_sorted_for: Option<[f32; 3]>,
     lines: Option<Batch>,
     hidden: Option<Batch>,
     overlays: Option<Batch>,
@@ -189,7 +192,9 @@ impl Batches {
         if let Some(sc) = slot.lock().ok().and_then(|mut s| s.take()) {
             self.tris = upload(device, "sc_tris", &sc.tris, TRI_SIZE);
             self.trans = upload(device, "sc_trans", &sc.trans, TRI_SIZE);
-            self.glass = upload(device, "sc_glass", &sc.glass, TRI_SIZE);
+            self.glass = upload_with(device, "sc_glass", &sc.glass, TRI_SIZE, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
+            self.glass_cpu = sc.glass;
+            self.glass_sorted_for = None;
             self.lines = upload(device, "sc_lines", &sc.lines, LINE_SIZE);
             self.hidden = upload(device, "sc_hidden", &sc.hidden, LINE_SIZE);
             self.overlays = upload(device, "sc_overlay", &sc.overlay, LINE_SIZE);
@@ -788,17 +793,42 @@ impl Resources {
 }
 
 fn upload(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize) -> Option<Batch> {
+    upload_with(device, label, bytes, stride, wgpu::BufferUsages::VERTEX)
+}
+
+fn upload_with(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, usage: wgpu::BufferUsages) -> Option<Batch> {
     if bytes.len() < stride {
         return None;
     }
     Some(Batch {
-        buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(label),
-            contents: bytes,
-            usage: wgpu::BufferUsages::VERTEX,
-        }),
+        buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytes, usage }),
         count: u32::try_from(bytes.len() / stride).unwrap_or(0),
     })
+}
+
+/// Triangles (3 vertices of `TRI_SIZE` bytes each, position first) ordered far to near along
+/// the view direction `back` (toward the eye), so blended glass draws back to front.
+pub fn sort_back_to_front(bytes: &[u8], back: [f32; 3]) -> Vec<u8> {
+    let tri = TRI_SIZE * 3;
+    let depth = |t: &[u8]| -> f32 {
+        let f = |o: usize| t.get(o..o + 4).and_then(|b| b.try_into().ok()).map_or(0.0, f32::from_le_bytes);
+        (0..3).map(|v| (0..3).map(|k| f(v * TRI_SIZE + k * 4) * back[k]).sum::<f32>()).sum::<f32>()
+    };
+    let mut tris: Vec<(f32, &[u8])> = bytes.chunks_exact(tri).map(|t| (depth(t), t)).collect();
+    tris.sort_by(|a, b| a.0.total_cmp(&b.0));
+    tris.into_iter().flat_map(|(_, t)| t.iter().copied()).collect()
+}
+
+impl Batches {
+    /// Re-sort the glass for a new view direction (when it turned more than about 2 degrees).
+    fn sort_glass(&mut self, queue: &wgpu::Queue, back: [f32; 3]) {
+        let (Some(g), false) = (&self.glass, self.glass_cpu.is_empty()) else { return };
+        let turned = self.glass_sorted_for.is_none_or(|s| s[0] * back[0] + s[1] * back[1] + s[2] * back[2] < 0.9994);
+        if turned {
+            queue.write_buffer(&g.buffer, 0, &sort_back_to_front(&self.glass_cpu, back));
+            self.glass_sorted_for = Some(back);
+        }
+    }
 }
 
 /// Create the pipelines. Call once with the app's render state and its depth/MSAA settings.
@@ -822,6 +852,7 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         res.model.take(device, self.key, &self.slot);
         res.highlight.take(device, self.hl_key, &self.hl_slot);
         res.preview.take(device, self.pv_key, &self.pv_slot);
+        res.model.sort_glass(queue, self.back);
         queue.write_buffer(&res.uniform, 0, &uniform_bytes(self, self.size_px[0], self.size_px[1], res.linear_out));
         if let Some(a) = &self.access
             && a.version != res.access_version
@@ -1040,5 +1071,28 @@ mod tests {
                 assert!(c < first, "fragment {n}: a derivative after a branch or return: {}", &body[c..(c + 40).min(body.len())]);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod glass_tests {
+    use super::*;
+
+    #[test]
+    fn glass_is_drawn_far_to_near() {
+        // Two triangles at z = 5 and z = -5, given near first; looking down from +Z.
+        let mut sc = GpuScene::default();
+        for z in [5.0f32, -5.0] {
+            for p in [[0.0, 0.0, z], [1.0, 0.0, z], [0.0, 1.0, z]] {
+                sc.glass_tri(p, [0.0, 0.0, 1.0], [255, 0, 0, 100]);
+            }
+        }
+        let sorted = sort_back_to_front(&sc.glass, [0.0, 0.0, 1.0]);
+        let z0 = f32::from_le_bytes(sorted[8..12].try_into().unwrap());
+        assert_eq!(z0, -5.0, "the far triangle first");
+        assert_eq!(sorted.len(), sc.glass.len());
+        // Seen from below, the order flips.
+        let sorted = sort_back_to_front(&sc.glass, [0.0, 0.0, -1.0]);
+        assert_eq!(f32::from_le_bytes(sorted[8..12].try_into().unwrap()), 5.0);
     }
 }
