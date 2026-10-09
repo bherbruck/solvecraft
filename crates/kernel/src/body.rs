@@ -19,6 +19,9 @@ pub struct Body {
     pub(crate) color: Option<[f32; 3]>,
     /// Opacity and face colours for export (set by the document; operations drop it).
     pub(crate) paint: Option<std::sync::Arc<Paint>>,
+    /// Lines the user split faces along (Split Face), as polylines: export keeps the faces on
+    /// either side apart where it would otherwise join pieces of one surface.
+    pub(crate) splits: Option<std::sync::Arc<Vec<Vec<Vec3>>>>,
 }
 
 /// How a body looks beyond its colour, for export: its opacity and its faces' own colours.
@@ -278,6 +281,7 @@ impl Body {
             }
             && self.color == other.color
             && self.paint == other.paint
+            && self.splits == other.splits
     }
 
     pub(crate) fn new(solid: Solid) -> Result<Body> {
@@ -302,7 +306,7 @@ impl Body {
         if v < 0.0 {
             solid.not();
         }
-        Ok(Body { solid: std::sync::Arc::new(solid), mesh: None, color: None, paint: None })
+        Ok(Body { solid: std::sync::Arc::new(solid), mesh: None, color: None, paint: None, splits: None })
     }
 
     /// A deep copy of the solid that can be mutated without affecting other bodies.
@@ -332,6 +336,21 @@ impl Body {
     /// The same body with a display colour.
     pub fn with_color(mut self, c: Option<[f32; 3]>) -> Body {
         self.color = c.filter(|c| c.iter().all(|x| x.is_finite())).map(|c| c.map(|x| x.clamp(0.0, 1.0)));
+        self
+    }
+
+    /// Lines faces were split along on purpose (Split Face), as polylines.
+    pub fn split_lines(&self) -> Option<&std::sync::Arc<Vec<Vec<Vec3>>>> {
+        self.splits.as_ref()
+    }
+
+    pub(crate) fn split_keep(&self) -> &[Vec<Vec3>] {
+        self.splits.as_ref().map(|l| l.as_slice()).unwrap_or(&[])
+    }
+
+    /// The same body with the lines its faces were split along on purpose.
+    pub fn with_split_lines(mut self, s: Option<std::sync::Arc<Vec<Vec<Vec3>>>>) -> Body {
+        self.splits = s.filter(|l| !l.is_empty());
         self
     }
 

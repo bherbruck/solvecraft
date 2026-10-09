@@ -241,6 +241,7 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         }
     }
     let mut empty_votes = 0;
+    let keep: Vec<Vec<Vec3>> = a.split_keep().iter().chain(b.split_keep()).cloned().collect();
     for (attempt, j) in JITTER.iter().enumerate() {
         let shift = mt::Vector3::new(j[0], j[1], j[2]) * (size * 0.01);
         for k in [2e-3, 5e-4] {
@@ -267,7 +268,7 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
                     empty_votes += 1;
                     last = "empty result".into();
                 }
-                Ok(s) => match Body::new(crate::heal::heal(s, size)) {
+                Ok(s) => match Body::new(crate::heal::heal_keep(s, size, &keep)) {
                     Ok(body) => {
                         let (ok, v) = check(&body);
                         if ok {

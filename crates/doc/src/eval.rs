@@ -283,6 +283,12 @@ impl ModelState {
                     (key, &b.name).hash(&mut h);
                     b.key = h.finish();
                     b.names = crate::naming::NameCell::new(Some(origin.clone()));
+                    // Faces split on purpose stay split through later features (for export).
+                    if b.body.split_lines().is_none()
+                        && let Some(lines) = before.bodies.iter().find(|x| x.name == b.name).and_then(|x| x.body.split_lines())
+                    {
+                        b.body = b.body.clone().with_split_lines(Some(lines.clone()));
+                    }
                     // An imported look outlives the operations on the body.
                     if b.body.paint().is_none()
                         && b.body.color().is_none()

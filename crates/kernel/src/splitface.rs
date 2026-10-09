@@ -845,6 +845,16 @@ pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Bod
 /// Like [`split_faces`], with the body face each face of the result came from (in face order).
 pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<usize>)> {
     let (b, imp) = split_any(body, faces, tool)?;
+    // The new edges, remembered so that export keeps the pieces apart.
+    let mut lines: Vec<Vec<Vec3>> = body.splits.as_ref().map(|l| l.to_vec()).unwrap_or_default();
+    lines.extend(imp.new_edges.iter().filter_map(|e| {
+        let c = e.curve();
+        let (t0, t1) = c.range_tuple();
+        let n = if matches!(c, mt::Curve::Line(_)) { 1 } else { 64 };
+        let pts: Vec<Vec3> = (0..=n).map(|k| from_p3(c.subs(t0 + (t1 - t0) * k as f64 / n as f64))).collect();
+        pts.iter().all(|p| p.is_finite()).then_some(pts)
+    }));
+    let b = b.with_split_lines(Some(std::sync::Arc::new(lines)));
     if let Some(missed) = faces.iter().find(|f| imp.made.get(f).copied().unwrap_or(0) == 0) {
         return Err(KernelError::Invalid(format!("the tool does not cross face {missed}")));
     }
@@ -867,7 +877,7 @@ pub(crate) fn split_any(body: &Body, faces: &[usize], tool: &SplitTool) -> Resul
         }
         let shells = std::mem::take(&mut imp.shells);
         let solid = mt::Solid::new_unchecked(shells.into_iter().map(mt::Shell::from).collect());
-        Ok((Body { solid: std::sync::Arc::new(solid), mesh: None, color: body.color, paint: None }, imp))
+        Ok((Body { solid: std::sync::Arc::new(solid), mesh: None, color: body.color, paint: None, splits: body.splits.clone() }, imp))
     })
 }
 
@@ -1154,6 +1164,42 @@ mod tests {
         let holed = crate::boolean(&s, &pin, crate::BoolOp::Cut).unwrap().unwrap();
         let v = measure(&holed).unwrap().volume;
         assert!(rel(v, 6000.0 - std::f64::consts::PI * 4.0 * 30.0) < 1e-3, "{v}");
+    }
+
+    /// Faces after a STEP round trip.
+    fn round_trip_faces(b: &Body) -> usize {
+        let ex = crate::ExportBody { name: "B".into(), body: b, color: None };
+        let text = crate::step_export_bodies(&[ex], &crate::StepHeader::default()).unwrap();
+        let imp = crate::step_import(&text).unwrap();
+        imp.bodies.iter().map(|x| x.body.face_count()).sum()
+    }
+
+    #[test]
+    fn export_keeps_faces_split_on_purpose() {
+        // A box top split by a plane, and a cylinder's side split by a plane across its axis.
+        let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let pl = Plane::new(Vec3::new(4.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+        let s = split_faces(&b, &[top(&b, 30.0)], &SplitTool::Plane(pl)).unwrap();
+        assert_eq!(s.face_count(), 7);
+        assert_eq!(round_trip_faces(&s), 7);
+        let c = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap();
+        let side = c.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_none()).unwrap();
+        let mid = Plane::new(Vec3::new(0.0, 0.0, 5.0), Vec3::X, Vec3::Y).unwrap();
+        let cs = split_faces(&c, &[side], &SplitTool::Plane(mid)).unwrap();
+        let n = cs.face_count();
+        assert!(n > c.face_count());
+        // The pieces stay apart; the cylinder's incidental seam pieces still join as before.
+        assert_eq!(round_trip_faces(&cs), round_trip_faces(&c) + 1);
+        // Without the record the export joins the top's pieces again (as it does for pieces a
+        // boolean left).
+        assert_eq!(round_trip_faces(&s.clone().with_split_lines(None)), 6);
+        // A split after a split keeps both lines.
+        let pl2 = Plane::new(Vec3::new(0.0, 12.0, 0.0), Vec3::X, Vec3::Z).unwrap();
+        let tops: Vec<usize> =
+            s.faces(0.01).unwrap().iter().enumerate().filter(|(_, f)| (f.centroid.z - 30.0).abs() < 1e-6).map(|(i, _)| i).collect();
+        let s2 = split_faces(&s, &tops, &SplitTool::Plane(pl2)).unwrap();
+        assert_eq!(s2.face_count(), 9);
+        assert_eq!(round_trip_faces(&s2), 9);
     }
 
     #[test]

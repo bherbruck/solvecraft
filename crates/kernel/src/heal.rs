@@ -79,7 +79,26 @@ fn inside(p: Vec3, edges: &[mt::Edge], n: Vec3) -> bool {
 
 /// Merge each group of edge-connected coplanar faces into one face. Returns None when nothing
 /// changed or the result would not be a valid solid.
-fn merge_coplanar(shell: &mt::Shell, tol: f64) -> Option<mt::Shell> {
+/// Do the points lie along one of the lines faces were split along on purpose (polylines;
+/// chords of a curved line sag by under a tenth of their length)?
+pub(crate) fn on_split_line(pts: &[Vec3], keep: &[Vec<Vec3>]) -> bool {
+    !pts.is_empty()
+        && keep.iter().any(|line| {
+            let seg = line.windows(2).filter_map(|w| Some(w.first()?.dist(*w.get(1)?))).fold(0.0, f64::max);
+            let tol = 1e-6 * (1.0 + seg) + if line.len() > 2 { seg * 0.1 } else { 0.0 };
+            pts.iter().all(|q| line.windows(2).any(|w| w.first().zip(w.get(1)).is_some_and(|(a, b)| q.dist_to_segment(*a, *b) <= tol)))
+        })
+}
+
+/// Points along an edge (ends and three inside).
+fn edge_points(e: &mt::Edge) -> Vec<Vec3> {
+    use mt::{BoundedCurve, ParametricCurve};
+    let c = e.curve();
+    let (t0, t1) = c.range_tuple();
+    (0..=4).map(|k| from_p3(c.subs(t0 + (t1 - t0) * k as f64 / 4.0))).collect()
+}
+
+fn merge_coplanar(shell: &mt::Shell, tol: f64, keep: &[Vec<Vec3>]) -> Option<mt::Shell> {
     let faces: Vec<mt::Face> = shell.face_iter().cloned().collect();
     let planes: Vec<Option<(Vec3, f64)>> = faces.iter().map(plane_of).collect();
     let mut parent: Vec<usize> = (0..faces.len()).collect();
@@ -90,9 +109,11 @@ fn merge_coplanar(shell: &mt::Shell, tol: f64) -> Option<mt::Shell> {
         }
     }
     let mut merged_any = false;
-    for fs in by_edge.values() {
+    let edges: HashMap<mt::EdgeID, mt::Edge> = shell.edge_iter().map(|e| (e.id(), e)).collect();
+    for (id, fs) in &by_edge {
         if let [a, b] = fs[..]
             && a != b
+            && (keep.is_empty() || !edges.get(id).is_some_and(|e| on_split_line(&edge_points(e), keep)))
             && let (Some(Some((na, da))), Some(Some((nb, db)))) = (planes.get(a), planes.get(b))
             && na.dot(*nb) > 1.0 - 1e-9
             && (da - db).abs() < tol
@@ -378,6 +399,11 @@ fn planar_surfaces(shell: &mt::Shell, tol: f64) -> Option<mt::Shell> {
 
 /// Heal a solid; returns the input unchanged when nothing applies or healing fails.
 pub fn heal(solid: Solid, size: f64) -> Solid {
+    heal_keep(solid, size, &[])
+}
+
+/// [`heal`], keeping faces apart along lines they were split along on purpose.
+pub(crate) fn heal_keep(solid: Solid, size: f64, keep: &[Vec<Vec3>]) -> Solid {
     let tol = (size * 1e-7).max(1e-9);
     let mut shells = Vec::new();
     let mut changed = false;
@@ -391,7 +417,7 @@ pub fn heal(solid: Solid, size: f64) -> Solid {
             cur = m;
             changed = true;
         }
-        if let Some(m) = merge_coplanar(&cur, tol) {
+        if let Some(m) = merge_coplanar(&cur, tol, keep) {
             cur = m;
             changed = true;
         }

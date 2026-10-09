@@ -62,3 +62,21 @@ fn a_tool_that_misses_is_refused() {
     assert!(s.execute("solid.split_face", &json!({"faces": [[10, 15, 20]], "plane": {"origin": [100, 0, 0], "normal": [1, 0, 0]}})).is_err());
     assert_eq!(s.doc.features.len(), n);
 }
+
+#[test]
+fn export_keeps_split_faces_through_later_features() {
+    let mut s = boxed();
+    run(&mut s, "solid.split_face", json!({"faces": [[10, 15, 20]], "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    // A later feature rebuilds the body; the split stays a split in the file.
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 0]], "radius": 2}));
+    let (f, _) = faces_volume(&mut s, "B");
+    assert_eq!(f, 8);
+    let dir = std::env::temp_dir().join(format!("solvecraft-split-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let step = dir.join("split.step");
+    run(&mut s, "file.export", json!({"path": step.to_string_lossy()}));
+    let text = std::fs::read_to_string(&step).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    // Six box faces, the top's second piece and the fillet.
+    assert_eq!(text.matches("ADVANCED_FACE(").count(), 8, "{text}");
+}

@@ -101,7 +101,7 @@ pub fn mesh_body(positions: &[Vec3], triangles: &[[u32; 3]]) -> Result<Body> {
             t.swap(1, 2);
         }
     }
-    Ok(Body { solid: Arc::new(crate::body::Solid::new_unchecked(Vec::new())), mesh: Some(Arc::new(out)), color: None, paint: None })
+    Ok(Body { solid: Arc::new(crate::body::Solid::new_unchecked(Vec::new())), mesh: Some(Arc::new(out)), color: None, paint: None, splits: None })
 }
 
 /// Wind every connected piece one way: a triangle that runs a side in the same direction as
@@ -185,6 +185,6 @@ impl Body {
                 t.swap(1, 2);
             }
         }
-        Some(Body { solid: self.solid.clone(), mesh: Some(Arc::new(out)), color: self.color, paint: self.paint.clone() })
+        Some(Body { solid: self.solid.clone(), mesh: Some(Arc::new(out)), color: self.color, paint: self.paint.clone(), splits: self.splits.clone() })
     }
 }

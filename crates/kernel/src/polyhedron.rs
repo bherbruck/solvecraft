@@ -192,7 +192,7 @@ pub fn draft(b: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) 
 
 /// Draft of a non-convex body: walls (planes, cylinders) next to caps square to `pull`.
 fn draft_walls(b: &Body, at: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Body> {
-    let healed = Body::new(crate::heal::heal(b.deep_copy(), b.size()))?;
+    let healed = Body::new(crate::heal::heal_keep(b.deep_copy(), b.size(), b.split_keep()))?;
     let size = healed.size();
     let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
     let mut chosen: Vec<usize> = Vec::new();
@@ -338,7 +338,7 @@ pub fn round_all_edges(b: &Body, r: f64) -> Result<Body> {
 /// by the thickness (open faces outward, past the body) keeping the body's topology, which
 /// gives the cavity; the shell is the body minus the cavity.
 fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
-    let healed = Body::new(crate::heal::heal(b.deep_copy(), b.size()))?;
+    let healed = Body::new(crate::heal::heal_keep(b.deep_copy(), b.size(), b.split_keep()))?;
     let size = healed.size();
     let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
     // Faces to open: the face of the triangle nearest each point.
@@ -422,7 +422,7 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     if !distance.is_finite() || distance.abs() > 1e6 {
         return Err(KernelError::Invalid("offset distance".into()));
     }
-    let healed = Body::new(crate::heal::heal(b.deep_copy(), b.size()))?;
+    let healed = Body::new(crate::heal::heal_keep(b.deep_copy(), b.size(), b.split_keep()))?;
     let size = healed.size();
     let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
     let mut chosen: Vec<usize> = Vec::new();

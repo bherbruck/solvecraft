@@ -22,7 +22,7 @@ impl Body {
 /// A body of faces as they are (no orientation fix: a surface has no inside).
 fn surface_body(faces: Vec<mt::Face>) -> Body {
     let shell = mt::Shell::from(faces);
-    Body { solid: std::sync::Arc::new(mt::Solid::new_unchecked(vec![shell])), mesh: None, color: None, paint: None }
+    Body { solid: std::sync::Arc::new(mt::Solid::new_unchecked(vec![shell])), mesh: None, color: None, paint: None, splits: None }
 }
 
 /// A body from faces: a solid when they close, else a surface.
@@ -31,7 +31,7 @@ fn body_of(faces: Vec<mt::Face>) -> Result<Body> {
     if shell.shell_condition() == mt::ShellCondition::Closed {
         Body::new(mt::Solid::new_unchecked(vec![shell]))
     } else {
-        Ok(Body { solid: std::sync::Arc::new(mt::Solid::new_unchecked(vec![shell])), mesh: None, color: None, paint: None })
+        Ok(Body { solid: std::sync::Arc::new(mt::Solid::new_unchecked(vec![shell])), mesh: None, color: None, paint: None, splits: None })
     }
 }
 

@@ -33,7 +33,7 @@ pub fn fillet_radii(body: &Body, edges: &[(Vec3, f64)]) -> Result<Body> {
     if edges.iter().any(|(p, r)| !(p.is_finite() && r.is_finite() && *r > 1e-6 && *r < 1e6)) {
         return Err(KernelError::Invalid("fillet size must be positive".into()));
     }
-    let mut cur = Body::new(crate::heal::heal(body.deep_copy(), body.size()))?;
+    let mut cur = Body::new(crate::heal::heal_keep(body.deep_copy(), body.size(), body.split_keep()))?;
     let mut sel = edges.to_vec();
     let mut first: Option<KernelError> = None;
     // Earlier rounds at the edges' ends come off and are blended again with the new edges.

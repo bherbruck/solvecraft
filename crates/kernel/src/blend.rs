@@ -285,7 +285,7 @@ fn blend(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str) -> Resul
         return Err(KernelError::Invalid("too many edges".into()));
     }
     // Coplanar neighbours as one face (as after a join), so corners look as they should.
-    let mut cur = Body::new(crate::heal::heal(body.deep_copy(), body.size()))?;
+    let mut cur = Body::new(crate::heal::heal_keep(body.deep_copy(), body.size(), body.split_keep()))?;
     // Every edge of a convex planar body: rounded as a whole (sphere corners).
     if shape == Shape::Round && edges.len() >= 6 {
         let solid = cur.deep_copy();
@@ -700,7 +700,7 @@ pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
         }
     }
     // Coplanar neighbours as one face (as after a join), so corners look as they should.
-    let mut cur = Body::new(crate::heal::heal(body.deep_copy(), body.size()))?;
+    let mut cur = Body::new(crate::heal::heal_keep(body.deep_copy(), body.size(), body.split_keep()))?;
     if let Some(groups) = loop_groups(&cur, edges)? {
         for g in groups {
             let size = cur.size();

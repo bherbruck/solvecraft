@@ -11,6 +11,8 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
+use solvecraft_geom::Vec3;
+
 use crate::body::Body;
 use crate::step_in::p21::{self, Param};
 use crate::{KernelError, Result};
@@ -832,7 +834,13 @@ fn face_edges(ex: &p21::Exchange, face: &p21::Entity) -> Option<Vec<Vec<(u64, bo
 /// Faces that truck splits (a revolution in two or three turns) joined back into one face per
 /// analytic surface, by dropping the edges between them. Faces whose union would lose all its
 /// edges, or whose leftover edges do not close into loops, stay apart.
-fn merge_split_faces(ex: &mut p21::Exchange, paint: &mut HashMap<u64, FaceLook>) -> HashMap<u64, V3> {
+fn merge_split_faces(ex: &mut p21::Exchange, paint: &mut HashMap<u64, FaceLook>, keep: &[Vec<Vec3>]) -> HashMap<u64, V3> {
+    // An edge on a line the user split along: every sample within a hair of the polyline.
+    let on_split = |ex: &p21::Exchange, e: u64| -> bool {
+        let Some(pts) = edge_samples(ex, e) else { return false };
+        let pts: Vec<Vec3> = pts.iter().map(|q| Vec3::new(q[0], q[1], q[2])).collect();
+        crate::heal::on_split_line(&pts, keep)
+    };
     let mut merged_surfaces = std::collections::HashSet::new();
     let mut next = ex.entities.keys().max().copied().unwrap_or(0) + 1;
     let shells: Vec<u64> = ex.entities.iter().filter(|(_, e)| matches!(e.name(), "CLOSED_SHELL" | "OPEN_SHELL")).map(|(i, _)| *i).collect();
@@ -923,7 +931,7 @@ fn merge_split_faces(ex: &mut p21::Exchange, paint: &mut HashMap<u64, FaceLook>)
                     let all: Vec<(u64, bool)> = ea.into_iter().chain(eb).flatten().collect();
                     let shared: std::collections::HashSet<u64> =
                         all.iter().filter(|(e, d)| all.iter().any(|(e2, d2)| e2 == e && d2 != d)).map(|(e, _)| *e).collect();
-                    if shared.is_empty() {
+                    if shared.is_empty() || shared.iter().any(|e| on_split(ex, *e)) {
                         continue;
                     }
                     // Chain oriented edges into loops by vertices (None: they do not close).
@@ -1200,7 +1208,8 @@ fn brep_exchange(b: &Body, merge: bool) -> Result<(p21::Exchange, HashMap<u64, V
         }
     }
     let before = shell_face_count(&ex);
-    let merged = if merge { merge_split_faces(&mut ex, &mut paint) } else { Default::default() };
+    let keep = b.split_lines().map(|l| l.as_slice()).unwrap_or(&[]);
+    let merged = if merge { merge_split_faces(&mut ex, &mut paint, keep) } else { Default::default() };
     MERGES.with(|m| m.set(m.get() + before.saturating_sub(shell_face_count(&ex))));
     Ok((ex, merged, paint))
 }
