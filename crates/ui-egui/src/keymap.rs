@@ -13,13 +13,14 @@ use crate::SolveApp;
 use crate::theme::Tokens;
 
 /// Keys the application handles before any command shortcut.
-pub const RESERVED: &[&str] = &["Escape", "S", "V", "F2", "F6", "Delete", "Backspace", "Ctrl+Z", "Ctrl+Y", "Ctrl+S", "Ctrl+N", "Ctrl+O"];
+pub const RESERVED: &[&str] =
+    &["Escape", "S", "V", "F2", "F6", "Delete", "Backspace", "Ctrl+Z", "Ctrl+Y", "Ctrl+S", "Ctrl+N", "Ctrl+O", "Ctrl+Comma"];
 
 #[derive(Default)]
 pub struct Keymap {
     /// Command id → key (`""`: no key). Only the changed ones.
     pub custom: BTreeMap<String, String>,
-    /// The Keyboard Shortcuts window.
+    /// Asks for the Keyboard Shortcuts page of Preferences (File and Help menus).
     pub open: bool,
     /// Opened from Help: a list to read, not to edit.
     pub read_only: bool,
@@ -113,11 +114,10 @@ pub fn reset(app: &mut SolveApp, id: Option<&str>) {
     }
 }
 
-/// The Keyboard Shortcuts window.
-pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    if !app.keymap.open {
-        return;
-    }
+/// The Keyboard Shortcuts page of Preferences: search, rebind (click, then press the key), clear,
+/// reset; a key another command uses is reported and taken over only on request.
+pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let ctx = ui.ctx().clone();
     // A key press while waiting for one binds it (Esc cancels).
     if let Some(id) = app.keymap.capturing.clone() {
         let press = ctx.input(|i| {
@@ -142,13 +142,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     let t = Tokens::get();
-    let mut open = true;
     let mut action: Option<(String, &str)> = None;
-    crate::frame::window(ctx, "Keyboard Shortcuts", crate::frame::Width::Wide)
-        .id(egui::Id::new("sc_keymap"))
-        .open(&mut open)
-        .default_size([520.0, 480.0])
-        .show(ctx, |ui| {
+    {
+        {
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut app.keymap.filter).hint_text("Filter commands or keys").desired_width(300.0));
                 if !app.keymap.read_only && ui.button("Reset All").clicked() {
@@ -170,7 +166,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             ui.separator();
             let q = app.keymap.filter.to_lowercase();
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::ScrollArea::both().max_height(330.0).auto_shrink([false, true]).show(ui, |ui| {
                 egui::Grid::new("sc_keymap_grid").num_columns(4).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
                     for c in command_specs() {
                         let key = effective(app, c.id).unwrap_or_default();
@@ -193,8 +189,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             ui.end_row();
                             continue;
                         }
-                        let b =
-                            egui::Button::new(RichText::new(text).color(if changed { t.accent } else { t.text })).min_size(egui::vec2(110.0, 0.0));
+                        let b = egui::Button::new(RichText::new(text).color(if changed { t.accent } else { t.text })).min_size(egui::vec2(80.0, 0.0));
                         if ui.add(b).on_hover_text("Click, then press the new key").clicked() {
                             action = Some((c.id.to_string(), "capture"));
                         }
@@ -210,7 +205,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                 });
             });
-        });
+        }
+    }
     match action {
         Some((id, "capture")) => {
             app.keymap.capturing = Some(id);
@@ -233,15 +229,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
         _ => {}
     }
-    if !open {
-        app.keymap.open = false;
-        app.keymap.capturing = None;
-    }
 }
 
-/// Is the window waiting for a key (so the key must not also run a command)?
+/// Stop waiting for a key (the dialog closed).
+pub fn stop_capture(app: &mut SolveApp) {
+    app.keymap.capturing = None;
+    app.keymap.conflict = None;
+    app.keymap.message = None;
+}
+
+/// Is the page waiting for a key (so the key must not also run a command)?
 pub fn capturing(app: &SolveApp) -> bool {
-    app.keymap.open && app.keymap.capturing.is_some()
+    app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS && app.keymap.capturing.is_some()
 }
 
 #[cfg(test)]

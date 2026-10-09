@@ -85,6 +85,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let theme_tip = if app.ui.dark { "Light theme" } else { "Dark theme" };
         if click(ui, if app.ui.dark { "sun" } else { "moon" }, theme_tip) {
             app.ui.dark = !app.ui.dark;
+            app.preferences.theme = if app.ui.dark { "dark" } else { "light" }.into();
         }
         if click(ui, "help", "Help") {
             app.help.menu = !app.help.menu;
@@ -108,7 +109,18 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // Document tabs.
         let captions = if app.custom_titlebar { crate::titlebar::WIDTH } else { 0.0 };
-        crate::documents::tabs(app, ui, r, x + 16.0, r.right() - captions - 60.0);
+        crate::documents::tabs(app, ui, r, x + 16.0, r.right() - captions - 90.0);
+        // Preferences, at the top right like Fusion's profile menu (also Ctrl+,).
+        let gear = Rect::from_center_size(pos2(r.right() - captions - 70.0, r.center().y), vec2(24.0, 24.0));
+        let gresp = ui.interact(gear, ui.id().with("sc_prefs_button"), Sense::click());
+        if gresp.hovered() {
+            ui.painter().rect_filled(gear, 4.0, Color32::from_white_alpha(30));
+        }
+        icons::paint(ui.painter(), gear.shrink(4.0), "settings", t.app_bar_text, t.app_bar_text, t.app_bar);
+        crate::scenario::publish_handle("titlebar:preferences", gear.center());
+        if gresp.on_hover_text(if cfg!(target_os = "macos") { "Preferences (Cmd+,)" } else { "Preferences (Ctrl+,)" }).clicked() {
+            crate::prefs::open_at(app, 0);
+        }
         ui.painter().text(
             pos2(r.right() - 12.0 - captions, r.center().y),
             Align2::RIGHT_CENTER,
@@ -436,6 +448,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::Y => drop(app.run("edit.redo", json!({}))),
                 Key::S => save(app),
                 Key::N => crate::documents::new_design(app),
+                Key::Comma => crate::prefs::open_at(app, 0),
                 Key::O => {
                     if let Some(p) = app.services.pick_open.as_ref().and_then(|f| f()) {
                         app.open_path(&p);

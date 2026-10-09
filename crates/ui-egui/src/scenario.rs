@@ -831,6 +831,15 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                     return Err(format!("start page open: got {}, want {v}", ui["home"]));
                 }
             }
+            "prefs" => {
+                // {key: value…}: those entries of `ui.prefs` (preferences, `dialog`, `dark`…).
+                let got = h.call("ui.prefs", json!({}))["result"].clone();
+                for (pk, pv) in v.as_object().into_iter().flatten() {
+                    if got[pk.as_str()] != *pv {
+                        return Err(format!("preference {pk}: got {}, want {pv}", got[pk.as_str()]));
+                    }
+                }
+            }
             "quit_requested" | "quitting" => {
                 if ui[k] != *v {
                     return Err(format!("{k}: got {}, want {v}", ui[k]));

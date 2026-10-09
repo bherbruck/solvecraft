@@ -1292,7 +1292,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let h = rect.height().max(1.0) as f64;
     if inside && scroll != 0.0 {
         let f = (-scroll as f64 * 0.0015 * crate::prefs::zoom_sign(app)).exp();
-        let anchor = hover.map(|p| {
+        // Preferences › Navigation › Zoom to the cursor (off: toward the view's centre).
+        let anchor = hover.filter(|_| app.preferences.zoom_to_cursor).map(|p| {
             let proj = projection(app, rect);
             // Toward the model's surface under the cursor, else the target's depth.
             if let Some(q) = pick_cached(app, &proj, p).iter().find_map(|h| if let Hit::Face { point, .. } = h { Some(*point) } else { None }) {

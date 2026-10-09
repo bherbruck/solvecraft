@@ -151,8 +151,6 @@ pub enum Kind {
     Stock {
         margin: String,
     },
-    /// Application preferences (applied as they change; kept between runs).
-    Preferences,
     /// Physical material (and with it the appearance) of bodies.
     Material {
         index: usize,
@@ -502,10 +500,6 @@ impl Dialog {
         Some(d)
     }
 
-    pub fn preferences() -> Dialog {
-        Dialog::new(Kind::Preferences, vec![])
-    }
-
     pub fn rename(feature: u64, name: &str) -> Dialog {
         Dialog::new(Kind::Rename { feature, name: name.to_string() }, vec![])
     }
@@ -775,7 +769,6 @@ fn title(k: &Kind) -> &'static str {
         Kind::Mirror => "MIRROR",
         Kind::Measure { .. } => "MEASURE",
         Kind::Material { .. } => "PHYSICAL MATERIAL",
-        Kind::Preferences => "PREFERENCES",
         Kind::OffsetPlane { .. } => "OFFSET PLANE",
         Kind::Rib { web: false, .. } => "RIB",
         Kind::Rib { web: true, .. } => "WEB",
@@ -1136,30 +1129,6 @@ fn update_measure(app: &SolveApp, d: &mut Dialog) {
     }
 }
 
-/// The preferences, applied as they change.
-fn preferences_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui.label("Theme");
-    let mut theme = usize::from(!app.ui.dark);
-    combo(ui, "pref_theme", &["Dark", "Light"], &mut theme);
-    app.ui.dark = theme == 0;
-    ui.end_row();
-    ui.label("Grid");
-    ui.checkbox(&mut app.ui.show_grid, "");
-    ui.end_row();
-    ui.label("Perspective view");
-    ui.checkbox(&mut app.ui.perspective, "");
-    ui.end_row();
-    ui.label("Project face edges into new sketches");
-    let mut auto = app.session.auto_project;
-    if ui.checkbox(&mut auto, "").changed() {
-        let _ = app.run("sketch.auto_project", json!({ "value": auto }));
-    }
-    ui.end_row();
-    ui.label("Click selects whole bodies");
-    ui.checkbox(&mut app.ui.pick_bodies, "");
-    ui.end_row();
-}
-
 fn fmt_mm(v: &Value) -> String {
     v.as_f64().map(|x| format!("{x:.3} mm")).unwrap_or_default()
 }
@@ -1251,7 +1220,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .corner_radius(egui::CornerRadius { nw: 4, sw: 4, ne: 0, se: 0 })
         .shadow(egui::Shadow { offset: [-2, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(40) });
     // OK is offered once the inputs make a feature.
-    let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::Preferences);
+    let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. });
     let valid = !has_ok || !d.previews() || (apply_commands(app, &d).is_ok() && app.preview.error.is_none());
     let width = if wide { crate::frame::Width::Wide } else { crate::frame::Width::Normal };
     let wkey = egui::Id::new(("sc_dialog_w", wide));
@@ -1490,7 +1459,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui.end_row();
                 }
                 Kind::Measure { result, .. } => measure_rows(ui, result.as_ref()),
-                Kind::Preferences => preferences_rows(app, ui),
                 Kind::OffsetPlane { offset } => {
                     row_label(ui, "Distance");
                     enter |= field(ui, offset);
@@ -1811,7 +1779,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ok = true;
                     }
                 }
-                let close = if matches!(d.kind, Kind::Params { .. } | Kind::Measure { .. } | Kind::Preferences) { "Close" } else { "Cancel" };
+                let close = if matches!(d.kind, Kind::Params { .. } | Kind::Measure { .. }) { "Close" } else { "Cancel" };
                 if ui.add(egui::Button::new(close).min_size(vec2(64.0, 24.0))).clicked() {
                     cancel = true;
                 }
@@ -1824,7 +1792,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
     let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::new("sc_canvas_value")));
     // Tables (configurations, a study's keys) take Enter for their cells.
-    let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::ConfirmDelete { .. } | Kind::Preferences)
+    let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
         && !matches!(&d.kind, Kind::Motion(k) if k.wide());
     if enter_applies && (enter || canvas_enter || (enter_free && nothing_focused)) {
         ok = true;
@@ -2533,7 +2501,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::ConfirmDelete { feature, .. } => ("timeline.delete", json!({ "features": [feature.to_string()] })),
-        Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::Preferences => return Ok(Vec::new()),
+        Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
         Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),
         Kind::Surface(k) => return crate::dialogs_surface::commands(app, k, &d.inputs, &d.extra),

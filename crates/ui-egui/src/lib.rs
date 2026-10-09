@@ -54,6 +54,7 @@ pub mod sketch_dims;
 mod sketch_edit_tests;
 pub mod sketch_palette;
 pub mod sketch_tools;
+pub mod stand_up;
 pub mod theme;
 pub mod timeline;
 pub mod titlebar;
@@ -194,6 +195,8 @@ pub struct SolveApp {
     pub autosave: Option<solvecraft_engine::recovery::Autosaver>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solvecraft_engine::recovery::Entry>,
+    /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
+    pub stand_up: Option<Vec<String>>,
     /// The last command was a big operation: autosave after it.
     pub big_operation: bool,
     /// Autosave interval (minutes; 0 = only after big operations). A preference.
@@ -250,6 +253,7 @@ impl SolveApp {
             quit_requested: false,
             autosave: None,
             recoverable: Vec::new(),
+            stand_up: None,
             big_operation: false,
             autosave_minutes: 5.0,
             custom_titlebar: false,
@@ -292,6 +296,8 @@ impl SolveApp {
             "shortcut_box": self.sbox.prefs(),
             "shortcuts": self.keymap.prefs(),
             "autosave_minutes": self.autosave_minutes,
+            "ground_shadow": self.ui.ground_shadow,
+            "agent_cursor": self.ui.agent_cursor,
             "preferences": self.preferences,
         })
         .to_string()
@@ -344,6 +350,16 @@ impl SolveApp {
         }
         if let Some(p) = v.get("preferences").and_then(|p| serde_json::from_value::<prefs::Prefs>(p.clone()).ok()) {
             self.preferences = p;
+        }
+        // Saved before the theme was a preference: the Dark/Light flag says which.
+        if v.get("preferences").and_then(|p| p.get("theme")).is_none() {
+            self.preferences.theme = if self.ui.dark { "dark" } else { "light" }.into();
+        }
+        if let Some(g) = flag("ground_shadow") {
+            self.ui.ground_shadow = g;
+        }
+        if let Some(a) = v.get("agent_cursor").and_then(|a| serde_json::from_value(a.clone()).ok()) {
+            self.ui.agent_cursor = a;
         }
     }
 
@@ -564,6 +580,7 @@ impl SolveApp {
         documents::prepare_open(self);
         if self.run("doc.open", json!({ "path": path })).is_ok() {
             self.fit_view();
+            stand_up::offer(self, path, &[]);
         }
     }
 
@@ -571,8 +588,10 @@ impl SolveApp {
     /// current design.
     pub fn insert_path(&mut self, path: &str) {
         let cmd = if solvecraft_engine::io::is_mesh_path(path) { "file.insert_mesh" } else { "file.insert_step" };
+        let before: Vec<String> = self.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
         if let Ok(r) = self.run(cmd, json!({ "path": path })) {
             self.fit_view();
+            stand_up::offer(self, path, &before);
             if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {
                 self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
             }
@@ -623,7 +642,18 @@ impl SolveApp {
         if !to.is_valid() {
             return;
         }
-        self.cam_anim = Some(CameraAnim::new(self.cam, to, self.now));
+        // Preferences › Navigation: animated (at a chosen speed) or immediate.
+        if !self.preferences.look_at_anim {
+            self.cam = to;
+            self.cam_anim = None;
+            return;
+        }
+        let mut anim = CameraAnim::new(self.cam, to, self.now);
+        let speed = f64::from(self.preferences.look_at_speed);
+        if speed.is_finite() && speed > 0.0 {
+            anim.duration /= speed;
+        }
+        self.cam_anim = Some(anim);
     }
 
     /// Animated view changes for the view cube and navigation bar.
@@ -666,6 +696,7 @@ impl SolveApp {
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
         self.esc_handled = false;
+        prefs::apply(self, ctx);
         if !self.styled || theme::is_dark() != self.ui.dark {
             theme::set_dark(self.ui.dark);
             theme::apply(ctx);
@@ -753,13 +784,13 @@ impl SolveApp {
         sketch_palette::show(self, ui.ctx());
         params_dialog::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
+        stand_up::show(self, ui.ctx());
         context_menu::show(self, ui.ctx());
         delete::show(self, ui.ctx());
         if self.custom_titlebar {
             titlebar::resize_zones(ui);
         }
         shortcut_box::show(self, ui.ctx());
-        keymap::show(self, ui.ctx());
         prefs::show(self, ui.ctx());
         agent_cursor::paint(self, ui.ctx());
         self.frame_ms = now_ms() - t0;

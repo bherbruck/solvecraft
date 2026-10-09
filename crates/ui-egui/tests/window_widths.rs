@@ -85,7 +85,8 @@ fn floating_windows_stay_within_limits() {
     solvecraft_ui_egui::params_dialog::open(&mut h.app);
     h.frames(6);
     let ws = window_widths(&h);
-    assert!(ws.len() >= 4, "windows on screen: {ws:?}");
+    // Keyboard Shortcuts is a page of Preferences (one window, #36).
+    assert!(ws.len() >= 3, "windows on screen: {ws:?}");
     for (layer, w) in ws {
         assert!(w <= WINDOW_WIDE_MAX_W + 4.0, "{layer} is {w} px wide");
     }
