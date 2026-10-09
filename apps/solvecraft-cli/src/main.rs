@@ -10,6 +10,7 @@
 //! solvecraft-cli oracle <case-dir>...                         replay recipes and compare with measure.json
 //! solvecraft-cli step-corpus <case-dir>...                    import part.step and compare with measure.json
 //! solvecraft-cli mcp [--in design|script] [--connect HOST:PORT] MCP server on stdio (docs/mcp.md)
+//! solvecraft-cli licences                                     SolveCraft's licence and the third-party licences
 //! ```
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -35,6 +36,7 @@ const USAGE: &str = "usage:
   solvecraft-cli oracle <case-dir>... [--json]
   solvecraft-cli step-corpus <case-dir>... [--json]
   solvecraft-cli mcp [--in design.solvecraft|script.json] [--connect 127.0.0.1:PORT]
+  solvecraft-cli licences
 ";
 
 fn main() -> ExitCode {
@@ -55,6 +57,12 @@ fn main() -> ExitCode {
         Some("oracle") => oracle::run(&args[1..]),
         Some("step-corpus") => oracle::step_corpus(&args[1..]),
         Some("mcp") => cmd_mcp(&args[1..]),
+        Some("licences" | "licenses") => {
+            // Written, not print!ed: a closed pipe (`| head`) is not a crash.
+            use std::io::Write as _;
+            let _ = std::io::stdout().lock().write_all(solvecraft_engine::licences::all().as_bytes());
+            Ok(())
+        }
         // Hidden, for the kill-mid-save test: save a large design over and over.
         Some("save-stress") => cmd_save_stress(&args[1..]),
         // Hidden: time recomputes after parameter edits (docs/perf.md).

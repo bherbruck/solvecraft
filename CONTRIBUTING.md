@@ -59,7 +59,8 @@ The [README](README.md#architecture) has the layer table. The short version:
 2. **No GPL/LGPL/AGPL code, not even reading it.** That rules out OpenCASCADE, FreeCAD
    (including planegcs), SolveSpace, CadQuery/OCP, LibreCAD and QCAD. SolveCraft is
    MIT OR Apache-2.0, and its solver and blends are written from the maths. Permissive
-   dependencies are fine. Note which one you're adding and why in the PR.
+   dependencies are fine. Note which one you're adding and why in the PR, and run
+   `cargo xtask licences` so THIRD-PARTY-LICENSES.txt lists it (CI checks that it is current).
 3. **Every asset is original or openly licensed and has a row in
    [ATTRIBUTION.md](ATTRIBUTION.md).** Icons are drawn in code (`crates/ui-egui/src/icons.rs`).
    `cargo xtask assets` enforces this.

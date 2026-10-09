@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Package the Linux release build: a tar.gz with both binaries, and an AppImage of the desktop app.
-# Usage: .github/release/package-linux.sh <tag>   (from the repository root, after
+# Package the Linux release build: the app and the CLI as plain binaries, and an AppImage of the
+# app. Usage: .github/release/package-linux.sh <tag>   (from the repository root, after
 # `cargo build --release -p solvecraft -p solvecraft-cli`). Writes out/.
 set -euo pipefail
 tag=${1:?usage: package-linux.sh <tag>}
 bin=${CARGO_TARGET_DIR:-target}/release
-name="solvecraft-$tag-linux-x86_64"
-rm -rf stage out && mkdir -p "stage/$name" out
-cp "$bin/solvecraft" "$bin/solvecraft-cli" README.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "stage/$name/"
-tar -C stage -czf "out/$name.tar.gz" "$name"
+rm -rf stage out && mkdir -p stage out
+cp "$bin/solvecraft" "out/solvecraft-$tag-linux-x86_64"
+cp "$bin/solvecraft-cli" "out/solvecraft-cli-$tag-linux-x86_64"
 
 # AppImage. The icon is rendered by SolveCraft itself from the bracket example, so no image file
 # is committed.

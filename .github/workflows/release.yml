@@ -1,7 +1,9 @@
 # Release builds: push a tag `v*` (or run it by hand with a tag name) and this builds the desktop
 # app and the CLI for Linux, Windows and macOS plus the web app, and attaches them to a GitHub
-# release with SHA256SUMS (a pre-release when the tag has a suffix, such as v0.2.0-rc1). Notes:
-# .github/release-notes.md.
+# release with SHA256SUMS (a pre-release when the tag has a suffix, such as v0.2.0-rc1). Every
+# download is a plain program (Windows .exe, Linux binary and AppImage, a macOS .dmg); the licences
+# are built into the programs (Help ▸ About ▸ Licences, `solvecraft-cli licences`). Only the web
+# app, being many files, is a zip. Notes: .github/release-notes.md, with {tag} replaced.
 name: Release
 
 on:
@@ -52,10 +54,9 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $name = "solvecraft-$env:TAG-windows-x86_64"
-          New-Item -ItemType Directory -Force -Path "stage/$name", out | Out-Null
-          Copy-Item target/release/solvecraft.exe, target/release/solvecraft-cli.exe, README.md, LICENSE-MIT, LICENSE-APACHE, NOTICE, ATTRIBUTION.md "stage/$name/"
-          Compress-Archive -Path "stage/$name" -DestinationPath "out/$name.zip"
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item target/release/solvecraft.exe "out/SolveCraft-$env:TAG-windows-x86_64.exe"
+          Copy-Item target/release/solvecraft-cli.exe "out/solvecraft-cli-$env:TAG-windows-x86_64.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -106,7 +107,7 @@ jobs:
         run: |
           name="solvecraft-$TAG-web"
           mkdir -p out && cp -r dist/web "$name"
-          cp LICENSE-MIT LICENSE-APACHE NOTICE "$name/"
+          cp LICENSE-MIT LICENSE-APACHE NOTICE THIRD-PARTY-LICENSES.txt "$name/"
           zip -qr "out/$name.zip" "$name"
       - uses: actions/upload-artifact@v4
         with:
@@ -127,11 +128,14 @@ jobs:
       - name: Checksums
         working-directory: assets
         run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Notes
+        run: sed "s/{tag}/$TAG/g" .github/release-notes.md > notes.md
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
           name: SolveCraft ${{ env.TAG }}
-          body_path: .github/release-notes.md
+          body_path: notes.md
+          generate_release_notes: true
           # A tag with a suffix (v0.2.0-rc1) is a pre-release; v1.2.3 is a normal release.
           prerelease: ${{ contains(env.TAG, '-') }}
           files: assets/*

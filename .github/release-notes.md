@@ -2,17 +2,6 @@ SolveCraft is an open-source parametric 3D CAD application in pure Rust: sketch 
 constrain and dimension the sketch, turn profiles into solids on a feature timeline, and change a
 parameter to watch the timeline rebuild. It is early, and we'd like your bug reports.
 
-## Fixed since v0.1.0
-
-- **Quitting with unsaved changes now asks first** ([#33](https://github.com/bherbruck/solvecraft/issues/33)):
-  "Save changes to <name>?" with Save, Don't Save and Cancel, once per unsaved design, for the
-  title bar's ×, File ▸ Quit, Alt+F4 / Cmd+Q and the window manager. The web app asks through
-  the browser's "leave site?" prompt.
-- **Web: a new design no longer shows a black screen** in browsers with WebGPU
-  ([#34](https://github.com/bherbruck/solvecraft/issues/34)); the viewport shader compiles there now.
-- **README demo:** a short GIF at the top shows an agent building an enclosure over MCP and then
-  editing its parameters. The full video is attached below.
-
 ## Links
 
 - **Documentation:** https://bherbruck.github.io/solvecraft/
@@ -42,24 +31,34 @@ Everything the UI does is a command with JSON parameters, so an agent can do it 
 `solvecraft-cli mcp` is a Model Context Protocol server: headless, or bridged to the running app
 (`solvecraft --control 7878`, then `solvecraft-cli mcp --connect 127.0.0.1:7878`) so you can
 watch the agent model. In Claude Code: `claude mcp add solvecraft -- solvecraft-cli mcp`. The
-attached video shows an agent building an enclosure through the UI and MCP.
+demo at the top of the [README](https://github.com/bherbruck/solvecraft#readme) shows an agent
+building an enclosure through the UI and MCP.
 
 ## Downloads
 
 | File | What |
 |---|---|
-| `solvecraft-v0.1.1-windows-x86_64.zip` | Windows 10/11: `solvecraft.exe` (the app) and `solvecraft-cli.exe` |
-| `solvecraft-v0.1.1-linux-x86_64.tar.gz` | Linux x86_64 (glibc 2.35 or newer): `solvecraft` and `solvecraft-cli` |
-| `SolveCraft-v0.1.1-x86_64.AppImage` | Linux, the app as one file: `chmod +x` and run it |
-| `solvecraft-v0.1.1-macos-universal.zip` | macOS 11 or newer, Apple silicon and Intel: `SolveCraft.app` and `solvecraft-cli` |
-| `solvecraft-v0.1.1-web.zip` | the web app, to host yourself (any static server; HTTPS or localhost for saving files) |
+| `SolveCraft-{tag}-windows-x86_64.exe` | Windows 10/11: the app, ready to run |
+| `solvecraft-cli-{tag}-windows-x86_64.exe` | Windows: the command-line tool and MCP server |
+| `SolveCraft-{tag}-macos-universal.dmg` | macOS 11 or newer, Apple silicon and Intel: open it and drag SolveCraft onto Applications |
+| `solvecraft-cli-{tag}-macos-universal` | macOS: the command-line tool and MCP server |
+| `SolveCraft-{tag}-x86_64.AppImage` | Linux x86_64 (glibc 2.35 or newer): the app as one file |
+| `solvecraft-{tag}-linux-x86_64` | Linux: the app as a plain binary |
+| `solvecraft-cli-{tag}-linux-x86_64` | Linux: the command-line tool and MCP server |
+| `solvecraft-{tag}-web.zip` | the web app, to host yourself (any static server; HTTPS or localhost for saving files) |
 | `SHA256SUMS` | checksums: `sha256sum -c SHA256SUMS` |
+
+On Linux and macOS a downloaded program isn't executable yet: `chmod +x` it first
+(`chmod +x SolveCraft-{tag}-x86_64.AppImage && ./SolveCraft-{tag}-x86_64.AppImage`). The licences
+of SolveCraft and everything it is built from are inside each program: Help ▸ About ▸ Licences,
+or `solvecraft-cli licences`.
 
 ### The binaries are not signed
 
-- **macOS:** the first time, right-click (or Control-click) `SolveCraft.app` and choose **Open**,
-  then **Open** again in the dialog. If macOS says the app is damaged, run
-  `xattr -dr com.apple.quarantine SolveCraft.app`. Do the same for `solvecraft-cli`.
+- **macOS:** the first time, right-click (or Control-click) `SolveCraft.app` in Applications and
+  choose **Open**, then **Open** again in the dialog. If macOS says the app is damaged, run
+  `xattr -dr com.apple.quarantine /Applications/SolveCraft.app`. For the CLI:
+  `xattr -d com.apple.quarantine solvecraft-cli-{tag}-macos-universal`.
 - **Windows:** SmartScreen may say "Windows protected your PC". Click **More info**, then
   **Run anyway**.
 

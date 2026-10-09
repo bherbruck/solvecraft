@@ -10,6 +10,7 @@
 pub mod cmd;
 pub mod frames;
 pub mod legacy_ids;
+pub mod licences;
 pub mod params;
 pub mod recovery;
 pub mod sample;

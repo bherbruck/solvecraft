@@ -6,6 +6,7 @@
 mod assets;
 mod book;
 mod layers;
+mod licences;
 mod parity;
 
 use std::path::{Path, PathBuf};
@@ -28,8 +29,11 @@ commands:
   book [--no-build]
                   generate docs/book's command reference and screenshots, then mdbook build
                   into target/book
+  licences [--check]
+                  write THIRD-PARTY-LICENSES.txt (the licences of every shipped crate, embedded
+                  in the programs); --check fails when it is out of date
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
-  ci              fmt --check, clippy -D warnings, test, assets, layers, wasm (stops at first failure)
+  ci              fmt --check, clippy -D warnings, test, assets, licences --check, layers, wasm (stops at first failure)
 ";
 
 fn main() -> ExitCode {
@@ -42,6 +46,7 @@ fn main() -> ExitCode {
         Some("oracle") => cmd_oracle(),
         Some("step-corpus") => cmd_step_corpus(rest.first().copied()),
         Some("book") => book::run(&root(), !rest.contains(&"--no-build")),
+        Some("licences") => licences::run(&root(), rest.contains(&"--check")),
         Some("ci") => cmd_ci(),
         Some("wasm") => cmd_wasm(),
         Some("-h" | "--help" | "help") | None => {
@@ -305,6 +310,7 @@ fn cmd_ci() -> Result<(), String> {
     c.args(["test", "--workspace", "--release"]);
     run(c, "cargo test")?;
     assets::run(&root())?;
+    licences::run(&root(), true)?;
     cmd_layers()?;
     cmd_wasm()?;
     eprintln!("ci: all gates passed");

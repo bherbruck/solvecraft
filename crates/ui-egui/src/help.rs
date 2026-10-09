@@ -13,8 +13,7 @@ pub const BUILD_DATE: &str = env!("SOLVECRAFT_BUILD_DATE");
 /// The user and developer guide (docs/book, published by .github/workflows/pages.yml).
 pub const DOCS_URL: &str = "https://bherbruck.github.io/solvecraft/";
 const ATTRIBUTION: &str = include_str!("../../../ATTRIBUTION.md");
-const LICENSE_MIT: &str = include_str!("../../../LICENSE-MIT");
-const LICENSE_APACHE: &str = include_str!("../../../LICENSE-APACHE");
+use solvecraft_engine::licences::{LICENSE_APACHE, LICENSE_MIT, NOTICE, THIRD_PARTY};
 /// Fonts: what this build carries.
 pub const FONTS: &str = "The interface uses egui's built-in fonts (Ubuntu Light and Hack, under the Ubuntu Font Licence and \
 the MIT/Bitstream Vera licence; Noto Emoji and the emoji icon font, under the OFL and MIT). Sketch text uses Liberation Sans \
@@ -112,23 +111,47 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
             });
             ui.separator();
             egui::ScrollArea::vertical().show(ui, |ui| {
-                egui::CollapsingHeader::new("Attributions (ATTRIBUTION.md)").default_open(true).show(ui, |ui| {
+                egui::CollapsingHeader::new("Attributions (ATTRIBUTION.md)").show(ui, |ui| {
                     ui.label(RichText::new(ATTRIBUTION).monospace().size(11.0));
                 });
                 egui::CollapsingHeader::new("Fonts").show(ui, |ui| {
                     ui.label(FONTS);
                 });
-                egui::CollapsingHeader::new("MIT licence").show(ui, |ui| {
-                    ui.label(RichText::new(LICENSE_MIT).monospace().size(11.0));
-                });
-                egui::CollapsingHeader::new("Apache licence 2.0").show(ui, |ui| {
-                    ui.label(RichText::new(LICENSE_APACHE).monospace().size(11.0));
+                egui::CollapsingHeader::new("Licences").show(ui, |ui| {
+                    egui::CollapsingHeader::new("NOTICE").show(ui, |ui| {
+                        ui.label(RichText::new(NOTICE).monospace().size(11.0));
+                    });
+                    egui::CollapsingHeader::new("MIT licence").show(ui, |ui| {
+                        ui.label(RichText::new(LICENSE_MIT).monospace().size(11.0));
+                    });
+                    egui::CollapsingHeader::new("Apache licence 2.0").show(ui, |ui| {
+                        ui.label(RichText::new(LICENSE_APACHE).monospace().size(11.0));
+                    });
+                    egui::CollapsingHeader::new("Third-party licences").show(ui, |ui| {
+                        if ui.button("Copy all licences").clicked() {
+                            ctx.copy_text(solvecraft_engine::licences::all());
+                        }
+                        third_party(ui);
+                    });
                 });
             });
         });
     if !open {
         app.help.about = false;
     }
+}
+
+/// THIRD-PARTY-LICENSES.txt (over 10 000 lines): only the lines in view are laid out.
+fn third_party(ui: &mut egui::Ui) {
+    let lines: Vec<&str> = THIRD_PARTY.lines().collect();
+    let font = egui::FontId::monospace(11.0);
+    let row_h = ui.fonts_mut(|f| f.row_height(&font));
+    egui::ScrollArea::both().id_salt("sc_third_party").max_height(360.0).show_rows(ui, row_h, lines.len(), |ui, rows| {
+        for line in lines.get(rows).unwrap_or_default() {
+            // One row per line (show_rows needs equal rows): long lines scroll sideways.
+            ui.add(egui::Label::new(RichText::new(*line).font(font.clone())).extend());
+        }
+    });
 }
 
 #[cfg(test)]

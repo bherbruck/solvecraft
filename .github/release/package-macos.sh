@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Package the macOS release build: a universal (arm64 + x86_64) SolveCraft.app and CLI in one zip.
+# Package the macOS release build: a universal (arm64 + x86_64) SolveCraft.app in a .dmg (with an
+# Applications link to drag it onto), and the universal CLI as a plain binary.
 # Usage: .github/release/package-macos.sh <tag>   (from the repository root, after building both
-# aarch64-apple-darwin and x86_64-apple-darwin). Writes out/. The app is not signed.
+# aarch64-apple-darwin and x86_64-apple-darwin). Writes out/. Neither is signed.
 set -euo pipefail
 tag=${1:?usage: package-macos.sh <tag>}
 version=${tag#v}
 t=${CARGO_TARGET_DIR:-target}
-name="solvecraft-$tag-macos-universal"
-rm -rf stage out && mkdir -p "stage/$name" out
-app="stage/$name/SolveCraft.app"
+rm -rf stage out && mkdir -p stage/dmg out
+app="stage/dmg/SolveCraft.app"
 mkdir -p "$app/Contents/MacOS"
 lipo -create -output "$app/Contents/MacOS/solvecraft" "$t/aarch64-apple-darwin/release/solvecraft" "$t/x86_64-apple-darwin/release/solvecraft"
-lipo -create -output "stage/$name/solvecraft-cli" "$t/aarch64-apple-darwin/release/solvecraft-cli" "$t/x86_64-apple-darwin/release/solvecraft-cli"
+lipo -create -output "out/solvecraft-cli-$tag-macos-universal" "$t/aarch64-apple-darwin/release/solvecraft-cli" "$t/x86_64-apple-darwin/release/solvecraft-cli"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -29,7 +29,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
-cp README.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "stage/$name/"
 lipo -info "$app/Contents/MacOS/solvecraft"
-(cd stage && ditto -c -k --keepParent "$name" "../out/$name.zip")
+ln -s /Applications stage/dmg/Applications
+hdiutil create -volname "SolveCraft $tag" -srcfolder stage/dmg -ov -format UDZO "out/SolveCraft-$tag-macos-universal.dmg"
 ls -l out
