@@ -423,7 +423,7 @@ fn span_step(ns: &[Vec3], s: &[f64]) -> Option<Vec3> {
 }
 
 /// A line or circular arc through an edge (by samples): `None` for other curves.
-fn arc_mid(e: &mt::Edge, tol: f64) -> Option<Option<Vec3>> {
+pub(crate) fn arc_mid(e: &mt::Edge, tol: f64) -> Option<Option<Vec3>> {
     use mt::{BoundedCurve, ParametricCurve};
     let c = e.curve();
     let (t0, t1) = c.range_tuple();

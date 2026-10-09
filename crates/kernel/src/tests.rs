@@ -1393,3 +1393,24 @@ fn perf_measure_5000_faces() {
     measure(&b).unwrap();
     assert!(t.elapsed().as_secs_f64() < 1.5, "{:?}", t.elapsed());
 }
+
+/// A lip on a rounded, shelled rim (#29): the band along the rim's inner (or outer) edge raised,
+/// its walls continuing the walls below. Exactly the band's area times its height is added.
+#[test]
+fn raise_band_on_a_rounded_rim() {
+    let b = box_solid(Vec3::new(-40.0, -30.0, 0.0), Vec3::new(40.0, 30.0, 30.0)).unwrap();
+    let f =
+        fillet(&b, &[Vec3::new(40.0, 30.0, 15.0), Vec3::new(-40.0, 30.0, 15.0), Vec3::new(-40.0, -30.0, 15.0), Vec3::new(40.0, -30.0, 15.0)], 6.0)
+            .unwrap();
+    let sh = shell(&f, &[Vec3::new(0.0, 0.0, 30.0)], 2.0).unwrap();
+    let v0 = measure(&sh).unwrap().volume;
+    // A rounded rectangle's area.
+    let ar = |w: f64, h: f64, r: f64| w * h - (4.0 - PI) * r * r;
+    for outside in [false, true] {
+        let lip = crate::lip::raise_band(&sh, Vec3::new(0.0, 29.0, 30.0), 1.0, 1.5, outside).unwrap();
+        assert!(lip.validity().is_empty(), "{:?}", lip.validity());
+        let band = if outside { ar(80.0, 60.0, 6.0) - ar(78.0, 58.0, 5.0) } else { ar(78.0, 58.0, 5.0) - ar(76.0, 56.0, 4.0) };
+        let v = measure(&lip).unwrap().volume;
+        assert!((v - (v0 + band * 1.5)).abs() < 1e-5 * v, "outside {outside}: {v} vs {}", v0 + band * 1.5);
+    }
+}

@@ -280,3 +280,33 @@ fn lip_after_boss() {
         }
     }
 }
+
+/// A lip, a groove and an outside lip on the rim of a rounded, shelled enclosure (#29: the
+/// lip's walls continue the shell's walls, which a boolean join couldn't do).
+#[test]
+fn lip_on_a_rounded_shelled_rim() {
+    use std::f64::consts::PI;
+    let base = json!([
+        {"command": "solid.box", "params": {"corner": [-40, -30, 0], "length": 80, "width": 60, "height": 30}},
+        {"command": "solid.fillet", "params": {"edges": [[40, 30, 15], [-40, 30, 15], [-40, -30, 15], [40, -30, 15]], "radius": 6}},
+        {"command": "solid.shell", "params": {"faces": [[0, 0, 30]], "thickness": 2}}
+    ]);
+    let v0 = total_volume(&script(base.clone()));
+    let ar = |w: f64, h: f64, r: f64| w * h - (4.0 - PI) * r * r;
+    let inside = ar(78.0, 58.0, 5.0) - ar(76.0, 56.0, 4.0);
+    for (extra, want) in [
+        (json!({}), v0 + inside * 1.5),
+        (json!({"side": "outside"}), v0 + (ar(80.0, 60.0, 6.0) - ar(78.0, 58.0, 5.0)) * 1.5),
+        // (The groove's band comes from the rim's meshed outline: within its sag.)
+        (json!({"type": "groove"}), v0 - inside * 1.5),
+    ] {
+        let mut p = json!({"face": [0, 29, 30], "width": 1, "height": 1.5});
+        if let (Some(o), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+            o.extend(e.clone());
+        }
+        let mut steps = base.as_array().cloned().unwrap_or_default();
+        steps.push(json!({"command": "plastic.lip", "params": p}));
+        let v = total_volume(&script(Value::Array(steps)));
+        assert!((v - want).abs() < 1e-3 * want, "{extra}: {v} vs {want}");
+    }
+}

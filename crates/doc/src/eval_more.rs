@@ -783,11 +783,28 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 return Err(DocError::Invalid("pick the rim face of a shelled body (a face with an inner and an outer edge)".into()));
             };
             let bw = if *groove { w + g } else { w };
-            // The band along the chosen edge, inside the rim face.
+            // A lip: the band raised from the rim's own faces (its walls continue the walls
+            // below, which a join can't do: they would coincide).
+            if !*groove
+                && let Ok(b) = kernel::raise_band(&mb.body, *face, w, h, *outside)
+                && let Some(slot) = st.bodies.iter_mut().find(|x| x.name == target)
+            {
+                *slot = ModelBody::new(target.clone(), b, slot.feature);
+                return Ok(());
+            }
+            // The band along the chosen edge, inside the rim face. A groove's cutter reaches past
+            // the edge into the free side (the cavity, or outside), so no wall coincides.
+            let free = if *groove { bw } else { 0.0 };
             let band = if *outside {
-                Region2 { outer: Loop2::polygon(&outer).ccw(), holes: vec![Loop2::polygon(&offset_left(&outer, bw)).ccw().reversed()] }
+                Region2 {
+                    outer: Loop2::polygon(&offset_left(&outer, -free)).ccw(),
+                    holes: vec![Loop2::polygon(&offset_left(&outer, bw)).ccw().reversed()],
+                }
             } else {
-                Region2 { outer: Loop2::polygon(&offset_left(&inner, -bw)).ccw(), holes: vec![Loop2::polygon(&inner).ccw().reversed()] }
+                Region2 {
+                    outer: Loop2::polygon(&offset_left(&inner, -bw)).ccw(),
+                    holes: vec![Loop2::polygon(&offset_left(&inner, free)).ccw().reversed()],
+                }
             };
             let delta = (h * 0.05).clamp(1e-3, 0.5);
             if *groove {
