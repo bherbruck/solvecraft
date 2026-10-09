@@ -1971,8 +1971,10 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         ("home", "Home view"),
         ("perspective", "Perspective / orthographic"),
         ("style", "Visual style: shaded with edges, shaded, wireframe, shaded with hidden edges"),
-        ("settings", "Grid on/off"),
+        ("settings", "View settings: grid, ground shadow, agent cursor"),
     ];
+    let menu_id = ui.id().with("nav_view_menu");
+    let mut menu_open = ui.data(|d| d.get_temp::<bool>(menu_id)).unwrap_or(false);
     let w = items.len() as f32 * 30.0 + 10.0;
     let bar = Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 22.0), vec2(w, 30.0));
     let painter = ui.painter_at(rect);
@@ -1985,7 +1987,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             "pan" => app.viewport.nav == Some(NavMode::Pan),
             "zoom" => app.viewport.nav == Some(NavMode::Zoom),
             "perspective" => app.ui.perspective,
-            "settings" => app.ui.show_grid,
+            "settings" => menu_open,
             "spin" => app.viewport.spin,
             _ => false,
         };
@@ -2008,10 +2010,50 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 "lookat" => look_at_selection(app),
                 "style" => app.ui.visual_style = (app.ui.visual_style + 1) % 4,
                 "perspective" => app.ui.perspective = !app.ui.perspective,
-                _ => app.ui.show_grid = !app.ui.show_grid,
+                _ => menu_open = !menu_open,
+            }
+        }
+        if *icon == "settings" {
+            crate::scenario::publish_handle("nav:view", br.center());
+            if menu_open {
+                menu_open = view_menu(app, ui, br);
             }
         }
     }
+    ui.data_mut(|d| d.insert_temp(menu_id, menu_open));
+}
+
+/// The View settings above the navigation bar's last button: grid, ground shadow and the agent
+/// cursor (#35). False once it should close (a click outside it).
+fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
+    let area = egui::Area::new(egui::Id::new("sc_view_menu"))
+        .order(egui::Order::Foreground)
+        .pivot(Align2::RIGHT_BOTTOM)
+        .fixed_pos(button.right_top() - vec2(0.0, 6.0));
+    let r = area.show(ui.ctx(), |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_width(220.0);
+            ui.label(egui::RichText::new("VIEW").strong().size(11.5));
+            ui.checkbox(&mut app.ui.show_grid, "Grid");
+            ui.checkbox(&mut app.ui.ground_shadow, "Ground shadow");
+            ui.separator();
+            let s = &mut app.ui.agent_cursor;
+            let show = ui.checkbox(&mut s.show, "Show Agent Cursor");
+            crate::scenario::publish_handle("view:agent_cursor", show.rect.center());
+            ui.add_enabled_ui(s.show, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Speed");
+                    for sp in crate::agent_cursor::Speed::ALL {
+                        ui.selectable_value(&mut s.speed, sp, sp.label());
+                    }
+                });
+                ui.checkbox(&mut s.follow_camera, "Follow camera (Look At sketches)");
+            });
+        });
+    });
+    let clicked_out = ui.input(|i| i.pointer.any_pressed())
+        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !r.response.rect.contains(p) && !button.contains(p));
+    !clicked_out
 }
 
 #[cfg(test)]

@@ -27,6 +27,9 @@
 //! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_cursor, msaa,
 //!   length_decimals, angle_decimals); returns them all
 //! - `ui.capture {action?: capture|revert|cancel}`: the Capture Position question
+//! - `ui.agent_cursor {show?, speed?: instant|normal|slow, follow_camera?}`: the agent cursor
+//!   (#35); while it is shown, `engine.execute` first glides to the command's button and picks
+//!   and replies once the command has run (`"animate": false` skips that one call)
 //! - `ui.resize {width, height}`, `app.quit`
 
 use std::sync::mpsc::Sender;
@@ -94,6 +97,22 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 app.fit_view();
             }
             wrap(r)
+        }
+        "ui.agent_cursor" => {
+            let s = &mut app.ui.agent_cursor;
+            if let Some(v) = p.get("show").and_then(Value::as_bool) {
+                s.show = v;
+            }
+            if let Some(v) = p.get("follow_camera").and_then(Value::as_bool) {
+                s.follow_camera = v;
+            }
+            if let Some(v) = p.get("speed") {
+                match serde_json::from_value(v.clone()) {
+                    Ok(sp) => s.speed = sp,
+                    Err(_) => return err("speed must be instant, normal or slow"),
+                }
+            }
+            ok(json!(app.ui.agent_cursor))
         }
         "engine.script" => wrap(app.session.run_script(p).map(|v| json!(v)).map_err(|e| e.to_string())),
         "engine.commands" => wrap(app.session.execute("engine.commands", &json!({})).map_err(|e| e.to_string())),

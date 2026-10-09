@@ -9,6 +9,9 @@
 //! - `{"click": AT, "double"?, "shift"?, "ctrl"?, "button"?}`, `{"move": AT}`,
 //!   `{"drag": [AT, AT], "shift"?, "ctrl"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
 //!   or `{"sketch": [x,y]}` (the sketch being edited)
+//! - `{"queued": "engine.execute", "params": {…}, "min_frames"?: n}`: a request sent the way an
+//!   agent's arrive (through the app's request queue, answered between frames, so the agent
+//!   cursor can act it out first); fails if the answer came in fewer than `min_frames` frames
 //! - `{"call": "ui.view", "params": {…}}`: any other control request (`fail: true` expects an
 //!   error)
 //! - `{"make_image": "pic.png"}`: a picture in the scenario's folder
@@ -112,6 +115,8 @@ pub struct Harness {
     pub dir: PathBuf,
     /// The file the next Open picker returns (a `choose_file` step).
     next_file: Rc<RefCell<Option<String>>>,
+    /// The app's request queue, opened by the first queued request.
+    queue: Option<std::sync::mpsc::Sender<ControlRequest>>,
     time: f64,
     size: egui::Vec2,
 }
@@ -139,6 +144,7 @@ impl Harness {
             output: Default::default(),
             dir: scratch_dir(),
             next_file: Rc::new(RefCell::new(None)),
+            queue: None,
             time: 0.0,
             size: egui::vec2(1600.0, 1000.0),
         };
@@ -201,6 +207,28 @@ impl Harness {
     }
 
     /// One control request, then frames until its input has been handled.
+    /// Send a request through the app's queue, as the control channel does, and run frames
+    /// until it is answered: (the reply, frames it took).
+    pub fn call_queued(&mut self, method: &str, params: Value) -> (Value, usize) {
+        let tx = self.queue.get_or_insert_with(|| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.app.control_rx = Some(rx);
+            tx
+        });
+        let (req, rx) = ControlRequest::new(method, params);
+        if tx.send(req).is_err() {
+            return (json!({"ok": false, "error": "the request queue is closed"}), 0);
+        }
+        for n in 1..=3000 {
+            self.frame();
+            if let Ok(v) = rx.try_recv() {
+                self.settle();
+                return (v, n);
+            }
+        }
+        (json!({"ok": false, "error": "no answer in 3000 frames"}), 3000)
+    }
+
     pub fn call(&mut self, method: &str, params: Value) -> Value {
         let (req, _rx) = ControlRequest::new(method, params);
         let out = match handle(&mut self.app, &self.ctx, &req) {
@@ -328,6 +356,13 @@ impl Harness {
                 let [x1, y1] = self.at(d.get(1).unwrap_or(&Value::Null))?;
                 let steps = s.get("steps").cloned().unwrap_or(json!(8));
                 self.call("ui.drag", json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl")}))
+            } else if let Some(m) = s.get("queued").and_then(Value::as_str) {
+                let (v, frames) = self.call_queued(m, s.get("params").cloned().unwrap_or(json!({})));
+                let min = s.get("min_frames").and_then(Value::as_u64).unwrap_or(0);
+                if (frames as u64) < min {
+                    return Err(format!("{m} was answered after {frames} frames: the agent cursor did not act it out ({min})"));
+                }
+                v
             } else if let Some(m) = s.get("call").and_then(Value::as_str) {
                 self.call(m, s.get("params").cloned().unwrap_or(json!({})))
             } else if s.get("note").is_some() || s.get("pending").is_some() {

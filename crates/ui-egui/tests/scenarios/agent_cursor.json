@@ -1,0 +1,17 @@
+[
+  {"note": "#35: with the agent cursor on, an agent's commands are acted out (the reply waits for the pointer) and give the same result as with it off"},
+  {"call": "ui.agent_cursor", "params": {"show": true, "speed": "normal", "follow_camera": true}},
+  {"queued": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}, "min_frames": 30},
+  {"queued": "engine.execute", "params": {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 25]}}, "min_frames": 45},
+  {"queued": "engine.execute", "params": {"command": "sketch.finish", "params": {}}, "min_frames": 30},
+  {"queued": "engine.execute", "params": {"command": "solid.extrude", "params": {"distance": 10, "operation": "new"}}, "min_frames": 30},
+  {"expect": {"errors": 0, "bodies": 1, "volume": [10000, 1e-6]}},
+  {"note": "A call with animate: false runs at once"},
+  {"queued": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}, "animate": false}},
+  {"call": "ui.agent_cursor", "params": {"show": false}},
+  {"note": "The same steps with the cursor off: a second, identical body"},
+  {"queued": "engine.execute", "params": {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 25]}}},
+  {"queued": "engine.execute", "params": {"command": "sketch.finish", "params": {}}},
+  {"queued": "engine.execute", "params": {"command": "solid.extrude", "params": {"distance": 10, "operation": "new"}}},
+  {"expect": {"errors": 0, "bodies": 2, "volume": [20000, 1e-6]}}
+]

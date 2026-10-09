@@ -52,6 +52,7 @@ Commands never open dialogs when run this way. `solvecraft-cli commands` prints 
 | `ui.prefs` | any of `default_units`, `nav` (`fusion`, `solidworks`, `inventor`), `zoom_reverse`, `orbit_cursor`, `msaa`, `length_decimals`, `angle_decimals` | sets preferences (kept between runs), returns them all |
 | `ui.capture` | `action?`: `capture`, `revert`, `cancel` | answers the Capture Position question (asked when a command starts or the design is saved while components were moved without capturing); without `action`, what waits |
 | `ui.window` | `action`: minimize, maximize, restore, toggle, close | what the title bar's caption buttons do (on Windows and Linux the application bar is the title bar); close asks about unsaved designs first |
+| `ui.agent_cursor` | `show` (bool), `speed`: `instant`, `normal`, `slow`, `follow_camera` (bool); all optional | the settings. While the cursor is shown, `engine.execute` first glides to the command's toolbar button and to each pick, then runs and replies; later requests wait their turn. `"animate": false` on a call skips it |
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | `force?` (quit without asking about unsaved designs) | `quitting` (the window closes), `asking` (a "save changes?" prompt is open) |
 

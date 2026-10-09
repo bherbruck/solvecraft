@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod access;
+pub mod agent_cursor;
 pub mod browser;
 pub mod canvas;
 pub mod context_menu;
@@ -104,6 +105,8 @@ pub struct UiState {
     pub shown_dims: Vec<u64>,
     /// Bodies locked in the browser (no move or delete).
     pub locked_bodies: Vec<String>,
+    /// The agent cursor: shown, speed, follow camera (#35).
+    pub agent_cursor: agent_cursor::Settings,
 }
 
 impl Default for UiState {
@@ -129,6 +132,7 @@ impl Default for UiState {
             hidden_profiles: Vec::new(),
             shown_dims: Vec::new(),
             locked_bodies: Vec::new(),
+            agent_cursor: Default::default(),
         }
     }
 }
@@ -199,6 +203,8 @@ pub struct SolveApp {
     /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
     pub synthetic_mods: egui::Modifiers,
     control_rx: Option<Receiver<ControlRequest>>,
+    /// The agent cursor acting out control requests.
+    pub agent: agent_cursor::AgentCursor,
     pending_shots: Vec<(u64, Option<String>, std::sync::mpsc::Sender<Value>, f64)>,
     queued_shots: Vec<(u64, f64, u32)>,
     shot_token: u64,
@@ -248,6 +254,7 @@ impl SolveApp {
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
             control_rx: None,
+            agent: Default::default(),
             pending_shots: Vec::new(),
             queued_shots: Vec::new(),
             shot_token: 0,
@@ -653,6 +660,7 @@ impl SolveApp {
         self.now = ctx.input(|i| i.time);
         self.step_view_animation(ctx);
         self.drain_control(ctx);
+        agent_cursor::step(self, ctx);
         if !self.synthetic.is_empty() {
             ctx.request_repaint();
         }
@@ -732,13 +740,20 @@ impl SolveApp {
         shortcut_box::show(self, ui.ctx());
         keymap::show(self, ui.ctx());
         prefs::show(self, ui.ctx());
+        agent_cursor::paint(self, ui.ctx());
         self.frame_ms = now_ms() - t0;
     }
 
     fn drain_control(&mut self, ctx: &egui::Context) {
         let Some(rx) = self.control_rx.take() else { return };
-        while let Ok(req) = rx.try_recv() {
+        // While the agent cursor acts out a request, later ones wait their turn.
+        while !self.agent.busy() {
+            let Ok(req) = rx.try_recv() else { break };
             let reply = req.reply.clone();
+            if agent_cursor::intercept(self, &req.method, &req.params, &reply) {
+                ctx.request_repaint();
+                continue;
+            }
             match control::handle(self, ctx, &req) {
                 control::Outcome::Done(v) => {
                     let _ = reply.send(v);
