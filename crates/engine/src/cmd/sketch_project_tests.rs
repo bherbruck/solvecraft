@@ -396,3 +396,44 @@ fn sweeps_and_pipes_follow_3d_sketch_curves() {
     let v = st.bodies.last().unwrap().mesh().measure().volume;
     assert!((v - 4.0 * len).abs() < 0.05 * 4.0 * len, "{v} vs {}", 4.0 * len);
 }
+
+/// #47: references to other bodies: an edge, a face's loops and a silhouette of a second body
+/// project into a sketch on the first; they follow an edit of that body (a parameter) and
+/// are reported lost, not crashed on, when it goes away.
+#[test]
+fn project_and_include_from_other_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 40, "width": 30, "height": 5}));
+    run(&mut s, "solid.box", json!({"corner": [50, 0, 0], "length": "w", "width": 10, "height": 20, "operation": "new"}));
+    run(&mut s, "solid.cylinder", json!({"base": [80, 5, 0], "radius": 4, "height": 10, "operation": "new"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 5]}, "project_edges": false}));
+    // An edge on the second box's top, its top face's loop, the cylinder's silhouette.
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [55, 0, 20]}]}));
+    run(&mut s, "sketch.project", json!({"refs": [{"face": [55, 5, 20]}]}));
+    run(&mut s, "sketch.include_3d", json!({"refs": [{"edge": [80, 1, 10]}]}));
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Body3"}]}));
+    let si = inspect(&mut s);
+    let lc = linked_curves(&si);
+    // (Geometry already there is not drawn twice: the edge lies on the face's loop, the included
+    // circle on the silhouette.)
+    assert!(lc.len() >= 6, "{}", lc.len());
+    // The projected edge of the second box runs from x 50 to 60 at y 0.
+    let xs = |si: &Value| -> Vec<f64> {
+        linked_curves(si).iter().flat_map(|c| [c["start_at"][0].as_f64().unwrap_or(0.0), c["end_at"][0].as_f64().unwrap_or(0.0)]).collect()
+    };
+    assert!(xs(&si).iter().any(|x| (x - 60.0).abs() < 1e-6), "{:?}", xs(&si));
+    run(&mut s, "sketch.finish", json!({}));
+    // Widen the second box: the projection follows (its far edge is at 70).
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "20 mm"}));
+    let id = s.doc.features.iter().find(|f| matches!(f.kind, solvecraft_doc::FeatureKind::Sketch { .. })).unwrap().id;
+    let si = run(&mut s, "sketch.inspect", json!({"sketch": id}));
+    assert!(xs(&si).iter().any(|x| (x - 70.0).abs() < 1e-6), "{:?}", xs(&si));
+    // Remove the cylinder: its silhouette and edge are lost, with a warning and no error.
+    let cyl = s.doc.features.iter().find(|f| matches!(f.kind, solvecraft_doc::FeatureKind::Cylinder { .. })).unwrap().id;
+    run(&mut s, "timeline.delete", json!({"feature": cyl}));
+    let t = run(&mut s, "document.inspect", json!({}));
+    let row = t["timeline"].as_array().unwrap().iter().find(|r| r["id"] == json!(id)).cloned().unwrap();
+    assert!(row["error"].is_null(), "{row}");
+    assert!(row["warning"].as_str().is_some_and(|w| w.contains("lost")), "{row}");
+}
