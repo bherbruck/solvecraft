@@ -110,7 +110,8 @@
       <Component Id="SolvecraftCli">
         <File Id="SolvecraftCliExe" Source="$(var.BinDir)\solvecraft-cli.exe" KeyPath="yes" />
       </Component>
-      <Component Id="SolvecraftLicences">
+      <!-- Several unversioned files: an explicit GUID (WIX0367). -->
+      <Component Id="SolvecraftLicences" Guid="CDEDEE8D-4BE9-4872-A2EA-EE623A6C7E91">
         <File Id="LicenseMit" Source="$(var.BinDir)\LICENSE-MIT" KeyPath="yes" />
         <File Id="LicenseApache" Source="$(var.BinDir)\LICENSE-APACHE" />
         <File Id="Notice" Source="$(var.BinDir)\NOTICE" />

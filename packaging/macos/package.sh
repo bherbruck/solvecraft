@@ -97,7 +97,8 @@ plutil -lint "$MNT/SolveCraft.app/Contents/Info.plist"
 case "$ARCH" in universal) WANT=(arm64 x86_64) ;; aarch64) WANT=(arm64) ;; *) WANT=(x86_64) ;; esac
 lipo "$MNT/SolveCraft.app/Contents/MacOS/SolveCraft" -verify_arch "${WANT[@]}"
 test -s "$MNT/SolveCraft.app/Contents/Resources/Licenses/THIRD-PARTY-LICENSES.txt"
-codesign --verify --strict --deep "$MNT/SolveCraft.app"
+# Not --strict: the mounted HFS volume adds Finder info, which strict verification rejects.
+codesign --verify --deep --verbose=2 "$MNT/SolveCraft.app"
 "$MNT/SolveCraft.app/Contents/MacOS/SolveCraft" --version
 hdiutil detach "$MNT"
 
