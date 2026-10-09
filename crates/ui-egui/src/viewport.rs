@@ -1909,6 +1909,12 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let targets = cube_targets();
     let shapes = cube_projected(&targets, (r, u, b), c);
     let hovered = hover.and_then(|h| cube_hit(&shapes, h));
+    // Axis triad from the cube's back corner, drawn first: the cube hides what is behind it.
+    let to2 = |p: Vec3| pos2(c.x + (p.dot(r) * CUBE_SCALE) as f32, c.y - (p.dot(u) * CUBE_SCALE) as f32);
+    let o = Vec3::new(-1.0, -1.0, -1.0);
+    for (d, col) in [(Vec3::X, colors::AXIS_X), (Vec3::Y, colors::AXIS_Y), (Vec3::Z, colors::AXIS_Z)] {
+        painter.line_segment([to2(o), to2(o + d * 2.6)], Stroke::new(2.0, Color32::from_rgb(col.0, col.1, col.2)));
+    }
     // Back to front: the faces and facets turned toward the camera.
     for (i, pts) in shapes.iter().rev() {
         let tg = &targets[*i];
@@ -1931,12 +1937,6 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     }
     // Clicked: the view from the face's or facet's direction (target → eye).
     let clicked = hovered.filter(|_| ui.input(|i| i.pointer.primary_clicked())).map(|i| targets[i].dir);
-    // Axis triad at the cube's corner.
-    let to2 = |p: Vec3| pos2(c.x + (p.dot(r) * CUBE_SCALE) as f32, c.y - (p.dot(u) * CUBE_SCALE) as f32);
-    let o = Vec3::new(-1.0, -1.0, -1.0);
-    for (d, col) in [(Vec3::X, colors::AXIS_X), (Vec3::Y, colors::AXIS_Y), (Vec3::Z, colors::AXIS_Z)] {
-        painter.line_segment([to2(o), to2(o + d * 2.6)], Stroke::new(2.0, Color32::from_rgb(col.0, col.1, col.2)));
-    }
     let home = Rect::from_center_size(pos2(c.x - 52.0, c.y - 48.0), vec2(18.0, 18.0));
     let hr = ui.interact(home, ui.id().with("vc_home"), Sense::click());
     icons::paint(&painter, home, "home", t.icon, if hr.hovered() { t.accent_soft } else { t.overlay }, t.accent);
