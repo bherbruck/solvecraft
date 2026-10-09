@@ -1,0 +1,11 @@
+{"commands": [
+  {"command": "sketch.create", "params": {"plane": "XZ", "name": "Section"}},
+  {"command": "sketch.line", "params": {"points": [[6, 0], [30, 0], [30, 4], [12, 4], [12, 20], [6, 20]], "closed": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.revolve", "params": {"axis": "Z", "body_name": "Hub"}},
+  {"command": "sketch.create", "params": {"plane": "XY", "name": "Bolt holes"}},
+  {"command": "sketch.circle.center", "params": {"center": [22, 0], "diameter": 5}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 4, "operation": "cut", "name": "Bolt hole"}},
+  {"command": "solid.pattern.circular", "params": {"features": ["Bolt hole"], "axis": "Z", "count": 6}}
+]}

@@ -8,6 +8,10 @@ storytold "craft" family.
 
 ![SolveCraft with the sample plate](docs/screenshots/sample-plate.png)
 
+**Documentation:** the [SolveCraft book](https://bherbruck.github.io/solvecraft/) (user guide,
+developer guide and command reference; sources in [docs/book](docs/book)), and the
+[web app](https://bherbruck.github.io/solvecraft/app/) to try it in the browser.
+
 **Status: early but usable for simple parts.** 76 of 76 reference parts built in Fusion
 rebuild in SolveCraft with the same volume, area and topology ([docs/oracle.md](docs/oracle.md));
 command parity with Fusion's Design workspace is tracked in [docs/parity.md](docs/parity.md).
@@ -90,6 +94,7 @@ configuration and an example session: [docs/mcp.md](docs/mcp.md).
 
 ## Architecture
 
+<!-- ANCHOR: architecture -->
 | Layer | Crates | Role |
 |---|---|---|
 | L0 | `geom` | vectors, planes, profiles, meshes and their measures |
@@ -99,6 +104,7 @@ configuration and an example session: [docs/mcp.md](docs/mcp.md).
 | L4 | `engine` | the session and the command registry (everything is a command) |
 | L5 | `ui-egui`, `mcp` | the swappable desktop front end; the MCP server (headless or bridged to the app) |
 | apps | `solvecraft`, `solvecraft-cli` | desktop app, headless CLI |
+<!-- ANCHOR_END: architecture -->
 
 ## Contributing
 

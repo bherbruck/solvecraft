@@ -1,0 +1,65 @@
+# The documentation site on GitHub Pages: the book (docs/book) at /solvecraft/ and the web app
+# at /solvecraft/app/. Needs Settings → Pages → Source = GitHub Actions; skipped while the
+# repository is private.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  MDBOOK_VERSION: v0.5.4
+  TRUNK_VERSION: v0.21.14
+
+jobs:
+  build:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install mdbook and trunk
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL "https://github.com/rust-lang/mdBook/releases/download/${MDBOOK_VERSION}/mdbook-${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$HOME/.local/bin"
+          curl -sSL "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build the book
+        run: cargo xtask book
+      - name: Build the web app
+        working-directory: apps/solvecraft-web
+        run: trunk build --release --public-url /solvecraft/app/
+      - name: Assemble the site
+        run: |
+          mkdir -p site
+          cp -r target/book/. site/
+          cp -r dist/web site/app
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

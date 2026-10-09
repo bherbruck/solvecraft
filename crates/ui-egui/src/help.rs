@@ -1,6 +1,6 @@
-//! The Help menu (the ? button on the application bar): About SolveCraft (version, commit, build
-//! date, licences, attributions, fonts), the keyboard shortcuts (read only), and Report an Issue,
-//! which copies diagnostic information to the clipboard.
+//! The Help menu (the ? button on the application bar): Documentation (the online book), About
+//! SolveCraft (version, commit, build date, licences, attributions, fonts), the keyboard shortcuts
+//! (read only), and Report an Issue, which copies diagnostic information to the clipboard.
 
 use egui::{RichText, vec2};
 
@@ -10,6 +10,8 @@ use crate::theme::Tokens;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const COMMIT: &str = env!("SOLVECRAFT_COMMIT");
 pub const BUILD_DATE: &str = env!("SOLVECRAFT_BUILD_DATE");
+/// The user and developer guide (docs/book, published by .github/workflows/pages.yml).
+pub const DOCS_URL: &str = "https://bherbruck.github.io/solvecraft/";
 const ATTRIBUTION: &str = include_str!("../../../ATTRIBUTION.md");
 const LICENSE_MIT: &str = include_str!("../../../LICENSE-MIT");
 const LICENSE_APACHE: &str = include_str!("../../../LICENSE-APACHE");
@@ -42,10 +44,11 @@ pub fn diagnostics(app: &SolveApp) -> String {
     )
 }
 
-/// Run a Help menu item: `about`, `shortcuts`, `report`.
+/// Run a Help menu item: `docs`, `about`, `shortcuts`, `report`.
 pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
     app.help.menu = false;
     match item {
+        "docs" => ctx.open_url(egui::OpenUrl::new_tab(DOCS_URL)),
         "about" => app.help.about = true,
         "shortcuts" => {
             app.keymap.open = true;
@@ -65,7 +68,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
         let mut pick: Option<&str> = None;
         let resp = egui::Area::new(egui::Id::new("sc_help_menu")).fixed_pos(anchor).constrain(true).order(egui::Order::Foreground).show(ctx, |ui| {
             crate::context_menu::menu_frame(ui, |ui| {
-                for (id, label) in [("about", "About SolveCraft"), ("shortcuts", "Keyboard Shortcuts"), ("report", "Report an Issue…")] {
+                for (id, label) in
+                    [("docs", "Documentation"), ("about", "About SolveCraft"), ("shortcuts", "Keyboard Shortcuts"), ("report", "Report an Issue…")]
+                {
                     if crate::context_menu::list_row(ui, &crate::context_menu::Item::action(id, label, "")).is_some() {
                         pick = Some(id);
                     }

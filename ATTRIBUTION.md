@@ -18,6 +18,11 @@ Generated-in-code assets are original and have no file to list:
 | File | Author | Source | Licence |
 |---|---|---|---|
 | docs/screenshots/sample-plate.png | SolveCraft contributors | screenshot of SolveCraft itself (`solvecraft --sample`) | MIT OR Apache-2.0 |
+| docs/book/src/generated/sample-plate.png | SolveCraft contributors | copy of docs/screenshots/sample-plate.png made by `cargo xtask book` (gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/bracket.png | SolveCraft contributors | rendered by `cargo xtask book` (`solvecraft-cli snapshot examples/bracket.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/enclosure.png | SolveCraft contributors | rendered by `cargo xtask book` (`solvecraft-cli snapshot docs/book/scripts/enclosure.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/revolve.png | SolveCraft contributors | rendered by `cargo xtask book` (`solvecraft-cli snapshot docs/book/scripts/revolve.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/src/generated/sheet-metal.png | SolveCraft contributors | rendered by `cargo xtask book` (`solvecraft-cli snapshot docs/book/scripts/sheet-metal.json`; gitignored) | MIT OR Apache-2.0 |
 | crates/sketch/fonts/LiberationSans-Regular.ttf | Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google) | https://github.com/liberationfonts (Debian fonts-liberation), unmodified; licence text in crates/sketch/fonts/OFL.txt; used for sketch Text outlines | SIL OFL 1.1 |
 
 ## Code adapted from sibling projects

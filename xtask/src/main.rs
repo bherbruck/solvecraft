@@ -4,6 +4,7 @@
 //! `std::process::Command`.
 
 mod assets;
+mod book;
 mod layers;
 mod parity;
 
@@ -24,6 +25,9 @@ commands:
   step-corpus [DIR]
                   import every DIR/*/part.step (default plan/fusion/oracle) and compare
                   with measure.json; writes docs/step-import.md
+  book [--no-build]
+                  generate docs/book's command reference and screenshots, then mdbook build
+                  into target/book
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
   ci              fmt --check, clippy -D warnings, test, assets, layers, wasm (stops at first failure)
 ";
@@ -37,6 +41,7 @@ fn main() -> ExitCode {
         Some("parity") => parity::run(&root(), rest.contains(&"--refresh")),
         Some("oracle") => cmd_oracle(),
         Some("step-corpus") => cmd_step_corpus(rest.first().copied()),
+        Some("book") => book::run(&root(), !rest.contains(&"--no-build")),
         Some("ci") => cmd_ci(),
         Some("wasm") => cmd_wasm(),
         Some("-h" | "--help" | "help") | None => {
