@@ -270,12 +270,19 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
         let nf = am.tri_face.iter().max().map_or(0, |m| *m as usize + 1);
         let added: Vec<bool> = (0..nf).map(|f| old.as_ref().is_none_or(|bm| face_is_new(&am, f, bm))).collect();
+        // Material removed from a body (a hole, a pocket): its new faces also show through the
+        // body in the cut colour, so the cut is seen from any side.
+        let cut = old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
         for (t, f) in am.triangles.iter().zip(&am.tri_face) {
-            let col = if added.get(*f as usize).copied().unwrap_or(true) { c.added } else { c.body };
+            let new = added.get(*f as usize).copied().unwrap_or(true);
+            let col = if new { c.added } else { c.body };
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (am.positions.get(i), am.normals.get(i)) {
                     sc.tri(p.to_f32(), n.to_f32(), col);
+                    if new && cut {
+                        sc.xray_tri(p.to_f32(), n.to_f32(), c.removed);
+                    }
                 }
             }
         }
@@ -362,6 +369,19 @@ mod tests {
 
     fn count(bytes: &[u8], stride: usize, col: [u8; 4]) -> usize {
         bytes.chunks(stride).filter(|v| v.get(24..28) == Some(&col[..])).count()
+    }
+
+    #[test]
+    fn a_hole_shows_its_cut_through_the_body() {
+        let mut s = solvecraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let p = s.preview(&[("solid.hole".to_string(), json!({"position": [20, 15, 20], "diameter": 5, "depth": 10}))]).unwrap();
+        let b = build(&p.before, &p.after, colors());
+        // The hole's walls are drawn see-through in the cut colour (seen from any side).
+        assert!(count(&b.scene.xray, 28, colors().removed) > 0);
+        // A feature that only adds material shows no cut.
+        let p = s.preview(&[("solid.box".to_string(), json!({"length": 10, "width": 10, "height": 30, "operation": "join"}))]).unwrap();
+        assert_eq!(count(&build(&p.before, &p.after, colors()).scene.xray, 28, colors().removed), 0);
     }
 
     fn plate() -> Session {

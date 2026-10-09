@@ -820,13 +820,17 @@ fn hint(inp: &SelInput) -> &'static str {
 
 /// Width of the label column; longer labels are cut with "…".
 const LABEL_W: f32 = 92.0;
+/// The label column grows to fit its labels up to this, then long labels wrap.
+const LABEL_MAX_W: f32 = 150.0;
 
-/// A row label in the dialog's label column.
+/// A row label in the dialog's label column (the grid sizes the column to its widest label).
 pub(crate) fn row_label(ui: &mut egui::Ui, text: &str) {
     ROW.with(|r| *r.borrow_mut() = text.to_string());
-    ui.allocate_ui_with_layout(vec2(LABEL_W, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.set_width(LABEL_W);
-        ui.add(egui::Label::new(text).truncate()).on_hover_text(text);
+    let full = egui::WidgetText::from(text).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body).size().x;
+    let w = full.clamp(LABEL_W, LABEL_MAX_W);
+    ui.allocate_ui_with_layout(vec2(w, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_width(w);
+        ui.add(egui::Label::new(text).wrap());
     });
 }
 
