@@ -929,10 +929,27 @@ fn face_tris(sc: &mut GpuScene, m: &solvecraft_engine::geom::Mesh, face: usize, 
     }
 }
 
+/// A highlighted edge: a halo and a core, and where the model hides it, the core dimmed (so a
+/// pick on the far side still shows).
 fn edge_lines(sc: &mut GpuScene, e: &[Vec3], core: Color32, halo: Color32, w: f32) {
     for (col, width) in [(halo, w + 3.0), (core, w)] {
         for p in e.windows(2) {
             sc.line(p[0].to_f32(), p[1].to_f32(), c4(col), width, false);
+        }
+    }
+    for p in e.windows(2) {
+        sc.hidden_line(p[0].to_f32(), p[1].to_f32(), c4(core.gamma_multiply(0.45)), (w * 0.7).max(1.0));
+    }
+}
+
+/// The outline of a highlighted face where the model hides it (dimmed).
+fn hidden_face_outline(sc: &mut GpuScene, m: &solvecraft_engine::geom::Mesh, face: usize, col: Color32) {
+    for (ei, e) in m.edges.iter().enumerate() {
+        let on = m.edge_faces.get(ei).is_some_and(|f| f.iter().any(|x| *x as usize == face));
+        if on && !m.seams.get(ei).copied().unwrap_or(false) {
+            for p in e.windows(2) {
+                sc.hidden_line(p[0].to_f32(), p[1].to_f32(), c4(col.gamma_multiply(0.45)), 1.4);
+            }
         }
     }
 }
@@ -1064,6 +1081,7 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
                 // A live preview stands in for the body: its old faces would fight with it.
                 if let Some(b) = st.body(body).filter(|_| !app.preview.replaced.contains(body)) {
                     face_tris(&mut sc, &b.mesh(), *index, c4(t.sel_face), false);
+                    hidden_face_outline(&mut sc, &b.mesh(), *index, t.sel_edge);
                 }
             }
             Sel::Body { name } => {
@@ -2190,6 +2208,17 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_shows_where_the_model_hides_it() {
+        let mut s = solvecraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        assert!(build_highlight(&app).hidden.is_empty());
+        // The back face: its outline is drawn (dimmed) where the box hides it.
+        app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 3, point: Vec3::new(20.0, 30.0, 10.0) }];
+        assert!(!build_highlight(&app).hidden.is_empty());
+    }
 
     /// A camera basis looking from `dir` (target → eye), as the view cube draws with.
     fn basis_from(dir: Vec3) -> (Vec3, Vec3, Vec3) {

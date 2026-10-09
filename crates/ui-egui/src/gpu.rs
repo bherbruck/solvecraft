@@ -914,6 +914,7 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         }
         lines(pass, &res.line, &m.lines);
         lines(pass, &res.line_hidden, &m.hidden);
+        lines(pass, &res.line_hidden, &h.hidden);
         lines(pass, &res.line, &pv.lines);
         lines(pass, &res.line, &h.lines);
         for (id, q) in &res.quads {
