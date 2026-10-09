@@ -3,7 +3,8 @@
 # release with SHA256SUMS (a pre-release when the tag has a suffix, such as v0.2.0-rc1). Every
 # download is a plain program (Windows .exe, Linux binary and AppImage, a macOS .dmg); the licences
 # are built into the programs (Help ▸ About ▸ Licences, `solvecraft-cli licences`). Only the web
-# app, being many files, is a zip. Notes: .github/release-notes.md, with {tag} replaced.
+# app, being many files, is a zip. Notes: .github/release-notes.md, with {tag} replaced. A dry run:
+# Actions ▸ Release ▸ Run workflow with "publish" off keeps the assets as the release-assets artifact.
 name: Release
 
 on:
@@ -12,8 +13,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (must exist), e.g. v0.1.0"
-        required: true
+        description: "Tag to release (must exist), e.g. v0.1.0; empty: the branch this runs on"
+        required: false
+      publish:
+        description: "Create the GitHub release (off: a dry run that keeps everything as the release-assets artifact)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -130,7 +135,8 @@ jobs:
         run: sha256sum * > SHA256SUMS && cat SHA256SUMS
       - name: Notes
         run: sed "s/{tag}/$TAG/g" .github/release-notes.md > notes.md
-      - uses: softprops/action-gh-release@v2
+      - if: ${{ github.event_name == 'push' || inputs.publish }}
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
           name: SolveCraft ${{ env.TAG }}
@@ -139,3 +145,11 @@ jobs:
           # A tag with a suffix (v0.2.0-rc1) is a pre-release; v1.2.3 is a normal release.
           prerelease: ${{ contains(env.TAG, '-') }}
           files: assets/*
+      # A dry run (workflow_dispatch with publish off): the assets and notes as an artifact.
+      - if: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish }}
+        run: cp notes.md assets/release-notes.md
+      - if: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: assets/*
