@@ -54,6 +54,8 @@ pub enum PlaneRef {
     Tangent { face: Box<GeoRef>, at: Vec3 },
     /// Square to an edge or sketch curve, a fraction `t` (expression, 0…1) of the way along it.
     AlongPath { path: Box<GeoRef>, t: String },
+    /// Through a straight edge (or line, axis) and square to a plane (or planar face).
+    Perpendicular { plane: Box<GeoRef>, line: Box<GeoRef> },
     /// A planar body face: found again on each evaluation (the face with this plane's normal
     /// nearest `at`), so sketches on it follow when earlier features change; `plane` is the
     /// plane as picked (its frame, and the fallback when the face is gone). `name` is the face's
@@ -1808,7 +1810,8 @@ impl Document {
             | PlaneRef::TwoEdges { .. }
             | PlaneRef::ThreePoints { .. }
             | PlaneRef::Tangent { .. }
-            | PlaneRef::AlongPath { .. } => {
+            | PlaneRef::AlongPath { .. }
+            | PlaneRef::Perpendicular { .. } => {
                 let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
                 crate::construct::resolve_geo_plane(&crate::construct::Ctx { doc: self, vals, st }, p)
             }

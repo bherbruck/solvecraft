@@ -513,6 +513,15 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             let (on, n) = surface_normal(s, *at).ok_or_else(|| bad("the point is on the face's axis"))?;
             Plane::from_normal(on, n).ok_or_else(degenerate)
         }
+        PlaneRef::Perpendicular { plane: base, line: l } => {
+            let pl = plane(ctx, base)?;
+            let (o, d) = line(ctx, l)?;
+            let n = d
+                .cross(pl.normal())
+                .normalized()
+                .ok_or_else(|| bad("the line is square to the plane: every plane through it is perpendicular; pick a line in or along the plane"))?;
+            Plane::new(o, d, n.cross(d)).ok_or_else(degenerate)
+        }
         PlaneRef::AlongPath { path, t } => {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
             let (p, tan) = along(&path_points(ctx, path)?, t).ok_or_else(|| bad("the path has no length"))?;
@@ -621,6 +630,7 @@ impl PlaneRef {
     pub fn refs_mut(&mut self) -> Vec<&mut GeoRef> {
         match self {
             PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } => vec![a.as_mut(), b.as_mut()],
+            PlaneRef::Perpendicular { plane, line } => vec![plane.as_mut(), line.as_mut()],
             PlaneRef::ThreePoints { a, b, c } => vec![a.as_mut(), b.as_mut(), c.as_mut()],
             PlaneRef::Tangent { face, .. } => vec![face.as_mut()],
             PlaneRef::AlongPath { path, .. } => vec![path.as_mut()],

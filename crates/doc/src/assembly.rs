@@ -148,7 +148,11 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
             *at = apply_point(m, *at);
             map_geo_ref(m, face);
         }
-        PlaneRef::Midplane { .. } | PlaneRef::TwoEdges { .. } | PlaneRef::ThreePoints { .. } | PlaneRef::AlongPath { .. } => {
+        PlaneRef::Midplane { .. }
+        | PlaneRef::TwoEdges { .. }
+        | PlaneRef::ThreePoints { .. }
+        | PlaneRef::AlongPath { .. }
+        | PlaneRef::Perpendicular { .. } => {
             for r in p.refs_mut() {
                 map_geo_ref(m, r);
             }

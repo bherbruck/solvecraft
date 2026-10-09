@@ -257,3 +257,18 @@ fn construction_lives_in_the_component_frame() {
     run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 20, 0]}));
     assert!(near(point(&s, "PinTop"), Vec3::new(50.0, 20.0, 10.0)), "{:?}", point(&s, "PinTop"));
 }
+
+#[test]
+fn plane_perpendicular_to_a_plane_through_a_line() {
+    let mut s = part();
+    // Through the box's front bottom edge (along X), square to the bottom: the front face's plane.
+    run(&mut s, "construct.plane.perpendicular", json!({"plane": {"face": [20, 15, 0]}, "line": {"edge": [20, 0, 0]}, "name": "F"}));
+    let f = plane(&s, "F");
+    assert!(parallel(f.normal(), Vec3::Y) && on_plane(&f, Vec3::new(7.0, 0.0, 13.0)), "{f:?}");
+    // Through the world Z axis, square to XZ: the YZ plane.
+    run(&mut s, "construct.plane.perpendicular", json!({"plane": "XZ", "line": {"axis": "Z"}, "name": "G"}));
+    let g = plane(&s, "G");
+    assert!(parallel(g.normal(), Vec3::X) && on_plane(&g, Vec3::new(0.0, 5.0, 9.0)), "{g:?}");
+    // A line square to the plane has no single answer.
+    assert!(s.execute("construct.plane.perpendicular", &json!({"plane": "XY", "line": {"axis": "Z"}})).is_err());
+}

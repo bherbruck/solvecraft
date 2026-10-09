@@ -83,6 +83,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CONSTRUCT")
         .icon("plane")
         .params("path: edge or sketch curve ref; t: expr, 0…1 along it (default 0.5); name? The plane is square to the path there"),
+    CommandSpec::new("construct.plane.perpendicular", "Perpendicular Plane", plane_perpendicular).at("SOLID", "CONSTRUCT").icon("plane").params(
+        "plane: plane or planar face ref; line: straight edge, sketch line or axis ref; name? The plane holds the line and is square to the plane",
+    ),
 ];
 
 /// A reference from its JSON form.
@@ -248,4 +251,10 @@ fn plane_along(s: &mut Session, p: &Value) -> Result<Value> {
     let path = geo(s, p.get("path"), cmd, "path")?;
     let t = t_param(s, p, cmd)?;
     plane(s, p, PlaneRef::AlongPath { path: Box::new(path), t })
+}
+
+fn plane_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "construct.plane.perpendicular";
+    let (base, line) = (geo(s, p.get("plane"), cmd, "plane")?, geo(s, p.get("line"), cmd, "line")?);
+    plane(s, p, PlaneRef::Perpendicular { plane: Box::new(base), line: Box::new(line) })
 }
