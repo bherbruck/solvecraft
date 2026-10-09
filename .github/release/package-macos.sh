@@ -32,4 +32,13 @@ PLIST
 lipo -info "$app/Contents/MacOS/solvecraft"
 ln -s /Applications stage/dmg/Applications
 hdiutil create -volname "SolveCraft $tag" -srcfolder stage/dmg -ov -format UDZO "out/SolveCraft-$tag-macos-universal.dmg"
+# Check the image: mount it and look at what a user will see.
+mnt=$(mktemp -d)
+hdiutil attach -readonly -nobrowse -mountpoint "$mnt" "out/SolveCraft-$tag-macos-universal.dmg"
+ls -la "$mnt" "$mnt/SolveCraft.app/Contents" "$mnt/SolveCraft.app/Contents/MacOS"
+test -L "$mnt/Applications" && test "$(readlink "$mnt/Applications")" = /Applications
+plutil -lint "$mnt/SolveCraft.app/Contents/Info.plist"
+lipo "$mnt/SolveCraft.app/Contents/MacOS/solvecraft" -verify_arch arm64 x86_64
+"$mnt/SolveCraft.app/Contents/MacOS/solvecraft" --version
+hdiutil detach "$mnt"
 ls -l out
