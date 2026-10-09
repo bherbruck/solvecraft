@@ -8,9 +8,11 @@ storytold "craft" family.
 
 ![SolveCraft with the sample plate](docs/screenshots/sample-plate.png)
 
-**Status: early (milestone M0 done, M1 in progress).** See [ROADMAP.md](ROADMAP.md),
-[docs/parity.md](docs/parity.md) (command parity with Fusion's Design workspace) and
-[docs/oracle.md](docs/oracle.md) (parts built in Fusion, rebuilt and measured in SolveCraft).
+**Status: early but usable for simple parts.** 76 of 76 reference parts built in Fusion
+rebuild in SolveCraft with the same volume, area and topology ([docs/oracle.md](docs/oracle.md));
+command parity with Fusion's Design workspace is tracked in [docs/parity.md](docs/parity.md).
+Open work and known bugs are in [GitHub issues](https://github.com/bherbruck/solvecraft/issues),
+and help is welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## What works
 
@@ -97,6 +99,11 @@ configuration and an example session: [docs/mcp.md](docs/mcp.md).
 | L4 | `engine` | the session and the command registry (everything is a command) |
 | L5 | `ui-egui`, `mcp` | the swappable desktop front end; the MCP server (headless or bridged to the app) |
 | apps | `solvecraft`, `solvecraft-cli` | desktop app, headless CLI |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md): how to build and test, the code map, the clean-room
+and licence rules, and where help is wanted most.
 
 ## Licence
 
