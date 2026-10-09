@@ -773,8 +773,16 @@ pub enum FilletStyle {
     Constant,
     /// `radius` is the chord: the width across the blend.
     Chord,
-    /// `radius` at the end of each edge nearest `start`, `radius2` at the other, linear between.
-    Variable { radius2: String, start: Vec3 },
+    /// `radius` at the end of each edge nearest `start`, `radius2` at the other; `mid` radii at
+    /// positions between (0 to 1 from the start end); straight between them, or `smooth`.
+    Variable {
+        radius2: String,
+        start: Vec3,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        mid: Vec<(f64, String)>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        smooth: bool,
+    },
 }
 
 impl FilletStyle {
@@ -1148,8 +1156,9 @@ impl FeatureKind {
             }
             FeatureKind::Fillet { radius, style, .. } => {
                 v.push(radius);
-                if let FilletStyle::Variable { radius2, .. } = style {
+                if let FilletStyle::Variable { radius2, mid, .. } = style {
                     v.push(radius2);
+                    v.extend(mid.iter().map(|(_, r)| r.as_str()));
                 }
             }
             FeatureKind::Chamfer { distance, distance2, angle, .. } => {

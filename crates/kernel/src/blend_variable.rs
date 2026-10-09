@@ -56,11 +56,78 @@ fn edge_frame(faces: &[&mt::Face], edge: &mt::Edge) -> Result<EdgeFrame> {
 
 /// Fillet one straight edge with radius `r0` at its end nearest `start` and `r1` at the other.
 pub fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, r0: f64, r1: f64) -> Result<Body> {
+    fillet_variable_points(body, edge_at, start, &[(0.0, r0), (1.0, r1)], false)
+}
+
+/// The radius along the edge as a B-spline of the edge parameter (0 at the edge's front):
+/// degree, knots and control radii.
+struct RadiusLaw {
+    deg: usize,
+    knots: Vec<f64>,
+    radii: Vec<f64>,
+}
+
+impl RadiusLaw {
+    /// Through (position, radius) points sorted by position from 0 to 1: straight between them,
+    /// or `smooth` (cubic pieces with Catmull-Rom slopes, C¹ through every point).
+    fn through(pts: &[(f64, f64)], smooth: bool) -> RadiusLaw {
+        if !smooth || pts.len() < 3 {
+            let mut knots = vec![0.0];
+            knots.extend(pts.iter().map(|p| p.0));
+            knots.push(1.0);
+            return RadiusLaw { deg: 1, knots, radii: pts.iter().map(|p| p.1).collect() };
+        }
+        let n = pts.len();
+        let at = |i: usize| pts.get(i).copied().unwrap_or((0.0, 0.0));
+        let slope = |i: usize| {
+            let (a, b) = (at(i.saturating_sub(1)), at((i + 1).min(n - 1)));
+            if b.0 > a.0 { (b.1 - a.1) / (b.0 - a.0) } else { 0.0 }
+        };
+        let mut knots = vec![0.0; 4];
+        let mut radii = vec![at(0).1];
+        for i in 0..n - 1 {
+            let ((t0, r0), (t1, r1)) = (at(i), at(i + 1));
+            let h = t1 - t0;
+            radii.extend([r0 + slope(i) * h / 3.0, r1 - slope(i + 1) * h / 3.0, r1]);
+            knots.extend(if i + 2 == n { vec![1.0; 4] } else { vec![t1; 3] });
+        }
+        RadiusLaw { deg: 3, knots, radii }
+    }
+
+    /// Greville abscissae: where each control radius sits along the edge.
+    fn greville(&self) -> Vec<f64> {
+        (0..self.radii.len()).map(|j| self.knots.iter().skip(j + 1).take(self.deg).sum::<f64>() / self.deg as f64).collect()
+    }
+
+    /// The radius at `t` (sampled for checks).
+    fn eval(&self, t: f64) -> f64 {
+        let kv = mt::KnotVec::from(self.knots.clone());
+        let b = kv.try_bspline_basis_functions(self.deg, t.clamp(0.0, 1.0)).unwrap_or_default();
+        b.iter().zip(&self.radii).map(|(x, r)| x * r).sum()
+    }
+}
+
+/// Fillet one straight edge with a radius that varies along it: (position, radius) points with
+/// positions 0 (the end nearest `start`) to 1 (the other end) and any between, the radius
+/// straight between them or `smooth`.
+pub fn fillet_variable_points(body: &Body, edge_at: Vec3, start: Vec3, points: &[(f64, f64)], smooth: bool) -> Result<Body> {
     body.require_brep("fillet")?;
-    for r in [r0, r1] {
-        if !(r.is_finite() && r > 1e-6 && r < 1e6) {
+    if points.len() < 2 || points.len() > 100 {
+        return Err(KernelError::Invalid("a variable radius needs 2…100 points".into()));
+    }
+    for (t, r) in points {
+        if !(r.is_finite() && *r > 1e-6 && *r < 1e6) {
             return Err(KernelError::Invalid("fillet radii must be positive".into()));
         }
+        if !(t.is_finite() && (0.0..=1.0).contains(t)) {
+            return Err(KernelError::Invalid("radius positions run from 0 to 1 along the edge".into()));
+        }
+    }
+    let mut pts = points.to_vec();
+    pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-9);
+    if pts.first().map(|p| p.0) != Some(0.0) || pts.last().map(|p| p.0) != Some(1.0) || pts.len() < 2 {
+        return Err(KernelError::Invalid("give the radius at both ends of the edge".into()));
     }
     let edge = crate::surfaces::edge_near(body, edge_at).ok_or_else(|| KernelError::Invalid(format!("no edge at {edge_at:?}")))?;
     let size = body.size();
@@ -78,8 +145,17 @@ pub fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, r0: f64, r1: f64
         let faces: Vec<&mt::Face> = shell.face_iter().collect();
         let fr = edge_frame(&faces, &edge)?;
         let (v0, v1) = (edge.absolute_front().clone(), edge.absolute_back().clone());
-        // r0 at the end nearest `start` (the edge keeps its own direction).
-        let (ra, rb) = if vtx(&v1).dist(start) < vtx(&v0).dist(start) { (r1, r0) } else { (r0, r1) };
+        // Positions from the end nearest `start` (the edge keeps its own direction).
+        if vtx(&v1).dist(start) < vtx(&v0).dist(start) {
+            pts = pts.iter().rev().map(|(t, r)| (1.0 - t, *r)).collect();
+        }
+        let law = RadiusLaw::through(&pts, smooth);
+        let (ra, rb) = (law.eval(0.0), law.eval(1.0));
+        // The largest radius along the edge decides whether the blend fits.
+        let rmax = (0..=200).map(|k| law.eval(k as f64 / 200.0)).fold(0.0, f64::max);
+        if (0..=200).any(|k| law.eval(k as f64 / 200.0) <= 1e-6) {
+            return Err(KernelError::Invalid("the radius must stay positive along the edge".into()));
+        }
         let (p0, p1) = (vtx(&v0), vtx(&v1));
         let d = (p1 - p0).normalized().ok_or_else(|| KernelError::Failed("zero-length edge".into()))?;
         let tol = (size * 1e-7).max(1e-9);
@@ -114,7 +190,7 @@ pub fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, r0: f64, r1: f64
                 }
                 let other = if e.front() == v { vtx(e.back()) } else { vtx(e.front()) };
                 let along = (other - p).dot(t);
-                if (other - p - t * along).len() > tol * 100.0 + 1e-7 || along <= back(r) + tol {
+                if (other - p - t * along).len() > tol * 100.0 + 1e-7 || along <= back(r.max(rmax)) + tol {
                     return Err(unsupported("the blend is larger than the neighbouring faces"));
                 }
             }
@@ -133,8 +209,18 @@ pub fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, r0: f64, r1: f64
         };
         let c0 = builder::circle_arc(&a0, &b0, p3(arc_mid(p0, s0, ra)));
         let c1 = builder::circle_arc(&a1, &b1, p3(arc_mid(p1, s1, rb)));
-        let la = builder::line(&a0, &a1);
-        let lb = builder::line(&b0, &b1);
+        // Contact curves: the edge moved along each face by the setback of the radius there.
+        let g = law.greville();
+        let contact = |t: Vec3, a: &mt::Vertex, b: &mt::Vertex| -> Result<mt::Edge> {
+            if law.deg == 1 && law.radii.len() == 2 {
+                return Ok(builder::line(a, b));
+            }
+            let ctrl: Vec<mt::Point3> = g.iter().zip(&law.radii).map(|(gj, rj)| p3(p0 + (p1 - p0) * *gj + t * back(*rj))).collect();
+            let c = mt::BSplineCurve::try_new(mt::KnotVec::from(law.knots.clone()), ctrl).map_err(|e| KernelError::Failed(format!("fillet: {e}")))?;
+            mt::Edge::try_new(a, b, mt::Curve::BSplineCurve(c)).map_err(|e| KernelError::Failed(format!("fillet: {e}")))
+        };
+        let la = contact(fr.t1, &a0, &a1)?;
+        let lb = contact(fr.t2, &b0, &b1)?;
         let mut subst: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
         for (end, a, b) in [(end0, &a0, &b0), (end1, &a1, &b1)] {
             for (e, nv) in [(&end.e1, a), (&end.e2, b)] {
@@ -166,8 +252,11 @@ pub fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, r0: f64, r1: f64
         // weight sin(φ/2)) at each end, joined linearly.
         let w = (fr.phi / 2.0).sin();
         let h = |p: Vec3, wt: f64| mt::Vector4::new(p.x * wt, p.y * wt, p.z * wt, wt);
-        let ctrl = vec![vec![h(pa0, 1.0), h(pa1, 1.0)], vec![h(p0, w), h(p1, w)], vec![h(pb0, 1.0), h(pb1, 1.0)]];
-        let bsp = mt::BSplineSurface::new((mt::KnotVec::bezier_knot(2), mt::KnotVec::bezier_knot(1)), ctrl);
+        let row = |t: Vec3, wt: f64, off: bool| -> Vec<mt::Vector4> {
+            g.iter().zip(&law.radii).map(|(gj, rj)| h(p0 + (p1 - p0) * *gj + if off { t * back(*rj) } else { Vec3::ZERO }, wt)).collect()
+        };
+        let ctrl = vec![row(fr.t1, 1.0, true), row(fr.t1, w, false), row(fr.t2, 1.0, true)];
+        let bsp = mt::BSplineSurface::new((mt::KnotVec::bezier_knot(2), mt::KnotVec::from(law.knots.clone())), ctrl);
         let mut surf = mt::Surface::NurbsSurface(mt::NurbsSurface::new(bsp));
         // Outward: away from the arc centre on a convex edge, toward it on a concave one.
         let (c, mid) = (p0 + fr.t1 * s0 + fr.n1 * (ra * fr.side), arc_mid(p0, s0, ra));
@@ -258,6 +347,36 @@ mod tests {
         assert!(rel(measure(&g).unwrap().volume, measure(&k).unwrap().volume) < 1e-6);
         // Too big for the faces: refused.
         assert!(fillet_variable(&b, Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0), 2.0, 50.0).is_err());
+    }
+
+    /// A radius through a middle point: straight pieces (exact: each piece removes
+    /// (1 − π/4) L (a² + ab + b²) / 3), and smooth (the removed volume integrates the law).
+    #[test]
+    fn variable_radius_through_a_middle_point() {
+        let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let (at, start) = (Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0));
+        let k = 1.0 - std::f64::consts::FRAC_PI_4;
+        let pts = [(0.0, 2.0), (0.5, 4.0), (1.0, 2.0)];
+        let f = fillet_variable_points(&b, at, start, &pts, false).unwrap();
+        let removed = 2.0 * k * 10.0 * (4.0 + 8.0 + 16.0) / 3.0;
+        let v = measure(&f).unwrap().volume;
+        assert!(rel(v, 6000.0 - removed) < 1e-4, "{v} vs {}", 6000.0 - removed);
+        assert_eq!(f.unmeshed_faces(), 0);
+        let s = fillet_variable_points(&b, at, start, &pts, true).unwrap();
+        let law = RadiusLaw::through(&pts, true);
+        let n = 20000;
+        let integral: f64 = (0..n).map(|i| law.eval((i as f64 + 0.5) / n as f64).powi(2)).sum::<f64>() / n as f64 * 20.0;
+        assert!((law.eval(0.5) - 4.0).abs() < 1e-12 && (law.eval(0.0) - 2.0).abs() < 1e-12);
+        let v = measure(&s).unwrap().volume;
+        assert!(rel(v, 6000.0 - k * integral) < 1e-4, "{v} vs {}", 6000.0 - k * integral);
+        // Unsorted, from the other end: the same.
+        let r = fillet_variable_points(&b, at, Vec3::new(10.0, 20.0, 30.0), &[(1.0, 2.0), (0.0, 2.0), (0.5, 4.0)], true).unwrap();
+        assert!(rel(measure(&r).unwrap().volume, v) < 1e-9);
+        // A middle radius too big for the faces, missing ends, bad positions: refused.
+        assert!(fillet_variable_points(&b, at, start, &[(0.0, 2.0), (0.5, 40.0), (1.0, 2.0)], false).is_err());
+        assert!(fillet_variable_points(&b, at, start, &[(0.0, 2.0), (0.5, 4.0)], false).is_err());
+        assert!(fillet_variable_points(&b, at, start, &[(0.0, 2.0), (f64::NAN, 4.0), (1.0, 2.0)], false).is_err());
+        assert!(fillet_variable_points(&b, at, start, &[(0.0, 2.0), (1.0, -1.0)], false).is_err());
     }
 
     #[test]

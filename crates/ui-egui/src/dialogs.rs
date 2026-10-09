@@ -2790,7 +2790,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     FilletStyle::Chord => {
                         d.extra.insert("type".into(), json!("chord"));
                     }
-                    FilletStyle::Variable { radius2, start } => {
+                    FilletStyle::Variable { radius2, start, .. } => {
                         d.extra.insert("type".into(), json!("variable"));
                         d.extra.insert("radius2".into(), json!(radius2));
                         // The start was the first edge's last point: ends swapped.

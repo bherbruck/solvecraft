@@ -75,9 +75,10 @@ impl FeatureKind {
             FeatureKind::Fillet { radius, style, .. } => match style {
                 crate::FilletStyle::Constant => v.push(("Radius", radius, L)),
                 crate::FilletStyle::Chord => v.push(("Chord length", radius, L)),
-                crate::FilletStyle::Variable { radius2, .. } => {
+                crate::FilletStyle::Variable { radius2, mid, .. } => {
                     v.push(("Start radius", radius, L));
                     v.push(("End radius", radius2, L));
+                    v.extend(mid.iter_mut().map(|(_, r)| ("Mid radius", r, L)));
                 }
             },
             FeatureKind::Chamfer { distance, distance2, angle, .. } => {

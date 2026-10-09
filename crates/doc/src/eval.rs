@@ -2620,11 +2620,15 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             };
             let nb = match &f.kind {
                 FeatureKind::Fillet { style: crate::FilletStyle::Chord, .. } => kernel::fillet_chord(&mb.body, &edges, r)?,
-                FeatureKind::Fillet { style: crate::FilletStyle::Variable { radius2, start }, .. } => {
+                FeatureKind::Fillet { style: crate::FilletStyle::Variable { radius2, start, mid, smooth }, .. } => {
                     let r2 = val(vals, radius2, Kind::Length)?;
+                    let mut pts = vec![(0.0, r), (1.0, r2)];
+                    for (t, e) in mid {
+                        pts.push((*t, val(vals, e, Kind::Length)?));
+                    }
                     let mut b = mb.body.clone();
                     for p in &edges {
-                        b = kernel::fillet_variable(&b, *p, *start, r, r2)?;
+                        b = kernel::fillet_variable_points(&b, *p, *start, &pts, *smooth)?;
                     }
                     b
                 }

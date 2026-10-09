@@ -1069,6 +1069,29 @@ fn chord_and_variable_fillets() {
     let removed = (1.0 - PI / 4.0) * 20.0 * (4.0 + 10.0 + 25.0) / 3.0;
     assert!(rel(v, 6000.0 - removed) < 1e-4, "{v}");
     assert!(s.execute("solid.fillet", &json!({"edges": [[10, 10, 30]], "radius": 2, "type": "variable"})).is_err());
+    // A radius through a middle point (a user parameter), straight between: 2 → 4 → 2.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "B"}));
+    run(&mut s, "parameters.add", json!({"name": "waist", "expression": "4 mm"}));
+    run(
+        &mut s,
+        "solid.fillet",
+        json!({"edges": [[10, 10, 30]], "radius": 2, "type": "variable", "radius2": 2, "start": [10, 0, 30], "mid": [[0.5, "waist"]]}),
+    );
+    let vol = |s: &Session| solvecraft_kernel::measure(&s.world_state().body("B").unwrap().body).unwrap().volume;
+    let removed = 2.0 * (1.0 - PI / 4.0) * 10.0 * (4.0 + 8.0 + 16.0) / 3.0;
+    assert!(rel(vol(&s), 6000.0 - removed) < 1e-4, "{}", vol(&s));
+    // The middle radius follows its parameter.
+    run(&mut s, "parameters.change", json!({"name": "waist", "expression": "3 mm"}));
+    let removed = 2.0 * (1.0 - PI / 4.0) * 10.0 * (4.0 + 6.0 + 9.0) / 3.0;
+    assert!(rel(vol(&s), 6000.0 - removed) < 1e-4, "{}", vol(&s));
+    assert!(
+        s.execute(
+            "solid.fillet",
+            &json!({"edges": [[10, 10, 30]], "radius": 2, "type": "variable", "radius2": 2, "start": [10, 0, 30], "mid": [[1.5, 3]]})
+        )
+        .is_err()
+    );
 }
 
 /// Components export as a STEP assembly: products, occurrences, placements.

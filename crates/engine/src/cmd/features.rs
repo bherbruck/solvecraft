@@ -31,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("fillet")
         .key("F")
-        .params("edges: [[x,y,z] point on edge | {body, index}]; radius: expr; body?; type?: constant|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other); radius2?; start?: [x,y,z]"),
+        .params("edges: [[x,y,z] point on edge | {body, index}]; radius: expr; body?; type?: constant|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other); radius2?; start?: [x,y,z]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii)"),
     CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
     CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
@@ -604,7 +604,24 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             check_expr(s, &radius2, Kind::Length, cmd, "radius2")?;
             let start =
                 p.get("start").and_then(vec3).ok_or_else(|| bad(cmd, "a variable fillet needs `start`: [x,y,z] near the end that takes `radius`"))?;
-            solvecraft_doc::FilletStyle::Variable { radius2, start }
+            let mut mid = Vec::new();
+            for m in p.get("mid").and_then(Value::as_array).into_iter().flatten().take(100) {
+                let (Some(t), Some(r)) = (m.get(0).and_then(Value::as_f64), m.get(1)) else {
+                    return Err(bad(cmd, "`mid` entries are [position, radius]"));
+                };
+                if !(t.is_finite() && t > 0.0 && t < 1.0) {
+                    return Err(bad(cmd, "`mid` positions lie between 0 and 1 (from the start end)"));
+                }
+                let r = match r {
+                    Value::String(x) => x.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => return Err(bad(cmd, "a `mid` radius is a number or an expression")),
+                };
+                check_expr(s, &r, Kind::Length, cmd, "mid radius")?;
+                mid.push((t, r));
+            }
+            let smooth = p.get("smooth").and_then(Value::as_bool).unwrap_or(false);
+            solvecraft_doc::FilletStyle::Variable { radius2, start, mid, smooth }
         }
         Some(o) => return Err(bad(cmd, format!("unknown fillet type `{o}` (constant, chord or variable)"))),
     };
