@@ -97,6 +97,8 @@ pub struct UiState {
     pub visual_style: u8,
     /// A soft shadow on the ground under the model (seen from above).
     pub ground_shadow: bool,
+    /// The world's up axis (Z or Y; #3): the camera, view cube, home view and ground follow it.
+    pub up_axis: solvecraft_engine::render::UpAxis,
     /// Sketches hidden one by one, and finished sketches shown although a feature uses them.
     pub hidden_sketches: Vec<u64>,
     pub shown_sketches: Vec<u64>,
@@ -128,6 +130,7 @@ impl Default for UiState {
             pick_bodies: false,
             visual_style: 0,
             ground_shadow: true,
+            up_axis: Default::default(),
             hidden_sketches: Vec::new(),
             shown_sketches: Vec::new(),
             hidden_profiles: Vec::new(),
@@ -584,6 +587,16 @@ impl SolveApp {
     }
 
     /// Frame the model at once (programmatic use; the toolbar animates).
+    /// Make `up` the world's up axis: the camera turns to the same standard view in that world
+    /// (home) and frames the model.
+    pub fn set_up_axis(&mut self, up: solvecraft_engine::render::UpAxis) {
+        self.ui.up_axis = up;
+        self.cam_anim = None;
+        self.cam.up = up;
+        self.cam.set_view(StandardView::Iso);
+        self.fit_view();
+    }
+
     pub fn fit_view(&mut self) {
         self.cam_anim = None;
         self.cam = self.fitted(self.cam);
@@ -659,6 +672,9 @@ impl SolveApp {
             self.fitted = true;
         }
         self.now = ctx.input(|i| i.time);
+        if self.cam.up != self.ui.up_axis {
+            self.set_up_axis(self.ui.up_axis);
+        }
         self.step_view_animation(ctx);
         self.drain_control(ctx);
         agent_cursor::step(self, ctx);

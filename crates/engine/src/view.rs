@@ -124,16 +124,28 @@ pub fn scene(s: &Session, cam: &Camera) -> Scene {
     let mut sc = Scene { background: Some((colors::BG_TOP, colors::BG_BOTTOM)), ..Default::default() };
     let b = bounds(s);
     sc.radius = (b.diagonal() * 0.5).max(cam.half_height()).max(10.0) + b.center().dist(cam.target);
-    // Grid on XY.
+    // Grid on the ground plane (XY with Z up, XZ with Y up).
     let (minor, major) = grid_step(cam.half_height());
     let ext = (cam.half_height() * 3.0 / major).ceil() * major;
-    let c = Vec3::new((cam.target.x / major).round() * major, (cam.target.y / major).round() * major, 0.0);
+    let tf = cam.to_frame(cam.target);
+    let c = Vec3::new((tf.x / major).round() * major, (tf.y / major).round() * major, 0.0);
+    let w = |p: Vec3| cam.from_frame(p);
     let n = ((ext / minor) as i64).clamp(1, 400);
     for i in -n..=n {
         let t = i as f64 * minor;
         let col = if (t / major).fract().abs() < 1e-9 { colors::GRID_MAJOR } else { colors::GRID };
-        sc.lines.push(SceneLine { points: vec![c + Vec3::new(t, -ext, 0.0), c + Vec3::new(t, ext, 0.0)], color: col, width: 0.6, on_top: false });
-        sc.lines.push(SceneLine { points: vec![c + Vec3::new(-ext, t, 0.0), c + Vec3::new(ext, t, 0.0)], color: col, width: 0.6, on_top: false });
+        sc.lines.push(SceneLine {
+            points: vec![w(c + Vec3::new(t, -ext, 0.0)), w(c + Vec3::new(t, ext, 0.0))],
+            color: col,
+            width: 0.6,
+            on_top: false,
+        });
+        sc.lines.push(SceneLine {
+            points: vec![w(c + Vec3::new(-ext, t, 0.0)), w(c + Vec3::new(ext, t, 0.0))],
+            color: col,
+            width: 0.6,
+            on_top: false,
+        });
     }
     let axis = cam.half_height() * 0.25;
     for (d, col) in [(Vec3::X, colors::AXIS_X), (Vec3::Y, colors::AXIS_Y), (Vec3::Z, colors::AXIS_Z)] {

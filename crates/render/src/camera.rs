@@ -181,7 +181,42 @@ impl CameraAnim {
     }
 }
 
-/// Orbit camera around `target` (Z up).
+/// Which world axis points up in the view (#3): Z (the default) or Y, as most STEP files from
+/// other systems are modelled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpAxis {
+    #[default]
+    Z,
+    Y,
+}
+
+impl UpAxis {
+    /// The world's up direction.
+    pub fn dir(self) -> Vec3 {
+        match self {
+            UpAxis::Z => Vec3::Z,
+            UpAxis::Y => Vec3::Y,
+        }
+    }
+    /// A world vector in the camera's Z-up frame (yaw turns about the frame's Z).
+    pub fn to_frame(self, v: Vec3) -> Vec3 {
+        match self {
+            UpAxis::Z => v,
+            UpAxis::Y => Vec3::new(v.x, -v.z, v.y),
+        }
+    }
+    /// A Z-up frame vector in the world.
+    pub fn from_frame(self, v: Vec3) -> Vec3 {
+        match self {
+            UpAxis::Z => v,
+            UpAxis::Y => Vec3::new(v.x, v.z, -v.y),
+        }
+    }
+}
+
+/// Orbit camera around `target`. Yaw and pitch are about the up axis (Z, or Y for a Y-up
+/// world): with Y up, the front view looks along −Z and the top view down −Y.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Camera {
     pub target: Vec3,
@@ -193,12 +228,15 @@ pub struct Camera {
     pub distance: f64,
     /// Vertical field of view (radians); 0 = orthographic.
     pub fov: f64,
+    /// The world's up axis.
+    #[serde(default)]
+    pub up: UpAxis,
 }
 
 impl Default for Camera {
     fn default() -> Self {
         let (yaw, pitch) = StandardView::Iso.angles();
-        Camera { target: Vec3::ZERO, yaw, pitch, distance: 200.0, fov: 0.0 }
+        Camera { target: Vec3::ZERO, yaw, pitch, distance: 200.0, fov: 0.0, up: UpAxis::Z }
     }
 }
 
@@ -206,7 +244,19 @@ impl Camera {
     /// Direction from the target toward the eye.
     pub fn back(&self) -> Vec3 {
         let (cp, sp) = (self.pitch.cos(), self.pitch.sin());
-        Vec3::new(-self.yaw.sin() * cp, -self.yaw.cos() * cp, sp).normalized().unwrap_or(Vec3::Z)
+        self.up.from_frame(Vec3::new(-self.yaw.sin() * cp, -self.yaw.cos() * cp, sp).normalized().unwrap_or(Vec3::Z))
+    }
+    /// The world's up direction.
+    pub fn up_dir(&self) -> Vec3 {
+        self.up.dir()
+    }
+    /// A world vector in the camera's Z-up frame (where yaw and pitch are measured).
+    pub fn to_frame(&self, v: Vec3) -> Vec3 {
+        self.up.to_frame(v)
+    }
+    /// A Z-up frame vector in the world.
+    pub fn from_frame(&self, v: Vec3) -> Vec3 {
+        self.up.from_frame(v)
     }
     pub fn eye(&self) -> Vec3 {
         self.target + self.back() * self.distance
@@ -214,8 +264,8 @@ impl Camera {
     /// Camera basis: right, up, back (orthonormal).
     pub fn basis(&self) -> (Vec3, Vec3, Vec3) {
         let b = self.back();
-        let right = Vec3::new(self.yaw.cos(), -self.yaw.sin(), 0.0);
-        let up = b.cross(right).normalized().unwrap_or(Vec3::Z);
+        let right = self.up.from_frame(Vec3::new(self.yaw.cos(), -self.yaw.sin(), 0.0));
+        let up = b.cross(right).normalized().unwrap_or(self.up.dir());
         (right, up, b)
     }
     pub fn view(&self) -> Mat4 {
@@ -317,7 +367,7 @@ impl Camera {
     /// The same camera looking from direction `back` (target → eye). Straight up or down
     /// keeps the yaw, rounded to the nearest quarter turn so the view stays square.
     pub fn looking_from(&self, back: Vec3) -> Camera {
-        let Some(b) = back.normalized() else { return *self };
+        let Some(b) = self.up.to_frame(back).normalized() else { return *self };
         let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
         let pitch = b.z.clamp(-1.0, 1.0).asin().clamp(-lim, lim);
         let yaw = if b.x.hypot(b.y) < 1e-6 {
@@ -355,6 +405,7 @@ impl Camera {
             pitch,
             distance: a.distance + (b.distance - a.distance) * s,
             fov: a.fov + (b.fov - a.fov) * s,
+            up: b.up,
         }
     }
     pub fn is_valid(&self) -> bool {
@@ -507,5 +558,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// With Y up: the front view looks along −Z (eye on +Z), the top view looks down −Y with X
+    /// to the right, orbiting turns about Y, and the picture's up is the world's up.
+    #[test]
+    fn y_up_views() {
+        let mut c = Camera { up: UpAxis::Y, distance: 100.0, ..Default::default() };
+        c.set_view(StandardView::Front);
+        assert!(c.back().dist(Vec3::Z) < 1e-9, "front eye {:?}", c.back());
+        let (r, u, b) = c.basis();
+        assert!(r.dist(Vec3::X) < 1e-9 && u.dist(Vec3::Y) < 1e-9 && b.dist(Vec3::Z) < 1e-9);
+        c.set_view(StandardView::Top);
+        assert!(c.back().dist(Vec3::Y) < 1e-5, "top eye {:?}", c.back());
+        assert!(c.basis().0.dist(Vec3::X) < 1e-9);
+        // Orbiting sideways keeps the eye's height above the XZ ground.
+        c.set_view(StandardView::Iso);
+        let h = c.back().y;
+        c.orbit(120.0, 0.0);
+        assert!((c.back().y - h).abs() < 1e-12);
+        // Looking from a world direction lands on it.
+        let d = Vec3::new(1.0, 1.0, 1.0).normalized().unwrap();
+        assert!(c.looking_from(d).back().dist(d) < 1e-9);
+        // Frames round-trip.
+        let v = Vec3::new(1.0, 2.0, 3.0);
+        assert!(UpAxis::Y.from_frame(UpAxis::Y.to_frame(v)).dist(v) < 1e-12);
     }
 }

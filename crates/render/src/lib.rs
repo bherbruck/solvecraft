@@ -7,5 +7,5 @@
 mod camera;
 mod raster;
 
-pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, ease_in_out};
+pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ease_in_out};
 pub use raster::{Canvas, Rgb, Scene, SceneLine, SceneMesh, png, render, render_png, render_transparent};

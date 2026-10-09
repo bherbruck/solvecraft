@@ -165,6 +165,7 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.ui.show_grid.hash(&mut h);
     app.ui.visual_style.hash(&mut h);
     app.ui.ground_shadow.hash(&mut h);
+    app.cam.up.hash(&mut h);
     (app.cam.pitch > 0.0).hash(&mut h);
     app.ui.show_sketches.hash(&mut h);
     app.ui.hidden_bodies.hash(&mut h);
@@ -204,15 +205,18 @@ fn build_scene(app: &SolveApp) -> GpuScene {
     if app.ui.show_grid && !active_view(app).hide_grid {
         let (minor, major) = grid_step(app.cam.half_height());
         let ext = (app.cam.half_height() * 3.0 / major).ceil() * major;
-        let c = Vec3::new((app.cam.target.x / major).round() * major, (app.cam.target.y / major).round() * major, 0.0);
+        // The ground plane: XY with Z up, XZ with Y up (laid out in the camera's Z-up frame).
+        let tf = app.cam.to_frame(app.cam.target);
+        let c = Vec3::new((tf.x / major).round() * major, (tf.y / major).round() * major, 0.0);
+        let w3 = |p: Vec3| app.cam.from_frame(p).to_f32();
         let n = ((ext / minor) as i64).clamp(1, 300);
         for i in -n..=n {
             let t = i as f64 * minor;
             let maj = (t / major).round() * major == t;
             let col = if maj { c4(tk.grid_major) } else { c4(tk.grid) };
             let w = if maj { 1.0 } else { 0.7 };
-            sc.under_line((c + Vec3::new(t, -ext, 0.0)).to_f32(), (c + Vec3::new(t, ext, 0.0)).to_f32(), col, w);
-            sc.under_line((c + Vec3::new(-ext, t, 0.0)).to_f32(), (c + Vec3::new(ext, t, 0.0)).to_f32(), col, w);
+            sc.under_line(w3(c + Vec3::new(t, -ext, 0.0)), w3(c + Vec3::new(t, ext, 0.0)), col, w);
+            sc.under_line(w3(c + Vec3::new(-ext, t, 0.0)), w3(c + Vec3::new(ext, t, 0.0)), col, w);
         }
     }
     for b in &st.bodies {
@@ -310,9 +314,21 @@ fn build_scene(app: &SolveApp) -> GpuScene {
 
 /// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
 fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, st: &solvecraft_engine::doc::ModelState) {
+    // The bodies' box in the camera's Z-up frame (the ground is its XY plane).
     let mut b = solvecraft_engine::geom::Aabb3::EMPTY;
     for x in st.bodies.iter().filter(|x| !app.ui.hidden_bodies.contains(&x.name)) {
-        b = b.union(&x.mesh().bounds());
+        let bb = x.mesh().bounds();
+        if bb.is_empty() {
+            continue;
+        }
+        for i in 0..8 {
+            let p = Vec3::new(
+                if i & 1 == 0 { bb.min.x } else { bb.max.x },
+                if i & 2 == 0 { bb.min.y } else { bb.max.y },
+                if i & 4 == 0 { bb.min.z } else { bb.max.z },
+            );
+            b.add(app.cam.to_frame(p));
+        }
     }
     if b.is_empty() {
         return;
@@ -330,7 +346,7 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, st: &solvecraft_engine::doc:
     let n = 48;
     let at = |r: f64, k: usize| {
         let a = k as f64 / n as f64 * std::f64::consts::TAU;
-        Vec3::new(c.x + rx * r * a.cos(), c.y + ry * r * a.sin(), z).to_f32()
+        app.cam.from_frame(Vec3::new(c.x + rx * r * a.cos(), c.y + ry * r * a.sin(), z)).to_f32()
     };
     for w in rings.windows(2) {
         let ((r0, a0), (r1, a1)) = (w[0], w[1]);
