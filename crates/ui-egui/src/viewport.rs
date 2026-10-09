@@ -1830,31 +1830,33 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         (Vec3::new(0.0, 0.0, -1.0), "BOTTOM", StandardView::Bottom),
     ];
     let painter = ui.painter_at(rect);
-    // Clicked view direction (target → eye): a face, or an edge/corner zone of a face.
-    let mut clicked: Option<Vec3> = None;
     let hover = ui.input(|i| i.pointer.hover_pos());
     let mut order: Vec<usize> = (0..6).collect();
     order.sort_by(|a, b2| faces[*a].0.dot(b).total_cmp(&faces[*b2].0.dot(b)));
-    for i in order {
-        let (n, label, _) = faces[i];
-        if n.dot(b) <= 1e-3 {
-            continue;
-        }
-        let (e1, e2) = if n.z.abs() > 0.5 {
-            (Vec3::X, Vec3::Y)
-        } else if n.x.abs() > 0.5 {
-            (Vec3::Y, Vec3::Z)
-        } else {
-            (Vec3::X, Vec3::Z)
-        };
-        let corners = [n - e1 - e2, n + e1 - e2, n + e1 + e2, n - e1 + e2];
-        let pts: Vec<Pos2> = corners.iter().map(|p| to2(*p).0).collect();
-        let poly_hover = hover.is_some_and(|h| point_in_poly(h, &pts));
+    let visible: Vec<usize> = order.into_iter().filter(|i| faces[*i].0.dot(b) > 1e-3).collect();
+    let outline = |n: Vec3| -> Vec<Pos2> {
+        let (e1, e2) = cube_face_axes(n);
+        [n - e1 - e2, n + e1 - e2, n + e1 + e2, n - e1 + e2].iter().map(|p| to2(*p).0).collect()
+    };
+    // The region under the cursor (a face, edge or corner, as the view direction a click
+    // turns to): found on the frontmost face under it, the same zones a click uses.
+    let region: Option<Vec3> = hover.and_then(|h| {
+        visible.iter().rev().find_map(|i| {
+            let n = faces[*i].0;
+            let pts = outline(n);
+            let (e1, e2) = cube_face_axes(n);
+            point_in_poly(h, &pts).then(|| cube_zone(&pts, h)).flatten().map(|(zi, zj)| n + e1 * f64::from(zi) + e2 * f64::from(zj))
+        })
+    });
+    for i in &visible {
+        let (n, label, _) = faces[*i];
+        let pts = outline(n);
         let shade = (0.75 + 0.25 * n.dot(b)) as f32;
-        painter.add(Shape::convex_polygon(pts.clone(), t.cube_face.gamma_multiply(shade).to_opaque(), Stroke::new(1.0, t.cube_edge)));
-        // Hover zone: the outer band of a face picks the edge or corner it borders.
-        let zone = hover.filter(|_| poly_hover).and_then(|h| cube_zone(&pts, h));
-        if let Some((zi, zj)) = zone {
+        painter.add(Shape::convex_polygon(pts, t.cube_face.gamma_multiply(shade).to_opaque(), Stroke::new(1.0, t.cube_edge)));
+        // Every patch of this face that belongs to the hovered region: a corner lights its
+        // three patches, an edge its two strips, a face its middle.
+        let (e1, e2) = cube_face_axes(n);
+        for (zi, zj) in region.map(|d| cube_patches_on(n, d)).unwrap_or_default() {
             let lo = |k: i32| match k {
                 -1 => (-1.0, -1.0 + 2.0 * CUBE_BAND),
                 0 => (-1.0 + 2.0 * CUBE_BAND, 1.0 - 2.0 * CUBE_BAND),
@@ -1869,12 +1871,9 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         if n.dot(b) > 0.35 {
             painter.text(center, Align2::CENTER_CENTER, label, FontId::proportional(9.5), Color32::from_rgb(40, 44, 52));
         }
-        if let Some((zi, zj)) = zone
-            && ui.input(|i| i.pointer.primary_clicked())
-        {
-            clicked = Some(n + e1 * zi as f64 + e2 * zj as f64);
-        }
     }
+    // Clicked view direction (target → eye): the hovered region.
+    let clicked = region.filter(|_| ui.input(|i| i.pointer.primary_clicked()));
     crate::scenario::publish_count("cube_highlights", f64::from(lit));
     // Axis triad at the cube's corner.
     let o = Vec3::new(-1.0, -1.0, -1.0);
@@ -1893,6 +1892,32 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         let to = app.cam.looking_from(dir);
         app.animate_to(to);
     }
+}
+
+/// The in-face axes of a view cube face (the zone grid's u and v).
+fn cube_face_axes(n: Vec3) -> (Vec3, Vec3) {
+    if n.z.abs() > 0.5 {
+        (Vec3::X, Vec3::Y)
+    } else if n.x.abs() > 0.5 {
+        (Vec3::Y, Vec3::Z)
+    } else {
+        (Vec3::X, Vec3::Z)
+    }
+}
+
+/// The patches (zones) of face `n` that belong to region `d` (a face, edge or corner direction
+/// with components −1, 0 or 1): the zones a click on would turn to `d`.
+pub(crate) fn cube_patches_on(n: Vec3, d: Vec3) -> Vec<(i32, i32)> {
+    let (e1, e2) = cube_face_axes(n);
+    let mut out = Vec::new();
+    for zi in -1..=1 {
+        for zj in -1..=1 {
+            if (n + e1 * f64::from(zi) + e2 * f64::from(zj)).dist(d) < 1e-9 {
+                out.push((zi, zj));
+            }
+        }
+    }
+    out
 }
 
 /// Width of the edge/corner band of a view cube face, as a fraction of the face.
@@ -2059,6 +2084,34 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn view_cube_regions_light_their_patches() {
+        let faces = [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z];
+        let mut regions = 0;
+        for x in -1i32..=1 {
+            for y in -1i32..=1 {
+                for z in -1i32..=1 {
+                    let d = Vec3::new(f64::from(x), f64::from(y), f64::from(z));
+                    let k = x.abs() + y.abs() + z.abs();
+                    if k == 0 {
+                        continue;
+                    }
+                    regions += 1;
+                    let lit: Vec<(Vec3, (i32, i32))> = faces.iter().flat_map(|n| cube_patches_on(*n, d).into_iter().map(move |z| (*n, z))).collect();
+                    // A face lights 1 patch, an edge 2, a corner 3, each on a different face.
+                    assert_eq!(lit.len() as i32, k, "{d:?}: {lit:?}");
+                    // Each lit patch is one a click turns to this same region.
+                    for (n, (zi, zj)) in lit {
+                        let (e1, e2) = cube_face_axes(n);
+                        assert!((n + e1 * f64::from(zi) + e2 * f64::from(zj)).dist(d) < 1e-12);
+                        assert!(n.dot(d) > 0.5, "a patch on a face away from {d:?}");
+                    }
+                }
+            }
+        }
+        assert_eq!(regions, 26);
+    }
 
     #[test]
     fn view_cube_zones() {

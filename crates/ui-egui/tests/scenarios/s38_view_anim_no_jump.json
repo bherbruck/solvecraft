@@ -1,8 +1,5 @@
 [
  {
-  "pending": "the last frame of an animation to Top turns the view 22.5 degrees (solvecraft-ui)"
- },
- {
   "note": "Animating to Top or Bottom from iso, front or any orbit turns the view smoothly to the end: no frame (the last included) turns it more than 10 degrees."
  },
  {

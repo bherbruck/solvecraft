@@ -72,10 +72,11 @@ impl StandardView {
     }
 }
 
-/// Smooth ease-in-out on [0, 1] (cubic).
+/// Smooth ease-in-out on [0, 1] (smoothstep: at its fastest, mid-way, 1.5 times the average
+/// speed, so long turns stay gentle).
 pub fn ease_in_out(t: f64) -> f64 {
     let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 1.0 };
-    if t < 0.5 { 4.0 * t * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(3) / 2.0 }
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// A unit quaternion (w, x, y, z).
@@ -162,8 +163,13 @@ pub struct CameraAnim {
 impl CameraAnim {
     /// The usual length of a view change, in seconds.
     pub const DURATION: f64 = 0.5;
+    /// A view change: half a second, longer for turns past a quarter turn (so a big turn, such
+    /// as from the home view to the bottom, never sweeps more than about 9 degrees a frame).
     pub fn new(from: Camera, to: Camera, now: f64) -> CameraAnim {
-        CameraAnim { from, to, start: now, duration: CameraAnim::DURATION }
+        let dy = (to.yaw - from.yaw + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        let turn = dy.abs().max((to.pitch - from.pitch).abs());
+        let k = if turn.is_finite() { (turn / std::f64::consts::FRAC_PI_2).clamp(1.0, 2.0) } else { 1.0 };
+        CameraAnim { from, to, start: now, duration: CameraAnim::DURATION * k }
     }
     /// The camera at time `now`, and whether the move has finished.
     pub fn sample(&self, now: f64) -> (Camera, bool) {
@@ -396,10 +402,10 @@ mod tests {
         let anim = CameraAnim::new(a, b, 10.0);
         // Endpoints are exact.
         assert_eq!(anim.sample(10.0).0, a);
-        assert_eq!(anim.sample(10.0 + CameraAnim::DURATION), (b, true));
+        assert_eq!(anim.sample(10.0 + anim.duration), (b, true));
         assert_eq!(anim.sample(99.0), (b, true));
         // Midpoint: half way in heading, elevation, target and distance.
-        let (m, done) = anim.sample(10.0 + CameraAnim::DURATION / 2.0);
+        let (m, done) = anim.sample(10.0 + anim.duration / 2.0);
         assert!(!done && m.is_valid());
         let dy = (b.yaw - a.yaw + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
         assert!((m.yaw - (a.yaw + dy / 2.0)).abs() < 1e-12 && (m.pitch - (a.pitch + b.pitch) / 2.0).abs() < 1e-12);
@@ -476,7 +482,7 @@ mod tests {
         for a in &cams {
             for b in &cams {
                 let anim = CameraAnim::new(*a, *b, 0.0);
-                let frames = 30;
+                let frames = (anim.duration * 60.0).round() as usize;
                 let mut prev = anim.sample(0.0).0;
                 let (mut steps, mut done_at) = (Vec::new(), None);
                 for f in 1..=frames + 2 {
@@ -495,9 +501,9 @@ mod tests {
                 let total_turn: f64 = steps.iter().map(|s| s.1).sum();
                 let total_move: f64 = steps.iter().map(|s| s.2).sum();
                 for (f, turn, moved) in &steps {
-                    // The eased curve's fastest frame is 1.5x the average: allow 3x.
-                    assert!(*turn <= 3.0 * total_turn / frames as f64 + 1e-9, "turn jump at frame {f}: {turn} of {total_turn} ({a:?} -> {b:?})");
-                    assert!(*moved <= 3.0 * total_move / frames as f64 + 1e-9, "move jump at frame {f}: {moved} of {total_move}");
+                    // The eased curve's fastest frame is 1.5x the average: allow 2x.
+                    assert!(*turn <= 2.0 * total_turn / frames as f64 + 1e-9, "turn jump at frame {f}: {turn} of {total_turn} ({a:?} -> {b:?})");
+                    assert!(*moved <= 2.0 * total_move / frames as f64 + 1e-9, "move jump at frame {f}: {moved} of {total_move}");
                 }
             }
         }

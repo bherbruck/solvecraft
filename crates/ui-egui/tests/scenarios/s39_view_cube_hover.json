@@ -1,8 +1,5 @@
 [
  {
-  "pending": "view cube edge and corner hover light 1 patch, Fusion lights 2 and 3 (solvecraft-ui)"
- },
- {
   "note": "View cube hover from the home view: a face lights one patch, an edge the 2 patches on its faces, a corner the 3 around it (Fusion)."
  },
  {
