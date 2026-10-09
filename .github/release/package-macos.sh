@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Package the macOS release build: a universal (arm64 + x86_64) SolveCraft.app and CLI in one zip.
+# Usage: .github/release/package-macos.sh <tag>   (from the repository root, after building both
+# aarch64-apple-darwin and x86_64-apple-darwin). Writes out/. The app is not signed.
+set -euo pipefail
+tag=${1:?usage: package-macos.sh <tag>}
+version=${tag#v}
+t=${CARGO_TARGET_DIR:-target}
+name="solvecraft-$tag-macos-universal"
+rm -rf stage out && mkdir -p "stage/$name" out
+app="stage/$name/SolveCraft.app"
+mkdir -p "$app/Contents/MacOS"
+lipo -create -output "$app/Contents/MacOS/solvecraft" "$t/aarch64-apple-darwin/release/solvecraft" "$t/x86_64-apple-darwin/release/solvecraft"
+lipo -create -output "stage/$name/solvecraft-cli" "$t/aarch64-apple-darwin/release/solvecraft-cli" "$t/x86_64-apple-darwin/release/solvecraft-cli"
+cat > "$app/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>SolveCraft</string>
+  <key>CFBundleDisplayName</key><string>SolveCraft</string>
+  <key>CFBundleIdentifier</key><string>io.github.bherbruck.solvecraft</string>
+  <key>CFBundleExecutable</key><string>solvecraft</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>$version</string>
+  <key>CFBundleShortVersionString</key><string>$version</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+PLIST
+cp README.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "stage/$name/"
+lipo -info "$app/Contents/MacOS/solvecraft"
+(cd stage && ditto -c -k --keepParent "$name" "../out/$name.zip")
+ls -l out

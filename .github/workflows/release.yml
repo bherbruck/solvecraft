@@ -1,0 +1,136 @@
+# Release builds: push a tag `v*` (or run it by hand with a tag name) and this builds the desktop
+# app and the CLI for Linux, Windows and macOS plus the web app, and attaches them to a GitHub
+# release (a pre-release while the version is 0.x) with SHA256SUMS. Notes:
+# .github/release-notes.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (must exist), e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+  TRUNK_VERSION: v0.21.14
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04 # an older glibc, so the binaries run on older distributions
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p solvecraft -p solvecraft-cli
+      - name: Package
+        run: .github/release/package-linux.sh "$TAG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: out/*
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p solvecraft -p solvecraft-cli
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "solvecraft-$env:TAG-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path "stage/$name", out | Out-Null
+          Copy-Item target/release/solvecraft.exe, target/release/solvecraft-cli.exe, README.md, LICENSE-MIT, LICENSE-APACHE, NOTICE, ATTRIBUTION.md "stage/$name/"
+          Compress-Archive -Path "stage/$name" -DestinationPath "out/$name.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/*
+
+  macos:
+    # One universal build: arm64 natively, x86_64 cross-compiled on the same runner, joined by lipo.
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          cargo build --release --locked -p solvecraft -p solvecraft-cli --target aarch64-apple-darwin
+          cargo build --release --locked -p solvecraft -p solvecraft-cli --target x86_64-apple-darwin
+      - name: Package
+        run: .github/release/package-macos.sh "$TAG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: out/*
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install trunk
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build (relative public URL, so it can be served from any path)
+        working-directory: apps/solvecraft-web
+        run: trunk build --release
+      - name: Package
+        run: |
+          name="solvecraft-$TAG-web"
+          mkdir -p out && cp -r dist/web "$name"
+          cp LICENSE-MIT LICENSE-APACHE NOTICE "$name/"
+          zip -qr "out/$name.zip" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: out/*
+
+  release:
+    needs: [linux, windows, macos, web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Checksums
+        working-directory: assets
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: SolveCraft ${{ env.TAG }}
+          body_path: .github/release-notes.md
+          prerelease: ${{ startsWith(env.TAG, 'v0.') }}
+          files: assets/*
