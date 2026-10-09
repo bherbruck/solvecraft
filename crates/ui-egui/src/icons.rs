@@ -768,6 +768,25 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.line(&[(15.0, 15.0), (19.0, 19.0)], a);
             pen.line(&[(19.0, 15.0), (15.0, 19.0)], a);
         }
+        "patch" => {
+            // A wire loop with a surface spanned across it.
+            pen.poly(&[(4.0, 16.0), (9.0, 6.0), (19.0, 5.0), (20.0, 15.0), (12.0, 20.0)], Color32::from_rgb(170, 200, 240), ink);
+            pen.line(&[(4.0, 16.0), (9.0, 6.0), (19.0, 5.0), (20.0, 15.0), (12.0, 20.0), (4.0, 16.0)], a);
+        }
+        "stitch" => {
+            // Two surface patches sewn along their shared edge.
+            pen.poly(&[(3.0, 18.0), (11.0, 14.0), (11.0, 4.0), (3.0, 8.0)], Color32::from_rgb(170, 200, 240), ink);
+            pen.poly(&[(13.0, 14.0), (21.0, 18.0), (21.0, 8.0), (13.0, 4.0)], Color32::from_rgb(150, 185, 235), ink);
+            for y in [6.0, 9.0, 12.0] {
+                pen.line(&[(10.0, y), (14.0, y + 1.5)], a);
+            }
+        }
+        "thicken" => {
+            // A curved sheet given thickness: its offset copy and the side walls.
+            pen.arc(12.0, 20.0, 11.0, 3.6, 5.8, ink);
+            pen.arc(12.0, 20.0, 7.0, 3.6, 5.8, a);
+            pen.arrow((12.0, 9.0), (12.0, 13.5), a);
+        }
         "extend" => {
             pen.line(&[(20.0, 3.0), (20.0, 21.0)], ink);
             pen.line(&[(3.0, 12.0), (10.0, 12.0)], ink);

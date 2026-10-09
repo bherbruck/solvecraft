@@ -326,3 +326,53 @@ fn align_snaps_to_centres_and_edge_middles() {
     assert_eq!(p["from"]["snap"], json!("face_center"));
     assert_eq!(p["to"]["snap"], json!("edge_mid"));
 }
+
+#[test]
+fn surface_dialogs_make_their_commands() {
+    // A planar patch of a sketch's rectangle, then thickened; Edit Feature brings both back.
+    let mut app = app_with(json!([
+        {"command": "sketch.create", "params": {"plane": "XY"}},
+        {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [30, 20]}},
+        {"command": "sketch.finish", "params": {}}
+    ]));
+    let sk = app.session.doc.features.last().unwrap().id;
+    let mut d = start(&mut app, vec![], "surface.patch");
+    d.inputs[0].items = vec![Sel::Profile { sketch: sk, index: 0 }];
+    let patch = {
+        for (id, p) in apply_commands(&app, &d).unwrap() {
+            app.session.execute(&id, &p).unwrap();
+        }
+        app.session.doc.features.last().unwrap().id
+    };
+    let surf = app.session.model.state().bodies.last().unwrap().name.clone();
+    assert!(matches!(crate::dialogs::for_feature(&app, patch, None).unwrap().kind, Kind::Surface(_)));
+    app.dialog = None;
+    let mut d = start(&mut app, vec![], "surface.thicken");
+    d.inputs[0].items = vec![Sel::Body { name: surf }];
+    let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(id, "surface.thicken");
+    app.session.execute(&id, &p).unwrap();
+    let v = app.session.model.state().bodies.iter().map(|b| b.mesh().measure().volume).fold(0.0, f64::max);
+    assert!((v - 30.0 * 20.0 * 2.0).abs() < 1.0, "{v}");
+}
+
+#[test]
+fn split_body_by_a_curved_face_sends_it_as_a_tool() {
+    let mut app = app_with(json!([
+        {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}},
+        {"command": "solid.cylinder", "params": {"diameter": 20, "height": 40, "base": [20, 15, -10], "operation": "new"}}
+    ]));
+    let st = app.session.model.state();
+    let cyl = st.bodies.iter().find(|b| b.name != "Body1").unwrap();
+    let m = cyl.mesh();
+    // A point on the round side.
+    let p = Vec3::new(30.0, 15.0, 5.0);
+    let t = m.triangles.iter().position(|t| crate::dialogs::point_tri_dist(p, m.tri(t).unwrap()) < 0.3).unwrap();
+    let side = Sel::Face { body: cyl.name.clone(), index: m.tri_face[t] as usize, point: p };
+    drop(st);
+    let mut d = start(&mut app, vec![], "solid.split_body");
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.inputs[1].items = vec![side];
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert!(p["tool"]["point"].is_array() && p.get("plane").is_none(), "{p}");
+}

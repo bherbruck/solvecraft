@@ -23,6 +23,7 @@ pub mod dialogs_move;
 pub mod dialogs_parts;
 pub mod dialogs_plastic;
 pub mod dialogs_sheet;
+pub mod dialogs_surface;
 pub mod dim_view;
 pub mod documents;
 pub mod drag_snap;

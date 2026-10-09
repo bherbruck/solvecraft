@@ -17,8 +17,8 @@ use crate::selection::{self, AXES, Accept, BODIES, CURVES, EDGES, FACES, PLANAR_
 use crate::theme::Tokens;
 use crate::viewport::Hit;
 
-const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
-const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
+pub(crate) const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
+pub(crate) const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
 const DIRS: [&str; 4] = ["positive", "negative", "symmetric", "positive"];
 /// The "Two sides" direction (a second distance the other way).
 pub const TWO_SIDES: usize = 3;
@@ -222,6 +222,8 @@ pub enum Kind {
     Assembly(crate::dialogs_assembly::Asm),
     /// Sheet metal (`dialogs_sheet`).
     Sheet(crate::dialogs_sheet::Sm),
+    /// Surface tools and Split Face (`dialogs_surface`).
+    Surface(crate::dialogs_surface::Surf),
     /// Plastic features (`dialogs_plastic`).
     Plastic(crate::dialogs_plastic::Pl),
     /// Appearance (`dialogs_appearance`).
@@ -360,10 +362,9 @@ impl Dialog {
                 Kind::AnglePlane { angle: "45 deg".into() },
                 vec![SelInput::new("Plane", PLANES, false), SelInput::new("Axis", AXES, false)],
             ),
-            "solid.split_body" => Dialog::new(
-                Kind::Split,
-                vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting plane", PLANES | PLANAR_FACES, false)],
-            ),
+            "solid.split_body" => {
+                Dialog::new(Kind::Split, vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES, false)])
+            }
             "solid.scale" => Dialog::new(Kind::Scale { factor: "2".into() }, vec![SelInput::new("Bodies", BODIES, true)]),
             "solid.offset_face" => Dialog::new(Kind::OffsetFaces { distance: "2 mm".into() }, vec![SelInput::new("Faces", PLANAR_FACES, true)]),
             "solid.thread" => {
@@ -427,6 +428,7 @@ impl Dialog {
             _ => {
                 let (kind, inputs) = crate::dialogs_assembly::start(app, id)
                     .or_else(|| crate::dialogs_sheet::start(app, id))
+                    .or_else(|| crate::dialogs_surface::start(app, id))
                     .or_else(|| crate::dialogs_plastic::start(app, id))
                     .or_else(|| crate::dialogs_appearance::start(app, id))
                     .or_else(|| crate::dialogs_motion::start(app, id))
@@ -530,6 +532,7 @@ impl Dialog {
         match &self.kind {
             Kind::Assembly(k) => return k.previews(),
             Kind::Sheet(k) => return k.previews(),
+            Kind::Surface(_) => return true,
             Kind::Plastic(k) => return k.previews(),
             Kind::Part(_) => return true,
             _ => {}
@@ -588,6 +591,7 @@ impl Dialog {
             Kind::Scale { factor } => ("Scale", ValueKind::Unitless, factor),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
             Kind::Sheet(k) => return k.primary(&self.inputs),
+            Kind::Surface(k) => return k.primary(),
             Kind::Plastic(k) => return k.primary(),
             _ => return None,
         })
@@ -809,6 +813,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::ConfirmDelete { .. } => "DELETE FEATURE",
         Kind::Assembly(k) => k.title(),
         Kind::Sheet(k) => k.title(),
+        Kind::Surface(k) => k.title(),
         Kind::Plastic(k) => k.title(),
         Kind::Appearance(_) => "APPEARANCE",
         Kind::Motion(k) => k.title(),
@@ -1754,6 +1759,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
                 Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
+                Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k),
                 Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
                 Kind::Appearance(k) => enter |= crate::dialogs_appearance::rows(app, ui, k, &mut d.inputs),
                 Kind::Motion(k) => enter |= crate::dialogs_motion::rows(app, ui, k, &mut d.inputs),
@@ -2383,15 +2389,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "the body to split")?;
             need(1, "the splitting plane")?;
             let body = body_names(0).into_iter().next().unwrap_or_default();
-            let plane = match sels(d, 1).first() {
-                Some(Sel::Plane { name }) => json!(name),
-                Some(Sel::Face { body, index, point }) => {
-                    let (_, n) = planar_face(s, body, *index).ok_or("the face must be planar")?;
-                    json!({"origin": pt(*point), "normal": pt(n)})
-                }
-                _ => return Err("pick a plane or a planar face".into()),
+            // A plane, a planar face's plane, or any other face (its surface extended).
+            let p = match sels(d, 1).first() {
+                Some(Sel::Plane { name }) => json!({"body": body, "plane": name}),
+                Some(Sel::Face { body: b, index, point }) => match planar_face(s, b, *index) {
+                    Some((_, n)) => json!({"body": body, "plane": {"origin": pt(*point), "normal": pt(n)}}),
+                    None => json!({"body": body, "tool": {"body": b, "point": pt(*point)}}),
+                },
+                _ => return Err("pick a plane or a face".into()),
             };
-            ("solid.split_body", json!({"body": body, "plane": plane}))
+            ("solid.split_body", p)
         }
         Kind::Scale { factor } => {
             need(0, "bodies")?;
@@ -2529,6 +2536,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Sketch | Kind::Params { .. } | Kind::Measure { .. } | Kind::Preferences => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
         Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),
+        Kind::Surface(k) => return crate::dialogs_surface::commands(app, k, &d.inputs, &d.extra),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
         Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
@@ -2691,7 +2699,7 @@ pub(crate) fn face_sel(s: &Session, p: Vec3) -> Option<Sel> {
     best.filter(|(d, _)| *d < 1e-3 + 1e-6 * p.len()).map(|x| x.1)
 }
 
-fn plane_sel(s: &Session, pl: &PlaneRef) -> Option<Sel> {
+pub(crate) fn plane_sel(s: &Session, pl: &PlaneRef) -> Option<Sel> {
     match pl {
         PlaneRef::Origin { name } | PlaneRef::Construction { name } => Some(Sel::Plane { name: name.clone() }),
         PlaneRef::Custom { plane } | PlaneRef::Face { plane, .. } => face_sel(s, plane.origin),
@@ -2699,7 +2707,7 @@ fn plane_sel(s: &Session, pl: &PlaneRef) -> Option<Sel> {
     }
 }
 
-fn op_index(o: &Operation) -> usize {
+pub(crate) fn op_index(o: &Operation) -> usize {
     match o {
         Operation::NewBody => 0,
         Operation::Join => 1,
@@ -3124,13 +3132,16 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Split { body, plane, .. } => {
+        FeatureKind::Split { body, plane, tool } => {
             let mut d = start("solid.split_body")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.clone() }];
             }
             if let Some(inp) = d.inputs.get_mut(1) {
-                inp.items = plane_sel(s, plane).into_iter().collect();
+                inp.items = match tool {
+                    Some(t) => face_sel(s, t.point).into_iter().collect(),
+                    None => plane_sel(s, plane).into_iter().collect(),
+                };
             }
             d
         }
@@ -3234,7 +3245,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         other => {
-            let (kind, inputs, extra) = crate::dialogs_sheet::for_feature(app, other).or_else(|| crate::dialogs_plastic::for_feature(app, other))?;
+            let (kind, inputs, extra) = crate::dialogs_sheet::for_feature(app, other)
+                .or_else(|| crate::dialogs_plastic::for_feature(app, other))
+                .or_else(|| crate::dialogs_surface::for_feature(app, other))?;
             let mut d = Dialog::new(kind, inputs);
             d.extra = extra;
             d
