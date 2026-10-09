@@ -194,7 +194,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     close = true;
                 }
                 if item(ui, "Quit", "") {
-                    app.quit_requested = true;
+                    crate::documents::request_quit(app);
                     close = true;
                 }
             });

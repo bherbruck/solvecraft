@@ -1,7 +1,8 @@
 //! Several open designs, as tabs in the application bar. The active design lives in the app as
 //! always (`app.session`, `app.cam`…); the others wait here with their own session (undo,
 //! selection), camera and per-design view state, and are swapped in when their tab is picked.
-//! Closing a design with unsaved changes asks first.
+//! Closing a design with unsaved changes asks first, and so does quitting: one "save changes?"
+//! per design with unsaved changes ([`request_quit`]).
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
@@ -48,6 +49,8 @@ pub struct Documents {
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
     pub closing: Option<usize>,
+    /// Quitting: the tabs answered so far with Don't Save (`None`: not quitting).
+    pub quitting: Option<Vec<usize>>,
 }
 
 impl Documents {
@@ -214,6 +217,44 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
     }
 }
 
+/// Quit (the title bar's ×, File ▸ Quit, the window being closed): asks "save changes?" for each
+/// design with unsaved changes, then sets `app.quit_requested` for the host to close the window.
+/// Cancel, or a Save that didn't save, stays open.
+pub fn request_quit(app: &mut SolveApp) {
+    if app.docs.quitting.is_none() {
+        app.docs.quitting = Some(Vec::new());
+    }
+    quit_step(app);
+}
+
+/// Ask about the next design with unsaved changes, or quit when none is left.
+fn quit_step(app: &mut SolveApp) {
+    let Some(skip) = app.docs.quitting.clone() else { return };
+    if app.docs.closing.is_some() {
+        return;
+    }
+    match (0..app.docs.count()).find(|i| !skip.contains(i) && dirty(app, *i)) {
+        Some(i) => {
+            switch(app, i);
+            app.docs.closing = Some(i);
+        }
+        None => {
+            // Don't Save means discard: no recovery copy is kept for the next launch either.
+            for i in skip {
+                switch(app, i);
+                app.session.mark_saved();
+            }
+            app.docs.quitting = None;
+            app.quit_requested = true;
+        }
+    }
+}
+
+/// Is any open design unsaved (the web page asks before it is left)?
+pub fn any_dirty(app: &SolveApp) -> bool {
+    (0..app.docs.count()).any(|i| dirty(app, i))
+}
+
 fn dirty(app: &SolveApp, i: usize) -> bool {
     if i == app.docs.active || app.docs.slots.is_empty() {
         return app.session.is_dirty();
@@ -236,18 +277,28 @@ pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
         .collect()
 }
 
-/// The control channel's `ui.documents`: list, `new`, `switch` or `close` (by index; `force`
-/// closes without asking).
+/// The control channel's `ui.documents`: list, `new`, `switch`, `close` (by index; `force`
+/// closes without asking) or `quit`; `answer`: save | dont_save | cancel answers "save changes?".
 pub fn control(app: &mut SolveApp, p: &Value) -> Value {
     let i = p.get("index").and_then(Value::as_u64).map(|x| x as usize);
     match p.get("action").and_then(Value::as_str) {
         Some("new") => new_design(app),
         Some("switch") => switch(app, i.unwrap_or(app.docs.active)),
         Some("close") => close(app, i.unwrap_or(app.docs.active), p.get("force").and_then(Value::as_bool).unwrap_or(false)),
+        Some("quit") => request_quit(app),
         _ => {}
     }
+    let answer = match p.get("answer").and_then(Value::as_str) {
+        Some("save") => Some(Answer::Save),
+        Some("dont_save") => Some(Answer::DontSave),
+        Some("cancel") => Some(Answer::Cancel),
+        _ => None,
+    };
+    if let Some(a) = answer {
+        answer_prompt(app, a);
+    }
     let tabs: Vec<Value> = tabs_info(app).into_iter().map(|(name, dirty)| json!({"name": name, "dirty": dirty})).collect();
-    json!({"documents": tabs, "active": app.docs.active, "closing": app.docs.closing})
+    json!({"documents": tabs, "active": app.docs.active, "closing": app.docs.closing, "quitting": app.docs.quitting.is_some()})
 }
 
 /// The document tabs in the application bar, from `x0` to `x1`: click to switch, × to close,
@@ -375,50 +426,81 @@ pub fn layout(n: usize, active: usize, room: f32) -> (usize, usize, f32) {
     (first, fit, MIN_TAB)
 }
 
-/// The "save changes?" prompt for a tab being closed.
+/// What "save changes?" was answered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Answer {
+    Save,
+    DontSave,
+    Cancel,
+}
+
+/// The "save changes?" prompt for a tab being closed, or for each unsaved design when quitting.
 pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
+    quit_step(app);
     let Some(i) = app.docs.closing else { return };
     let name = tabs_info(app).get(i).map(|x| x.0.clone()).unwrap_or_default();
-    let mut answer: Option<u8> = None;
-    crate::frame::window(ctx, "Save changes?", crate::frame::Width::Normal)
+    let mut answer: Option<Answer> = None;
+    crate::frame::window(ctx, format!("Save changes to {name}?"), crate::frame::Width::Normal)
         .id(egui::Id::new("sc_close_prompt"))
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
         .show(ctx, |ui| {
-            ui.label(format!("{name} has unsaved changes."));
+            ui.label(format!("{name} has unsaved changes. If you don't save, they are lost."));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui.button("Save").clicked() {
-                    answer = Some(0);
+                    answer = Some(Answer::Save);
                 }
                 if ui.button("Don't Save").clicked() {
-                    answer = Some(1);
+                    answer = Some(Answer::DontSave);
                 }
                 if ui.button("Cancel").clicked() {
-                    answer = Some(2);
+                    answer = Some(Answer::Cancel);
                 }
             });
         });
     if ctx.input(|x| x.key_pressed(egui::Key::Escape)) {
-        answer = Some(2);
+        answer = Some(Answer::Cancel);
         app.esc_handled = true;
     }
+    if let Some(a) = answer {
+        answer_prompt(app, a);
+    }
+}
+
+/// Act on the "save changes?" answer (also the control channel's `ui.documents {answer}`).
+pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
+    let Some(i) = app.docs.closing else { return };
     match answer {
-        Some(0) => {
+        Answer::Save => {
             switch(app, i);
             crate::toolbar::save(app);
-            // Saved (not cancelled in the file picker): close it.
-            if !app.session.is_dirty() {
+            let saved = !app.session.is_dirty();
+            app.docs.closing = None;
+            if app.docs.quitting.is_some() {
+                // Quit only once it is saved; a cancelled picker or a failed save stays open.
+                if !saved {
+                    app.docs.quitting = None;
+                }
+            } else if saved {
                 close(app, app.docs.active, true);
-            } else {
-                app.docs.closing = None;
             }
         }
-        Some(1) => close(app, i, true),
-        Some(2) => app.docs.closing = None,
-        _ => {}
+        Answer::DontSave => {
+            if let Some(skip) = app.docs.quitting.as_mut() {
+                skip.push(i);
+                app.docs.closing = None;
+            } else {
+                close(app, i, true);
+            }
+        }
+        Answer::Cancel => {
+            app.docs.closing = None;
+            app.docs.quitting = None;
+        }
     }
+    quit_step(app);
 }
 
 #[cfg(test)]
@@ -471,6 +553,72 @@ mod tests {
         assert_eq!(a.docs.active, 0);
         close(&mut a, 0, true);
         assert!(active_is_blank(&a) && a.home.open);
+    }
+
+    /// Quitting asks once per design with unsaved changes: Don't Save moves on (and keeps no
+    /// recovery copy), Save saves and moves on, and the app quits after the last answer.
+    #[test]
+    fn quit_asks_about_each_unsaved_design_then_quits() {
+        let mut a = app();
+        request_quit(&mut a);
+        assert!(a.quit_requested, "nothing unsaved: quits at once");
+
+        let mut a = app();
+        let file = std::env::temp_dir().join(format!("solvecraft-quit-save-{}.solvecraft", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        a.run("file.save_as", json!({"path": file.to_string_lossy()})).unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        new_design(&mut a);
+        a.run("solid.sphere", json!({"diameter": 8})).unwrap();
+        assert!(dirty(&a, 0) && dirty(&a, 1));
+
+        request_quit(&mut a);
+        assert!(!a.quit_requested);
+        assert_eq!(a.docs.closing, Some(0), "the first unsaved design is asked about first");
+        assert_eq!(a.docs.active, 0, "and shown");
+        answer_prompt(&mut a, Answer::Save);
+        assert!(!dirty(&a, 0), "saved");
+        assert_eq!(
+            std::fs::read(&file).ok().and_then(|b| solvecraft_engine::io::read_design(&b).ok()).map(|d| d.features.len()),
+            Some(2),
+            "the file holds the change"
+        );
+        assert_eq!(a.docs.closing, Some(1), "then the next one");
+        assert!(!a.quit_requested);
+        answer_prompt(&mut a, Answer::DontSave);
+        assert_eq!(a.docs.closing, None);
+        assert!(a.quit_requested, "every design answered: quit");
+        assert!(!any_dirty(&a), "Don't Save discards: nothing is kept for recovery");
+        let _ = std::fs::remove_file(&file);
+    }
+
+    /// Cancel, Esc's answer, or a Save that saves nothing (a never-saved design whose Save As
+    /// picker is cancelled) stay open with the changes.
+    #[test]
+    fn quit_cancelled_or_unsaved_stays_open() {
+        let mut a = app();
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        request_quit(&mut a);
+        assert_eq!(a.docs.closing, Some(0));
+        answer_prompt(&mut a, Answer::Cancel);
+        assert!(!a.quit_requested && a.docs.closing.is_none() && a.docs.quitting.is_none());
+        assert!(a.session.is_dirty(), "the changes are still there");
+
+        // No Save As picker answer (the default services have none): not saved, so no quit.
+        request_quit(&mut a);
+        answer_prompt(&mut a, Answer::Save);
+        assert!(!a.quit_requested && a.docs.quitting.is_none() && a.session.is_dirty());
+
+        // A picked file: saved, then quit.
+        let file = std::env::temp_dir().join(format!("solvecraft-quit-saveas-{}.solvecraft", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        let to = file.to_string_lossy().to_string();
+        a.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Some(to.clone())));
+        request_quit(&mut a);
+        answer_prompt(&mut a, Answer::Save);
+        assert!(a.quit_requested && file.exists());
+        let _ = std::fs::remove_file(&file);
     }
 
     /// A design built elsewhere replaces a blank one and gets a tab otherwise.

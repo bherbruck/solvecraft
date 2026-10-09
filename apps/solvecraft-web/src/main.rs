@@ -27,6 +27,25 @@ mod web {
     /// Seconds between autosaves of unsaved work.
     const AUTOSAVE_S: f64 = 30.0;
 
+    thread_local! {
+        /// An open design has unsaved changes: leaving the page asks first.
+        static UNSAVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// The browser's "leave site? changes you made may not be saved" prompt while a design has
+    /// unsaved changes (the page can't show its own dialog when it is being closed).
+    fn ask_before_unload(window: &web_sys::Window) {
+        let on_unload = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(|e: web_sys::BeforeUnloadEvent| {
+            if UNSAVED.with(std::cell::Cell::get) {
+                e.prevent_default();
+                e.set_return_value("unsaved");
+            }
+        });
+        let _ = window.add_event_listener_with_callback("beforeunload", on_unload.as_ref().unchecked_ref());
+        // The listener lives as long as the page.
+        on_unload.forget();
+    }
+
     struct Shell {
         app: SolveApp,
         files: Rc<Files>,
@@ -291,6 +310,7 @@ mod web {
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             self.app.logic(ctx);
             self.files_tick(ctx);
+            UNSAVED.with(|u| u.set(solvecraft_ui_egui::documents::any_dirty(&self.app)));
         }
         fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
             files::take_drops(&self.files, raw);
@@ -317,7 +337,9 @@ mod web {
     pub fn start() {
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
         wasm_bindgen_futures::spawn_local(async {
-            let Some(document) = web_sys::window().and_then(|w| w.document()) else { return };
+            let Some(window) = web_sys::window() else { return };
+            ask_before_unload(&window);
+            let Some(document) = window.document() else { return };
             let Some(canvas) = document.get_element_by_id(CANVAS_ID).and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok()) else {
                 log::error!("missing <canvas id=\"{CANVAS_ID}\">");
                 return;

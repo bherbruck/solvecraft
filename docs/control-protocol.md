@@ -45,15 +45,15 @@ Commands never open dialogs when run this way. `solvecraft-cli commands` prints 
 | `ui.screenshot` | `path?` | PNG of the window (needs a presented frame) |
 | `ui.render` | `path`, `width?`, `height?` | CPU render of the model with the current camera (no window needed) |
 | `ui.confirm` | `accept?`: bool | answers the Delete confirmation (shown when a delete takes other features with it or makes some fail); without `accept`, what it lists |
-| `ui.documents` | `action?`: `new`, `switch`, `close`; `index?`; `force?` (close without asking) | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt |
+| `ui.documents` | `action?`: `new`, `switch`, `close`, `quit`; `index?`; `force?` (close without asking); `answer?`: `save`, `dont_save`, `cancel` (answers "save changes?") | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt, whether a quit is asking |
 | `ui.home` | `open?`: bool; `sample?`: index | the start page: show or hide it, open a built-in sample (once built); returns `open` and the recent designs |
 | `ui.shortcut` | `command`, `key?`, `replace?` | a command's key, or rebinds it (`""` clears; a key another command uses is refused unless `replace`) |
 | `ui.help` | `item?`: `about`, `shortcuts` (read only), `report` (copies diagnostics) | the version, commit, build date and diagnostic text |
 | `ui.prefs` | any of `default_units`, `nav` (`fusion`, `solidworks`, `inventor`), `zoom_reverse`, `orbit_cursor`, `msaa`, `length_decimals`, `angle_decimals` | sets preferences (kept between runs), returns them all |
 | `ui.capture` | `action?`: `capture`, `revert`, `cancel` | answers the Capture Position question (asked when a command starts or the design is saved while components were moved without capturing); without `action`, what waits |
-| `ui.window` | `action`: minimize, maximize, restore, toggle, close | what the title bar's caption buttons do (on Windows and Linux the application bar is the title bar) |
+| `ui.window` | `action`: minimize, maximize, restore, toggle, close | what the title bar's caption buttons do (on Windows and Linux the application bar is the title bar); close asks about unsaved designs first |
 | `ui.resize` | `width`, `height` | |
-| `app.quit` | — | |
+| `app.quit` | `force?` (quit without asking about unsaved designs) | `quitting` (the window closes), `asking` (a "save changes?" prompt is open) |
 
 ## MCP
 

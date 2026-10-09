@@ -57,8 +57,11 @@ pub fn window_action(app: &mut SolveApp, ctx: &egui::Context, action: &str) -> R
         "restore" => ctx.send_viewport_cmd(ViewportCommand::Maximized(false)),
         "toggle" => toggle_maximize(ctx),
         "close" => {
-            app.quit_requested = true;
-            ctx.send_viewport_cmd(ViewportCommand::Close);
+            // Unsaved designs are asked about first; the window closes once they are answered.
+            crate::documents::request_quit(app);
+            if app.quit_requested {
+                ctx.send_viewport_cmd(ViewportCommand::Close);
+            }
         }
         other => return Err(format!("unknown window action `{other}` (minimize, maximize, restore, toggle, close)")),
     }

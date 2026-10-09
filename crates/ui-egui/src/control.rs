@@ -111,6 +111,8 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             "preview": {"active": app.preview.active, "busy": app.preview.busy, "error": app.preview.error, "ms": app.preview.ms, "replaced": app.preview.replaced},
             "home": app.home.open,
             "documents": app.docs.count(),
+            "quit_requested": app.quit_requested,
+            "quitting": app.docs.quitting.is_some(),
         })),
         "ui.documents" => ok(crate::documents::control(app, p)),
         "ui.home" => {
@@ -459,9 +461,16 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             }
         }
         "app.quit" => {
-            app.quit_requested = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            ok(Value::Null)
+            // `force`: quit without asking about unsaved designs.
+            if p.get("force").and_then(Value::as_bool).unwrap_or(false) {
+                app.quit_requested = true;
+            } else {
+                crate::documents::request_quit(app);
+            }
+            if app.quit_requested {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            ok(json!({"quitting": app.quit_requested, "asking": app.docs.closing.is_some()}))
         }
         other => err(format!("unknown method `{other}`")),
     }

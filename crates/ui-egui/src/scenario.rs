@@ -738,6 +738,11 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                     return Err(format!("start page open: got {}, want {v}", ui["home"]));
                 }
             }
+            "quit_requested" | "quitting" => {
+                if ui[k] != *v {
+                    return Err(format!("{k}: got {}, want {v}", ui[k]));
+                }
+            }
             "documents" => {
                 if ui["documents"] != *v {
                     return Err(format!("open designs: got {}, want {v}", ui["documents"]));

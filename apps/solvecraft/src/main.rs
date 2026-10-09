@@ -21,6 +21,12 @@ struct App(SolveApp);
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // The OS closing the window (Alt+F4, Cmd+Q, the window manager): ask about unsaved
+        // designs first; the window closes once they are answered (`quit_requested`).
+        if ctx.input(|i| i.viewport().close_requested()) && !self.0.quit_requested {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            solvecraft_ui_egui::documents::request_quit(&mut self.0);
+        }
         self.0.logic(ctx);
         if self.0.quit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
