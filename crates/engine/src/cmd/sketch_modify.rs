@@ -376,11 +376,13 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
             if oi == ci {
                 continue;
             }
-            let Some(other) = sk.shape(oi) else { continue };
-            for q in intersections(&unbounded, &other) {
-                if on_bounded(&other, q).is_none() {
-                    continue;
-                }
+            // Lines and circles exactly; free-form curves (splines, ellipses, conics) by the
+            // pieces of their polyline.
+            let pieces: Vec<Shape> = match sk.shape(oi) {
+                Some(other) => vec![other],
+                None => sk.polyline(oi).windows(2).map(|w| Shape::Line { a: w[0], b: w[1] }).collect(),
+            };
+            for q in pieces.iter().flat_map(|other| intersections(&unbounded, other).into_iter().filter(|q| on_bounded(other, *q).is_some())) {
                 let t = sh.param(q);
                 let gap = match sh {
                     Shape::Line { a, b } => {
@@ -847,6 +849,18 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         if !closed {
             joints.push(end_of(&pieces[n - 1]));
         }
+        // A straight piece whose joints come out reversed (or meet) was overrun by its
+        // neighbours: the offset is larger than the shape allows there.
+        for (k, pc) in pieces.iter().enumerate() {
+            if let Piece::Line(a, b) = pc {
+                let (ja, jb) = (joints.get(k).copied(), joints.get(if closed { (k + 1) % n } else { k + 1 }).copied());
+                if let (Some(ja), Some(jb)) = (ja, jb)
+                    && (jb - ja).dot(*b - *a) <= TOL * a.dist(*b)
+                {
+                    return Err(bad(cmd, "the offset is larger than the shape allows (the offset curves would cross)"));
+                }
+            }
+        }
         let pts: Vec<usize> = joints.iter().map(|q| sk.add_point(*q, None)).collect::<std::result::Result<_, _>>()?;
         for (k, pc) in pieces.iter().enumerate() {
             let (pa, pb) = (pts[k], if closed { pts[(k + 1) % n] } else { pts[k + 1] });
@@ -1149,3 +1163,7 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 #[path = "sketch_modify_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "sketch_robust_tests.rs"]
+mod robust_tests;
