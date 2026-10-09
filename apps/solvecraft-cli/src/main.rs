@@ -37,7 +37,7 @@ const USAGE: &str = "usage:
   solvecraft-cli recipe <recipe.json>
   solvecraft-cli oracle <case-dir>... [--json]
   solvecraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]
-  solvecraft-cli step-corpus <case-dir>... [--json]
+  solvecraft-cli step-corpus <case-dir>... [--json] [--iges]
   solvecraft-cli mcp [--in design.solvecraft|script.json] [--connect 127.0.0.1:PORT]
   solvecraft-cli licences
   solvecraft-cli icon --out icon.png [--size 256] | --out icon.ico

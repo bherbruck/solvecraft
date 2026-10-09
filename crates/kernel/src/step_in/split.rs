@@ -299,6 +299,10 @@ fn plan(face: &mt::Face) -> R<Option<Plan>> {
             _ => chains.push((seam, vec![e])),
         }
     }
+    // A cone's tip: the seam runs from the ring to the apex and straight back.
+    if let [(true, sm), (false, ring)] = chains.as_slice() {
+        return apex_plan(face, &s, (d, mid, period), sm, ring, &wires, outer_idx).map(Some);
+    }
     let [(true, s1), (false, r1), (true, s2), (false, r2)] = chains.as_slice() else {
         return Err(format!("unsupported seam loop layout ({} runs)", chains.len()));
     };
@@ -356,6 +360,72 @@ fn plan(face: &mt::Face) -> R<Option<Plan>> {
         fb.invert();
     }
     Ok(Some(Plan { cuts: c1.into_iter().chain(c2).collect(), faces: (fa, fb) }))
+}
+
+/// Split a face closing at an apex (loop: seam out to the apex, seam back, the ring) along the
+/// iso-line opposite the seam, from the ring to the apex.
+fn apex_plan(
+    face: &mt::Face,
+    s: &mt::Surface,
+    (d, mid, period): (Dir, f64, f64),
+    sm: &[mt::Edge],
+    ring: &[mt::Edge],
+    wires: &[mt::Wire],
+    outer_idx: usize,
+) -> R<Plan> {
+    let h = sm.len() / 2;
+    if !sm.len().is_multiple_of(2) || h == 0 {
+        return Err("seam edges are not used back and forth".into());
+    }
+    let (out, back) = (sm.get(..h).ok_or("seam")?, sm.get(h..).ok_or("seam")?);
+    if out.iter().map(mt::Edge::id).collect::<Vec<_>>() != back.iter().rev().map(mt::Edge::id).collect::<Vec<_>>() {
+        return Err("seam edges are not used back and forth".into());
+    }
+    let apex = out.last().ok_or("seam")?.back().clone();
+    let (k, t, q) = crossing(s, d, ring, mid, period)?;
+    let seam_line: Vec<mt::Point3> = out.iter().flat_map(|e| samples(&e.oriented_curve(), 16).into_iter().map(|x| x.1)).collect();
+    let iso = iso_curve(s, d, mid, q, apex.point(), &seam_line)?;
+    let (ra, rb, c, vq) = split_chain(ring, k, t, q)?;
+    let e = mt::Edge::new_unchecked(&vq, &apex, iso);
+    // Face A: out to the apex, down the split line, the ring's second part; face B the rest.
+    let mut wa: Vec<mt::Edge> = out.to_vec();
+    wa.push(e.inverse());
+    wa.extend(rb.iter().cloned());
+    let mut wb: Vec<mt::Edge> = vec![e];
+    wb.extend(back.iter().cloned());
+    wb.extend(ra);
+    let (wire_a, wire_b): (mt::Wire, mt::Wire) = (wa.into(), wb.into());
+    if !wire_a.is_closed() || !wire_b.is_closed() {
+        return Err("split loops do not close".into());
+    }
+    let side_a = rb
+        .iter()
+        .flat_map(|e| samples(&e.oriented_curve(), 4))
+        .filter_map(|(_, p)| uv_of(s, p).map(|uv| coord(d, uv)))
+        .find(|w| (w - mid).abs() > period * 1e-3)
+        .map(|w| w < mid)
+        .ok_or("cannot place the split halves")?;
+    let (mut ha, mut hb) = (vec![wire_a], vec![wire_b]);
+    for (i, w) in wires.iter().enumerate() {
+        if i == outer_idx {
+            continue;
+        }
+        let ws: Vec<f64> = w.edge_iter().flat_map(|e| samples(&e.curve(), 4)).filter_map(|(_, p)| uv_of(s, p).map(|uv| coord(d, uv))).collect();
+        if ws.iter().all(|x| (*x < mid) == side_a) {
+            ha.push(w.clone());
+        } else if ws.iter().all(|x| (*x < mid) != side_a) {
+            hb.push(w.clone());
+        } else {
+            return Err("a hole crosses the split line".into());
+        }
+    }
+    let mut fa = mt::Face::new_unchecked(ha, s.clone());
+    let mut fb = mt::Face::new_unchecked(hb, s.clone());
+    if !face.orientation() {
+        fa.invert();
+        fb.invert();
+    }
+    Ok(Plan { cuts: c.into_iter().collect(), faces: (fa, fb) })
 }
 
 /// Replace cut edges in a face's loops.

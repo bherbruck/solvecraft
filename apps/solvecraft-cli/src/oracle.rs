@@ -170,9 +170,10 @@ const FUSION_AREA_OFF: &[&str] = &["50-sweep-tight-bend"];
 
 /// Import a case's `part.step` (as File → Open does) and compare with Fusion's measurements:
 /// body count, volume and area (relative 1e-3) and the faces read from the file.
-fn check_step_case(dir: &str) -> Value {
+/// Open the case's `part.step` (or `part.igs` with `iges`) and compare with measure.json.
+fn check_step_case(dir: &str, iges: bool) -> Value {
     let name = std::path::Path::new(dir).file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
-    let sp = format!("{dir}/part.step");
+    let sp = format!("{dir}/{}", if iges { "part.igs" } else { "part.step" });
     let want = match read_json(&format!("{dir}/measure.json")) {
         Ok(m) => m,
         Err(e) => return json!({"case": name, "pass": false, "error": e}),
@@ -191,7 +192,14 @@ fn check_step_case(dir: &str) -> Value {
     // Faces read from the file (the kernel may split a face that wraps around a closed surface).
     let file_faces = std::fs::read(&sp)
         .ok()
-        .and_then(|b| solvecraft_engine::kernel::step_import_shared(&String::from_utf8_lossy(&b)).ok())
+        .and_then(|b| {
+            let text = String::from_utf8_lossy(&b);
+            if iges {
+                solvecraft_engine::kernel::iges_import(&text).ok().map(std::sync::Arc::new)
+            } else {
+                solvecraft_engine::kernel::step_import_shared(&text).ok()
+            }
+        })
         .map(|imp| imp.bodies.iter().map(|b| b.file_faces).sum::<usize>() as f64);
     let mut checks = Vec::new();
     let mut pass = true;
@@ -221,7 +229,8 @@ pub fn step_corpus(args: &[String]) -> Result<(), String> {
     if dirs.is_empty() {
         return Err("step-corpus: give one or more case directories (each with part.step and measure.json)".into());
     }
-    let results: Vec<Value> = dirs.iter().map(|d| check_step_case(d)).collect();
+    let iges = args.iter().any(|a| a == "--iges");
+    let results: Vec<Value> = dirs.iter().map(|d| check_step_case(d, iges)).collect();
     report(args, &results);
     let failed = results.iter().filter(|r| !r["pass"].as_bool().unwrap_or(false)).count();
     if failed > 0 { Err(format!("{failed} STEP case(s) failed")) } else { Ok(()) }
