@@ -92,7 +92,6 @@ default = [
     "analyzers",
     "filters",
     "tessellation",
-    "vtk",
 ]
 filters = []
 tessellation = [
