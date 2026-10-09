@@ -1372,7 +1372,7 @@ fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut open = true;
     let mut action: Option<&str> = None;
     let before = (m.translate, m.angles);
-    crate::frame::window(ctx, format!("Move: {name}"), crate::frame::Width::Normal)
+    crate::frame::window(&ctx, format!("Move: {name}"), crate::frame::Width::Normal)
         .id(egui::Id::new("sc_occ_move"))
         .pivot(egui::Align2::LEFT_TOP)
         .default_pos(panel_pos(app))
