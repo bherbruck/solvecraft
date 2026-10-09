@@ -1,0 +1,91 @@
+[
+ {
+  "note": "#31: with the Origin hidden, its planes are not pickable in Create Sketch (a body is shown, so they don't come back)."
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     6,
+     -15,
+     0
+    ],
+    "length": 4,
+    "width": 4,
+    "height": 4
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -15,
+     10,
+     -5
+    ],
+    "length": 3,
+    "width": 3,
+    "height": 3
+   }
+  }
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "fit"
+  }
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "iso"
+  }
+ },
+ {
+  "start": "sketch.create"
+ },
+ {
+  "click": {
+   "plane": "YZ"
+  }
+ },
+ {
+  "expect": {
+   "sketching": true
+  }
+ },
+ {
+  "start": "sketch.finish"
+ },
+ {
+  "call": "ui.set",
+  "params": {
+   "showOrigin": false
+  }
+ },
+ {
+  "start": "sketch.create"
+ },
+ {
+  "click": {
+   "world": [
+    0,
+    3,
+    3
+   ]
+  }
+ },
+ {
+  "expect": {
+   "sketching": false
+  }
+ },
+ {
+  "key": "Escape"
+ }
+]

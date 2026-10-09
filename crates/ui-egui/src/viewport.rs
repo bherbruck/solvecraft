@@ -406,7 +406,9 @@ pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
     if !app.origin_visible() {
         return Vec::new();
     }
-    let creating = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Sketch));
+    // While the Origin is hidden, Create Sketch may bring the planes back (empty design): then
+    // every plane; otherwise only those not hidden one by one.
+    let creating = !app.ui.show_origin && app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Sketch));
     origin_quads(origin_size(app.cam.half_height()))
         .into_iter()
         .filter(|(n, _, _)| creating || !app.ui.hidden_origin.iter().any(|h| h == n))
@@ -740,14 +742,15 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     if let Some(f) = bestf {
         surf.push(f);
     }
+    // Planes give way to a face or profile at the same depth (a floor on the XZ plane).
     for (name, _, q) in origin_planes(app) {
         if let Some(t) = ray_quad(o, d, &q) {
-            surf.push((t, Hit::Plane { name: name.into(), point: o + d * t }));
+            surf.push((t + slack, Hit::Plane { name: name.into(), point: o + d * t }));
         }
     }
     for (name, _, q) in construction_quads(app) {
         if let Some(t) = ray_quad(o, d, &q) {
-            surf.push((t, Hit::Plane { name, point: o + d * t }));
+            surf.push((t + slack, Hit::Plane { name, point: o + d * t }));
         }
     }
     surf.sort_by(|a, b| a.0.total_cmp(&b.0));

@@ -547,8 +547,12 @@ impl SolveApp {
     }
 
     /// Is the origin widget shown (always while picking a sketch plane)?
+    /// Origin planes and axes are drawn and pickable. Hidden ones only come back while Create
+    /// Sketch has nothing else to offer (no body shown).
     pub fn origin_visible(&self) -> bool {
-        self.ui.show_origin || self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::Sketch))
+        self.ui.show_origin
+            || (self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::Sketch))
+                && !self.session.world_state().bodies.iter().any(|b| !self.ui.hidden_bodies.contains(&b.name)))
     }
 
     pub fn set_status(&mut self, s: impl Into<String>, error: bool) {
