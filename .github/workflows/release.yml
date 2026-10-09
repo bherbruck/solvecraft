@@ -1,6 +1,6 @@
 # Release builds: push a tag `v*` (or run it by hand with a tag name) and this builds the desktop
 # app and the CLI for Linux, Windows and macOS plus the web app, and attaches them to a GitHub
-# release (a pre-release while the version is 0.x) with SHA256SUMS. Notes:
+# release with SHA256SUMS (a pre-release when the tag has a suffix, such as v0.2.0-rc1). Notes:
 # .github/release-notes.md.
 name: Release
 
@@ -132,5 +132,6 @@ jobs:
           tag_name: ${{ env.TAG }}
           name: SolveCraft ${{ env.TAG }}
           body_path: .github/release-notes.md
-          prerelease: ${{ startsWith(env.TAG, 'v0.') }}
+          # A tag with a suffix (v0.2.0-rc1) is a pre-release; v1.2.3 is a normal release.
+          prerelease: ${{ contains(env.TAG, '-') }}
           files: assets/*

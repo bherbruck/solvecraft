@@ -1,7 +1,6 @@
 SolveCraft is an open-source parametric 3D CAD application in pure Rust: sketch on a plane,
 constrain and dimension the sketch, turn profiles into solids on a feature timeline, and change a
-parameter to watch the timeline rebuild. This is a **pre-release**: it is early, and we'd like
-your bug reports.
+parameter to watch the timeline rebuild. It is early, and we'd like your bug reports.
 
 ## Fixed since v0.1.0
 
