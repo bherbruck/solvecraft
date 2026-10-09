@@ -85,7 +85,9 @@ with each step's caption burnt in.
 modelling goes through the app's UI over its control channel. The pointer glides to toolbar
 buttons and faces and clicks them, the real dialogs open, the sketches go on the model's faces,
 and the camera follows. The parameters, the sketch dimensions bound to them and two extrudes go
-over MCP. `record_v2.sh` records it and draws the pointer and the captions.
+over MCP. With `--story v3` (the default) one standoff is patterned 2 × 2 in the Rectangular
+Pattern dialog with spacings from the parameters, and width and wall are then changed in the
+Parameters dialog. `record_ui.sh` records it and draws the pointer and the captions.
 
 ## A typical session
 

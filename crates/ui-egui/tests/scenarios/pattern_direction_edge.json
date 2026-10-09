@@ -1,0 +1,79 @@
+[
+ {
+  "note": "A Rectangular Pattern's direction can be a straight model edge (as in Fusion), not only an origin axis or a sketch line."
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "solid.box",
+   "params": {
+    "length": 20,
+    "width": 10,
+    "height": 10
+   }
+  }
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "home"
+  }
+ },
+ {
+  "start": "solid.pattern.rectangular"
+ },
+ {
+  "click": {
+   "world": [
+    10,
+    5,
+    10
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "dialog:Direction"
+  }
+ },
+ {
+  "click": {
+   "world": [
+    10,
+    0,
+    10
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "dialog:OK"
+  }
+ },
+ {
+  "expect": {
+   "dialog": null,
+   "bodies": 3
+  }
+ },
+ {
+  "note": "Along the picked edge (an edge along X points +X, as the axis would): copies 20 mm apart."
+ },
+ {
+  "expect": {
+   "bbox": {
+    "body": "Body3",
+    "min": [
+     40,
+     0,
+     0
+    ],
+    "max": [
+     60,
+     10,
+     10
+    ]
+   }
+  }
+ }
+]

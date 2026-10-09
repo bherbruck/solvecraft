@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Demo v2: build an electronics enclosure in a running SolveCraft the way a person would, with
-the parametric steps sent over MCP.
+"""Demo v2/v3: build an electronics enclosure in a running SolveCraft the way a person would,
+with the parametric steps sent over MCP.
+
+--story v3 (default): one standoff placed from the parameters and patterned 2 x 2 in the
+Rectangular Pattern dialog, then width and wall changed in the Parameters dialog.
+--story v2: four standoffs from one sketch, then the width changed over MCP.
 
     solvecraft --control 7878 &
-    python3 examples/demo/enclosure_ui_mcp.py --port 7878 --cli solvecraft-cli
+    python3 examples/demo/enclosure_ui_mcp.py --port 7878 --cli solvecraft-cli [--story v2|v3]
 
 Modelling steps go through the app's UI over its control channel: the pointer glides to a
 toolbar button and clicks it (the real dialog opens), glides to the face or point it picks and
@@ -28,6 +32,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from enclosure_mcp import Mcp, control  # noqa: E402
 
 
+# Seconds a caption stays up at least.
+MIN_CAPTION = 1.4
+
+
 class Demo:
     def __init__(self, port, mcp, log, speed):
         self.port, self.mcp, self.log, self.speed = port, mcp, log, speed
@@ -44,6 +52,11 @@ class Demo:
         self.n = getattr(self, "n", 0) + 1
         if self.n > self.stop:
             raise StopIteration
+        # Every caption stays up long enough to read.
+        shown = time.time() - getattr(self, "shown_at", 0.0)
+        if shown < MIN_CAPTION:
+            time.sleep(MIN_CAPTION - shown)
+        self.shown_at = time.time()
         print(f"  {text}  [{via}]", file=sys.stderr)
         self.mark(caption=text, via=via)
 
@@ -61,7 +74,7 @@ class Demo:
         p = self.ui("ui.at", where)
         return (p[0], p[1])
 
-    def glide(self, to, dur=0.35):
+    def glide(self, to, dur=0.3):
         """Move the pointer to `to` along an eased path (the app sees every step: hover
         highlights follow it)."""
         frm = self.pos or (1150.0, 620.0)
@@ -75,7 +88,7 @@ class Demo:
             time.sleep(dur / n)
         self.pos = to
 
-    def click(self, to, dur=0.35, settle=0.25):
+    def click(self, to, dur=0.3, settle=0.2):
         self.glide(to, dur)
         self.ui("ui.click", {"x": to[0], "y": to[1]})
         self.mark(cursor=list(to), click=True)
@@ -101,6 +114,7 @@ class Demo:
     def view(self, v, settle=0.7):
         self.ui("ui.view", {"view": v, "animate": True})
         self.wait(settle)
+        self.settle_camera()
 
     def orbit(self, dx, dy=0, steps=40):
         """A right-button drag in the viewport, as a user orbits."""
@@ -113,6 +127,16 @@ class Demo:
         # The pointer moved with the camera (the app plays the drag one event a frame).
         self.mark(drag_end=[cx + dx, cy + dy])
         self.pos = (cx + dx, cy + dy)
+
+    def drag(self, frm, to, button="left", steps=30):
+        """Press at `frm`, move to `to` and let go (a window's title bar, or a middle-button pan)."""
+        self.glide(frm, 0.25)
+        self.mark(drag_start=list(frm))
+        self.ui("ui.drag", {"x0": frm[0], "y0": frm[1], "x1": to[0], "y1": to[1], "button": button, "steps": steps})
+        self.settle_camera()
+        self.wait(0.2)
+        self.mark(drag_end=list(to))
+        self.pos = tuple(to)
 
     def settle_camera(self):
         """Wait until the app has played queued pointer events (the camera stops moving)."""
@@ -129,9 +153,9 @@ class Demo:
         self.mcp.tool("execute", {"command": command, "params": params})
 
 
-def run(d):
-    d.caption("Parameters over MCP: width 80, depth 60, height 30, wall 2", "MCP tools/call execute parameters.change")
-    for name, expr in [("width", "80 mm"), ("depth", "60 mm"), ("height", "30 mm"), ("wall", "2 mm")]:
+def build_box(d, params):
+    d.caption("Parameters over MCP: " + ", ".join(f"{n} {e.split()[0]}" for n, e in params), "MCP tools/call execute parameters.change")
+    for name, expr in params:
         d.execute("parameters.change", {"name": name, "expression": expr})
         d.wait(0.25)
     d.wait(0.6)
@@ -139,6 +163,7 @@ def run(d):
     d.caption("Create Sketch on the XY plane", "UI click")
     d.tool("sketch.create")
     d.click(d.at(plane="XY"), settle=0.8)
+    d.settle_camera()
 
     d.caption("Center rectangle from the origin", "UI click")
     d.tool("sketch.rectangle.center")
@@ -185,6 +210,7 @@ def run(d):
     d.caption("Sketch on the side face for a USB port", "UI click")
     d.tool("sketch.create")
     d.click(d.at(world=[40, 10, 20]), settle=0.9)
+    d.settle_camera()
     d.tool("sketch.rectangle.center")
     d.click(d.at(world=[40, 0, 12]), settle=0.15)
     d.click(d.at(world=[40, 6, 15.5]), dur=0.4, settle=0.2)
@@ -199,9 +225,13 @@ def run(d):
     d.wait(0.6)
     d.orbit(-140, 30)
 
+def run_v2(d):
+    """v2: four standoffs from one sketch, then the width changed over MCP."""
+    build_box(d, [("width", "80 mm"), ("depth", "60 mm"), ("height", "30 mm"), ("wall", "2 mm")])
     d.caption("Sketch on the inner floor: four standoffs", "UI click")
     d.tool("sketch.create")
     d.click(d.at(world=[6, -9, 2]), settle=0.9)
+    d.settle_camera()
     d.tool("sketch.circle.center")
     for x, y in [(-30, -20), (30, -20), (30, 20), (-30, 20)]:
         d.click(d.at(world=[x, y, 2]), dur=0.3, settle=0.1)
@@ -224,13 +254,96 @@ def run(d):
     d.view("home", 1.5)
 
 
+def select_all_and_type(d, at, text, enter=True):
+    """Click a value field, select what is there (Ctrl+A) and type over it."""
+    d.click(at, settle=0.15)
+    d.ui("ui.key", {"key": "A", "cmd": True})
+    d.wait(0.1)
+    d.type(text, enter)
+
+
+def run_v3(d):
+    """v3: one standoff placed from the parameters and patterned 2 x 2 in the Rectangular Pattern
+    dialog, then width and wall changed in the Parameters dialog."""
+    build_box(d, [("width", "80 mm"), ("depth", "60 mm"), ("height", "30 mm"), ("wall", "2 mm"), ("inset", "10 mm")])
+
+    d.caption("Sketch one standoff on the inner floor", "UI click")
+    d.tool("sketch.create")
+    d.click(d.at(world=[6, -9, 2]), settle=0.9)
+    d.settle_camera()
+    d.tool("sketch.circle.center")
+    d.click(d.at(world=[-30, 20, 2]), dur=0.3, settle=0.1)
+    d.click(d.at(world=[-26.5, 20, 2]), dur=0.2, settle=0.15)
+    d.key("Escape")
+
+    d.caption("Place it from the parameters: width/2 − inset, depth/2 − inset", "MCP tools/call execute sketch.dimension")
+    sk = json.loads(d.mcp.tool("execute", {"command": "sketch.inspect", "params": {}}))
+    sk = sk.get("result", sk)
+    circles = [c["id"] for c in sk["curves"] if c["type"] == "circle" and not c.get("fixed")]
+    if not circles:
+        raise RuntimeError(f"no circle in the standoff sketch: {[c['id'] for c in sk['curves']]}")
+    circle = circles[0]
+    d.execute("sketch.dimension", {"entities": ["origin", f"{circle}.center"], "type": "horizontal", "value": "width / 2 - inset"})
+    d.execute("sketch.dimension", {"entities": ["origin", f"{circle}.center"], "type": "vertical", "value": "depth / 2 - inset"})
+    d.execute("sketch.dimension", {"entities": [circle], "type": "diameter", "value": "7 mm"})
+    d.wait(0.8)
+    d.tool("sketch.finish")
+    d.view("home", 0.5)
+
+    d.caption("Extrude the standoff: 12 mm", "MCP tools/call execute solid.extrude")
+    d.execute("solid.extrude", {"profiles": [[circle]], "distance": 12, "operation": "join"})
+    d.wait(0.7)
+    standoff = d.ui("ui.handles", {"prefix": "timeline:"})[-1]["name"]
+
+    d.caption("Rectangular Pattern: 2 × 2, spaced width − 2·inset by depth − 2·inset", "UI click")
+    d.tool("solid.pattern.rectangular", panel="panel:SOLID:CREATE")
+    d.click(d.at(handle="dialog:Object Type"), settle=0.25)
+    d.click(d.at(handle="dialog:Object Type:Features"), settle=0.25)
+    d.click(d.at(handle=standoff), settle=0.25)
+    d.click(d.at(handle="dialog:Direction"), settle=0.15)
+    d.click(d.at(world=[0, 30, 30]), settle=0.2)
+    d.click(d.at(handle="dialog:Direction 2"), settle=0.15)
+    d.click(d.at(world=[-40, 0, 30]), settle=0.2)
+    select_all_and_type(d, d.at(handle="dialog:Quantity"), "2", enter=False)
+    select_all_and_type(d, d.at(handle="dialog:Spacing"), "width - 2*inset", enter=False)
+    select_all_and_type(d, d.at(handle="dialog:Quantity 2"), "2", enter=False)
+    select_all_and_type(d, d.at(handle="dialog:Spacing 2"), "-(depth - 2*inset)", enter=False)
+    d.wait(0.4)
+    d.click(d.at(handle="dialog:OK"), settle=0.4)
+    # Up a little, so the corners behind the walls show.
+    d.orbit(-60, 45)
+
+    d.caption("Parameters dialog: width 80 → 100 mm", "UI click")
+    d.tool("parameters.change", panel="panel:SOLID:MODIFY")
+    d.wait(0.3)
+    # Move the dialog aside and the model over, so both show.
+    title = d.at(handle="params:title")
+    d.drag(title, (title[0] - 330, title[1] + 20), steps=25)
+    vp = d.ui("ui.inspect").get("viewport") or [250, 126, 1350, 800]
+    d.drag((vp[0] + vp[2] * 0.62, vp[1] + vp[3] * 0.5), (vp[0] + vp[2] * 0.62 + 280, vp[1] + vp[3] * 0.5), button="middle", steps=25)
+    select_all_and_type(d, d.at(handle="param:width"), "100 mm")
+    d.wait(1.0)
+    d.caption("… and wall 2 → 3 mm", "UI click")
+    select_all_and_type(d, d.at(handle="param:wall"), "3 mm")
+    d.wait(0.8)
+    d.click(d.at(handle="params:close"), settle=0.4)
+
+    d.caption("", "")
+    d.orbit(300, 0, steps=45)
+    # End on a high 3/4 view: all four standoffs in sight.
+    d.view("home", 0.5)
+    d.orbit(0, 45, steps=25)
+    d.wait(1.5)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--port", type=int, default=7878, help="the app's --control port")
     ap.add_argument("--cli", default="solvecraft-cli", help="path to solvecraft-cli")
     ap.add_argument("--log", help="write a JSON line per caption and pointer event")
+    ap.add_argument("--story", choices=["v2", "v3"], default="v3", help="v2: standoffs from one sketch, width over MCP; v3: one standoff patterned, Parameters dialog")
     ap.add_argument("--until", type=int, default=10**6, help="stop before step N (trying the script out)")
-    ap.add_argument("--speed", type=float, default=1.0, help="scale the pauses (2 = twice as long)")
+    ap.add_argument("--speed", type=float, default=0.55, help="scale the pauses (2 = twice as long)")
     a = ap.parse_args()
     mcp = Mcp([a.cli, "mcp", "--connect", f"127.0.0.1:{a.port}"])
     mcp.send("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "enclosure-demo-v2", "version": "2"}})
@@ -239,7 +352,7 @@ def main():
     d.stop = a.until - 1
     t0 = time.time()
     try:
-        run(d)
+        run_v3(d) if a.story == "v3" else run_v2(d)
     except StopIteration:
         pass
     d.mark(caption="", via="")

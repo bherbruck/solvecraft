@@ -188,6 +188,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             });
         });
+    // The title bar's close button, for scenarios and demos.
+    if let Some(r) = ctx.memory(|m| m.area_rect(egui::Id::new("sc_params_dialog"))) {
+        crate::scenario::publish_handle("params:close", egui::pos2(r.right() - 16.0, r.top() + 15.0));
+        crate::scenario::publish_handle("params:title", egui::pos2(r.center().x, r.top() + 15.0));
+    }
     if !open {
         app.params = None;
         return;
@@ -271,6 +276,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                 te = te.text_color(t.error);
             }
             let resp = ui.add_sized([170.0, 20.0], te);
+            crate::scenario::publish_handle(&format!("param:{}", r.name), resp.rect.center());
             let completed = complete(ui, &resp, &mut e);
             if resp.changed() || completed {
                 d.editing.insert(r.name.clone(), e.clone());

@@ -2,7 +2,7 @@
 """overlay.py LOG START OUTDIR: from enclosure_ui_mcp.py's --log (captions and pointer events)
 and the recording's start (epoch seconds), write OUTDIR/captions.ass, OUTDIR/cursor.cmd
 (ffmpeg sendcmd moves for the drawn pointer and the click ripple) and the two sprites
-(cursor.png, ripple.png). record_v2.sh composites them onto the screen recording."""
+(cursor.png, ripple.png). record_ui.sh composites them onto the screen recording."""
 
 import json
 import math

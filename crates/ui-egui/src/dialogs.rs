@@ -363,7 +363,11 @@ impl Dialog {
             }
             "solid.pattern.rectangular" => Dialog::new(
                 Kind::PatternRect { count: "3".into(), spacing: "20 mm".into(), count2: "1".into(), spacing2: "20 mm".into() },
-                vec![SelInput::new("Objects", BODIES, true), SelInput::new("Direction", AXES, false), SelInput::new("Direction 2", AXES, false)],
+                vec![
+                    SelInput::new("Objects", BODIES, true),
+                    SelInput::new("Direction", AXES | EDGES, false),
+                    SelInput::new("Direction 2", AXES | EDGES, false),
+                ],
             ),
             "solid.pattern.circular" => Dialog::new(
                 Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
@@ -713,16 +717,30 @@ fn plane_value(s: &Session, sel: Option<&Sel>) -> Option<Value> {
 /// A value field; true when Enter was pressed in it.
 pub(crate) fn field(ui: &mut egui::Ui, s: &mut String) -> bool {
     let r = ui.text_edit_singleline(s);
+    publish_row(&r);
     crate::params_dialog::complete(ui, &r, s);
     r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
 }
 
 pub(crate) fn combo(ui: &mut egui::Ui, id: &str, labels: &[&str], sel: &mut usize) {
-    egui::ComboBox::from_id_salt(id).selected_text(labels.get(*sel).copied().unwrap_or("")).width(FIELD_W).show_ui(ui, |ui| {
+    let row = ROW.with(|r| r.borrow().clone());
+    let r = egui::ComboBox::from_id_salt(id).selected_text(labels.get(*sel).copied().unwrap_or("")).width(FIELD_W).show_ui(ui, |ui| {
         for (i, l) in labels.iter().enumerate() {
-            ui.selectable_value(sel, i, *l);
+            let item = ui.selectable_value(sel, i, *l);
+            crate::scenario::publish_handle(&format!("dialog:{row}:{l}"), item.rect.center());
         }
     });
+    publish_row(&r.response);
+}
+
+thread_local! {
+    /// The label of the dialog row being laid out (its widgets publish `dialog:<label>` handles).
+    static ROW: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// A dialog row's widget, for scenarios and demos: the handle `dialog:<row label>`.
+fn publish_row(r: &egui::Response) {
+    ROW.with(|row| crate::scenario::publish_handle(&format!("dialog:{}", row.borrow()), r.rect.center()));
 }
 
 fn title(k: &Kind) -> &'static str {
@@ -805,6 +823,7 @@ const LABEL_W: f32 = 92.0;
 
 /// A row label in the dialog's label column.
 pub(crate) fn row_label(ui: &mut egui::Ui, text: &str) {
+    ROW.with(|r| *r.borrow_mut() = text.to_string());
     ui.allocate_ui_with_layout(vec2(LABEL_W, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.set_width(LABEL_W);
         ui.add(egui::Label::new(text).truncate()).on_hover_text(text);
@@ -926,7 +945,11 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
             let (kind, mut inputs) = match ty {
                 0 => (
                     Kind::PatternRect { count: "3".into(), spacing: "20 mm".into(), count2: "1".into(), spacing2: "20 mm".into() },
-                    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Direction", AXES, false), SelInput::new("Direction 2", AXES, false)],
+                    vec![
+                        SelInput::new("Objects", BODIES, true),
+                        SelInput::new("Direction", AXES | EDGES, false),
+                        SelInput::new("Direction 2", AXES | EDGES, false),
+                    ],
                 ),
                 1 => (
                     Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
@@ -988,7 +1011,9 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
                 .stroke(stroke)
                 .min_size(vec2(0.0, 22.0))
                 .sense(egui::Sense::CLICK);
-            if ui.add(b).on_hover_text(format!("{} (click to pick into this input)", hint(inp))).clicked() {
+            let chip = ui.add(b);
+            publish_row(&chip);
+            if chip.on_hover_text(format!("{} (click to pick into this input)", hint(inp))).clicked() {
                 activate = Some(i);
             }
             if !inp.items.is_empty() && ui.small_button("×").on_hover_text("Clear the selection").clicked() {
@@ -1571,7 +1596,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     let b = egui::Button::new(RichText::new(label).color(if valid { Color32::WHITE } else { t.text_dim }))
                         .fill(if valid { t.accent } else { Color32::TRANSPARENT })
                         .min_size(vec2(64.0, 24.0));
-                    if ui.add_enabled(valid, b).clicked() {
+                    let r = ui.add_enabled(valid, b);
+                    crate::scenario::publish_handle(&format!("dialog:{label}"), r.rect.center());
+                    if r.clicked() {
                         ok = true;
                     }
                 }
@@ -1898,9 +1925,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "objects")?;
             let kept = d.extra.get("dir1").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
             let d1 = match (sels(d, 1).first(), kept) {
-                (Some(x), _) => axis_of(app, x).ok_or("the direction must be an axis or a sketch line")?.1,
+                (Some(x), _) => axis_of(app, x).ok_or("the direction must be an axis, a sketch line or a straight edge")?.1,
                 (None, Some(k)) => k,
-                (None, None) => return Err("select a direction (an axis or a sketch line) first".into()),
+                (None, None) => return Err("select a direction (an axis, a sketch line or a straight edge) first".into()),
             };
             let mut p = json!({"features": pattern_features(s, sels(d, 0)), "dir1": pt(d1), "count1": count, "spacing1": spacing});
             if let Some((_, d2)) = sels(d, 2).first().and_then(|x| axis_of(app, x)) {
@@ -2275,6 +2302,21 @@ pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
             let solvecraft_engine::sketch::CurveKind::Line { a, b } = c.kind else { return None };
             let (pa, pb) = (ss.plane.to_world(ss.sketch.point(a)?), ss.plane.to_world(ss.sketch.point(b)?));
             Some((pa, (pb - pa).normalized()?))
+        }
+        // A straight model edge, along it.
+        Sel::Edge { body, index, .. } => {
+            let b = app.session.world_state().body(body).cloned()?;
+            let m = b.mesh();
+            let e = m.edges.get(*index)?;
+            let (a, z) = (*e.first()?, *e.last()?);
+            let dir = (z - a).normalized()?;
+            let tol = 1e-6 * a.dist(z).max(1.0);
+            if !e.iter().all(|p| (*p - a).cross(dir).len() < tol) {
+                return None;
+            }
+            // An edge along an origin axis points the way the axis does (as picking the axis).
+            let axis = [Vec3::X, Vec3::Y, Vec3::Z].into_iter().find(|x| dir.dot(*x).abs() > 1.0 - 1e-9);
+            Some((a, axis.unwrap_or(dir)))
         }
         _ => None,
     }
