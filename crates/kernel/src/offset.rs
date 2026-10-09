@@ -746,7 +746,7 @@ pub(crate) fn draft_walls(b: &Body, chosen: &[usize], neutral: &solvecraft_geom:
 }
 
 /// The chosen faces and every face on the same surface joined to them (the halves of a hole's
-/// wall), as face indices.
+/// wall), as face indices. Pieces of a face split on purpose (Split Face) stay apart.
 pub fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
     let faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
     let size = b.size();
@@ -766,6 +766,7 @@ pub fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
         }
         _ => false,
     };
+    let keep = b.split_keep();
     let mut out: Vec<usize> = chosen.to_vec();
     let mut grew = true;
     while grew {
@@ -777,7 +778,12 @@ pub fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
             let Some(Some(si)) = surfs.get(i) else { continue };
             let joins = out.iter().any(|j| {
                 surfs.get(*j).and_then(|x| x.as_ref()).is_some_and(|sj| same(si, sj))
-                    && faces.get(*j).is_some_and(|g| g.edge_iter().any(|e| f.edge_iter().any(|x| x.id() == e.id())))
+                    && faces.get(*j).is_some_and(|g| {
+                        g.edge_iter().any(|e| {
+                            f.edge_iter().any(|x| x.id() == e.id())
+                                && (keep.is_empty() || !crate::heal::on_split_line(&crate::heal::edge_points(&e), keep))
+                        })
+                    })
             });
             if joins {
                 out.push(i);

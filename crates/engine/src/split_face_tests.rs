@@ -80,3 +80,20 @@ fn export_keeps_split_faces_through_later_features() {
     // Six box faces, the top's second piece and the fillet.
     assert_eq!(text.matches("ADVANCED_FACE(").count(), 8, "{text}");
 }
+
+#[test]
+fn split_pieces_count_and_move_apart() {
+    let mut s = boxed();
+    run(&mut s, "solid.split_face", json!({"faces": [[10, 15, 20]], "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    // Measure counts the two halves of the top as two faces.
+    let m = run(&mut s, "inspect.measure", json!({ "bodies": ["B"] }))["bodies"][0].clone();
+    assert_eq!(m["faces"].as_u64(), Some(7), "{m}");
+    // Offset Face on one half moves that half only (Fusion): a 20 × 30 step 5 high.
+    run(&mut s, "solid.offset_face", json!({"faces": [[10, 15, 20]], "distance": 5}));
+    let (_, v) = faces_volume(&mut s, "B");
+    assert!((v - 27000.0).abs() < 1e-6 * 27000.0, "{v}");
+    // And the other half down 3: a 20 × 30 pocket.
+    run(&mut s, "solid.offset_face", json!({"faces": [[30, 15, 20]], "distance": -3}));
+    let (_, v) = faces_volume(&mut s, "B");
+    assert!((v - 25200.0).abs() < 1e-6 * 25200.0, "{v}");
+}

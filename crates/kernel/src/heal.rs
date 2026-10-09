@@ -91,7 +91,7 @@ pub(crate) fn on_split_line(pts: &[Vec3], keep: &[Vec<Vec3>]) -> bool {
 }
 
 /// Points along an edge (ends and three inside).
-fn edge_points(e: &mt::Edge) -> Vec<Vec3> {
+pub(crate) fn edge_points(e: &mt::Edge) -> Vec<Vec3> {
     use mt::{BoundedCurve, ParametricCurve};
     let c = e.curve();
     let (t0, t1) = c.range_tuple();

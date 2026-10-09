@@ -447,10 +447,14 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
         });
         smooth && seen > 0
     };
+    // Pieces of a face split on purpose count apart.
+    let b_keep = b.split_keep();
+    let keep_split = !b_keep.is_empty();
     let mut fp: Vec<usize> = (0..nf).collect();
     for (ei, faces) in &edge_faces {
         let other = |f: usize| matches!(surfs.get(f), Some(Surf::Other(_)));
         if let [a, b] = faces[..]
+            && !(keep_split && poly(*ei).is_some_and(|pl| crate::heal::on_split_line(pl, b_keep)))
             && (same_surface(&surfs, &verts, poly(*ei), a, b, tol * 10.0)
                 || (other(a) && other(b) && exact_smooth(a, b, poly(*ei)) && {
                     let (Some(va), Some(vb)) = (verts.get(a), verts.get(b)) else { return Ok(TopoCounts::default()) };

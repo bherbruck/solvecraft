@@ -422,7 +422,7 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     if !distance.is_finite() || distance.abs() > 1e6 {
         return Err(KernelError::Invalid("offset distance".into()));
     }
-    let healed = Body::new(crate::heal::heal_keep(b.deep_copy(), b.size(), b.split_keep()))?;
+    let healed = Body::new(crate::heal::heal_keep(b.deep_copy(), b.size(), b.split_keep()))?.with_split_lines(b.splits.clone());
     let size = healed.size();
     let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
     let mut chosen: Vec<usize> = Vec::new();
@@ -443,5 +443,24 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         }
     }
     let chosen = crate::offset::with_same_surface(&healed, &chosen);
-    offset_planar(&healed, |fi, _| if chosen.contains(&fi) { distance } else { 0.0 })
+    match offset_planar(&healed, |fi, _| if chosen.contains(&fi) { distance } else { 0.0 }) {
+        Ok(r) => Ok(r),
+        // A piece of a split face (its neighbour stays): the piece swept along its normal
+        // joins on (outward) or cuts in, with walls along the split lines.
+        Err(e) if !healed.split_keep().is_empty() => press_pieces(&healed, &chosen, distance).map_err(|_| e),
+        Err(e) => Err(e),
+    }
+}
+
+fn press_pieces(b: &Body, chosen: &[usize], distance: f64) -> Result<Body> {
+    let faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
+    let mut cur = b.clone();
+    for fi in chosen {
+        let f = faces.get(*fi).ok_or_else(|| KernelError::Failed("offset: face".into()))?;
+        let n = crate::blend::plane_normal(f).ok_or_else(|| KernelError::Failed("offset: only planar pieces".into()))?;
+        let tool = guard("offset face", || Body::new(builder::tsweep(f, crate::body::v3(n * distance))))?;
+        let op = if distance > 0.0 { crate::BoolOp::Union } else { crate::BoolOp::Cut };
+        cur = crate::ops::boolean(&cur, &tool, op)?.ok_or_else(|| KernelError::Failed("offset: the piece moved off the body".into()))?;
+    }
+    Ok(cur.with_split_lines(b.splits.clone()))
 }
