@@ -219,3 +219,110 @@ fn chamfer_types_send_their_values() {
     let e = crate::dialogs::for_feature(&app, ch, None).unwrap();
     assert!(matches!(&e.kind, Kind::Fillet { chamfer: true, ctype: 2, angle, flip: true, .. } if angle == "30 deg"), "{:?}", e.kind);
 }
+
+/// Apply a dialog's commands to the session; the new feature's id.
+fn apply(app: &mut SolveApp, d: &Dialog) -> u64 {
+    for (id, p) in apply_commands(app, d).unwrap() {
+        app.session.execute(&id, &p).unwrap();
+    }
+    app.session.doc.features.last().unwrap().id
+}
+
+#[test]
+fn shell_direction_and_tangent_chain_round_trip() {
+    let mut app = boxed();
+    let top = face(&app, Vec3::new(20.0, 15.0, 20.0));
+    let mut d = start(&mut app, vec![top], "solid.shell");
+    // Tangent Chain is on, as in Fusion; Direction Outside.
+    assert_eq!(d.extra.get("tangent_chain"), Some(&json!(true)));
+    d.extra.insert("direction".into(), json!("outside"));
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!((p["direction"].clone(), p["tangent_chain"].clone()), (json!("outside"), json!(true)));
+    let id = apply(&mut app, &d);
+    let e = crate::dialogs::for_feature(&app, id, None).unwrap();
+    assert_eq!(e.extra.get("direction"), Some(&json!("outside")));
+    assert_eq!(e.extra.get("tangent_chain"), Some(&json!(true)));
+}
+
+#[test]
+fn variable_fillet_round_trip() {
+    let mut app = boxed();
+    let e0 = edge(&app, Vec3::new(40.0, 15.0, 20.0));
+    let mut d = start(&mut app, vec![e0], "solid.fillet");
+    d.inputs[0].items.truncate(1);
+    d.extra.insert("type".into(), json!("variable"));
+    d.extra.insert("radius2".into(), json!("4 mm"));
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!((p["type"].clone(), p["radius2"].clone()), (json!("variable"), json!("4 mm")));
+    assert!(p["start"].is_array(), "{p}");
+    let id = apply(&mut app, &d);
+    let e = crate::dialogs::for_feature(&app, id, None).unwrap();
+    assert_eq!(e.extra.get("type"), Some(&json!("variable")));
+    assert_eq!(e.extra.get("radius2"), Some(&json!("4 mm")));
+}
+
+#[test]
+fn newer_options_reach_their_commands() {
+    let mut app = boxed();
+    // Thread: Modeled.
+    let side = face(&app, Vec3::new(20.0, 0.0, 10.0));
+    let mut d = start(&mut app, vec![side.clone()], "solid.thread");
+    d.extra.insert("modeled".into(), json!(true));
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["modeled"], json!(true));
+    // Combine into a new component.
+    app.dialog = None;
+    let mut d = start(&mut app, vec![], "solid.combine");
+    d.extra.insert("new_component".into(), json!(true));
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.inputs[1].items = vec![Sel::Body { name: "Body2".into() }];
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["new_component"], json!(true));
+    // Hole: To Object sends the place to drill to instead of a depth.
+    app.dialog = None;
+    let top = face(&app, Vec3::new(20.0, 15.0, 20.0));
+    let mut d = start(&mut app, vec![top], "solid.hole");
+    d.inputs.push(crate::selection::SelInput::new("To Object", crate::selection::FACES | crate::selection::VERTICES, false));
+    d.inputs[1].items = vec![face(&app, Vec3::new(20.0, 15.0, 0.0))];
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert!(p["to"].is_array() && p.get("depth").is_none(), "{p}");
+}
+
+#[test]
+fn boundary_fill_finds_the_cells_and_fills_the_ticked_ones() {
+    let mut app = app_with(json!([
+        {"command": "solid.box", "params": {"length": 20, "width": 20, "height": 20}},
+        {"command": "solid.box", "params": {"length": 20, "width": 20, "height": 20, "corner": [10, 10, 0], "operation": "new"}}
+    ]));
+    let mut d = start(&mut app, vec![], "SurfaceSculpt");
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Body2".into() }];
+    app.dialog = Some(d);
+    // The dialog finds the cells on its next frame.
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(Default::default(), |ui| crate::dialogs::show(&mut app, ui.ctx()));
+    let mut d = app.dialog.take().unwrap();
+    let Kind::BoundaryFill { cells, .. } = &mut d.kind else { panic!() };
+    // Only A, only B, and both.
+    assert_eq!(cells.len(), 3, "{cells:?}");
+    assert!(cells.iter().any(|c| c.1 == "Inside Body1, Body2"));
+    // Fill just the overlap.
+    for c in cells.iter_mut() {
+        c.2 = c.1 == "Inside Body1, Body2";
+    }
+    let id = apply(&mut app, &d);
+    assert!(app.session.model.result(id).is_some_and(|r| r.error.is_none()));
+    // A new body filling the 10 x 10 x 20 overlap.
+    let vols: Vec<f64> = app.session.model.state().bodies.iter().map(|b| b.mesh().measure().volume).collect();
+    assert!(vols.len() == 3 && vols.iter().any(|v| (v - 2000.0).abs() < 1.0), "{vols:?}");
+}
+
+#[test]
+fn align_snaps_to_centres_and_edge_middles() {
+    let mut app = boxed();
+    let mut d = start(&mut app, vec![], "solid.align");
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.inputs[1].items = vec![face(&app, Vec3::new(20.0, 15.0, 0.0))];
+    d.inputs[2].items = vec![edge(&app, Vec3::new(20.0, 0.0, 20.0))];
+    d.extra.insert("from_snap".into(), json!("center"));
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!(p["from"]["snap"], json!("face_center"));
+    assert_eq!(p["to"]["snap"], json!("edge_mid"));
+}

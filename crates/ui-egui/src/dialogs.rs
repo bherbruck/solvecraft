@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use solvecraft_engine::Sel;
 use solvecraft_engine::Session;
 use solvecraft_engine::doc::expr::Kind as ValueKind;
-use solvecraft_engine::doc::{AxisRef, Direction, FeatureKind, HoleKind, Operation, PatternKind, PlaneRef, ProfileSel};
+use solvecraft_engine::doc::{AxisRef, Direction, FeatureKind, FilletStyle, HoleKind, Operation, PatternKind, PlaneRef, ProfileSel};
 use solvecraft_engine::geom::Vec3;
 
 use crate::SolveApp;
@@ -124,6 +124,13 @@ pub enum Kind {
     },
     /// Move planar faces onto a target plane or face.
     ReplaceFace,
+    /// Boundary Fill: the cells the tool bodies make (a point inside, a description, filled
+    /// or not), found again when the tools change.
+    BoundaryFill {
+        operation: usize,
+        cells: Vec<(Vec3, String, bool)>,
+        of: Vec<Sel>,
+    },
     /// Move bodies so a face or point meets another.
     Align {
         flip: bool,
@@ -308,7 +315,12 @@ impl Dialog {
             ),
             "solid.fillet" => Dialog::new(fillet_kind("2 mm", false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind("1 mm", true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
-            "solid.shell" => Dialog::new(Kind::Shell { thickness: "2 mm".into() }, vec![SelInput::new("Faces/Body", FACES, true)]),
+            "solid.shell" => {
+                let mut d = Dialog::new(Kind::Shell { thickness: "2 mm".into() }, vec![SelInput::new("Faces/Body", FACES, true)]);
+                // Fusion opens faces joined smoothly to the picked ones too.
+                d.extra.insert("tangent_chain".into(), json!(true));
+                d
+            }
             "solid.draft" => Dialog::new(
                 Kind::Draft { angle: "5 deg".into() },
                 vec![SelInput::new("Faces", FACES, true), SelInput::new("Neutral plane", PLANES | PLANAR_FACES, false)],
@@ -325,12 +337,15 @@ impl Dialog {
                 Kind::ReplaceFace,
                 vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
             ),
+            "SurfaceSculpt" => {
+                Dialog::new(Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() }, vec![SelInput::new("Tools", BODIES, true)])
+            }
             "solid.align" => Dialog::new(
                 Kind::Align { flip: false },
                 vec![
                     SelInput::new("Bodies", BODIES, true),
-                    SelInput::new("From", FACES | selection::VERTICES, false),
-                    SelInput::new("To", FACES | selection::VERTICES, false),
+                    SelInput::new("From", FACES | EDGES | selection::VERTICES, false),
+                    SelInput::new("To", FACES | EDGES | selection::VERTICES, false),
                 ],
             ),
             "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
@@ -546,6 +561,7 @@ impl Dialog {
                 | Kind::Hole { .. }
                 | Kind::Primitive { .. }
                 | Kind::Combine { .. }
+                | Kind::BoundaryFill { .. }
         )
     }
 
@@ -762,6 +778,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Emboss { .. } => "EMBOSS",
         Kind::ReplaceFace => "REPLACE FACE",
         Kind::Align { .. } => "ALIGN",
+        Kind::BoundaryFill { .. } => "BOUNDARY FILL",
         Kind::Remove => "REMOVE",
         Kind::PathPattern { .. } => "PATTERN ON PATH",
         Kind::Pipe { .. } => "PIPE",
@@ -1042,6 +1059,67 @@ use crate::frame::{DIALOG_MAX_W, DIALOG_MIN_W, DIALOG_WIDE_MAX_W};
 /// Width of value fields and choice boxes in a dialog.
 const FIELD_W: f32 = 124.0;
 
+/// Find the Boundary Fill cells again when the tool bodies changed (keeping the choices of
+/// cells that are still there).
+fn update_fill_cells(app: &SolveApp, d: &mut Dialog) {
+    let tools: Vec<Sel> = sels(d, 0).to_vec();
+    let Kind::BoundaryFill { cells, of, .. } = &mut d.kind else { return };
+    if *of == tools {
+        return;
+    }
+    let names: Vec<String> = tools.iter().filter_map(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None }).collect();
+    // Editing: the tools as they were before this feature (it may have removed them).
+    let st = match d.editing {
+        Some((id, _)) => app.session.model.state_before(id),
+        None => app.session.world_state(),
+    };
+    let found = fill_cells(&st, &names);
+    let kept: Vec<String> = cells.iter().filter(|c| c.2).map(|c| c.1.clone()).collect();
+    *cells = found.into_iter().map(|(p, label)| (p, label.clone(), kept.is_empty() || kept.contains(&label))).collect();
+    *of = tools;
+}
+
+/// The cells a set of tool bodies makes: each region inside some of them and outside the rest,
+/// as a point inside it and which tools hold it. Found by sampling a grid over the tools.
+pub(crate) fn fill_cells(st: &solvecraft_engine::doc::ModelState, tools: &[String]) -> Vec<(Vec3, String)> {
+    let bodies: Vec<_> = tools.iter().filter_map(|n| st.body(n).map(|b| (n.clone(), b.mesh()))).take(16).collect();
+    if bodies.is_empty() {
+        return Vec::new();
+    }
+    let indexes: Vec<_> = bodies.iter().map(|(_, m)| m.inside_index()).collect();
+    let bb = bodies.iter().fold(solvecraft_engine::geom::Aabb3::EMPTY, |b, (_, m)| b.union(&m.bounds()));
+    let n = 20;
+    let at = |i: usize, lo: f64, hi: f64| lo + (hi - lo) * (i as f64 + 0.5) / n as f64;
+    // Signature (which tools hold the point) → the points with it.
+    let mut groups: Vec<(u32, Vec<Vec3>)> = Vec::new();
+    for i in 0..n {
+        for j in 0..n {
+            for k in 0..n {
+                let p = Vec3::new(at(i, bb.min.x, bb.max.x), at(j, bb.min.y, bb.max.y), at(k, bb.min.z, bb.max.z));
+                let sig = indexes.iter().enumerate().fold(0u32, |acc, (t, ix)| if ix.contains(p) { acc | (1 << t) } else { acc });
+                if sig == 0 {
+                    continue;
+                }
+                match groups.iter_mut().find(|(g, _)| *g == sig) {
+                    Some((_, v)) => v.push(p),
+                    None => groups.push((sig, vec![p])),
+                }
+            }
+        }
+    }
+    groups.sort_by_key(|(sig, _)| *sig);
+    groups
+        .into_iter()
+        .filter_map(|(sig, pts)| {
+            let c = pts.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / pts.len() as f64);
+            // The sample nearest the middle (the middle itself may be outside a curved cell).
+            let rep = pts.iter().min_by(|a, b| a.dist(c).total_cmp(&b.dist(c))).copied()?;
+            let inside: Vec<&str> = bodies.iter().enumerate().filter(|(t, _)| sig & (1 << t) != 0).map(|(_, (name, _))| name.as_str()).collect();
+            Some((rep, format!("Inside {}", inside.join(", "))))
+        })
+        .collect()
+}
+
 /// Measure again when the picked items changed.
 fn update_measure(app: &SolveApp, d: &mut Dialog) {
     let items: Vec<Sel> = sels(d, 0).to_vec();
@@ -1151,6 +1229,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.dialog.take() else { return };
     auto_operation(app, &mut d);
     update_measure(app, &mut d);
+    update_fill_cells(app, &mut d);
     let t = Tokens::get();
     let vp = app.viewport.rect.unwrap_or_else(|| ctx.content_rect());
     let anchor = egui::pos2(vp.right(), vp.top() + crate::viewport::VIEW_CUBE_CLEARANCE);
@@ -1236,11 +1315,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     *direction = order.get(pos).copied().unwrap_or(0);
                     ui.end_row();
                     row_label(ui, "Extent Type");
-                    let mut ext = usize::from(*all);
-                    combo(ui, "ex_ext", &["Distance", "All"], &mut ext);
-                    *all = ext == 1;
+                    let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(*all) * 2 };
+                    let mut ext = cur;
+                    combo(ui, "ex_ext", &["Distance", "To Object", "All"], &mut ext);
+                    *all = ext == 2;
+                    set_to_object(&mut d.inputs, &mut d.active, ext == 1);
                     ui.end_row();
-                    if !*all {
+                    if ext == 0 {
                         row_label(ui, "Distance");
                         enter |= field(ui, distance);
                         ui.end_row();
@@ -1265,9 +1346,47 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui.end_row();
                 }
                 Kind::Revolve { angle, operation } => {
-                    row_label(ui, "Angle");
-                    enter |= field(ui, angle);
+                    row_label(ui, "Type");
+                    let cur = usize::from(to_object_on(&d.inputs));
+                    let mut ty = cur;
+                    combo(ui, "rv_type", &["Angle", "To Object"], &mut ty);
+                    set_to_object(&mut d.inputs, &mut d.active, ty == 1);
                     ui.end_row();
+                    if ty == 0 {
+                        // One Side, Two Sides (a second angle), Symmetric (the angle split).
+                        row_label(ui, "Direction");
+                        let cur = if d.extra.contains_key("angle2") {
+                            1
+                        } else if d.extra.get("direction").is_some() {
+                            2
+                        } else {
+                            0
+                        };
+                        let mut dir = cur;
+                        combo(ui, "rv_dir", &["One Side", "Two Sides", "Symmetric"], &mut dir);
+                        if dir != cur {
+                            d.extra.remove("angle2");
+                            d.extra.remove("direction");
+                            match dir {
+                                1 => {
+                                    d.extra.insert("angle2".into(), json!("90 deg"));
+                                }
+                                2 => {
+                                    d.extra.insert("direction".into(), json!("symmetric"));
+                                }
+                                _ => {}
+                            }
+                        }
+                        ui.end_row();
+                        row_label(ui, "Angle");
+                        enter |= field(ui, angle);
+                        ui.end_row();
+                        if dir == 1 {
+                            row_label(ui, "Angle 2");
+                            enter |= extra_field(ui, &mut d.extra, "angle2", "90 deg");
+                            ui.end_row();
+                        }
+                    }
                     row_label(ui, "Operation");
                     combo(ui, "rv_op", &OP_LABELS, operation);
                     ui.end_row();
@@ -1278,10 +1397,26 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         combo(ui, "ch_type", &CHAMFER_TYPES, ctype);
                         ui.end_row();
                     }
+                    let mut rtype = 0;
+                    if !*chamfer {
+                        row_label(ui, "Radius Type");
+                        rtype = extra_choice(
+                            ui,
+                            &mut d.extra,
+                            "fi_type",
+                            "type",
+                            &[("Constant", "constant"), ("Chord Length", "chord"), ("Variable", "variable")],
+                        );
+                        ui.end_row();
+                    }
                     row_label(
                         ui,
                         if !*chamfer {
-                            "Radius"
+                            match rtype {
+                                1 => "Chord Length",
+                                2 => "Start Radius",
+                                _ => "Radius",
+                            }
                         } else if *ctype == 0 {
                             "Distance"
                         } else {
@@ -1305,13 +1440,36 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.checkbox(flip, "");
                         ui.end_row();
                     }
+                    if !*chamfer && rtype == 2 {
+                        row_label(ui, "End Radius");
+                        enter |= extra_field(ui, &mut d.extra, "radius2", "1 mm");
+                        ui.end_row();
+                        // Which end of the first edge takes the start radius.
+                        row_label(ui, "Swap Ends");
+                        extra_check(ui, &mut d.extra, "swap_ends");
+                        ui.end_row();
+                    }
                     row_label(ui, "Tangent Chain");
                     ui.checkbox(chain, "");
                     ui.end_row();
                 }
                 Kind::Shell { thickness } => {
-                    row_label(ui, "Inside Thickness");
+                    row_label(ui, "Tangent Chain");
+                    extra_check(ui, &mut d.extra, "tangent_chain");
+                    ui.end_row();
+                    let dir = d.extra.get("direction").and_then(Value::as_str).unwrap_or("inside").to_string();
+                    row_label(
+                        ui,
+                        match dir.as_str() {
+                            "outside" => "Outside Thickness",
+                            "both" => "Thickness",
+                            _ => "Inside Thickness",
+                        },
+                    );
                     enter |= field(ui, thickness);
+                    ui.end_row();
+                    row_label(ui, "Direction");
+                    extra_choice(ui, &mut d.extra, "sh_dir", "direction", &[("Inside", "inside"), ("Outside", "outside"), ("Both", "both")]);
                     ui.end_row();
                 }
                 Kind::Draft { angle } => {
@@ -1363,8 +1521,33 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui.end_row();
                 }
                 Kind::Align { flip } => {
+                    // Where on the picked face or edge to snap: as picked (a face turns to meet
+                    // the other, an edge at its middle), its centre, or a round one's centre.
+                    for (label, key) in [("From Snap", "from_snap"), ("To Snap", "to_snap")] {
+                        row_label(ui, label);
+                        extra_choice(ui, &mut d.extra, key, key, &[("As Picked", "picked"), ("Centre", "center"), ("Circle Centre", "circle")]);
+                        ui.end_row();
+                    }
                     row_label(ui, "Flip");
                     ui.checkbox(flip, "");
+                    ui.end_row();
+                }
+                Kind::BoundaryFill { operation, cells, .. } => {
+                    row_label(ui, "Cells");
+                    if cells.is_empty() {
+                        ui.label(RichText::new("Pick the tool bodies").color(Tokens::get().text_dim));
+                    }
+                    ui.end_row();
+                    for (i, (_, label, on)) in cells.iter_mut().enumerate() {
+                        row_label(ui, &format!("Cell {}", i + 1));
+                        ui.checkbox(on, label.as_str());
+                        ui.end_row();
+                    }
+                    row_label(ui, "Operation");
+                    combo(ui, "bf_op", &OP_LABELS, operation);
+                    ui.end_row();
+                    row_label(ui, "Remove Tools");
+                    extra_check(ui, &mut d.extra, "remove_tools");
                     ui.end_row();
                 }
                 Kind::PathPattern { count, spacing } => {
@@ -1400,7 +1583,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui.end_row();
                 }
                 Kind::Thread { designation, length } => {
-                    // Fusion's order: Full Length, then the size; a length only when not full.
+                    // Fusion's order: Modeled, Full Length, then the size; a length only when not
+                    // full.
+                    row_label(ui, "Modeled");
+                    extra_check(ui, &mut d.extra, "modeled");
+                    ui.end_row();
                     row_label(ui, "Full Length");
                     let mut full = length.trim().is_empty();
                     if ui.checkbox(&mut full, "").changed() {
@@ -1458,10 +1645,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 k @ Kind::Move { .. } => enter |= crate::dialogs_move::rows(ui, k),
                 Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
                     row_label(ui, "Extents");
-                    let mut ext = usize::from(opts.all);
-                    combo(ui, "hole_ext", &["Distance", "All"], &mut ext);
-                    opts.all = ext == 1;
+                    let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(opts.all) * 2 };
+                    let mut ext = cur;
+                    combo(ui, "hole_ext", &["Distance", "To Object", "All"], &mut ext);
+                    opts.all = ext == 2;
+                    set_to_object(&mut d.inputs, &mut d.active, ext == 1);
                     ui.end_row();
+                    if opts.multiple {
+                        // Every point of the picked points' sketches (standalone points and
+                        // circle centres), not just the picked ones.
+                        row_label(ui, "All Sketch Points");
+                        extra_check(ui, &mut d.extra, "all_points");
+                        ui.end_row();
+                    }
                     row_label(ui, "Hole Type");
                     combo(ui, "hole_kind", &HOLE_LABELS, kind);
                     ui.end_row();
@@ -1528,6 +1724,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     let mut op = operation.saturating_sub(1);
                     combo(ui, "cb_op", &OP_LABELS[1..], &mut op);
                     *operation = op + 1;
+                    ui.end_row();
+                    row_label(ui, "New Component");
+                    extra_check(ui, &mut d.extra, "new_component");
                     ui.end_row();
                     row_label(ui, "Keep Tools");
                     ui.checkbox(keep_tools, "");
@@ -1666,6 +1865,78 @@ pub fn cancel(app: &mut SolveApp) {
     {
         let _ = app.run("timeline.roll_to", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
     }
+}
+
+/// The pick input an extent of To Object adds (a face, vertex or point to go to).
+const TO_OBJECT: &str = "To Object";
+
+fn to_object_on(inputs: &[SelInput]) -> bool {
+    inputs.iter().any(|i| i.label == TO_OBJECT)
+}
+
+/// Add or remove the To Object input; the active input moves to it when it is added.
+fn set_to_object(inputs: &mut Vec<SelInput>, active: &mut usize, on: bool) {
+    if on && !to_object_on(inputs) {
+        inputs.push(SelInput::new(TO_OBJECT, FACES | selection::VERTICES, false));
+        *active = inputs.len() - 1;
+    } else if !on && to_object_on(inputs) {
+        inputs.retain(|i| i.label != TO_OBJECT);
+        *active = (*active).min(inputs.len().saturating_sub(1));
+    }
+}
+
+/// The picked To Object place.
+fn to_object_point(inputs: &[SelInput]) -> Option<Value> {
+    inputs.iter().find(|i| i.label == TO_OBJECT)?.items.first().and_then(|x| match x {
+        Sel::Face { point, .. } | Sel::Vertex { point, .. } | Sel::Edge { point, .. } => Some(pt(*point)),
+        _ => None,
+    })
+}
+
+/// A To Object input filled from a stored place (editing).
+fn with_to_object(d: &mut Dialog, s: &Session, to: Option<Vec3>) {
+    if let Some(p) = to {
+        set_to_object(&mut d.inputs, &mut d.active, true);
+        if let Some(inp) = d.inputs.iter_mut().find(|i| i.label == TO_OBJECT) {
+            inp.items = vec![face_sel(s, p).unwrap_or(Sel::Vertex { body: String::new(), point: p })];
+        }
+    }
+}
+
+/// A choice row stored in the dialog's extra parameters as `key: value` (the first choice, the
+/// command's default, is stored as no key at all).
+fn extra_choice(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, id: &str, key: &str, choices: &[(&str, &str)]) -> usize {
+    let cur = extra.get(key).and_then(Value::as_str).and_then(|v| choices.iter().position(|(_, x)| *x == v)).unwrap_or(0);
+    let mut i = cur;
+    let labels: Vec<&str> = choices.iter().map(|(l, _)| *l).collect();
+    combo(ui, id, &labels, &mut i);
+    if i != cur {
+        match choices.get(i) {
+            Some((_, v)) if i > 0 => {
+                extra.insert(key.into(), json!(v));
+            }
+            _ => {
+                extra.remove(key);
+            }
+        }
+    }
+    i
+}
+
+/// A checkbox stored in the dialog's extra parameters.
+fn extra_check(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, key: &str) {
+    let mut on = extra.get(key).and_then(Value::as_bool).unwrap_or(false);
+    if ui.checkbox(&mut on, "").changed() {
+        extra.insert(key.into(), json!(on));
+    }
+}
+
+/// A value field stored in the dialog's extra parameters (`default` until edited).
+fn extra_field(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, key: &str, default: &str) -> bool {
+    let mut v = extra.get(key).and_then(Value::as_str).unwrap_or(default).to_string();
+    let enter = field(ui, &mut v);
+    extra.insert(key.into(), json!(v));
+    enter
 }
 
 const CHAMFER_TYPES: [&str; 3] = ["Equal Distance", "Two Distances", "Distance and Angle"];
@@ -1828,6 +2099,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if *all {
                 common["through_all"] = json!(true);
             }
+            if to_object_on(&d.inputs) {
+                common["to"] = to_object_point(&d.inputs).ok_or("select the object to extrude to")?;
+            }
             let with = |extra: Value| -> Value {
                 let mut p = common.clone();
                 if let (Value::Object(m), Value::Object(e)) = (&mut p, extra) {
@@ -1858,10 +2132,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 _ => return Err("select an axis".into()),
             };
             let (sketch, idx) = profiles();
-            (
-                "solid.revolve",
-                json!({"sketch": sketch, "profiles": idx, "axis": axis, "angle": angle, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
-            )
+            let mut p =
+                json!({"sketch": sketch, "profiles": idx, "axis": axis, "angle": angle, "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            if to_object_on(&d.inputs) {
+                p["to"] = to_object_point(&d.inputs).ok_or("select the object to turn to")?;
+                // A To Object turn has no second side.
+                return Ok(vec![("solid.revolve".into(), p)]);
+            }
+            ("solid.revolve", p)
         }
         Kind::Fillet { radius, chamfer, ctype, distance2, angle, flip, .. } => {
             need(0, "edges")?;
@@ -1905,7 +2183,21 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 ("solid.chamfer", p)
             } else {
-                ("solid.fillet", json!({"edges": edges, "radius": radius}))
+                let mut p = json!({"edges": edges, "radius": radius});
+                if d.extra.get("type").and_then(Value::as_str) == Some("variable") {
+                    // The start radius goes at one end of the first edge (Swap Ends: the other).
+                    let ends = sels(d, 0).iter().find_map(|x| match x {
+                        Sel::Edge { body, index, .. } => {
+                            st.body(body).and_then(|b| b.mesh().edges.get(*index).and_then(|e| Some((*e.first()?, *e.last()?))))
+                        }
+                        _ => None,
+                    });
+                    let swap = d.extra.get("swap_ends").and_then(Value::as_bool).unwrap_or(false);
+                    if let Some((a, b)) = ends {
+                        p["start"] = pt(if swap { b } else { a });
+                    }
+                }
+                ("solid.fillet", p)
             }
         }
         Kind::Shell { thickness } => {
@@ -2039,10 +2331,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(2, "where to move it to")?;
             let mut p = json!({"bodies": body_names(0), "flip": flip});
             for (i, key) in [(1, "from"), (2, "to")] {
-                match sels(d, i).first() {
-                    Some(Sel::Face { point, .. }) => p[format!("{key}_face")] = pt(*point),
-                    Some(Sel::Vertex { point, .. }) => p[key] = pt(*point),
-                    _ => return Err("pick faces or vertices".into()),
+                let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or("picked");
+                match (sels(d, i).first(), snap) {
+                    (Some(Sel::Face { point, .. }), "center") => p[key] = json!({"snap": "face_center", "at": pt(*point)}),
+                    (Some(Sel::Face { point, .. } | Sel::Edge { point, .. }), "circle") => {
+                        p[key] = json!({"snap": "circle_center", "at": pt(*point)})
+                    }
+                    (Some(Sel::Face { point, .. }), _) => p[format!("{key}_face")] = pt(*point),
+                    (Some(Sel::Edge { point, .. }), _) => p[key] = json!({"snap": "edge_mid", "at": pt(*point)}),
+                    (Some(Sel::Vertex { point, .. }), _) => p[key] = pt(*point),
+                    _ => return Err("pick faces, edges or vertices".into()),
                 }
             }
             ("solid.align", p)
@@ -2161,7 +2459,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                         }
                     }
                 }
-                places.extend(by_sketch.into_iter().map(|(sk, ids)| json!({"sketch": sk, "points": ids})));
+                let all_points = d.extra.get("all_points").and_then(Value::as_bool).unwrap_or(false);
+                places.extend(
+                    by_sketch.into_iter().map(|(sk, ids)| if all_points { json!({ "sketch": sk }) } else { json!({"sketch": sk, "points": ids}) }),
+                );
             } else {
                 places.extend(face_points(0).into_iter().map(|p| json!({ "position": p })));
             }
@@ -2170,7 +2471,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 let mut params = place;
                 params["diameter"] = json!(diameter);
                 params["type"] = json!(ty);
-                if !opts.all {
+                if to_object_on(&d.inputs) {
+                    params["to"] = to_object_point(&d.inputs).ok_or("select the object to drill to")?;
+                } else if !opts.all {
                     params["depth"] = json!(depth);
                 }
                 if ty == "drilled" {
@@ -2201,6 +2504,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))
+        }
+        Kind::BoundaryFill { operation, cells, .. } => {
+            need(0, "the tool bodies")?;
+            let picked: Vec<Value> = cells.iter().filter(|c| c.2).map(|c| pt(c.0)).collect();
+            if picked.is_empty() {
+                return Err("tick the cells to fill".into());
+            }
+            ("SurfaceSculpt", json!({"tools": body_names(0), "cells": picked, "operation": OPS.get(*operation).copied().unwrap_or("new")}))
         }
         Kind::Combine { operation, keep_tools } => {
             need(0, "the target body")?;
@@ -2434,6 +2745,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 start: extent.start_offset.clone().unwrap_or_default(),
                 all: extent.through_all,
             };
+            with_to_object(&mut d, s, extent.to);
             // The dialog has no "flip": a flipped extrude is a negative distance.
             if let Kind::Extrude { direction, distance, .. } = &mut d.kind
                 && *direction == 1
@@ -2452,9 +2764,16 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets, .. } => {
+        FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets, angle2, symmetric, to } => {
             let mut d = start("solid.revolve")?;
             d.kind = Kind::Revolve { angle: angle.clone(), operation: op_index(operation) };
+            if let Some(a2) = angle2 {
+                d.extra.insert("angle2".into(), json!(a2));
+            }
+            if *symmetric {
+                d.extra.insert("direction".into(), json!("symmetric"));
+            }
+            with_to_object(&mut d, s, *to);
             let items = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             if let Some(inp) = d.inputs.get_mut(0) {
                 inp.items = items.into_iter().map(|index| Sel::Profile { sketch: *sketch, index }).collect();
@@ -2490,14 +2809,40 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     *flip = *f;
                 }
             }
+            // A chord-length or variable fillet.
+            if let FeatureKind::Fillet { style, .. } = &f.kind {
+                match style {
+                    FilletStyle::Constant => {}
+                    FilletStyle::Chord => {
+                        d.extra.insert("type".into(), json!("chord"));
+                    }
+                    FilletStyle::Variable { radius2, start } => {
+                        d.extra.insert("type".into(), json!("variable"));
+                        d.extra.insert("radius2".into(), json!(radius2));
+                        // The start was the first edge's last point: ends swapped.
+                        let first_end = edges.first().and_then(|p| edge_sel(s, *p)).and_then(|x| match x {
+                            Sel::Edge { body, index, .. } => {
+                                s.world_state().body(&body).and_then(|b| b.mesh().edges.get(index).and_then(|e| e.last().copied()))
+                            }
+                            _ => None,
+                        });
+                        let swapped = first_end.is_some_and(|e| e.dist(*start) < 1e-6);
+                        d.extra.insert("swap_ends".into(), json!(swapped));
+                    }
+                }
+            }
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = edges.iter().filter_map(|p| edge_sel(s, *p)).collect();
             }
             d
         }
-        FeatureKind::Shell { faces, thickness, .. } => {
+        FeatureKind::Shell { faces, thickness, direction, tangent_chain, .. } => {
             let mut d = start("solid.shell")?;
             d.kind = Kind::Shell { thickness: thickness.clone() };
+            d.extra.insert("tangent_chain".into(), json!(tangent_chain));
+            if !direction.is_empty() && direction != "inside" {
+                d.extra.insert("direction".into(), json!(direction));
+            }
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = faces.iter().filter_map(|p| face_sel(s, *p)).collect();
             }
@@ -2515,7 +2860,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("pull".into(), pt3(*pull));
             d
         }
-        FeatureKind::Hole { position, direction, diameter, depth, hole, points, thread, .. } => {
+        FeatureKind::Hole { position, direction, diameter, depth, hole, points, thread, to } => {
             let mut d = start("solid.hole")?;
             let mut k = hole_defaults();
             if let Kind::Hole { diameter: dia, depth: dep, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = &mut k {
@@ -2562,6 +2907,16 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     d.extra.insert("direction".into(), pt3(*direction));
                 }
             }
+            if to.is_some() {
+                if let Kind::Hole { opts, .. } = &mut d.kind {
+                    opts.all = false;
+                }
+                with_to_object(&mut d, s, *to);
+            }
+            // A hole at every point of a sketch.
+            if points.as_ref().is_some_and(|sp| sp.ids.is_empty()) {
+                d.extra.insert("all_points".into(), json!(true));
+            }
             d
         }
         FeatureKind::Box { corner, length, width, height, operation } => {
@@ -2599,6 +2954,27 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 operation: op_index(operation),
             };
             d.extra.insert("center".into(), pt3(*center));
+            d
+        }
+        FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {
+            let mut d = start("SurfaceSculpt")?;
+            // The cells again, ticked where a stored cell point lies in the same cell.
+            let before = s.model.state_before(f.id);
+            let found = fill_cells(&before, tools);
+            let filled: Vec<String> =
+                cells.iter().filter_map(|c| found.iter().min_by(|a, b| a.0.dist(*c).total_cmp(&b.0.dist(*c))).map(|x| x.1.clone())).collect();
+            let items: Vec<Sel> = tools.iter().map(|n| Sel::Body { name: n.clone() }).collect();
+            d.kind = Kind::BoundaryFill {
+                operation: op_index(operation),
+                cells: found.into_iter().map(|(p, l)| (p, l.clone(), filled.contains(&l))).collect(),
+                of: items.clone(),
+            };
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = items;
+            }
+            if *remove_tools {
+                d.extra.insert("remove_tools".into(), json!(true));
+            }
             d
         }
         FeatureKind::Combine { target, tools, operation, keep_tools } => {
@@ -2781,8 +3157,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Thread { face, designation, length, .. } => {
+        FeatureKind::Thread { face, designation, length, modeled } => {
             let mut d = start("solid.thread")?;
+            if *modeled {
+                d.extra.insert("modeled".into(), json!(true));
+            }
             d.kind = Kind::Thread { designation: designation.clone().unwrap_or_default(), length: length.clone().unwrap_or_default() };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = face_sel(s, *face).into_iter().collect();
