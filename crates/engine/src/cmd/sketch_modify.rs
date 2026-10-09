@@ -17,7 +17,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
-        .params("point: corner shared by two curves (\"l1.end\") | a, b: two lines or arcs meeting at a corner; radius: expr"),
+        .params("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal) | a, b: two lines or arcs meeting at a corner; radius: expr"),
     CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", chamfer_equal)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer")
@@ -480,46 +480,65 @@ fn cut_corner(sk: &mut Sketch, la: usize, lb: usize, c: usize, fa: usize, fb: us
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.fillet";
     let r_expr = expr(p, "radius").ok_or_else(|| bad(cmd, "`radius` must be a number or an expression"))?;
+    // Several corners at once (`points`), each like a single `point`.
+    let corners: Vec<Value> = match p.get("points").and_then(Value::as_array) {
+        Some(a) if !a.is_empty() && a.len() <= 500 => a.iter().map(|q| json!({ "point": q })).collect(),
+        Some(_) => return Err(bad(cmd, "`points` must list 1…500 corners")),
+        None => vec![p.clone()],
+    };
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let r = doc.eval(&r_expr, solvecraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
         if !(r > 1e-9 && r < 1e8) {
             return Err(bad(cmd, "radius must be positive"));
         }
-        let (la, lb, c, fa, fb) = match corner(sk, p, cmd) {
-            Ok(x) => x,
-            // Not two lines: a corner with an arc.
-            Err(e) => {
-                let Some((arc, cons)) = round_corner(sk, p, r, cmd)? else { return Err(e) };
-                let mut cons = cons;
-                let pname = doc.new_model_param(&r_expr, "mm");
-                cons.push(sk.add_constraint(ConstraintKind::Radius { c: arc, value: r }, Some(pname.clone()))?);
-                return Ok((ids_of(sk, &[arc]), cons, pname));
-            }
-        };
-        let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
-        let u = (pa - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
-        let v = (pb - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
-        let half = 0.5 * u.cross(v).atan2(u.dot(v)).abs();
-        if half < 1e-6 || half > std::f64::consts::FRAC_PI_2 - 1e-9 {
-            return Err(bad(cmd, "the lines are parallel"));
-        }
-        let d = r / half.tan();
-        let bis = (u + v).normalized().ok_or_else(|| bad(cmd, "the lines are parallel"))?;
-        let center = pc + bis * (r / half.sin());
-        let (ta, tb, _) = cut_corner(sk, la, lb, c, fa, fb, d, d, cmd)?;
-        let (qa, qb) = (sk.point(ta).unwrap_or_default(), sk.point(tb).unwrap_or_default());
-        let ccw = (qa - center).cross(qb - center) > 0.0;
-        let arc = if ccw {
-            sk.add_arc(center, qa, qb, [None, Some(ta), Some(tb)], None)?
-        } else {
-            sk.add_arc(center, qb, qa, [None, Some(tb), Some(ta)], None)?
-        };
-        let mut cons = vec![add_c(sk, ConstraintKind::Tangent { a: la, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: lb, b: arc })?];
         let pname = doc.new_model_param(&r_expr, "mm");
-        cons.push(sk.add_constraint(ConstraintKind::Radius { c: arc, value: r }, Some(pname.clone()))?);
-        Ok((ids_of(sk, &[arc]), cons, pname))
+        let (mut arcs, mut cons) = (Vec::new(), Vec::new());
+        for q in &corners {
+            let (arc, mut c) = fillet_corner(sk, q, r, cmd)?;
+            // One radius for them all: the first carries the dimension, the rest are equal to it.
+            match arcs.first() {
+                None => c.push(sk.add_constraint(ConstraintKind::Radius { c: arc, value: r }, Some(pname.clone()))?),
+                Some(first) => c.push(add_c(sk, ConstraintKind::Equal { a: *first, b: arc })?),
+            }
+            cons.extend(c);
+            arcs.push(arc);
+        }
+        Ok((ids_of(sk, &arcs), cons, pname))
     })?;
     Ok(json!({"curves": out.0, "constraints": out.1, "param": out.2, "sketch": info}))
+}
+
+/// Round one corner (`point` or `a`, `b`) with an arc of radius `r` tangent to both curves:
+/// the arc and the tangent constraints.
+fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize, Vec<String>)> {
+    let (la, lb, c, fa, fb) = match corner(sk, p, cmd) {
+        Ok(x) => x,
+        // Not two lines: a corner with an arc.
+        Err(e) => return round_corner(sk, p, r, cmd)?.ok_or(e),
+    };
+    let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
+    let u = (pa - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
+    let v = (pb - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
+    let half = 0.5 * u.cross(v).atan2(u.dot(v)).abs();
+    if half < 1e-6 || half > std::f64::consts::FRAC_PI_2 - 1e-9 {
+        return Err(bad(cmd, "the lines are parallel"));
+    }
+    let d = r / half.tan();
+    if d >= pa.dist(pc) - 1e-9 || d >= pb.dist(pc) - 1e-9 {
+        return Err(bad(cmd, format!("the radius is too large for that corner (it needs {d:.3} mm of each line)")));
+    }
+    let bis = (u + v).normalized().ok_or_else(|| bad(cmd, "the lines are parallel"))?;
+    let center = pc + bis * (r / half.sin());
+    let (ta, tb, _) = cut_corner(sk, la, lb, c, fa, fb, d, d, cmd)?;
+    let (qa, qb) = (sk.point(ta).unwrap_or_default(), sk.point(tb).unwrap_or_default());
+    let ccw = (qa - center).cross(qb - center) > 0.0;
+    let arc = if ccw {
+        sk.add_arc(center, qa, qb, [None, Some(ta), Some(tb)], None)?
+    } else {
+        sk.add_arc(center, qb, qa, [None, Some(tb), Some(ta)], None)?
+    };
+    let cons = vec![add_c(sk, ConstraintKind::Tangent { a: la, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: lb, b: arc })?];
+    Ok((arc, cons))
 }
 
 /// Fillet a corner where a line meets an arc, or two arcs meet: the arc of radius `r` touching
@@ -1167,3 +1186,7 @@ mod tests;
 #[cfg(test)]
 #[path = "sketch_robust_tests.rs"]
 mod robust_tests;
+
+#[cfg(test)]
+#[path = "sketch_corner_tests.rs"]
+mod corner_tests;
