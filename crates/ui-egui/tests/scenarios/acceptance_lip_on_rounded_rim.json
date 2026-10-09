@@ -1,0 +1,33 @@
+[
+ {
+  "pending": "#29: Plastic Lip fails on a rounded (filleted) shelled rim"
+ },
+ {
+  "note": "Acceptance (#27): a lip on the case's rounded rim with the Lip command."
+ },
+ {
+  "script": "examples/acceptance/sensor_enclosure.json"
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "plastic.lip",
+   "params": {
+    "face": [
+     0,
+     29,
+     25
+    ],
+    "width": 1,
+    "height": 1.5,
+    "body": "Case"
+   }
+  }
+ },
+ {
+  "expect": {
+   "errors": 0,
+   "bodies": 2
+  }
+ }
+]

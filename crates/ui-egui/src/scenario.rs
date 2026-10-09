@@ -27,6 +27,8 @@
 //!   `{"dimension": "d1"}` or `{"handle": "arrow"}` (a manipulator handle: see [`publish_handle`])
 //! - `{"autosave": true}`: autosave into the scenario's recovery folder; `{"restart": "crash" |
 //!   "close"}`: the app dies (or closes) and a new one starts on the same folders
+//! - `{"script": "examples/…/x.json"}`: run a command script through the engine; `"$DIR"` in a
+//!   `call` step's string parameters is the scenario's folder
 //! - `{"note": "…"}`: a comment; `{"pending": "why"}`: the scenario waits for a fix (its test
 //!   is ignored)
 //! - `{"expect": {…}}`: checks, see [`check`]; `{"until": {…}}` waits (frames) until they pass
@@ -93,6 +95,16 @@ pub fn clear_handles() {
     HANDLES.with(|h| h.borrow_mut().clear());
     RECTS.with(|h| h.borrow_mut().clear());
     COUNTS.with(|h| h.borrow_mut().clear());
+}
+
+/// `v` with "$DIR" in its strings replaced by `dir`.
+fn with_dir(v: Value, dir: &str) -> Value {
+    match v {
+        Value::String(t) => Value::String(t.replace("$DIR", dir)),
+        Value::Array(a) => Value::Array(a.into_iter().map(|x| with_dir(x, dir)).collect()),
+        Value::Object(o) => Value::Object(o.into_iter().map(|(k, x)| (k, with_dir(x, dir))).collect()),
+        other => other,
+    }
 }
 
 /// A fresh folder for one scenario's files.
@@ -363,8 +375,24 @@ impl Harness {
                     return Err(format!("{m} was answered after {frames} frames: the agent cursor did not act it out ({min})"));
                 }
                 v
+            } else if let Some(f) = s.get("script").and_then(Value::as_str) {
+                // A command script (`{"commands": [{command, params}]}`, path from the repository
+                // root) run through the engine, as `solvecraft-cli run` does.
+                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(f);
+                let text = std::fs::read_to_string(&path).map_err(|e| format!("{f}: {e}"))?;
+                let v: Value = serde_json::from_str(&text).map_err(|e| format!("{f}: {e}"))?;
+                for (i, c) in v["commands"].as_array().into_iter().flatten().enumerate() {
+                    let r = self.call("engine.execute", json!({"command": c["command"], "params": c.get("params").cloned().unwrap_or(json!({}))}));
+                    if r["ok"] != true {
+                        return Err(format!("{f}: step {} ({}): {}", i + 1, c["command"], r["error"]));
+                    }
+                }
+                self.frames(2);
+                return Ok(());
             } else if let Some(m) = s.get("call").and_then(Value::as_str) {
-                self.call(m, s.get("params").cloned().unwrap_or(json!({})))
+                // "$DIR" in a string parameter is the scenario's folder.
+                let params = with_dir(s.get("params").cloned().unwrap_or(json!({})), &self.dir.to_string_lossy());
+                self.call(m, params)
             } else if s.get("note").is_some() || s.get("pending").is_some() {
                 return Ok(());
             } else if let Some(name) = s.get("shot").and_then(Value::as_str) {

@@ -1,0 +1,27 @@
+[
+ {
+  "pending": "#40: offsets of projected geometry get new ids on recompute, the lid's lip fails"
+ },
+ {
+  "note": "Acceptance (#27): the board grows 60 \u2192 70 mm; the lid's lip (offsets of the case's projected rim) follows."
+ },
+ {
+  "script": "examples/acceptance/sensor_enclosure.json"
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "parameters.change",
+   "params": {
+    "name": "board_w",
+    "expression": "70 mm"
+   }
+  }
+ },
+ {
+  "expect": {
+   "errors": 0,
+   "bodies": 2
+  }
+ }
+]
