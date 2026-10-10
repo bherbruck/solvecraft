@@ -1445,6 +1445,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 
     let proj = projection(app, rect);
+    // Suppress hover for the whole navigation gesture, including frames between pointer
+    // events. Testing delta made the highlight reappear whenever a held drag paused.
+    // Resolve it before rendering so the GPU scene and screen overlays use the same hit.
+    let navigating =
+        scroll != 0.0 || middle || secondary_down || (app.viewport.nav.is_some() && primary_down) || app.viewport.spin || app.cam_anim.is_some();
+    let hits = hover.filter(|_| inside && app.viewport.boxsel.is_none() && !navigating).map(|p| pick_cached(app, &proj, p)).unwrap_or_default();
+    let cand = if app.tool.is_some() { hits.first().cloned().map(|h| (h, None)) } else { candidate(app, &hits).map(|(h, s)| (h, Some(s))) };
+    app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     let painter = ui.painter_at(rect);
     // Background gradient.
     let (top, bot) = (t.viewport_top, t.viewport_bottom);
@@ -1505,11 +1513,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 
     // ---- interaction ----
-    // No picking while the view moves (orbit, pan, zoom): nothing can be hovered meanwhile.
-    let navigating = scroll != 0.0 || ((middle || secondary_down) && delta != egui::Vec2::ZERO) || (app.viewport.nav.is_some() && primary_down);
-    let hits = hover.filter(|_| inside && app.viewport.boxsel.is_none() && !navigating).map(|p| pick_cached(app, &proj, p)).unwrap_or_default();
-    let cand = if app.tool.is_some() { hits.first().cloned().map(|h| (h, None)) } else { candidate(app, &hits).map(|(h, s)| (h, Some(s))) };
-    app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     let add = mods.shift || mods.command || mods.ctrl;
     if let Some(p) = hover.filter(|_| inside) {
         if app.tool.is_some() {
@@ -2403,6 +2406,88 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hover_frame(app: &mut SolveApp, ctx: &egui::Context, events: Vec<egui::Event>) {
+        let selected = app.highlighted();
+        let _ = ctx.run_ui(
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), events, ..Default::default() },
+            |ui| {
+                show(app, ui);
+            },
+        );
+        // Click selection is applied after rendering; hover itself must already be current.
+        if app.viewport.gpu.is_some() && selected == app.highlighted() {
+            assert_eq!(app.viewport.hl_key, highlight_key(app), "GPU highlight must use this frame's hover");
+        }
+    }
+
+    fn hover_app(gpu: bool) -> SolveApp {
+        let mut s = solvecraft_engine::Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.point", &json!({"point": [0, 0]})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.viewport.no_pixels = true;
+        if gpu {
+            // The callback is queued by egui; no device is needed to inspect scene updates.
+            app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1 });
+        }
+        app
+    }
+
+    #[test]
+    fn hover_stays_off_between_navigation_events_and_returns_on_release() {
+        for gpu in [false, true] {
+            for button in [egui::PointerButton::Middle, egui::PointerButton::Secondary, egui::PointerButton::Primary] {
+                let ctx = egui::Context::default();
+                let mut app = hover_app(gpu);
+                if button == egui::PointerButton::Primary {
+                    app.viewport.nav = Some(NavMode::Orbit);
+                }
+                hover_frame(&mut app, &ctx, vec![]);
+                let p = projection(&app, app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
+                hover_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
+                assert!(app.viewport.hover.is_some());
+                hover_frame(&mut app, &ctx, vec![egui::Event::PointerButton { pos: p, button, pressed: true, modifiers: Default::default() }]);
+                assert!(app.viewport.hover.is_none(), "hover on navigation press");
+                for offset in [1.0, 2.0, 3.0] {
+                    hover_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(p + vec2(offset, 0.0))]);
+                    assert!(app.viewport.hover.is_none(), "hover while moving");
+                    for _ in 0..3 {
+                        hover_frame(&mut app, &ctx, vec![]);
+                        assert!(app.viewport.hover.is_none(), "hover between movement events");
+                    }
+                }
+                hover_frame(&mut app, &ctx, vec![egui::Event::PointerButton { pos: p, button, pressed: false, modifiers: Default::default() }]);
+                assert!(app.viewport.hover.is_some(), "hover must return on release");
+            }
+        }
+    }
+
+    #[test]
+    fn hover_stays_off_during_spin_and_animated_views() {
+        let ctx = egui::Context::default();
+        let mut app = hover_app(true);
+        hover_frame(&mut app, &ctx, vec![]);
+        let p = projection(&app, app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
+        hover_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
+        assert!(app.viewport.hover.is_some());
+        app.viewport.spin = true;
+        for _ in 0..3 {
+            hover_frame(&mut app, &ctx, vec![]);
+            assert!(app.viewport.hover.is_none());
+        }
+        app.viewport.spin = false;
+        hover_frame(&mut app, &ctx, vec![]);
+        assert!(app.viewport.hover.is_some());
+        app.cam_anim = Some(solvecraft_engine::render::CameraAnim::new(app.cam, app.cam, 0.0));
+        for _ in 0..3 {
+            hover_frame(&mut app, &ctx, vec![]);
+            assert!(app.viewport.hover.is_none());
+        }
+        app.cam_anim = None;
+        hover_frame(&mut app, &ctx, vec![]);
+        assert!(app.viewport.hover.is_some());
+    }
 
     fn cylinder_app() -> SolveApp {
         let mut s = solvecraft_engine::Session::default();
