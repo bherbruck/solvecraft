@@ -18,7 +18,7 @@ build you also need `rustup target add wasm32-unknown-unknown` and [`trunk`](htt
 ```sh
 git clone https://github.com/bherbruck/solvecraft && cd solvecraft
 cargo run --release -p solvecraft -- --sample      # desktop app with a sample part
-cargo test --workspace --profile ci               # unit, engine and UI-scenario tests
+cargo xtask test                                   # unit, engine and UI-scenario tests
 cargo xtask ci                                     # everything a PR must pass (see below)
 ```
 
@@ -81,7 +81,7 @@ the most complete description of the house style.
 
 | What | Where | Run |
 |---|---|---|
-| Unit and engine tests | next to the code, or `*_tests.rs` files | `cargo test --workspace --profile ci` |
+| Unit and engine tests | next to the code, or `*_tests.rs` files | `cargo xtask test` (or `cargo test --workspace --profile ci`) |
 | UI scenarios | `crates/ui-egui/tests/scenarios/*.json` | part of `cargo test` |
 | Fusion oracle | `cargo xtask oracle` | needs the local oracle data (see below) |
 
@@ -105,7 +105,10 @@ put `{"pending": "why"}` in the scenario, and remove it in the PR that fixes the
 **Use the `ci` profile.** CI runs the tests with `--profile ci`: light optimisation, line tables,
 no LTO, and debug assertions off (truck has debug-only assertions that reject valid geometry). It
 builds several times faster than `--release`. If a test fails only in a plain debug build, say so
-in the PR.
+in the PR. `cargo xtask test` builds the tests with it and then runs every test binary at once
+(`cargo test` runs them one after another); arguments after `--` go to each binary, e.g.
+`cargo xtask test -- shell`. Tests run beside each other on a busy machine, so a test must not
+depend on wall-clock timing.
 
 **The Fusion oracle** is a set of 76 reference parts, each built in Fusion from a recipe.
 SolveCraft rebuilds the same recipe and compares volume, area and topology counts with Fusion's
@@ -120,8 +123,8 @@ install. If you work on geometry and want to check against it, ask in an issue.
    comment on the issue so it gets the `in progress` label and two people don't build the same
    thing. For anything bigger than a bug fix that has no issue yet, open one first.
 2. Branch from `main` and keep the PR to one topic.
-3. Run `cargo xtask ci` before pushing. It runs fmt, clippy (`-D warnings`), the tests in
-   release mode, the asset and layer checks, and the wasm build check. A PR has to pass it.
+3. Run `cargo xtask ci` before pushing. It runs fmt, the asset, licence and layer checks,
+   clippy (`-D warnings`), then the tests with the wasm build check alongside. A PR has to pass it.
 4. Reference the issue (`Fixes #12`). In the PR, say what you tested and how. For geometry work, include the measured numbers (and
    the expected ones).
 
