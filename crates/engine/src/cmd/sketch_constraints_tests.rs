@@ -99,7 +99,7 @@ fn curvature_polygon_arc_length_linear_diameter() {
 #[test]
 fn glyphs_and_snaps() {
     let mut s = new_sketch();
-    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10], "connect": false}));
     let l = ids(&r["curves"]);
     let g = run(&mut s, "sketch.glyphs", json!({}));
     assert_eq!(g["glyphs"].as_array().unwrap().len(), 4);

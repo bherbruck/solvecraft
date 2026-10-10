@@ -71,7 +71,7 @@ fn every_dimension_kind_has_a_drawable_frame() {
 #[test]
 fn dimension_text_is_stored_relative_to_the_dimension_and_follows_it() {
     let mut s = new_sketch();
-    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]], "connect": false}));
     let d = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "text_at": [20, -8]}));
     let param = d["param"].as_str().unwrap_or_default().to_string();
     let text = |s: &Session| {
@@ -126,7 +126,7 @@ fn dof(s: &mut Session) -> i64 {
 #[test]
 fn fixed_points_survive_drags_and_solves_and_unfix_frees_them() {
     let mut s = new_sketch();
-    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0], [30, 20]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0], [30, 20]], "connect": false}));
     let free = dof(&mut s);
     let r = run(&mut s, "sketch.constraint.fix", json!({"entity": "l1.end"}));
     assert_eq!(r["result"]["fixed"], true);
@@ -333,7 +333,7 @@ fn two_fully_constrained_entities_conflict_and_nothing_moves() {
 fn line_pairs_keep_the_first_line() {
     let lines = || {
         let mut s = new_sketch();
-        run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 2]]}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 2]], "connect": false}));
         run(&mut s, "sketch.line", json!({"points": [[5, 20], [25, 35]]}));
         s
     };
@@ -360,7 +360,7 @@ fn line_pairs_keep_the_first_line() {
 fn circle_pairs_keep_the_first_circle() {
     let circles = || {
         let mut s = new_sketch();
-        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5, "connect": false}));
         run(&mut s, "sketch.circle.center", json!({"center": [30, 10], "radius": 8}));
         s
     };
@@ -471,7 +471,7 @@ fn dragging_a_rectangle_side_moves_that_side_only() {
 #[test]
 fn dragging_circles_and_arcs() {
     let mut s = new_sketch();
-    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5, "connect": false}));
     // The edge changes the radius about a fixed centre; the centre moves the circle.
     drag(&mut s, "c1", [5.0, 0.0], [0.0, 8.0]);
     assert!((snap(&s, "c1").1.unwrap_or(0.0) - 8.0).abs() < 1e-9);
@@ -553,7 +553,7 @@ fn chain_follows_shared_and_coincident_ends() {
 #[test]
 fn constraints_and_dimensions_can_be_selected_and_deleted_together() {
     let mut s = new_sketch();
-    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "connect": false}));
     run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l1"}));
     run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 30}));
     let ids: Vec<String> = sketch(&s).constraints.iter().map(|c| c.id.clone()).collect();

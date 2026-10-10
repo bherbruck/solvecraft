@@ -1887,3 +1887,31 @@ fn rectangle_names_sides_and_corners() {
     assert!((p.x - 90.0).abs() < 1e-9 && (p.y + 5.0).abs() < 1e-9, "{c}");
     assert_eq!(pos(&s, &json!(format!("{}.start", c["sides"]["top"].as_str().unwrap()))), pos(&s, &c["corners"]["top_right"]), "{c}");
 }
+
+/// Points drawn exactly onto an existing point (the origin, a corner) are connected to it;
+/// `connect: false` leaves them free, and tying them again by hand is a no-op, not a conflict.
+#[test]
+fn drawing_on_existing_points_connects_to_them() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let n = |v: &Value| v["constraints"].as_array().map_or(0, Vec::len);
+    // Horizontal/vertical x4, plus the corner on the origin.
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    assert_eq!(n(&r), 5, "{r}");
+    run(&mut s, "sketch.dimension", json!({"entities": [r["curves"][0]], "value": 40}));
+    run(&mut s, "sketch.dimension", json!({"entities": [r["curves"][1]], "value": 30}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert_eq!(si["dof"], 0, "fully constrained without a hand-made coincident: {si}");
+    let again = run(&mut s, "sketch.constraint.coincident", json!({"a": "origin", "b": "l1.start"}));
+    assert_eq!(again["existing"], true, "{again}");
+
+    // A line from a corner, a circle on a corner and a point on the origin connect too.
+    assert_eq!(n(&run(&mut s, "sketch.line", json!({"points": [[40, 30], [60, 30]]}))), 1);
+    assert_eq!(n(&run(&mut s, "sketch.circle.center", json!({"center": [0, 30], "radius": 3}))), 1);
+    assert_eq!(n(&run(&mut s, "sketch.point", json!({"point": [0, 0]}))), 1);
+    // Close is not on it, and `connect: false` opts out.
+    assert_eq!(n(&run(&mut s, "sketch.point", json!({"point": [40.001, 0]}))), 0);
+    assert_eq!(n(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -10]], "connect": false}))), 0);
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert_ne!(si["status"], "conflict", "{si}");
+}

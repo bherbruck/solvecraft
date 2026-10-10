@@ -23,7 +23,7 @@ fn rect(kind: &str) -> (Session, Vec<String>) {
     let r = match kind {
         "center" => run(&mut s, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [13, 9]})),
         "two" => run(&mut s, "sketch.rectangle.two_point", json!({"p0": [1, 1], "p1": [21, 15]})),
-        _ => run(&mut s, "sketch.rectangle.three_point", json!({"p0": [0, 0], "p1": [20, 5], "p2": [18, 15]})),
+        _ => run(&mut s, "sketch.rectangle.three_point", json!({"p0": [0, 0], "p1": [20, 5], "p2": [18, 15], "connect": false})),
     };
     let sides = ids(&r["curves"]);
     assert_eq!(sides.len(), 4, "{r}");
