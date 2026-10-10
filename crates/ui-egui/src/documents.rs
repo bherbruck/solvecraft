@@ -298,13 +298,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let response = ui.interact(home, ui.id().with("home_tab"), Sense::click());
     ui.painter().rect_filled(
         home,
-        5.0,
+        egui::CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 },
         if app.home.open {
             t.toolbar
         } else if response.hovered() {
             t.hover
         } else {
-            Color32::from_white_alpha(10)
+            t.app_bar
         },
     );
     ui.painter().text(home.center(), Align2::CENTER_CENTER, "Home", FontId::proportional(13.0), if app.home.open { t.text } else { t.app_bar_text });
@@ -338,7 +338,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         } else if resp.hovered() {
             Color32::from_white_alpha(28)
         } else {
-            Color32::from_white_alpha(10)
+            t.app_bar
         };
         ui.painter().rect_filled(tr, egui::CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 }, fill);
         let ink = if active { t.text } else { t.app_bar_text };

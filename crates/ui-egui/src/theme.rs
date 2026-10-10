@@ -16,7 +16,6 @@ pub fn is_dark() -> bool {
 pub struct Tokens {
     pub app_bar: Color32,
     pub toolbar: Color32,
-    pub tab_active: Color32,
     pub panel: Color32,
     pub panel_header: Color32,
     pub border: Color32,
@@ -132,7 +131,6 @@ impl Tokens {
         Tokens {
             app_bar: Color32::from_rgb(52, 56, 64),
             toolbar: Color32::from_rgb(246, 247, 249),
-            tab_active: Color32::from_rgb(255, 255, 255),
             panel: Color32::from_rgb(250, 251, 252),
             panel_header: Color32::from_rgb(236, 238, 242),
             border: Color32::from_rgb(208, 212, 220),
@@ -212,7 +210,6 @@ impl Tokens {
         let mut t = Tokens::light();
         t.app_bar = Color32::from_rgb(28, 31, 38);
         t.toolbar = Color32::from_rgb(37, 41, 49);
-        t.tab_active = Color32::from_rgb(46, 52, 64);
         t.panel = Color32::from_rgb(39, 43, 52);
         t.panel_header = Color32::from_rgb(47, 52, 62);
         t.border = Color32::from_rgb(63, 69, 82);

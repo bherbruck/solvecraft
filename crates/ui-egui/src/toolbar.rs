@@ -38,7 +38,7 @@ pub fn promoted(tab: &str, panel: &str) -> usize {
 
 pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    egui::Panel::top("sc_appbar").exact_size(34.0).frame(egui::Frame::NONE.fill(t.app_bar)).show(ui, |ui| {
+    egui::Panel::top("sc_appbar").exact_size(34.0).show_separator_line(false).frame(egui::Frame::NONE.fill(t.app_bar)).show(ui, |ui| {
         let r = ui.max_rect();
         // The bar is the window's title bar: its empty space moves the window.
         if app.custom_titlebar || app.integrated_titlebar {
@@ -305,7 +305,6 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let active = app.ui.tab == tab;
             let resp = ui.interact(tr, ui.id().with(("tab", tab)), Sense::click());
             if active {
-                painter.rect_filled(tr, egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, t.tab_active);
                 let c = if tab == "SKETCH" { t.sketch_accent } else { t.accent };
                 painter.line_segment([pos2(tr.left() + 4.0, tr.bottom() - 1.0), pos2(tr.right() - 4.0, tr.bottom() - 1.0)], Stroke::new(2.0, c));
             } else if resp.hovered() {
