@@ -839,6 +839,22 @@ fn pipe_scale_offset_bounding_and_materials() {
     assert!(s.execute("material.assign", &json!({"bodies": ["Cube"], "material": "unobtainium"})).is_err());
 }
 
+/// Regression: deleting a pipe's path sketch left the pipe in the timeline ("unknown sketch").
+#[test]
+fn deleting_a_path_sketch_deletes_its_pipe() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let pipe = run(&mut s, "solid.pipe", json!({"path_sketch": "Path", "path": ["l1"], "diameter": 4}));
+    let deps = run(&mut s, "timeline.dependents", json!({"feature": "Path"}));
+    assert_eq!(deps["deleted_with_it"].as_array().map(Vec::len), Some(1), "{deps} (pipe {pipe})");
+    let r = run(&mut s, "timeline.delete", json!({"features": ["Path"]}));
+    assert_eq!(r["deleted"].as_array().map(Vec::len), Some(2), "{r}");
+    assert!(s.doc.features.is_empty(), "{:?}", s.doc.features.iter().map(|f| &f.name).collect::<Vec<_>>());
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+}
+
 #[test]
 fn components_occurrences_and_world_placement() {
     let mut s = Session::default();
