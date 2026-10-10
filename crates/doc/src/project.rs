@@ -485,7 +485,7 @@ fn tilted_circle(plane: &Plane, pts: &[Vec3]) -> Option<Vec<LinkGeom>> {
     let (c, n, r, closed) = circle3(pts)?;
     let sn = plane.normal();
     let cosang = n.dot(sn).abs();
-    if cosang > 1.0 - 1e-12 || cosang < 1e-9 {
+    if !(1e-9..=1.0 - 1e-12).contains(&cosang) {
         return None;
     }
     if closed {

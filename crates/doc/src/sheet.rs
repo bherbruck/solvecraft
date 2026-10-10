@@ -899,7 +899,7 @@ impl SheetBody {
             return Err(DocError::Invalid("the hem is shorter than its bend".into()));
         }
         // A hem folds back over the face it starts from (toward the bottom unless flipped).
-        let up = !top == flip;
+        let up = top != flip;
         let up = !up;
         self.flanges.push(SheetFlange {
             parent: panel,

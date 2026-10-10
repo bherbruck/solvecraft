@@ -1855,7 +1855,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Err(e) => d.error = Some(e),
         }
     }
-    if !(keep && !cancel) {
+    if !keep || cancel {
         crate::dialogs_motion::closed(app, &mut d, applied);
     }
     if keep && !cancel {

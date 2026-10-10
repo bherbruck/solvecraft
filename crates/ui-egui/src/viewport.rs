@@ -1371,7 +1371,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let secondary_down = secondary_down && app.viewport.context_menu.is_none();
     // The view cube handles its own clicks; the model underneath must not see them.
     let cube = Rect::from_center_size(pos2(rect.right() - 80.0, rect.top() + 80.0), vec2(150.0, 150.0));
-    let inside = hover.is_some_and(|p| rect.contains(p) && !cube.contains(p));
+    // Floating windows and menus own input over the model, including wheel navigation.
+    let inside = resp.contains_pointer() && hover.is_some_and(|p| !cube.contains(p));
     app.viewport.mouse = hover.filter(|_| inside);
     // Ctrl or Alt held: drawing and dragging don't snap.
     crate::drag_snap::set_suppressed(mods.ctrl || mods.alt || mods.command);
@@ -2086,7 +2087,7 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let (r, u, b) = cube_basis(&app.cam);
     let (wr, wu, _) = app.cam.basis();
     let painter = ui.painter_at(rect);
-    let hover = ui.input(|i| i.pointer.hover_pos());
+    let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(rect));
     let targets = cube_targets();
     let shapes = cube_projected(&targets, (r, u, b), c);
     let hovered = hover.and_then(|h| cube_hit(&shapes, h));
@@ -2532,6 +2533,124 @@ mod tests {
         for i in 0..box_body.body.face_count() {
             assert_eq!(box_body.mesh().surface_patch(i), vec![i]);
         }
+    }
+
+    #[test]
+    fn shortcuts_window_wheel_does_not_zoom_the_viewport() {
+        let ctx = egui::Context::default();
+        let mut app = SolveApp::new(solvecraft_engine::Session::default(), crate::Services::default());
+        app.viewport.no_pixels = true;
+        crate::help::run(&mut app, &ctx, "shortcuts");
+        let mut time = 0.0;
+        let mut frame = |app: &mut SolveApp, pointer: Option<Pos2>, wheel: f32| {
+            time += 1.0 / 60.0;
+            let mut events = Vec::new();
+            if let Some(p) = pointer {
+                events.push(egui::Event::PointerMoved(p));
+            }
+            if wheel != 0.0 {
+                events.push(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: vec2(0.0, wheel),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                });
+            }
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1100.0, 800.0))),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| show(app, ui));
+                    crate::prefs::show(app, ui.ctx());
+                },
+            );
+        };
+        // Let egui establish the floating window's size and hit-test widgets.
+        for _ in 0..4 {
+            frame(&mut app, None, 0.0);
+        }
+        let window = ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        let list = window.center() + vec2(140.0, 0.0);
+        let height = app.cam.half_height();
+        let target = app.cam.target;
+        frame(&mut app, Some(list), 0.0);
+        for n in 0..12 {
+            frame(&mut app, Some(list), if n == 0 { -120.0 } else { 0.0 });
+            assert_eq!(app.cam.half_height(), height, "wheel input over shortcuts must stay in the popup");
+            assert_eq!(app.cam.target, target);
+        }
+        // The window's non-scrolling sidebar must also shield the model.
+        frame(&mut app, Some(window.left_center() + vec2(30.0, 0.0)), -120.0);
+        assert_eq!(app.cam.half_height(), height);
+        // An exposed part of the viewport still accepts wheel navigation with the popup open.
+        let exposed = pos2(40.0, 700.0);
+        assert!(!window.contains(exposed));
+        frame(&mut app, Some(exposed), 0.0);
+        frame(&mut app, Some(exposed), -120.0);
+        assert_ne!(app.cam.half_height(), height);
+        // Closing the popup returns its former area to the viewport.
+        app.prefs_window.open = false;
+        for _ in 0..12 {
+            frame(&mut app, Some(list), 0.0);
+        }
+        let height = app.cam.half_height();
+        frame(&mut app, Some(list), -120.0);
+        assert_ne!(app.cam.half_height(), height);
+    }
+
+    #[test]
+    fn floating_dialog_blocks_viewport_hover_and_clicks() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}));
+        h.call("ui.view", json!({"view": "fit"}));
+        h.app.ui.pick_bodies = true;
+        let p = h.app.viewport.rect.unwrap().center();
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert!(h.app.viewport.hover.is_some(), "the test point must hover over the model");
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        assert!(!h.app.session.selection.is_empty(), "the uncovered model must be selectable");
+        h.app.session.selection.clear();
+
+        h.call("ui.prefs", json!({"open": "Navigation"}));
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        assert!(window.contains(p), "the dialog must cover the model at the test point");
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert!(h.app.viewport.hover.is_none(), "the dialog must block model highlights");
+        assert!(h.app.viewport.mouse.is_none());
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        assert!(h.app.session.selection.is_empty(), "clicks in the dialog must not select the model");
+
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert!(h.app.viewport.hover.is_some(), "closing the dialog must restore model highlights");
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        assert!(!h.app.session.selection.is_empty());
+    }
+
+    #[test]
+    fn floating_dialog_blocks_view_cube_highlights_and_clicks() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.resize", json!({"width": 800, "height": 700}));
+        let p = crate::scenario::handle_at("cube:top").unwrap();
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert_eq!(crate::scenario::count_of("cube_highlights"), Some(1.0));
+        h.call("ui.prefs", json!({"open": "Navigation"}));
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        assert!(window.contains(p), "the floating dialog must cover the cube target");
+        let camera = serde_json::to_value(h.app.cam).unwrap();
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert_eq!(crate::scenario::count_of("cube_highlights"), Some(0.0));
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        assert_eq!(serde_json::to_value(h.app.cam).unwrap(), camera, "dialog clicks must not turn the view cube");
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert_eq!(crate::scenario::count_of("cube_highlights"), Some(1.0));
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        assert_ne!(serde_json::to_value(h.app.cam).unwrap(), camera);
     }
 
     #[test]

@@ -1090,7 +1090,7 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 /// Per frame, after the viewport is drawn: constraint glyphs and the text-entry box.
 pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
     SHIFT.with(|c| c.set(ui.input(|i| i.modifiers.shift)));
-    glyphs(app, painter, proj, ui.input(|i| i.pointer.hover_pos()));
+    glyphs(app, painter, proj, ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)));
     snap_hint(app, painter, proj);
     combs(app, painter, proj);
     if DEFERRED.with(|d| d.replace(false)) {
