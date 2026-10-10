@@ -10,7 +10,7 @@ use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, vec2};
 use solvecraft_engine::geom::Vec3;
 
 use crate::theme::Tokens;
-use crate::viewport::Proj;
+use crate::viewport::{Proj, projected_polygon};
 
 /// A part of the triad.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -264,7 +264,7 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     }
     for (i, q) in &sh.planes {
         let c = col(Handle::Plane(*i), *i);
-        painter.add(Shape::convex_polygon(q.clone(), c.gamma_multiply(if hot(Handle::Plane(*i)) { 0.7 } else { 0.35 }), Stroke::new(1.0, c)));
+        painter.extend(projected_polygon(q, c.gamma_multiply(if hot(Handle::Plane(*i)) { 0.7 } else { 0.35 }), Stroke::new(1.0, c)));
     }
     for (i, a, b) in &sh.arrows {
         arrow(painter, *a, *b, col(Handle::Axis(*i), *i), hot(Handle::Axis(*i)));
@@ -412,6 +412,27 @@ pub fn axis_angle(m: &[[f64; 3]; 3]) -> (Vec3, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plane_squares_stay_within_the_triad() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let t = Triad { center: Vec3::ZERO, translate: true, rotate: false };
+        // The squares reach 0.45 √2 of the arrow length from the centre, plus stroke and feathering.
+        let limit = (0.45 * 2f64.sqrt() * LEN_PX) as f32 + 3.0;
+        let mut worst = 0.0f32;
+        for dir in crate::viewport::orbit_directions() {
+            let cam = solvecraft_engine::render::Camera::default().looking_from(dir);
+            let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
+            let l = mm_per_px(&proj, t.center).unwrap() * LEN_PX;
+            let sh = shapes(&proj, &t, l).unwrap();
+            for (_, q) in &sh.planes {
+                for p in crate::viewport::drawn_points(projected_polygon(q, Color32::GRAY, Stroke::new(1.0, Color32::BLACK))) {
+                    worst = worst.max(p.distance(sh.ball));
+                }
+            }
+        }
+        assert!(worst <= limit, "a vertex {worst} px from the centre (limit {limit})");
+    }
 
     #[test]
     fn rotations_compose_to_one_axis_angle() {

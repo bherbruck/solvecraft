@@ -125,6 +125,44 @@ impl Proj {
     }
 }
 
+/// A projected 3D face (convex): an unfeathered triangle fan, outlined one edge at a time (no
+/// joins between the edges). Unlike `Shape::convex_polygon`, it stays inside its outline when
+/// the face turns edge-on.
+pub(crate) fn projected_polygon(pts: &[Pos2], fill: Color32, stroke: Stroke) -> Vec<Shape> {
+    let mut mesh = egui::Mesh::default();
+    for (i, p) in (0u32..).zip(pts) {
+        mesh.colored_vertex(*p, fill);
+        if i >= 2 {
+            mesh.add_triangle(0, i - 1, i);
+        }
+    }
+    let mut out = vec![Shape::mesh(mesh)];
+    out.extend(pts.iter().zip(pts.iter().skip(1).chain(pts.first())).map(|(a, b)| Shape::line_segment([*a, *b], stroke)));
+    out
+}
+
+/// View directions all round, a few degrees apart, none exactly along an axis.
+#[cfg(test)]
+pub(crate) fn orbit_directions() -> impl Iterator<Item = Vec3> {
+    (0..90).flat_map(|i| {
+        (0..45).map(move |j| {
+            let (yaw, pitch) = (f64::from(i) * 4.0f64.to_radians() + 0.003, f64::from(j) * 4.0f64.to_radians() - 1.5);
+            Vec3::new(pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), pitch.sin())
+        })
+    })
+}
+
+/// Every vertex egui draws for `shapes`.
+#[cfg(test)]
+pub(crate) fn drawn_points(shapes: Vec<Shape>) -> Vec<Pos2> {
+    let mut tess = egui::epaint::Tessellator::new(1.0, egui::epaint::TessellationOptions::default(), [1, 1], vec![]);
+    let mut mesh = egui::Mesh::default();
+    for shape in shapes {
+        tess.tessellate_shape(shape, &mut mesh);
+    }
+    mesh.vertices.iter().map(|v| v.pos).collect()
+}
+
 fn rgba(c: Rgb) -> [u8; 4] {
     [c.0, c.1, c.2, 255]
 }
@@ -1953,9 +1991,9 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         let n = tg.normal();
         let shade = (0.75 + 0.25 * n.dot(b)) as f32;
         let fill = if tg.corner { t.cube_face.gamma_multiply(shade * 0.92) } else { t.cube_face.gamma_multiply(shade) };
-        painter.add(Shape::convex_polygon(pts.clone(), fill.to_opaque(), Stroke::new(1.0, t.cube_edge)));
+        painter.extend(projected_polygon(pts, fill.to_opaque(), Stroke::new(1.0, t.cube_edge)));
         if hovered == Some(*i) {
-            painter.add(Shape::convex_polygon(pts.clone(), t.accent_soft, Stroke::new(1.0, t.accent)));
+            painter.extend(projected_polygon(pts, t.accent_soft, Stroke::new(1.0, t.accent)));
         }
         let centre = cube_centroid(pts);
         crate::scenario::publish_handle(&format!("cube:{}", tg.name), centre);
@@ -2277,6 +2315,25 @@ mod tests {
         let shapes = cube_projected(&targets, basis_from(Vec3::new(1.0, -1.0, 1.0)), c);
         assert_eq!(shapes.len(), 3 + 4);
         assert_eq!(cube_hit(&shapes, pos2(400.0, 400.0)), None);
+    }
+
+    /// From any direction, including faces turned nearly edge-on, everything drawn stays within
+    /// the cube.
+    #[test]
+    fn view_cube_faces_never_spike_past_the_cube() {
+        let targets = cube_targets();
+        let c = pos2(100.0, 100.0);
+        // The cube's circumradius (corner at √3) plus the stroke and feathering.
+        let limit = (3f64.sqrt() * CUBE_SCALE) as f32 + 3.0;
+        let mut worst = 0.0f32;
+        for dir in orbit_directions() {
+            for (_, pts) in cube_projected(&targets, basis_from(dir), c) {
+                for p in drawn_points(projected_polygon(&pts, Color32::GRAY, Stroke::new(1.0, Color32::BLACK))) {
+                    worst = worst.max(p.distance(c));
+                }
+            }
+        }
+        assert!(worst <= limit, "a vertex {worst} px from the centre (limit {limit})");
     }
 
     #[test]
