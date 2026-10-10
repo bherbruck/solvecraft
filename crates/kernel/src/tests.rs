@@ -259,6 +259,22 @@ fn loft_and_sweep() {
 }
 
 #[test]
+fn moving_a_body_with_an_intersection_curve_edge_ends() {
+    // A cylinder cut by a tilted box keeps an elliptical intersection curve as an edge. Moving
+    // such a body scales the curve's tolerance by the matrix norm, whose root refinement cycled
+    // forever for about one translation in eight (this one included): the app hung.
+    let cyl = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 40.0).unwrap();
+    let block = box_solid(Vec3::new(-20.0, -20.0, 20.0), Vec3::new(20.0, 20.0, 60.0)).unwrap();
+    let block = crate::ops::transform(&block, Vec3::ZERO, Vec3::new(0.0, 0.0, 20.0), Vec3::X, 0.4).unwrap();
+    let cut = boolean(&cyl, &block, BoolOp::Cut).unwrap().unwrap();
+    assert!(cut.solid.edge_iter().any(|e| matches!(e.curve(), truck_modeling::Curve::IntersectionCurve(_))));
+    let t = Vec3::new(0.6911, -0.3337, -0.6127) * 2.334;
+    let moved = crate::ops::transform(&cut, t, Vec3::ZERO, Vec3::Z, 0.0).unwrap();
+    let (v0, v1) = (measure(&cut).unwrap().volume, measure(&moved).unwrap().volume);
+    assert!(rel(v0, v1) < 1e-6, "{v0} vs {v1}");
+}
+
+#[test]
 fn planar_booleans_with_coincident_faces() {
     // L-bracket: a wall flush with three sides of its base.
     let base = box_solid(Vec3::ZERO, Vec3::new(80.0, 50.0, 8.0)).unwrap();
