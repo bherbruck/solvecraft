@@ -1,9 +1,9 @@
 # Release pipeline, after PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 #
-# Push a tag `v<version>` (matching [workspace.package] version in Cargo.toml) and this builds and
-# packages SolveCraft for every platform and publishes the GitHub release "SolveCraft v<version>"
-# with SHA256SUMS.txt, .github/release-notes.md and GitHub's generated "What's Changed". A
-# version with a suffix (0.2.0-rc.1) is a pre-release. Nothing is signed yet.
+# Push to `release` to build packages and create/update a DRAFT GitHub Release. The version
+# comes from [workspace.package] in Cargo.toml. An agent verifies the artifacts and publishes
+# the draft separately; see docs/releasing.md. Tags and pushes to main do not trigger releases.
+# A version with a suffix (0.2.0-rc.1) is a pre-release. Nothing is signed yet.
 #
 #   Linux x86_64, aarch64   AppImage (+ .zsync), .deb, .rpm, .flatpak, .tar.gz     packaging/linux
 #   FreeBSD x86_64          .tar.gz (built in a FreeBSD VM)                        packaging/freebsd
@@ -11,17 +11,16 @@
 #   Windows x64, x86, arm64 .msi and a portable .zip; x64 also the plain .exe      packaging/windows
 #   Web                     a .zip of the static site                              packaging/web
 #
-# A dry run: Actions > Release > Run workflow (publish off) builds everything and keeps it as
-# the release-assets artifact instead of releasing.
+# A dry run: dispatch with draft=false (the default). Only the release branch may create drafts.
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [release]
   workflow_dispatch:
     inputs:
-      publish:
-        description: "Publish the release (off: a dry run; the files become the release-assets artifact)"
+      draft:
+        description: "Create/update a draft (release branch only; off: build artifacts only)"
         type: boolean
         default: false
 
@@ -47,10 +46,16 @@ jobs:
       - uses: actions/checkout@v4
       - id: v
         name: Resolve version
+        env:
+          REQUEST_DRAFT: ${{ inputs.draft || false }}
         run: |
           . packaging/env.sh
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
-            echo "::error::tag $GITHUB_REF_NAME doesn't match the Cargo.toml version $VERSION"
+          if ! printf '%s' "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$'; then
+            echo "::error::Cargo.toml must contain a version like 1.2.3 or 1.2.3-rc.1"
+            exit 1
+          fi
+          if [ "$REQUEST_DRAFT" = true ] && [ "$GITHUB_REF" != refs/heads/release ]; then
+            echo "::error::Draft releases must be built from the release branch"
             exit 1
           fi
           case "$VERSION" in *-*) pre=true ;; *) pre=false ;; esac
@@ -295,7 +300,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: GitHub Release
+    name: Draft GitHub Release or dry-run artifacts
     needs: [version, linux, flatpak, freebsd, macos, windows, web]
     runs-on: ubuntu-latest
     permissions:
@@ -316,27 +321,47 @@ jobs:
         run: |
           (cd artifacts && sha256sum -- * | tee SHA256SUMS.txt)
           sed "s/{version}/$VERSION/g" .github/release-notes.md >notes.md
-      - name: Publish the release
-        if: github.event_name == 'push' || inputs.publish
+      - name: Create or update the draft release
+        if: github.ref == 'refs/heads/release' && (github.event_name == 'push' || inputs.draft)
         working-directory: artifacts
         run: |
           tag="v$VERSION"
-          pre=()
-          if [ "$PRERELEASE" = true ]; then pre=(--prerelease); else pre=(--latest); fi
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "::error::Release $tag already exists. Bump the version before tagging."
+          # Refuse existing tags: a draft must point at this build, never an older tag.
+          # matching-refs returns [] for an absent tag and fails on API/auth errors.
+          existing_refs="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" \
+            --jq '.[].ref')"
+          if printf '%s\n' "$existing_refs" | grep -Fxq "refs/tags/$tag"; then
+            echo "::error::Tag $tag already exists. Choose a new version; never move a release tag."
             exit 1
           fi
-          gh release create "$tag" --title "SolveCraft v$VERSION" --verify-tag --notes-file ../notes.md --generate-notes "${pre[@]}" -- *
+          pre=()
+          if [ "$PRERELEASE" = true ]; then pre=(--prerelease); fi
+          if draft="$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [ "$draft" != true ]; then
+              echo "::error::Release $tag is already published. Bump the version before releasing."
+              exit 1
+            fi
+            # Replace the complete draft asset set, including assets removed in this build.
+            assets="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+            while IFS= read -r asset; do
+              if [ -n "$asset" ]; then gh release delete-asset "$tag" "$asset" --yes; fi
+            done <<<"$assets"
+            gh release edit "$tag" --draft --title "SolveCraft v$VERSION" \
+              --target "$GITHUB_SHA" --prerelease="$PRERELEASE"
+            gh release upload "$tag" --clobber -- *
+          else
+            gh release create "$tag" --draft --title "SolveCraft v$VERSION" \
+              --target "$GITHUB_SHA" --notes-file ../notes.md --generate-notes "${pre[@]}" -- *
+          fi
           {
-            echo "Published **SolveCraft v$VERSION** at \`${GITHUB_SHA::9}\`:"
+            echo "Draft **SolveCraft v$VERSION** at \`${GITHUB_SHA::9}\`:"
             echo
             sed 's/^/    /' SHA256SUMS.txt
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Keep the files (dry run)
-        if: github.event_name == 'workflow_dispatch' && !inputs.publish
+        if: github.event_name == 'workflow_dispatch' && !inputs.draft
         run: cp notes.md artifacts/release-notes.md
-      - if: github.event_name == 'workflow_dispatch' && !inputs.publish
+      - if: github.event_name == 'workflow_dispatch' && !inputs.draft
         uses: actions/upload-artifact@v4
         with:
           name: release-assets
