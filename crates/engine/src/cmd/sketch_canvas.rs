@@ -57,6 +57,8 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         return Err(bad(cmd, "`width` must be positive"));
     }
     let opacity = num(p, "opacity").unwrap_or(if decal { 1.0 } else { 0.5 }).clamp(0.0, 1.0);
+    // It belongs to the active component (its plane is in that frame) and moves with it.
+    let component = s.active_component;
     let doc = s.doc_mut();
     let id = doc.canvases.iter().map(|c| c.id).max().unwrap_or(0) + 1;
     let base = if decal { "Decal" } else { "Canvas" };
@@ -74,6 +76,7 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         opacity,
         flip: bool_(p, "flip").unwrap_or(false),
         visible: true,
+        component,
     });
     Ok(json!({"canvas": id, "name": name, "pixels": pixels}))
 }

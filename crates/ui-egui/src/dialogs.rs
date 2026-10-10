@@ -480,10 +480,12 @@ impl Dialog {
                                 .collect::<Vec<_>>()
                         })
                         .unwrap_or_else(|| vec![sel.clone()]),
+                    (Kind::Measure { .. }, _) => vec![crate::viewport::measurement_selection(s, sel)],
+                    _ if inp.multi => crate::viewport::grouped_selection(s, sel),
                     _ => vec![sel.clone()],
                 };
                 for x in picked {
-                    if !inp.items.contains(&x) {
+                    if !inp.items.iter().any(|y| selection::same_item(y, &x)) {
                         inp.items.push(x);
                     }
                 }
@@ -631,8 +633,11 @@ impl Dialog {
 
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
+        let measure = matches!(self.kind, Kind::Measure { .. });
+        let sel = if measure { crate::viewport::measurement_selection(s, &sel) } else { sel };
         let chain = matches!(self.kind, Kind::Fillet { chain: true, .. });
-        let mut picked = vec![sel.clone()];
+        let mut picked =
+            if !measure && self.active_input().is_some_and(|i| i.multi) { crate::viewport::grouped_selection(s, &sel) } else { vec![sel.clone()] };
         // Tangent chain: an edge brings the edges that continue it smoothly.
         if chain
             && let Sel::Edge { body, index, .. } = &sel
@@ -667,13 +672,15 @@ impl Dialog {
     }
 
     /// Box selection result: replace (or add to) the active input.
-    pub fn take_box(&mut self, sels: Vec<Sel>, add: bool) {
+    pub fn take_box(&mut self, s: &Session, sels: Vec<Sel>, add: bool) {
+        let measure = matches!(self.kind, Kind::Measure { .. });
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
         if !add {
             inp.items.clear();
         }
         for x in sels {
-            if fits(inp.accept, &x) && !inp.items.contains(&x) {
+            let x = if measure { crate::viewport::measurement_selection(s, &x) } else { x };
+            if fits(inp.accept, &x) && !inp.items.iter().any(|y| selection::same_item(y, &x)) {
                 inp.items.push(x);
             }
         }
@@ -1848,7 +1855,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Err(e) => d.error = Some(e),
         }
     }
-    if !(keep && !cancel) {
+    if !keep || cancel {
         crate::dialogs_motion::closed(app, &mut d, applied);
     }
     if keep && !cancel {
@@ -2691,11 +2698,50 @@ pub(crate) fn profile_indices(ss: &solvecraft_engine::doc::SolvedSketch, sel: &P
     }
 }
 
+thread_local! {
+    /// A dialog is being filled from a feature: its points are in component frames.
+    static REFILL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// While filling a dialog from a feature (dropped at the end).
+struct Refill;
+
+impl Refill {
+    fn start() -> Refill {
+        REFILL.with(|r| r.set(true));
+        Refill
+    }
+}
+
+impl Drop for Refill {
+    fn drop(&mut self) {
+        REFILL.with(|r| r.set(false));
+    }
+}
+
+/// A point stored in a feature, as it shows on world body `body`: features keep their picks in
+/// the frame of the body they were on, so each body's placement takes the point to the world
+/// (a moved component, a pasted instance). Other points are the world already.
+fn stored_on(frames: &Option<Vec<(String, solvecraft_engine::doc::Mat)>>, body: &str, p: Vec3) -> Vec3 {
+    frames.as_ref().and_then(|f| f.iter().find(|(n, _)| n == body)).map(|(_, m)| solvecraft_engine::doc::apply_point(m, p)).unwrap_or(p)
+}
+
+/// Body placements while filling a dialog from a feature (when anything is placed).
+fn stored_frames(s: &Session) -> Option<Vec<(String, solvecraft_engine::doc::Mat)>> {
+    if !REFILL.with(std::cell::Cell::get) || !solvecraft_engine::frames::placed(s) {
+        return None;
+    }
+    let st = s.model.state();
+    Some(s.doc.body_frames(&st).into_iter().map(|(w, _, _, m)| (w, m)).collect())
+}
+
 /// The edge of a visible body through (or nearest) a point.
-pub(crate) fn edge_sel(s: &Session, p: Vec3) -> Option<Sel> {
+pub(crate) fn edge_sel(s: &Session, p0: Vec3) -> Option<Sel> {
     let st = s.world_state();
+    let frames = stored_frames(s);
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
+        let p = stored_on(&frames, &b.name, p0);
         let m = b.mesh();
         for (i, e) in m.edges.iter().enumerate() {
             let d = e.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
@@ -2708,10 +2754,12 @@ pub(crate) fn edge_sel(s: &Session, p: Vec3) -> Option<Sel> {
 }
 
 /// The body face containing a point (nearest triangle).
-pub(crate) fn face_sel(s: &Session, p: Vec3) -> Option<Sel> {
+pub(crate) fn face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
     let st = s.world_state();
+    let frames = stored_frames(s);
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
+        let p = stored_on(&frames, &b.name, p0);
         let m = b.mesh();
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {
             let Some([a, bb, c]) = m.tri(t) else { continue };
@@ -2721,7 +2769,7 @@ pub(crate) fn face_sel(s: &Session, p: Vec3) -> Option<Sel> {
             }
         }
     }
-    best.filter(|(d, _)| *d < 1e-3 + 1e-6 * p.len()).map(|x| x.1)
+    best.filter(|(d, _)| *d < 1e-3 + 1e-6 * p0.len()).map(|x| x.1)
 }
 
 pub(crate) fn plane_sel(s: &Session, pl: &PlaneRef) -> Option<Sel> {
@@ -2756,6 +2804,7 @@ fn pt3(v: Vec3) -> Value {
 /// A dialog that edits an existing feature, filled from it. The timeline is rolled back to just
 /// before the feature, so its references show on the geometry they refer to.
 pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dialog> {
+    let _refill = Refill::start();
     let s = &app.session;
     let f = s.doc.feature(id)?.clone();
     let st = s.world_state();

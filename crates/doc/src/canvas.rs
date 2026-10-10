@@ -34,6 +34,14 @@ pub struct Canvas {
     pub flip: bool,
     #[serde(default = "yes")]
     pub visible: bool,
+    /// The component it belongs to (its plane is in that component's frame, so it moves with
+    /// the component's occurrence); 0 = the root.
+    #[serde(default, skip_serializing_if = "is_root")]
+    pub component: u64,
+}
+
+fn is_root(c: &u64) -> bool {
+    *c == 0
 }
 
 fn half() -> f64 {
@@ -57,12 +65,25 @@ impl Canvas {
         let f = if self.flip { -1.0 } else { 1.0 };
         [rot(-hw * f, -hh), rot(hw * f, -hh), rot(hw * f, hh), rot(-hw * f, hh)]
     }
-    /// Corners in world coordinates.
+    /// Corners on `plane` (in whatever frame the plane is given).
     pub fn world_corners(&self, plane: &Plane) -> [Vec3; 4] {
         self.corners().map(|p| plane.to_world(p))
     }
     pub fn bytes(&self) -> Option<Vec<u8>> {
         base64_decode(&self.data)
+    }
+}
+
+impl crate::Document {
+    /// A canvas's plane in the world: resolved in its component's frame, then placed where the
+    /// component's occurrence puts it.
+    pub fn canvas_plane(&self, vals: &std::collections::BTreeMap<String, crate::expr::Value>, c: &Canvas) -> crate::Result<Plane> {
+        let p = self.resolve_plane(vals, &c.plane, 0)?;
+        let m = self.component_transform(c.component);
+        if crate::is_identity(&m) {
+            return Ok(p);
+        }
+        Ok(Plane::new(crate::apply_point(&m, p.origin), crate::apply_vector(&m, p.x), crate::apply_vector(&m, p.y)).unwrap_or(p))
     }
 }
 

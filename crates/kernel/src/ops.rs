@@ -15,6 +15,12 @@ pub enum BoolOp {
     Intersect,
 }
 
+/// Whether a union can sew two matching planar faces without intersecting them.
+/// Callers can retain the exact touching tool instead of extending it into material.
+pub fn can_join_touching_faces(a: &Body, b: &Body) -> bool {
+    a.solid.boundaries().len() == 1 && b.solid.boundaries().len() == 1 && crate::coplanar::glue(a, b).is_some_and(|r| r.is_ok())
+}
+
 /// Shifts applied to both operands on retries. The boolean classifies some faces by casting a
 /// ray whose direction is derived from point coordinates; moving both solids (and the result
 /// back) leaves the geometry unchanged but changes those rays.
@@ -46,7 +52,10 @@ fn mismatch(a: &solvecraft_geom::Mesh, b: &solvecraft_geom::Mesh, result: &solve
     let hi = ba.max.min(bb.max);
     let all = ba.union(&bb);
     let mut boxes = vec![(all, 300usize)];
-    if lo.x < hi.x && lo.y < hi.y && lo.z < hi.z {
+    // A touching seam can overlap by round-off only. Samples there sit on the
+    // operands' boundaries, where ray parity cannot classify membership reliably.
+    let gap = all.diagonal().max(1.0) * 1e-9;
+    if hi.x - lo.x > gap && hi.y - lo.y > gap && hi.z - lo.z > gap {
         boxes.push((solvecraft_geom::Aabb3 { min: lo, max: hi }, 900));
     }
     let (ia_idx, ib_idx, ir_idx) = (a.inside_index(), b.inside_index(), result.inside_index());
@@ -180,11 +189,28 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     r
 }
 
+/// Smallest side of the box where the bodies' vertex boxes overlap (infinite when they don't).
+fn meeting_size(a: &Body, b: &Body) -> f64 {
+    let bbox = |x: &Body| {
+        let mut bb = solvecraft_geom::Aabb3::EMPTY;
+        for v in x.solid.vertex_iter() {
+            bb.add(from_p3(v.point()));
+        }
+        bb
+    };
+    let (ba, bb) = (bbox(a), bbox(b));
+    let s = solvecraft_geom::Aabb3 { min: ba.min.max(bb.min), max: ba.max.min(bb.max) }.size();
+    if s.x > 0.0 && s.y > 0.0 && s.z > 0.0 { s.x.min(s.y).min(s.z) } else { f64::INFINITY }
+}
+
 fn boolean_whole(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     a.require_brep("a boolean")?;
     b.require_brep("a boolean")?;
     let size = a.size().max(b.size());
-    let tol_m = size * 5e-4;
+    // The checks mesh both bodies; where they meet in a region much thinner than they are (a
+    // thin part trimmed by a long one), a step from their size would facet the small faces
+    // there coarsely enough to fail the membership test on a correct result.
+    let tol_m = (size * 5e-4).min(meeting_size(a, b) * 2e-3).max(size * 1e-5);
     let meshes = (a.tessellate(tol_m).ok(), b.tessellate(tol_m).ok());
     let (va, vb) = match &meshes {
         (Some(ma), Some(mb)) => (ma.measure().volume, mb.measure().volume),
@@ -287,7 +313,7 @@ fn boolean_whole(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
                     empty_votes += 1;
                     last = "empty result".into();
                 }
-                Ok(s) => match Body::new(crate::heal::heal_keep(s, size, &keep)) {
+                Ok(s) => match guard("boolean result", || Body::new(crate::heal::heal_keep(s, size, &keep))) {
                     Ok(body) => {
                         let (ok, v) = check(&body);
                         if ok {
@@ -489,6 +515,15 @@ pub fn transform(body: &Body, translate: Vec3, origin: Vec3, axis: Vec3, angle: 
 /// Split a body with a plane: the parts on the positive and the negative side of the plane
 /// (only the non-empty ones).
 pub fn split_by_plane(body: &Body, plane: &solvecraft_geom::Plane) -> Result<Vec<Body>> {
+    let mut out = Vec::new();
+    for positive in [true, false] {
+        out.extend(half_space(body, plane, positive)?);
+    }
+    Ok(out)
+}
+
+/// The part of a body on one side of a plane (`None` when nothing is there).
+pub(crate) fn half_space(body: &Body, plane: &solvecraft_geom::Plane, positive: bool) -> Result<Option<Body>> {
     body.require_brep("split")?;
     let size = body.size();
     let mut bb = solvecraft_geom::Aabb3::EMPTY;
@@ -506,12 +541,7 @@ pub fn split_by_plane(body: &Body, plane: &solvecraft_geom::Plane) -> Result<Vec
         ]),
         holes: vec![],
     };
-    let mut out = Vec::new();
-    for (lo, hi) in [(0.0, reach), (-reach, 0.0)] {
-        let half = crate::build::extrude(plane, std::slice::from_ref(&sq), lo, hi)?.pop().ok_or_else(|| KernelError::Failed("half space".into()))?;
-        if let Some(part) = boolean(body, &half, BoolOp::Intersect)? {
-            out.push(part);
-        }
-    }
-    Ok(out)
+    let (lo, hi) = if positive { (0.0, reach) } else { (-reach, 0.0) };
+    let half = crate::build::extrude(plane, std::slice::from_ref(&sq), lo, hi)?.pop().ok_or_else(|| KernelError::Failed("half space".into()))?;
+    boolean(body, &half, BoolOp::Intersect)
 }

@@ -10,7 +10,7 @@ fn plane_param(pl: &Value) -> Value {
     let origin_zero = pl.get("origin").and_then(Value::as_array).is_none_or(|o| o.iter().all(|x| x.as_f64().unwrap_or(0.0).abs() < 1e-12));
     let std = match r.to_ascii_uppercase().as_str() {
         "XY" => Some(([1.0, 0.0, 0.0], [0.0, 1.0, 0.0])),
-        "XZ" => Some(([1.0, 0.0, 0.0], [0.0, 0.0, 1.0])),
+        "XZ" => Some(([1.0, 0.0, 0.0], [0.0, 0.0, -1.0])),
         "YZ" => Some(([0.0, 1.0, 0.0], [0.0, 0.0, 1.0])),
         _ => None,
     };

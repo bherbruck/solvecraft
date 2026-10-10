@@ -10,6 +10,12 @@ use crate::{EngineError, Result, Sel, Session, Snapshot};
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo(),
     CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo(),
+    CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint)
+        .noundo()
+        .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint)"),
+    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", restore_checkpoint)
+        .noundo()
+        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included"),
     CommandSpec::new("timeline.compute_all", "Compute All", compute_all).at("SOLID", "MODIFY").icon("compute").noundo(),
     CommandSpec::new("timeline.delete", "Delete", delete)
         .at("SOLID", "MODIFY")
@@ -28,8 +34,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params("feature: id|name → features deleted with it, and features that would fail without it"),
     CommandSpec::new("timeline.suppress", "Suppress Feature", suppress).params("feature: id|name, suppressed?: bool (default toggles)"),
-    CommandSpec::new("timeline.edit", "Edit Feature", edit_feature)
-        .params("feature: id|name, set: {fields to change, e.g. {\"extent\": {\"distance\": \"30\"}}}"),
+    CommandSpec::new("timeline.edit", "Edit Feature", edit_feature).params(
+        "feature: id|name, set: {fields to change, e.g. {\"extent\": {\"distance\": \"30\"}}} → recomputed: features rebuilt, \
+             restored: features whose earlier result for the same inputs was reused",
+    ),
     CommandSpec::new("select.set", "Select", select_set)
         .noundo()
         .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool"),
@@ -56,6 +64,21 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
     s.refresh();
     Ok(json!({"redone": label}))
+}
+
+fn checkpoint(s: &mut Session, _p: &Value) -> Result<Value> {
+    Ok(json!({"checkpoint": s.checkpoint()}))
+}
+
+fn restore_checkpoint(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "edit.restore_checkpoint";
+    let id = p.get("checkpoint").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`checkpoint` must be an id from edit.checkpoint"))?;
+    if bool_(p, "forget") == Some(true) {
+        s.drop_checkpoint(id);
+        return Ok(json!({"checkpoint": id, "restored": false}));
+    }
+    s.restore_checkpoint(id)?;
+    Ok(json!({"checkpoint": id, "restored": true}))
 }
 
 fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -204,7 +227,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
-    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed}))
+    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored}))
 }
 
 fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -307,7 +330,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
-    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed}))
+    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored}))
 }
 
 fn dependents(s: &mut Session, p: &Value) -> Result<Value> {

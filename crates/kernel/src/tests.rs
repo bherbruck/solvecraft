@@ -40,8 +40,8 @@ fn extrude_on_other_planes_and_offsets() {
     let b = extrude(&Plane::XZ, &[rect(10.0, 5.0)], -2.0, 3.0).unwrap().pop().unwrap();
     let m = measure(&b).unwrap();
     assert!(rel(m.volume, 250.0) < 1e-9);
-    // XZ normal is -Y: the body spans y in [-3, 2].
-    assert!((m.bbox.min.y + 3.0).abs() < 1e-6 && (m.bbox.max.y - 2.0).abs() < 1e-6, "{:?}", m.bbox);
+    // XZ normal is +Y: the body spans y in [-2, 3].
+    assert!((m.bbox.min.y + 2.0).abs() < 1e-6 && (m.bbox.max.y - 3.0).abs() < 1e-6, "{:?}", m.bbox);
 }
 
 #[test]
@@ -50,6 +50,39 @@ fn region_with_hole() {
     let b = extrude(&Plane::XY, &[r], 0.0, 10.0).unwrap().pop().unwrap();
     let m = measure(&b).unwrap();
     assert!(rel(m.volume, (1200.0 - PI * 25.0) * 10.0) < 5e-4, "{}", m.volume);
+}
+
+#[test]
+fn through_cut_preserves_a_larger_blind_pocket() {
+    let plate = box_solid(Vec3::new(-30.0, -28.0, 0.0), Vec3::new(60.0, 22.0, 8.0)).unwrap();
+    let pocket = cylinder(Vec3::ZERO, Vec3::Z, 11.0, 6.0).unwrap();
+    let through = cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 9.5, 10.0).unwrap();
+    let expected = 90.0 * 50.0 * 8.0 - PI * 11.0_f64.powi(2) * 6.0 - PI * 9.5_f64.powi(2) * 2.0;
+    for reverse in [false, true] {
+        let (first, second) = if reverse { (&through, &pocket) } else { (&pocket, &through) };
+        let cut = boolean(&plate, first, BoolOp::Cut).unwrap().unwrap();
+        let result = boolean(&cut, second, BoolOp::Cut).unwrap().unwrap();
+        let m = measure(&result).unwrap();
+        assert!(rel(m.volume, expected) < 5e-4, "reverse={reverse}: {} vs {expected}", m.volume);
+        assert_eq!(m.merged.faces, 9);
+        assert!(!result.tessellate(0.01).unwrap().contains(Vec3::new(10.0, 0.0, 3.0)));
+    }
+}
+
+#[test]
+fn join_a_cylinder_on_its_chamfered_top() {
+    for seam in [0.0, crate::build::SEAM_ANGLE] {
+        let region = Region2 { outer: Loop2::circle_from(Vec2::ZERO, 10.0, seam), holes: vec![] };
+        let base = extrude(&Plane::XY, &[region], 0.0, 20.0).unwrap().pop().unwrap();
+        let base = chamfer(&base, &[Vec3::new(10.0, 0.0, 20.0)], 2.0).unwrap();
+        let region = Region2 { outer: Loop2::circle_from(Vec2::new(0.0, -3.774758283725534e-15), 8.0, seam), holes: vec![] };
+        let plane = Plane { origin: Vec3::new(0.0, 0.0, 20.000000000000007), ..Plane::XY };
+        let tool = extrude(&plane, &[region], 0.0, 5.0).unwrap().pop().unwrap();
+        let expected = measure(&base).unwrap().volume + PI * 64.0 * 5.0;
+        let joined = boolean(&base, &tool, BoolOp::Union).unwrap().unwrap();
+        assert!(rel(measure(&joined).unwrap().volume, expected) < 5e-4);
+        assert_eq!(joined.lumps().unwrap().len(), 1);
+    }
 }
 
 #[test]
@@ -223,6 +256,38 @@ fn loft_and_sweep() {
     let area = PI * 9.0;
     let expect = area * (30.0 + 30.0 + 20.0 * std::f64::consts::FRAC_PI_2);
     assert!(rel(measure(&t).unwrap().volume, expect) < 1e-3, "{} vs {expect}", measure(&t).unwrap().volume);
+}
+
+#[test]
+fn sweep_round_a_sharp_corner_is_mitred() {
+    // A 2 × 2 square centred on an L of two 10 mm lines: lines alone would slide the profile
+    // along the second leg within its own plane (an empty, inside-out body). Mitred, the
+    // volume is the area times the path length.
+    let sq =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(-1.0, -1.0), Vec2::new(1.0, -1.0), Vec2::new(1.0, 1.0), Vec2::new(-1.0, 1.0)]), holes: vec![] };
+    let path = [
+        PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 0.0, 10.0) },
+        PathSeg::Line { a: Vec3::new(0.0, 0.0, 10.0), b: Vec3::new(10.0, 0.0, 10.0) },
+    ];
+    let b = sweep(&Plane::XY, &sq, &path).unwrap();
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, 80.0) < 1e-9, "{}", m.volume);
+}
+
+#[test]
+fn moving_a_body_with_an_intersection_curve_edge_ends() {
+    // A cylinder cut by a tilted box keeps an elliptical intersection curve as an edge. Moving
+    // such a body scales the curve's tolerance by the matrix norm, whose root refinement cycled
+    // forever for about one translation in eight (this one included): the app hung.
+    let cyl = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 40.0).unwrap();
+    let block = box_solid(Vec3::new(-20.0, -20.0, 20.0), Vec3::new(20.0, 20.0, 60.0)).unwrap();
+    let block = crate::ops::transform(&block, Vec3::ZERO, Vec3::new(0.0, 0.0, 20.0), Vec3::X, 0.4).unwrap();
+    let cut = boolean(&cyl, &block, BoolOp::Cut).unwrap().unwrap();
+    assert!(cut.solid.edge_iter().any(|e| matches!(e.curve(), truck_modeling::Curve::IntersectionCurve(_))));
+    let t = Vec3::new(0.6911, -0.3337, -0.6127) * 2.334;
+    let moved = crate::ops::transform(&cut, t, Vec3::ZERO, Vec3::Z, 0.0).unwrap();
+    let (v0, v1) = (measure(&cut).unwrap().volume, measure(&moved).unwrap().volume);
+    assert!(rel(v0, v1) < 1e-6, "{v0} vs {v1}");
 }
 
 #[test]
@@ -1344,7 +1409,8 @@ fn boolean_identity_survey() {
 fn partial_revolve_on_the_axis() {
     let sq =
         Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 7.5), Vec2::new(0.0, 7.5)]), holes: vec![] };
-    let pie = revolve(&Plane::XZ, &[sq], Vec2::ZERO, Vec2::Y, std::f64::consts::FRAC_PI_2).unwrap().pop().unwrap();
+    let plane = Plane { y: Vec3::Z, ..Plane::XZ }; // This fixture's rectangle is above z = 0.
+    let pie = revolve(&plane, &[sq], Vec2::ZERO, Vec2::Y, std::f64::consts::FRAC_PI_2).unwrap().pop().unwrap();
     assert!(pie.validity().is_empty(), "{:?}", pie.validity());
     let v = measure(&pie).unwrap().volume;
     assert!((v - PI * 400.0 / 4.0 * 7.5).abs() < 1e-3 * v, "{v}");

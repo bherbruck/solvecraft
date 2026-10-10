@@ -1,0 +1,103 @@
+[
+ {
+  "note": "User bug 1/4 (\"big square\"): with the root active, Create Sketch on a moved component's face puts the sketch on the face where it is shown, its projected loop on the face's edges (not at the component's own coordinates)."
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "component.create",
+   "params": {
+    "name": "C"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "occurrence.move",
+   "params": {
+    "occurrence": "C:1",
+    "translate": [
+     100,
+     0,
+     0
+    ]
+   }
+  }
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "fit"
+  }
+ },
+ {
+  "start": "sketch.create"
+ },
+ {
+  "click": {
+   "world": [
+    120,
+    15,
+    20
+   ]
+  }
+ },
+ {
+  "expect": {
+   "sketching": true
+  }
+ },
+ {
+  "expect": {
+   "sketch_curves": {
+    "linked": 4,
+    "own": 0
+   }
+  }
+ },
+ {
+  "expect": {
+   "sketch_world": {
+    "sketch": "Sketch1",
+    "point": "p1",
+    "at": [
+     140,
+     0,
+     20
+    ]
+   }
+  }
+ },
+ {
+  "shot": "s43_root_sketch_on_moved_face"
+ },
+ {
+  "start": "sketch.finish"
+ },
+ {
+  "expect": {
+   "errors": 0
+  }
+ }
+]

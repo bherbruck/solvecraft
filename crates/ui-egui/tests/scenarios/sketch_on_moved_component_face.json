@@ -1,8 +1,5 @@
 [
  {
-  "pending": "a root-active sketch on a face of a moved component lands in body-local coordinates (solvecraft-dialogs)"
- },
- {
   "note": "A box in a new component, the component moved +100 in x, the root active: a sketch on the box's top face projects the face's edges where the face is (x 100-140), not at the body's own coordinates (x 0-40)."
  },
  {

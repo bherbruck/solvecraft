@@ -467,6 +467,8 @@ pub struct Sketch {
     /// Links to geometry outside the sketch (projections, intersections, includes).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<crate::link::Link>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offsets: Vec<crate::offset::OffsetChain>,
     /// 3D curves (world coordinates) carried by the sketch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wires: Vec<crate::wire::Wire>,
@@ -495,6 +497,7 @@ impl Sketch {
             curves: Vec::new(),
             constraints: Vec::new(),
             links: Vec::new(),
+            offsets: Vec::new(),
             wires: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
@@ -695,10 +698,8 @@ impl Sketch {
             | Symmetric { l, .. }
             | PointLineDistance { l, .. }
             | LinearDiameter { l, .. } => need_line(l)?,
-            ArcLength { c, .. } => {
-                if !matches!(self.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. })) {
-                    return Err(SketchError::WrongKind(name(c), "arc length needs an arc".into()));
-                }
+            ArcLength { c, .. } if !matches!(self.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. })) => {
+                return Err(SketchError::WrongKind(name(c), "arc length needs an arc".into()));
             }
             Smooth { a, b } => {
                 let ends = |i: usize| self.curves.get(i).and_then(|c| c.kind.ends());
@@ -727,10 +728,8 @@ impl Sketch {
                     return Err(SketchError::WrongKind(name(a), "tangent needs a circle or arc".into()));
                 }
             }
-            Equal { a, b } => {
-                if is_line(a) != is_line(b) {
-                    return Err(SketchError::WrongKind(name(b), "equal needs two lines or two circles/arcs".into()));
-                }
+            Equal { a, b } if is_line(a) != is_line(b) => {
+                return Err(SketchError::WrongKind(name(b), "equal needs two lines or two circles/arcs".into()));
             }
             Coincident { p, q } if p == q => return Err(SketchError::Invalid("a point is always coincident with itself".into())),
             _ => {}

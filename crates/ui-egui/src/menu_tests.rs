@@ -232,8 +232,10 @@ fn delete_key_handles_every_kind_and_asks_about_dependents() {
     app.run("edit.undo", json!({})).unwrap();
     assert_eq!(app.session.doc.features.len(), n);
     // A face its neighbours can't close (a side of the plate): refused, nothing changes.
-    let b0 = app.session.model.state().bodies[0].name.clone();
-    app.run("select.set", json!({"items": [{"type": "face", "body": b0, "index": 0, "point": [0, 0, 0]}]})).unwrap();
+    let body = &app.session.model.state().bodies[0];
+    let face = body.body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.x < -0.99)).unwrap();
+    let b0 = body.name.clone();
+    app.run("select.set", json!({"items": [{"type": "face", "body": b0, "index": face.index, "point": face.centroid}]})).unwrap();
     crate::delete::delete_selection(&mut app);
     assert!(app.status.as_ref().is_some_and(|s| s.0.contains("Delete Face")), "{:?}", app.status);
     assert_eq!(app.session.doc.features.len(), n);

@@ -82,6 +82,71 @@ impl Mesh {
     pub fn face_edges(&self, f: u32) -> Vec<usize> {
         self.edge_faces.iter().enumerate().filter(|(_, fs)| fs.contains(&f)).map(|(i, _)| i).collect()
     }
+    /// Pieces of one surface joined across hidden seams, including `face` itself.
+    pub fn surface_patch(&self, face: usize) -> Vec<usize> {
+        let mut patch = vec![face];
+        let mut todo = vec![face];
+        while let Some(f) = todo.pop() {
+            for (ei, fs) in self.edge_faces.iter().enumerate() {
+                if !self.seams.get(ei).copied().unwrap_or(false) || !fs.iter().any(|x| *x as usize == f) {
+                    continue;
+                }
+                for &next in fs {
+                    let next = next as usize;
+                    if !patch.contains(&next) {
+                        patch.push(next);
+                        todo.push(next);
+                    }
+                }
+            }
+        }
+        patch.sort_unstable();
+        patch
+    }
+
+    /// A complete circular rim may be split into several kernel edges. Keep its pieces
+    /// together for picking, without joining other tangent curves or changing edge indices.
+    pub fn circular_rim(&self, edge: usize) -> Vec<usize> {
+        let single = vec![edge];
+        let Some(p) = self.edges.get(edge).filter(|p| p.len() >= 3) else { return single };
+        let (Some(&a), Some(&b), Some(&c)) = (p.first(), p.get(p.len() / 2), p.last()) else { return single };
+        let (u, v) = (b - a, c - a);
+        let n = u.cross(v);
+        if !(n.len2() > u.len2() * v.len2() * 1e-12) {
+            return single;
+        }
+        let center = a + (v.cross(n) * u.len2() + n.cross(u) * v.len2()) / (2.0 * n.len2());
+        let radius = center.dist(a);
+        let normal = n.normalized().unwrap_or(Vec3::ZERO);
+        let tol = (radius * 1e-6).max(1e-9);
+        let mut rim = self.tangent_chain(edge, 2f64.to_radians());
+        if rim.len() < 2 || !radius.is_finite() {
+            return single;
+        }
+        // All samples must lie on this circle, and every end must join exactly one other
+        // piece. Open arcs, ellipses, and branching tangent chains stay separate.
+        for &i in &rim {
+            let Some(points) = self.edges.get(i) else { return single };
+            if points.iter().any(|q| !q.is_finite() || (q.dist(center) - radius).abs() > tol || (*q - center).dot(normal).abs() > tol) {
+                return single;
+            }
+            for end in [points.first(), points.last()].into_iter().flatten() {
+                let joins = rim
+                    .iter()
+                    .filter(|&&j| j != i)
+                    .filter_map(|&j| self.edges.get(j))
+                    .flat_map(|q| [q.first(), q.last()])
+                    .flatten()
+                    .filter(|q| q.dist(*end) < tol)
+                    .count();
+                if joins != 1 {
+                    return single;
+                }
+            }
+        }
+        rim.sort_unstable();
+        rim
+    }
     /// The edges reached from `e` through vertices where the next edge continues smoothly
     /// (angle between the end tangents below `max_angle`), including `e` itself.
     pub fn tangent_chain(&self, e: usize, max_angle: f64) -> Vec<usize> {

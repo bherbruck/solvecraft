@@ -104,6 +104,9 @@ pub struct Link {
     #[serde(default)]
     pub kind: LinkKind,
     pub source: LinkSource,
+    /// Persistent model face identity, resolved by the document before geometry refresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub face_name: Option<String>,
     /// The reference could not be found on the last recompute; the geometry is the last good one.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub lost: bool,
@@ -169,7 +172,7 @@ struct Layout {
     curves: Vec<LCurve>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum LCurve {
     Line(usize, usize),
     Circle(usize, f64),
@@ -368,7 +371,7 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("j");
-        self.links.push(Link { id: id.clone(), kind, source, lost: false });
+        self.links.push(Link { id: id.clone(), kind, source, face_name: None, lost: false });
         self.build_link(&id, &lay)?;
         Ok(id)
     }
@@ -576,6 +579,77 @@ impl Sketch {
                 && lone_old.len() == points.len()
                 && same_geometry(&old, &fresh)
             {
+                return Ok(false);
+            }
+        }
+        // A resized face can enumerate the same boundary in another order. Match the
+        // shared-point graph in normalized sketch space before discarding its identity.
+        if let Some(cur) = &cur
+            && points.len() == lay.pts.len()
+            && cur.len() == lay.curves.len()
+            && points.len() <= 512
+        {
+            let old: Vec<Vec2> = points.iter().filter_map(|i| self.point(*i)).collect();
+            let normalized = |ps: &[Vec2]| -> Vec<Vec2> {
+                let lo = ps.iter().fold(Vec2::new(f64::INFINITY, f64::INFINITY), |a, p| Vec2::new(a.x.min(p.x), a.y.min(p.y)));
+                let hi = ps.iter().fold(Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |a, p| Vec2::new(a.x.max(p.x), a.y.max(p.y)));
+                ps.iter().map(|p| Vec2::new((p.x - lo.x) / (hi.x - lo.x).max(1e-9), (p.y - lo.y) / (hi.y - lo.y).max(1e-9))).collect()
+            };
+            let (a, b) = (normalized(&old), normalized(&lay.pts));
+            let mut mapping = Vec::new();
+            for p in &a {
+                let mut candidates: Vec<(usize, f64)> = b.iter().enumerate().map(|(i, q)| (i, p.dist(*q))).collect();
+                candidates.sort_by(|x, y| x.1.total_cmp(&y.1));
+                if let Some((i, d)) = candidates.first()
+                    && *d < 0.1
+                    && candidates.get(1).is_none_or(|(_, second)| *d < *second * 0.5)
+                    && !mapping.contains(i)
+                {
+                    mapping.push(*i);
+                } else {
+                    break;
+                }
+            }
+            let mut used = Vec::new();
+            let mut curve_map = Vec::new();
+            if mapping.len() == points.len() {
+                for c in cur {
+                    let mapped: Option<Vec<usize>> = curve_points(c).iter().map(|i| mapping.get(*i).copied()).collect();
+                    let found = lay
+                        .curves
+                        .iter()
+                        .enumerate()
+                        .find(|(i, fresh)| {
+                            if used.contains(i) || !same_shape(c, fresh) {
+                                return false;
+                            }
+                            let fresh_pts = curve_points(fresh);
+                            mapped.as_ref().is_some_and(|p| {
+                                *p == fresh_pts || matches!(c, LCurve::Line(..)) && p.iter().rev().copied().collect::<Vec<_>>() == fresh_pts
+                            })
+                        })
+                        .map(|(i, _)| i);
+                    if let Some(i) = found {
+                        used.push(i);
+                        curve_map.push(i);
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if curve_map.len() == cur.len() && mapping.len() == points.len() {
+                for (pi, li) in points.iter().zip(mapping) {
+                    if let (Some(p), Some(q)) = (self.points.get_mut(*pi), lay.pts.get(li)) {
+                        p.pos = *q;
+                    }
+                }
+                for (ci, li) in curves.iter().zip(curve_map) {
+                    if let (Some(Curve { kind: CurveKind::Circle { r, .. }, .. }), Some(LCurve::Circle(_, value))) =
+                        (self.curves.get_mut(*ci), lay.curves.get(li))
+                    {
+                        *r = *value;
+                    }
+                }
                 return Ok(false);
             }
         }

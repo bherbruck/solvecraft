@@ -129,7 +129,8 @@ pub fn tool_definitions() -> Vec<Value> {
             "set_parameter",
             "Set a parameter",
             "Create or change a user parameter and re-evaluate the timeline. `value` is a number (mm) or an expression \
-             (\"40 mm\", \"width * 2\", \"30 deg\"). Returns the new value, the features recomputed and any features that now fail.",
+             (\"40 mm\", \"width * 2\", \"30 deg\"). Returns the new value, the features recomputed (`recomputed`), the features whose earlier \
+             result for the same inputs was reused instead (`restored`, e.g. after setting a value back) and any features that now fail.",
             obj(
                 json!({
                     "name": string("Parameter name"),
@@ -360,7 +361,56 @@ fn undo_depth(b: &mut dyn Backend) -> Option<u64> {
     b.call("document.inspect", json!({})).ok().and_then(|d| d["undo"].as_u64())
 }
 
-/// `batch`: run steps in order, stop at the first failure and (by default) undo what ran.
+/// How a failed batch goes back to where it started.
+enum Undo {
+    /// An engine checkpoint: the design, active sketch and undo history exactly as they were.
+    Checkpoint(u64),
+    /// An app without checkpoints: undo as many steps as the batch added (wrong once the undo
+    /// history is full, as its depth no longer grows).
+    Depth(u64),
+    None,
+}
+
+impl Undo {
+    fn begin(b: &mut dyn Backend) -> Undo {
+        match exec(b, "edit.checkpoint", json!({})).ok().and_then(|v| v["checkpoint"].as_u64()) {
+            Some(id) => Undo::Checkpoint(id),
+            None => undo_depth(b).map_or(Undo::None, Undo::Depth),
+        }
+    }
+
+    /// Go back; the number of steps undone.
+    fn rollback(self, b: &mut dyn Backend, steps: usize) -> u64 {
+        match self {
+            Undo::Checkpoint(id) => match exec(b, "edit.restore_checkpoint", json!({"checkpoint": id})) {
+                Ok(_) => steps as u64,
+                Err(_) => 0,
+            },
+            Undo::Depth(before) => {
+                let after = undo_depth(b).unwrap_or(before);
+                let mut undone = 0u64;
+                for _ in before..after {
+                    if exec(b, "edit.undo", json!({})).is_err() {
+                        break;
+                    }
+                    undone += 1;
+                }
+                undone
+            }
+            Undo::None => 0,
+        }
+    }
+
+    /// The batch went through: forget the checkpoint.
+    fn finish(self, b: &mut dyn Backend) {
+        if let Undo::Checkpoint(id) = self {
+            let _ = exec(b, "edit.restore_checkpoint", json!({"checkpoint": id, "forget": true}));
+        }
+    }
+}
+
+/// `batch`: run steps in order, stop at the first failure and (by default) go back to the
+/// design as it was before the batch.
 fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     let Some(steps) = a.get("commands").and_then(Value::as_array) else {
         return text_result(&json!("`commands` must be an array of {command, params}"), true);
@@ -369,7 +419,7 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
         return text_result(&json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())), true);
     }
     let rollback = a.get("rollback").and_then(Value::as_bool).unwrap_or(true);
-    let before = if rollback { undo_depth(b) } else { None };
+    let start = if rollback { Undo::begin(b) } else { Undo::None };
     let mut results = Vec::with_capacity(steps.len());
     for (i, step) in steps.iter().enumerate() {
         let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str);
@@ -380,15 +430,7 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
         match r {
             Ok(v) => results.push(v),
             Err(e) => {
-                let mut undone = 0u64;
-                if let (Some(before), Some(after)) = (before, rollback.then(|| undo_depth(b)).flatten()) {
-                    for _ in before..after {
-                        if exec(b, "edit.undo", json!({})).is_err() {
-                            break;
-                        }
-                        undone += 1;
-                    }
-                }
+                let undone = start.rollback(b, i);
                 return text_result(
                     &json!({
                         "ok": false,
@@ -403,6 +445,7 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
             }
         }
     }
+    start.finish(b);
     text_result(&json!({"ok": true, "completed": results.len(), "results": results}), false)
 }
 

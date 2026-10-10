@@ -49,3 +49,15 @@ Changes:
   direction (long triangles from a trim loop to the grid's far ends cut through cylinders).
 - `lib.rs`: compiler warnings no longer fail the build. Example, test and bench targets are
   dropped (their sources are not vendored).
+
+## matext4cgmath 0.1.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/matext4cgmath)
+
+truck-geometry uses it for a matrix's operator norm (an intersection curve scales its tolerance
+by it whenever it is moved).
+
+Changes:
+- `solver.rs`: the Newton refinement of cubic and quartic roots stops after 100 steps. Near a
+  double root it could cycle forever: moving a body whose edges a boolean made (the retries
+  move both bodies and the result back) hung the app.
+- `lib.rs`: compiler warnings no longer fail the build. Test targets are dropped (their sources
+  are not vendored).

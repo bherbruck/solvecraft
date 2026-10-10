@@ -1,7 +1,7 @@
 //! Sketch commands: create/edit/finish sketches, draw curves, constraints and dimensions.
 
 use serde_json::{Value, json};
-use solvecraft_doc::{FeatureKind, PlaneRef};
+use solvecraft_doc::{FeatureKind, PlaneRef, expr::Kind};
 use solvecraft_geom::{Plane, Vec2, Vec3};
 use solvecraft_sketch::{ConstraintKind, CurveKind, Hold, Sketch, SolveReport, solve, solve_holding};
 
@@ -94,7 +94,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("p0, p1: overall ends, width", connect_doc!())),
     CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params(concat!("point: [x,y], id?", connect_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
-        "entities: [refs], type?: auto|distance|horizontal|vertical|length|radius|diameter|angle, value?: number or expression (default: current)",
+        "entities: [refs], type?: auto|distance|horizontal|vertical|length|radius|diameter|angle, value?: number or expression (default: current); text_at?: [x, y]. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. Returns measured in unit (mm or deg)",
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", c_horizontal_vertical)
         .at("SKETCH", "CONSTRAINTS")
@@ -359,8 +359,10 @@ pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
         }
         Some(v @ Value::Object(o)) => {
             if let Some(fp) = o.get("face").and_then(vec3) {
-                // A planar face of a body at this point.
-                let st = s.model.state();
+                // A planar face of a body at this point, as the active component sees the model
+                // (another component's face where it is placed).
+                let model = s.model.state();
+                let st = solvecraft_doc::state_in_frame(&s.doc, &model, s.active_component);
                 let mut found = None;
                 let mut face_name = None;
                 for b in &st.bodies {
@@ -406,7 +408,10 @@ fn face_contains(m: &solvecraft_geom::Mesh, fi: usize, p: Vec3, tol: f64) -> boo
         let s1 = (b - a).cross(p - a).dot(n);
         let s2 = (c - b).cross(p - b).dot(n);
         let s3 = (a - c).cross(p - c).dot(n);
-        (s1 >= 0.0 && s2 >= 0.0 && s3 >= 0.0) || (s1 <= 0.0 && s2 <= 0.0 && s3 <= 0.0)
+        (s1 >= 0.0 && s2 >= 0.0 && s3 >= 0.0)
+            || (s1 <= 0.0 && s2 <= 0.0 && s3 <= 0.0)
+            // Exact curved boundaries can sit just outside their tessellated chords.
+            || p.dist_to_segment(a, b).min(p.dist_to_segment(b, c)).min(p.dist_to_segment(c, a)) <= tol * 0.1
     })
 }
 
@@ -1332,7 +1337,9 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let is_line = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }));
         let is_circle = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. }));
-        let (k, cur): (ConstraintKind, f64) = match (e0, e1) {
+        // The other reading of an angle between two lines (see below).
+        let mut alt: Option<(ConstraintKind, f64)> = None;
+        let (mut k, mut cur): (ConstraintKind, f64) = match (e0, e1) {
             ((None, Some(c)), None) if is_line(c) => {
                 let (a, b) = line_pts(sk, c).unwrap_or_default();
                 match ty.as_str() {
@@ -1409,7 +1416,14 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                                 ang = -ang;
                                 std::mem::swap(&mut ka, &mut kb);
                             }
-                            (ConstraintKind::Angle { a: ka, b: kb, value: ang, flip: false }, ang)
+                            // Two lines make two angles, θ and 180° − θ, whichever way they were
+                            // drawn: the acute one unless the value asks for the other.
+                            let direct = (ConstraintKind::Angle { a: ka, b: kb, value: ang, flip: false }, ang);
+                            let supplement =
+                                (ConstraintKind::Angle { a: kb, b: ka, value: std::f64::consts::PI - ang, flip: true }, std::f64::consts::PI - ang);
+                            let (acute, obtuse) = if ang <= std::f64::consts::FRAC_PI_2 { (direct, supplement) } else { (supplement, direct) };
+                            alt = Some(obtuse);
+                            acute
                         }
                     }
                 }
@@ -1426,7 +1440,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 c.driven = true;
             }
             before = None;
-            return Ok((String::new(), name, cur));
+            return Ok((String::new(), name, measured(is_angle, cur)));
         }
         let (unit, default_expr) =
             if is_angle { ("deg", format!("{} deg", round6(cur.to_degrees()))) } else { ("mm", format!("{} mm", round6(cur))) };
@@ -1437,28 +1451,39 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(err) = errs.get(&pname) {
             return Err(bad(cmd, format!("value: {err}")));
         }
-        let _ = vals;
+        // An angle between two lines dimensions whichever of its two readings is nearer the value.
+        if let (Some((ka, ca)), Some(want)) = (alt, vals.get(&pname).and_then(|v| v.to_kind(Kind::Angle).ok()))
+            && (want - ca).abs() < (want - cur).abs()
+        {
+            (k, cur) = (ka, ca);
+        }
         let name = k.name();
         let id = sk.add_constraint(k, Some(pname.clone()))?;
         place_text(sk, &id, text_at);
-        Ok((pname, name, cur))
+        Ok((pname, name, measured(is_angle, cur)))
     })?;
     // Report what the dimension measures once the sketch is solved, not the geometry before.
     let current = solved_measure(s, p, cmd).unwrap_or(current);
     if driven {
-        return Ok(json!({"param": Value::Null, "driven": true, "type": kind_name, "measured": current, "sketch": info}));
+        return Ok(json!({"param": Value::Null, "driven": true, "type": kind_name, "measured": current.0, "unit": current.1, "sketch": info}));
     }
     if reject_redundant(before, &info, cmd).is_err() {
         return Err(bad(cmd, "that dimension would over-constrain the sketch; add it as a driven (reference) dimension with driven: true"));
     }
     let v = s.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
-    Ok(json!({"param": param, "type": kind_name, "expression": v, "measured": current, "sketch": info}))
+    Ok(json!({"param": param, "type": kind_name, "expression": v, "measured": current.0, "unit": current.1, "sketch": info}))
+}
+
+/// A dimension's measured value as reported, in the unit its expression is written in.
+fn measured(is_angle: bool, v: f64) -> (f64, &'static str) {
+    if is_angle { (round6(v.to_degrees()), "deg") } else { (round6(v), "mm") }
 }
 
 /// What the dimension just added (the sketch's last constraint) measures on the solved sketch.
-fn solved_measure(s: &Session, p: &Value, cmd: &str) -> Option<f64> {
+fn solved_measure(s: &Session, p: &Value, cmd: &str) -> Option<(f64, &'static str)> {
     let sk = s.doc.sketch(target_sketch(s, p, cmd).ok()?).ok()?;
-    solvecraft_sketch::measure_dimension(sk, &sk.constraints.last()?.kind)
+    let k = &sk.constraints.last()?.kind;
+    Some(measured(k.is_angle(), solvecraft_sketch::measure_dimension(sk, k)?))
 }
 
 /// Keep a dimension's text where it was placed (`at`, sketch coordinates), relative to the

@@ -493,7 +493,10 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let rigid = j.kind == solvecraft_engine::doc::joints::JointKind::Rigid;
     vec![
         act("ui.editJoint", "Edit Joint", "joint").with(json!({ "joint": id })),
+        act("ui.editJoint", "Edit Joint Limits", "").with(json!({ "joint": id })).on(!rigid),
         act("ui.driveJoint", "Drive Joint", "").with(json!({ "joint": id })).on(!rigid),
+        act("ui.animateJoint", "Animate Joint", "").with(json!({ "joint": id })).on(!rigid && !j.suppressed),
+        act("ui.findJoint", "Find in Window", "").with(json!({ "joint": id })),
         cmd(app, "joint.edit", if j.suppressed { "Unsuppress" } else { "Suppress" }).with(json!({ "joint": id, "suppressed": !j.suppressed })),
         Item::sep(),
         cmd(app, "joint.delete", "Delete").key("Del").with(json!({ "joint": id })),
@@ -792,12 +795,17 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
         "ui.toolbarPin" | "ui.toolbarRemove" | "ui.toolbarReset" | "ui.shortcutPin" => crate::toolbar_custom::run(app, &item.id, &p),
         "ui.workspace" => {}
-        "ui.editJoint" | "ui.driveJoint" => {
+        "ui.findJoint" => {
             if let Some(id) = id_of(&p, "joint") {
-                let d = if item.id == "ui.editJoint" {
-                    crate::dialogs_assembly::edit_joint(app, id)
-                } else {
-                    crate::dialogs_assembly::drive_joint(app, id)
+                crate::dialogs_assembly::find_joint(app, id);
+            }
+        }
+        "ui.editJoint" | "ui.driveJoint" | "ui.animateJoint" => {
+            if let Some(id) = id_of(&p, "joint") {
+                let d = match item.id.as_str() {
+                    "ui.editJoint" => crate::dialogs_assembly::edit_joint(app, id),
+                    "ui.animateJoint" => crate::dialogs_assembly::animate_joint(app, id),
+                    _ => crate::dialogs_assembly::drive_joint(app, id),
                 };
                 if let Some(d) = d {
                     app.tool = None;

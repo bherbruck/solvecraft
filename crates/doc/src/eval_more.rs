@@ -613,7 +613,12 @@ fn face_loops(mesh: &solvecraft_geom::Mesh, plane: &Plane, at: Vec3, n: Vec3, le
 /// The body a placed plastic feature joins: by name, else the one under the point.
 fn body_under(st: &ModelState, body: &Option<String>, p: Vec3) -> Result<String> {
     let i = body_at(st, body, &[p])?;
-    st.bodies.get(i).map(|b| b.name.clone()).ok_or_else(|| DocError::Invalid("there is no body".into()))
+    let b = st.bodies.get(i).ok_or_else(|| DocError::Invalid("there is no body".into()))?;
+    let tolerance = (b.body.size() * 1e-5).max(1e-4);
+    if crate::project::nearest_face(&b.mesh(), p).is_none_or(|(_, _, distance)| distance > tolerance) {
+        return Err(DocError::Invalid("the plastic feature's placement is no longer on its body face".into()));
+    }
+    Ok(b.name.clone())
 }
 
 /// Axes with z along `z` (and x along `x` when given).

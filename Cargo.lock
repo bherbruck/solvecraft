@@ -1753,8 +1753,6 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "matext4cgmath"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6541e181de37f70f0aceb25441823a3d0efa9cc1d23f475a0d3926678949178"
 dependencies = [
  "cgmath",
  "katexit",

@@ -74,7 +74,7 @@ pub fn text_geometry(text: &str, at: Vec2, height: f64, angle: f64) -> Result<Ve
     if text.chars().count() > MAX_TEXT_CHARS {
         return Err(SketchError::TooLarge);
     }
-    if !(height.is_finite() && height > 1e-6 && height < 1e6) || !angle.is_finite() || !at.is_finite() {
+    if !(height.is_finite() && height > 1e-6 && height < 1e6 && angle.is_finite() && at.is_finite()) {
         return Err(SketchError::Invalid("text height must be positive".into()));
     }
     let face = ttf_parser::Face::parse(FONT, 0).map_err(|e| SketchError::Invalid(format!("font: {e}")))?;

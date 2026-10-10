@@ -1,0 +1,16 @@
+{
+ "description": "A shallow, wide loft cut starting in a body's top face: slab 900 x 480 x 160, loft cut from a 556.68 x 99 rectangle on the top face down 4 mm to an 80 x 80 square (sides about 0.9 degrees from horizontal). Healing an intermediate boolean result panicked outside the boolean's guard and stopped every later attempt. Result: the slab less the loft, 69 003 015.31 mm³.",
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": "XY", "name": "Base"}},
+  {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [900, 480]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 160, "name": "Slab"}},
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": 160, "name": "LoftTop"}},
+  {"command": "sketch.rectangle.two_point", "params": {"p0": [171.66, 329.34], "p1": [728.34, 428.34]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": 156, "name": "LoftBottom"}},
+  {"command": "sketch.rectangle.two_point", "params": {"p0": [410, 338.84], "p1": [490, 418.84]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.loft", "params": {"sections": [{"sketch": "LoftTop"}, {"sketch": "LoftBottom"}], "operation": "cut", "name": "LoftCut"}}
+ ]
+}

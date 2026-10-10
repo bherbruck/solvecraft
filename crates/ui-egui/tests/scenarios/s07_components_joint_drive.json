@@ -77,11 +77,25 @@
   "key": "Enter"
  },
  {
+  "call": "ui.set",
+  "params": {
+   "hiddenBodies": [
+    "Body1"
+   ]
+  }
+ },
+ {
   "start": "sketch.create"
  },
  {
   "click": {
    "plane": "XZ"
+  }
+ },
+ {
+  "call": "ui.set",
+  "params": {
+   "hiddenBodies": []
   }
  },
  {
@@ -99,7 +113,7 @@
   "click": {
    "sketch": [
     50,
-    10
+    -10
    ]
   }
  },
@@ -116,16 +130,13 @@
   }
  },
  {
-  "start": "solid.extrude"
+  "call": "ui.view",
+  "params": {
+   "view": "fit"
+  }
  },
  {
-  "click": {
-   "world": [
-    40,
-    0,
-    5
-   ]
-  }
+  "start": "solid.extrude"
  },
  {
   "text": "20"
@@ -199,7 +210,7 @@
     "max": [
      null,
      null,
-     20
+     30
     ]
    }
   }

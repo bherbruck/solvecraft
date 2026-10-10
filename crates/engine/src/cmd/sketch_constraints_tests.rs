@@ -221,3 +221,65 @@ fn drawing_onto_a_curve_keeps_the_point_on_it() {
     let cc = sk.center(sk.curve_index(&c).unwrap()).unwrap();
     assert!((st.dist(cc) - 8.0).abs() < 1e-7, "{st:?} {cc:?}");
 }
+
+/// A faucet spout path: a vertical riser, a horizontal top and an outlet sloping down, joined
+/// by fillets. The riser points up and the outlet down-left, so their directions are 150° apart
+/// while the lines meet at 30°.
+fn spout() -> Session {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[795, 955], [795, 1068], [689, 1068], [661, 1020]], "ids": ["l1", "l2", "l3"]}));
+    run(&mut s, "sketch.fillet", json!({"point": "l1.end", "radius": 50}));
+    run(&mut s, "sketch.fillet", json!({"point": "l2.end", "radius": 35}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l1", "mode": "vertical"}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l2", "mode": "horizontal"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l1.start"], "type": "horizontal", "value": 795}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l1.start"], "type": "vertical", "value": 955}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l2.start"], "type": "vertical", "value": 1068}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l3.end", "l1.start"], "type": "horizontal", "value": 134}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l3.end"], "type": "vertical", "value": 1020}));
+    assert_eq!(d["sketch"]["dof"], 1, "{d}");
+    s
+}
+
+/// The angle (degrees, 0..=90) between two lines of the active sketch.
+fn line_angle(s: &Session, a: &str, b: &str) -> f64 {
+    let sk = sketch(s);
+    let dir = |l: &str| {
+        let c = sk.curve_index(l).unwrap();
+        let (p, q) = crate::cmd::sketch::line_pts(&sk, c).unwrap();
+        q - p
+    };
+    let (u, v) = (dir(a), dir(b));
+    let t = u.cross(v).abs().atan2(u.dot(v)).to_degrees();
+    t.min(180.0 - t)
+}
+
+#[test]
+fn an_angle_between_lines_takes_the_reading_nearest_its_value_and_reports_degrees() {
+    // The riser and the outlet are not adjacent and meet at 30°; their directions are 150°
+    // apart. Asking for 30° used to swing the outlet round and was refused as over-constraining.
+    for ents in [["l1", "l3"], ["l3", "l1"]] {
+        let mut s = spout();
+        let d = run(&mut s, "sketch.dimension", json!({"entities": ents, "type": "angle", "value": "30 deg"}));
+        assert_eq!(d["sketch"]["dof"], 0, "{d}");
+        assert_eq!(d["unit"], "deg", "{d}");
+        assert!((d["measured"].as_f64().unwrap() - 30.0).abs() < 1e-6, "{d}");
+        assert!((line_angle(&s, "l1", "l3") - 30.0).abs() < 1e-6);
+    }
+    // The other reading still works, and the adjacent top line measures 60° the same way.
+    let mut s = spout();
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["l1", "l3"], "value": "150 deg"}));
+    assert_eq!(d["sketch"]["dof"], 0, "{d}");
+    assert!((line_angle(&s, "l1", "l3") - 30.0).abs() < 1e-6);
+    let mut s = spout();
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["l2", "l3"], "value": "60 deg"}));
+    assert!((d["measured"].as_f64().unwrap() - 60.0).abs() < 1e-6, "{d}");
+    // Without a value the acute angle is kept as it is.
+    let mut s = spout();
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["l1", "l3"]}));
+    let e = d["expression"].as_str().unwrap();
+    assert!(e.ends_with(" deg") && (e.trim_end_matches(" deg").parse::<f64>().unwrap() - 30.3).abs() < 0.1, "{d}");
+    // Lengths report millimetres.
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "driven": true}));
+    assert_eq!(d["unit"], "mm", "{d}");
+}

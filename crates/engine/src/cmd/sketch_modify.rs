@@ -520,7 +520,7 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     let u = (pa - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
     let v = (pb - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
     let half = 0.5 * u.cross(v).atan2(u.dot(v)).abs();
-    if half < 1e-6 || half > std::f64::consts::FRAC_PI_2 - 1e-9 {
+    if !(1e-6..=std::f64::consts::FRAC_PI_2 - 1e-9).contains(&half) {
         return Err(bad(cmd, "the lines are parallel"));
     }
     let d = r / half.tan();
@@ -813,6 +813,12 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let ci = sk.add_circle(cc, nr, Some(c), None)?;
             made.push(ci);
+            sk.offsets.push(solvecraft_sketch::OffsetChain {
+                sources: vec![(ids[0].clone(), true)],
+                outputs: ids_of(sk, &made),
+                distance: r - nr,
+                closed: true,
+            });
             return Ok((ids_of(sk, &made), cons));
         }
         let pool: Vec<usize> = if use_chain {
@@ -916,7 +922,13 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
-        Ok((ids_of(sk, &made), cons))
+        let outputs = ids_of(sk, &made);
+        if pieces.iter().all(|p| !matches!(p, Piece::Free(_))) {
+            let sources = order.iter().filter_map(|(i, forward)| sk.curves.get(*i).map(|c| (c.id.clone(), *forward))).collect();
+            sk.offsets.push(solvecraft_sketch::OffsetChain { sources, outputs: outputs.clone(), distance: d, closed });
+            sk.refresh_offsets()?;
+        }
+        Ok((outputs, cons))
     })?;
     Ok(json!({"curves": out.0, "constraints": out.1, "sketch": info}))
 }

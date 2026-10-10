@@ -1091,7 +1091,14 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
     let t = Tokens::get();
     let mut sc = GpuScene::default();
     let st = app.session.world_state();
-    let sel = app.highlighted();
+    let mut sel = Vec::new();
+    for item in app.highlighted() {
+        for piece in grouped_selection(&app.session, &item) {
+            if !sel.iter().any(|x| crate::selection::same_item(x, &piece)) {
+                sel.push(piece);
+            }
+        }
+    }
     let hover = app.viewport.hover.as_ref();
     let size = origin_size(app.cam.half_height());
     // Origin planes and construction planes.
@@ -1242,9 +1249,12 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
             if let Some(b) = st.body(body) {
                 let k = t.hover_face_lift;
                 let c = body_rgb(app, body);
-                face_tris(&mut sc, &b.mesh(), *index, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
                 let m = b.mesh();
-                for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
+                let patch = m.surface_patch(*index);
+                for &f in &patch {
+                    face_tris(&mut sc, &m, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
+                }
+                for (e, _) in m.edge_faces.iter().enumerate().filter(|(_, fs)| fs.iter().any(|f| patch.contains(&(*f as usize)))) {
                     if let Some(p) = m.edges.get(e)
                         && !m.seams.get(e).copied().unwrap_or(false)
                     {
@@ -1254,12 +1264,13 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
             }
         }
         Some(Hit::Edge { body, index, mid }) => {
-            if let Some(b) = st.body(body)
-                && let Some(e) = edge_of(&b.mesh(), *index, *mid)
-            {
-                let selected = sel.iter().any(|x| matches!(x, Sel::Edge { point, .. } if point.dist(*mid) < 1e-9));
-                if !selected {
-                    edge_lines(&mut sc, e, t.hover_edge, t.hover_edge_halo, 2.0);
+            if let Some(b) = st.body(body) {
+                let m = b.mesh();
+                for i in m.circular_rim(*index) {
+                    let selected = sel.iter().any(|x| matches!(x, Sel::Edge { body: b, index: j, .. } if b == body && *j == i));
+                    if !selected && let Some(e) = if i == *index { edge_of(&m, i, *mid) } else { m.edges.get(i) } {
+                        edge_lines(&mut sc, e, t.hover_edge, t.hover_edge_halo, 2.0);
+                    }
                 }
             }
         }
@@ -1286,7 +1297,7 @@ fn body_rgb(app: &SolveApp, name: &str) -> (u8, u8, u8) {
     (c.r(), c.g(), c.b())
 }
 
-fn polyline_mid(pts: &[Vec3]) -> Vec3 {
+pub(crate) fn polyline_mid(pts: &[Vec3]) -> Vec3 {
     let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
     let mut acc = 0.0;
     for w in pts.windows(2) {
@@ -1360,7 +1371,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let secondary_down = secondary_down && app.viewport.context_menu.is_none();
     // The view cube handles its own clicks; the model underneath must not see them.
     let cube = Rect::from_center_size(pos2(rect.right() - 80.0, rect.top() + 80.0), vec2(150.0, 150.0));
-    let inside = hover.is_some_and(|p| rect.contains(p) && !cube.contains(p));
+    // Floating windows and menus own input over the model, including wheel navigation.
+    let inside = resp.contains_pointer() && hover.is_some_and(|p| !cube.contains(p));
     app.viewport.mouse = hover.filter(|_| inside);
     // Ctrl or Alt held: drawing and dragging don't snap.
     crate::drag_snap::set_suppressed(mods.ctrl || mods.alt || mods.command);
@@ -1682,6 +1694,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.viewport.boxsel = None;
     }
     crate::ref_images::show(app, ui, &painter, &proj);
+    crate::dialogs_assembly::origins(app, &painter, &proj);
     overlays(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch3d::show(app, &painter, &proj);
@@ -1729,12 +1742,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool) {
     match sel {
         Some(x) => {
-            let item = serde_json::to_value(&x).unwrap_or_default();
-            if add && app.session.selection.contains(&x) {
-                let rest: Vec<Sel> = app.session.selection.iter().filter(|y| **y != x).cloned().collect();
+            let items = grouped_selection(&app.session, &x);
+            if add && items.iter().all(|x| app.session.selection.iter().any(|y| crate::selection::same_item(x, y))) {
+                let rest: Vec<Sel> =
+                    app.session.selection.iter().filter(|y| !items.iter().any(|x| crate::selection::same_item(x, y))).cloned().collect();
                 let _ = app.run("select.set", json!({ "items": rest }));
             } else {
-                let _ = app.run("select.set", json!({"items": [item], "add": add}));
+                let _ = app.run("select.set", json!({"items": items, "add": add}));
             }
         }
         None if !add => {
@@ -1742,6 +1756,75 @@ fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool) {
         }
         None => {}
     }
+}
+
+/// Expand a visible rim or surface into the kernel pieces a command needs. The original
+/// face pick keeps its point (used by tools such as Hole and construction geometry).
+pub(crate) fn grouped_selection(s: &solvecraft_engine::Session, sel: &Sel) -> Vec<Sel> {
+    let st = s.world_state();
+    match sel {
+        Sel::Edge { body, index, .. } => {
+            if let Some(b) = st.body(body) {
+                let m = b.mesh();
+                return m
+                    .circular_rim(*index)
+                    .into_iter()
+                    .filter_map(|i| m.edges.get(i).map(|e| Sel::Edge { body: body.clone(), index: i, point: polyline_mid(e) }))
+                    .collect();
+            }
+        }
+        Sel::Face { body, index, .. } => {
+            if let Some(b) = st.body(body) {
+                let m = b.mesh();
+                let mut patch = m.surface_patch(*index);
+                patch.sort_by_key(|i| usize::from(i != index));
+                return patch
+                    .into_iter()
+                    .filter_map(|i| {
+                        if i == *index {
+                            return Some(sel.clone());
+                        }
+                        m.triangles.iter().zip(&m.tri_face).find_map(|(t, f)| {
+                            if *f as usize != i {
+                                return None;
+                            }
+                            let [a, b, c] = m.tri(t)?;
+                            Some(Sel::Face { body: body.clone(), index: i, point: (a + b + c) / 3.0 })
+                        })
+                    })
+                    .collect();
+            }
+        }
+        _ => {}
+    }
+    vec![sel.clone()]
+}
+
+/// Measure keeps one entry per visible item, rather than using its two slots for kernel halves.
+pub(crate) fn measurement_selection(s: &solvecraft_engine::Session, sel: &Sel) -> Sel {
+    let pieces = grouped_selection(s, sel);
+    let mut representative = sel.clone();
+    match &mut representative {
+        Sel::Edge { index, .. } => {
+            if let Some(Sel::Edge { index: i, .. }) = pieces.first() {
+                *index = *i;
+            }
+        }
+        Sel::Face { index, .. } => {
+            if let Some(i) = pieces
+                .iter()
+                .filter_map(|p| match p {
+                    Sel::Face { index, .. } => Some(*index),
+                    _ => None,
+                })
+                .min()
+            {
+                *index = i;
+            }
+        }
+        _ => {}
+    }
+    representative
 }
 
 /// What a box selects: sketch entities while sketching, otherwise what the open dialog's
@@ -1793,7 +1876,9 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             let m = b.mesh();
             if accept & EDGES != 0 {
                 for (ei, e) in m.edges.iter().enumerate() {
-                    if !m.seams.get(ei).copied().unwrap_or(false) && bx.takes(&to2(e)) {
+                    let rim = m.circular_rim(ei);
+                    let takes = if bx.crossing { bx.takes(&to2(e)) } else { rim.iter().all(|&i| m.edges.get(i).is_some_and(|p| bx.takes(&to2(p)))) };
+                    if !m.seams.get(ei).copied().unwrap_or(false) && takes {
                         out.push(Sel::Edge { body: b.name.clone(), index: ei, point: polyline_mid(e) });
                     }
                 }
@@ -1810,8 +1895,15 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
                         .find(|(_, tf)| **tf as usize == f)
                         .and_then(|(t, _)| m.tri(t))
                         .map(|[a, bb, c]| (a + bb + c) / 3.0);
+                    let takes = bx.takes(&to2(&pts))
+                        && (bx.crossing
+                            || m.surface_patch(f).iter().all(|&face| {
+                                m.face_edges(u32::try_from(face).unwrap_or(u32::MAX))
+                                    .iter()
+                                    .all(|&e| m.edges.get(e).is_some_and(|p| bx.takes(&to2(p))))
+                            }));
                     if let Some(point) = point
-                        && bx.takes(&to2(&pts))
+                        && takes
                     {
                         out.push(Sel::Face { body: b.name.clone(), index: f, point });
                     }
@@ -1836,8 +1928,17 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             }
         }
     }
+    let mut grouped = Vec::new();
+    for item in out {
+        for piece in grouped_selection(&app.session, &item) {
+            if !grouped.iter().any(|x| crate::selection::same_item(x, &piece)) {
+                grouped.push(piece);
+            }
+        }
+    }
+    let out = grouped;
     if let Some(mut d) = app.dialog.take() {
-        d.take_box(out, add);
+        d.take_box(&app.session, out, add);
         app.dialog = Some(d);
         return;
     }
@@ -1986,7 +2087,7 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let (r, u, b) = cube_basis(&app.cam);
     let (wr, wu, _) = app.cam.basis();
     let painter = ui.painter_at(rect);
-    let hover = ui.input(|i| i.pointer.hover_pos());
+    let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(rect));
     let targets = cube_targets();
     let shapes = cube_projected(&targets, (r, u, b), c);
     let hovered = hover.and_then(|h| cube_hit(&shapes, h));
@@ -2302,6 +2403,255 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cylinder_app() -> SolveApp {
+        let mut s = solvecraft_engine::Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 10, "height": 20})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.ui.show_origin = false;
+        app
+    }
+
+    #[test]
+    fn circular_items_measure_as_whole_rims_and_surfaces() {
+        let mut app = cylinder_app();
+        let st = app.session.world_state();
+        let b = &st.bodies[0];
+        let m = b.mesh();
+        let edges: Vec<Sel> = m
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.len() > 3 && p.iter().all(|q| (q.z - 20.0).abs() < 1e-6))
+            .map(|(index, p)| Sel::Edge { body: b.name.clone(), index, point: polyline_mid(p) })
+            .collect();
+        let result = app.session.measure_items(&edges);
+        assert_eq!(result["items"].as_array().unwrap().len(), 1);
+        assert!((result["items"][0]["length_mm"].as_f64().unwrap() - 20.0 * std::f64::consts::PI).abs() < 0.2, "{result}");
+        app.session.selection = edges;
+        let d = crate::dialogs::Dialog::for_command(&app, "inspect.measure").unwrap();
+        assert_eq!(d.items().len(), 1);
+
+        let faces = m.edge_faces.iter().zip(&m.seams).find(|(_, seam)| **seam).unwrap().0;
+        let wall = Sel::Face { body: b.name.clone(), index: faces[0] as usize, point: Vec3::new(10.0, 0.0, 10.0) };
+        let wall_pieces = grouped_selection(&app.session, &wall);
+        let result = app.session.measure_items(&wall_pieces);
+        assert_eq!(result["items"].as_array().unwrap().len(), 1);
+        assert!((result["items"][0]["area_mm2"].as_f64().unwrap() - 400.0 * std::f64::consts::PI).abs() < 10.0, "{result}");
+        let mut d = crate::dialogs::Dialog::for_command(&app, "inspect.measure").unwrap();
+        d.pick(&app.session, wall.clone());
+        assert_eq!(d.items().len(), 2, "a rim and a wall are two measurement targets");
+        d.pick(&app.session, Sel::Face { body: b.name.clone(), index: faces[1] as usize, point: Vec3::new(-10.0, 0.0, 10.0) });
+        assert_eq!(d.items().len(), 1, "the other half toggles the same wall");
+    }
+
+    #[test]
+    fn circular_rim_hover_click_and_dialog_pick_include_both_halves() {
+        let mut app = cylinder_app();
+        let st = app.session.world_state();
+        let b = &st.bodies[0];
+        let m = b.mesh();
+        let top = m.edges.iter().position(|e| e.len() > 3 && e.iter().all(|p| (p.z - 20.0).abs() < 1e-6)).unwrap();
+        let rim = m.circular_rim(top);
+        assert_eq!(rim.len(), 2);
+        let line_count: usize = rim.iter().map(|&i| m.edges[i].len() - 1).sum();
+        for &i in &rim {
+            let mid = polyline_mid(&m.edges[i]);
+            app.viewport.hover = Some(Hit::Edge { body: b.name.clone(), index: i, mid });
+            assert_eq!(build_highlight(&app).lines.len(), 2 * line_count * crate::gpu::LINE_SIZE);
+            let item = hit_sel(app.viewport.hover.as_ref().unwrap()).unwrap();
+            select(&mut app, Some(item.clone()), false);
+            assert_eq!(app.session.selection.len(), 2);
+            // Selecting both pieces must not draw each highlight twice.
+            assert_eq!(build_highlight(&app).lines.len(), 2 * line_count * crate::gpu::LINE_SIZE);
+            // Ctrl/Shift clicking either half deselects the entire rim.
+            select(&mut app, Some(item.clone()), true);
+            assert!(app.session.selection.is_empty());
+            let mut d = crate::dialogs::Dialog::for_command(&app, "solid.chamfer").unwrap();
+            if let crate::dialogs::Kind::Fillet { chain, .. } = &mut d.kind {
+                *chain = false;
+            }
+            d.pick(&app.session, item.clone());
+            assert_eq!(d.items().len(), 2);
+            d.pick(&app.session, item);
+            assert!(d.items().is_empty());
+        }
+        // Screen-space picking works from either side of the rim as the model turns.
+        for &i in &rim {
+            let mid = polyline_mid(&m.edges[i]);
+            app.cam = app.cam.looking_from(Vec3::new(mid.x, mid.y, 20.0));
+            app.cam.target = Vec3::new(0.0, 0.0, 10.0);
+            for perspective in [false, true] {
+                app.ui.perspective = perspective;
+                let proj = projection(&app, Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)));
+                let hits = pick(&app, &proj, proj.to_screen(mid).unwrap());
+                let (_, sel) = candidate(&app, &hits).unwrap();
+                assert!(matches!(sel, Sel::Edge { .. }), "{hits:?}");
+                assert_eq!(grouped_selection(&app.session, &sel).len(), 2);
+            }
+        }
+    }
+
+    #[test]
+    fn curved_face_hover_selection_and_dialogs_cross_the_seam() {
+        let mut app = cylinder_app();
+        let st = app.session.world_state();
+        let b = &st.bodies[0];
+        let m = b.mesh();
+        let faces = m.edge_faces.iter().zip(&m.seams).find(|(_, seam)| **seam).unwrap().0;
+        assert_eq!(faces.len(), 2);
+        let triangle_count = m.tri_face.iter().filter(|f| faces.contains(f)).count();
+        for &f in faces {
+            let index = f as usize;
+            let t = m.triangles.iter().zip(&m.tri_face).find(|(_, tf)| **tf == f).unwrap().0;
+            let [a, c, d] = m.tri(t).unwrap();
+            let point = (a + c + d) / 3.0;
+            app.viewport.hover = Some(Hit::Face { body: b.name.clone(), index, point });
+            assert_eq!(build_highlight(&app).tris.len(), triangle_count * 3 * crate::gpu::TRI_SIZE);
+            let item = hit_sel(app.viewport.hover.as_ref().unwrap()).unwrap();
+            select(&mut app, Some(item.clone()), false);
+            assert_eq!(app.session.selection.len(), 2);
+            assert_eq!(build_highlight(&app).tris.len(), triangle_count * 3 * crate::gpu::TRI_SIZE);
+            assert_eq!(app.session.selection.first(), Some(&item), "keep the original tool placement point first");
+            let mut dialog = crate::dialogs::Dialog::for_command(&app, "solid.chamfer").unwrap();
+            assert_eq!(dialog.items().len(), 2);
+            dialog.pick(&app.session, item.clone());
+            assert!(dialog.items().is_empty());
+            dialog.pick(&app.session, item);
+            assert_eq!(dialog.items().len(), 2);
+            // A point elsewhere on the opposite half still toggles the whole surface off.
+            let other = faces.iter().find(|&&x| x != f).unwrap();
+            select(&mut app, Some(Sel::Face { body: b.name.clone(), index: *other as usize, point: m.positions[0] }), true);
+            assert!(app.session.selection.is_empty());
+        }
+        // Planar caps and box corners stay separate.
+        let cap = (0..b.body.face_count()).find(|&i| m.surface_patch(i).len() == 1).unwrap();
+        assert_eq!(m.surface_patch(cap), vec![cap]);
+        app.session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let st = app.session.world_state();
+        let box_body = st.bodies.last().unwrap();
+        for i in 0..box_body.body.face_count() {
+            assert_eq!(box_body.mesh().surface_patch(i), vec![i]);
+        }
+    }
+
+    #[test]
+    fn shortcuts_window_wheel_does_not_zoom_the_viewport() {
+        let ctx = egui::Context::default();
+        let mut app = SolveApp::new(solvecraft_engine::Session::default(), crate::Services::default());
+        app.viewport.no_pixels = true;
+        crate::help::run(&mut app, &ctx, "shortcuts");
+        let mut time = 0.0;
+        let mut frame = |app: &mut SolveApp, pointer: Option<Pos2>, wheel: f32| {
+            time += 1.0 / 60.0;
+            let mut events = Vec::new();
+            if let Some(p) = pointer {
+                events.push(egui::Event::PointerMoved(p));
+            }
+            if wheel != 0.0 {
+                events.push(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: vec2(0.0, wheel),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                });
+            }
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1100.0, 800.0))),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| show(app, ui));
+                    crate::prefs::show(app, ui.ctx());
+                },
+            );
+        };
+        // Let egui establish the floating window's size and hit-test widgets.
+        for _ in 0..4 {
+            frame(&mut app, None, 0.0);
+        }
+        let window = ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        let list = window.center() + vec2(140.0, 0.0);
+        let height = app.cam.half_height();
+        let target = app.cam.target;
+        frame(&mut app, Some(list), 0.0);
+        for n in 0..12 {
+            frame(&mut app, Some(list), if n == 0 { -120.0 } else { 0.0 });
+            assert_eq!(app.cam.half_height(), height, "wheel input over shortcuts must stay in the popup");
+            assert_eq!(app.cam.target, target);
+        }
+        // The window's non-scrolling sidebar must also shield the model.
+        frame(&mut app, Some(window.left_center() + vec2(30.0, 0.0)), -120.0);
+        assert_eq!(app.cam.half_height(), height);
+        // An exposed part of the viewport still accepts wheel navigation with the popup open.
+        let exposed = pos2(40.0, 700.0);
+        assert!(!window.contains(exposed));
+        frame(&mut app, Some(exposed), 0.0);
+        frame(&mut app, Some(exposed), -120.0);
+        assert_ne!(app.cam.half_height(), height);
+        // Closing the popup returns its former area to the viewport.
+        app.prefs_window.open = false;
+        for _ in 0..12 {
+            frame(&mut app, Some(list), 0.0);
+        }
+        let height = app.cam.half_height();
+        frame(&mut app, Some(list), -120.0);
+        assert_ne!(app.cam.half_height(), height);
+    }
+
+    #[test]
+    fn floating_dialog_blocks_viewport_hover_and_clicks() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}));
+        h.call("ui.view", json!({"view": "fit"}));
+        h.app.ui.pick_bodies = true;
+        let p = h.app.viewport.rect.unwrap().center();
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert!(h.app.viewport.hover.is_some(), "the test point must hover over the model");
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        assert!(!h.app.session.selection.is_empty(), "the uncovered model must be selectable");
+        h.app.session.selection.clear();
+
+        h.call("ui.prefs", json!({"open": "Navigation"}));
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        assert!(window.contains(p), "the dialog must cover the model at the test point");
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert!(h.app.viewport.hover.is_none(), "the dialog must block model highlights");
+        assert!(h.app.viewport.mouse.is_none());
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        assert!(h.app.session.selection.is_empty(), "clicks in the dialog must not select the model");
+
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert!(h.app.viewport.hover.is_some(), "closing the dialog must restore model highlights");
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        assert!(!h.app.session.selection.is_empty());
+    }
+
+    #[test]
+    fn floating_dialog_blocks_view_cube_highlights_and_clicks() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.resize", json!({"width": 800, "height": 700}));
+        let p = crate::scenario::handle_at("cube:top").unwrap();
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert_eq!(crate::scenario::count_of("cube_highlights"), Some(1.0));
+        h.call("ui.prefs", json!({"open": "Navigation"}));
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        assert!(window.contains(p), "the floating dialog must cover the cube target");
+        let camera = serde_json::to_value(h.app.cam).unwrap();
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert_eq!(crate::scenario::count_of("cube_highlights"), Some(0.0));
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        assert_eq!(serde_json::to_value(h.app.cam).unwrap(), camera, "dialog clicks must not turn the view cube");
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        assert_eq!(crate::scenario::count_of("cube_highlights"), Some(1.0));
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        assert_ne!(serde_json::to_value(h.app.cam).unwrap(), camera);
+    }
 
     #[test]
     fn section_outlines_follow_the_cut() {

@@ -54,6 +54,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let br = Rect::from_center_size(pos2(x, r.center().y), vec2(26.0, 26.0));
             x += 30.0;
             let resp = ui.interact(br, ui.id().with(("ab", icon)), Sense::click());
+            crate::scenario::publish_handle(&format!("appbar:{icon}"), br.center());
             if resp.hovered() {
                 ui.painter().rect_filled(br, 4.0, Color32::from_white_alpha(30));
             }
@@ -148,8 +149,11 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.set_min_width(190.0);
+                ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
+                ui.visuals_mut().widgets.hovered.weak_bg_fill = Tokens::get().hover;
                 let item = |ui: &mut egui::Ui, label: &str, key: &str| {
-                    ui.add(egui::Button::new(label).shortcut_text(key).frame(false).min_size(vec2(180.0, 22.0))).clicked()
+                    ui.add(egui::Button::new(label).shortcut_text(key).min_size(vec2(180.0, 22.0))).clicked()
                 };
                 if item(ui, "New Design", "Ctrl+N") {
                     crate::documents::new_design(app);
@@ -161,6 +165,24 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     close = true;
                 }
+                ui.menu_button("Open Recent", |ui| {
+                    for path in app.home.recent.clone() {
+                        let missing = !solvecraft_engine::io::vfs::exists(&path);
+                        let label = format!("{path}{}", if missing { " (missing)" } else { "" });
+                        if ui.button(label).clicked() {
+                            crate::home::open_recent(app, &path);
+                            close = true;
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    if ui.button("Clear Recent").clicked() {
+                        app.home.recent.clear();
+                        app.home.opened_at.clear();
+                        close = true;
+                        ui.close();
+                    }
+                });
                 if item(ui, "Insert STEP…", "") {
                     app.start("file.insert_step");
                     close = true;
@@ -308,11 +330,16 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let top = r.top() + 26.0;
         let mut drop: Option<(&'static str, &'static str, Option<&'static str>)> = None;
         let mut menu: Option<(egui::Pos2, &'static str)> = None;
+        let mut overflow = Vec::new();
         for (panel, cmds, promote) in crate::toolbar_custom::panel_lists(&tab) {
             let panel: &&str = &panel;
             let shown = crate::toolbar_custom::buttons(app, &tab, panel, &cmds, promote);
             let n = shown.len().max(1);
             let width = (n as f32 * 40.0).max(64.0) + 8.0;
+            if !overflow.is_empty() || px + width > r.right() - 40.0 {
+                overflow.push((*panel, cmds));
+                continue;
+            }
             let enabled_panel = !cmds.is_empty() || *panel == "SELECT";
             // Dropped on the panel's free space: the button goes to its end.
             let free = Rect::from_min_size(
@@ -432,6 +459,31 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             px += width;
             painter.line_segment([pos2(px, top + 4.0), pos2(px, top + 58.0)], Stroke::new(1.0, t.border));
             px += 2.0;
+        }
+        if !overflow.is_empty() {
+            let at = Rect::from_min_size(pos2(px.min(r.right() - 40.0), top + 4.0), vec2(38.0, 52.0));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
+                let response = ui.menu_button("»", |ui| {
+                    for (panel, cmds) in &overflow {
+                        ui.menu_button(*panel, |ui| {
+                            if *panel == "SELECT" {
+                                selection_filter(app, ui);
+                            }
+                            for c in cmds {
+                                let info = c.info(&app.session);
+                                let response = ui.add_enabled(info.enabled, egui::Button::new(c.label).shortcut_text(c.shortcut.unwrap_or("")));
+                                crate::scenario::publish_handle(&format!("toolbar:{}", c.id), response.rect.center());
+                                if response.clicked() {
+                                    app.start(c.id);
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
+                });
+                crate::scenario::publish_handle("toolbar:overflow", response.response.rect.center());
+                response.response.on_hover_text("More toolbar panels");
+            });
         }
         painter.line_segment([pos2(r.left(), r.bottom() - 0.5), pos2(r.right(), r.bottom() - 0.5)], Stroke::new(1.0, t.border));
         if let Some((id, panel, before)) = drop {

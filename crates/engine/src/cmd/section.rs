@@ -10,7 +10,7 @@ use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] =
     &[CommandSpec::new("inspect.section", "Section Analysis", section).at("SOLID", "INSPECT").icon("section").noundo().params(
-        "plane: XY|XZ|YZ | {origin, normal}; offset?: expr along the plane's normal (XY: +Z, XZ: -Y, YZ: +X); \
+        "plane: XY|XZ|YZ | {origin, normal}; offset?: expr along the plane's normal (XY: +Z, XZ: +Y, YZ: +X); \
          at?: expr, the cut's world coordinate on the named plane's axis (XY: Z, XZ: Y, YZ: X), instead of offset; \
          flip?: bool; or clear: true. Returns the cut's origin and normal, and for a named plane its axis and at",
     )];

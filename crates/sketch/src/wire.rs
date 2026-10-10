@@ -98,7 +98,7 @@ impl Sketch {
         }
         let id = if geom.is_empty() {
             let id = self.fresh("j");
-            self.links.push(Link { id: id.clone(), kind, source, lost: false });
+            self.links.push(Link { id: id.clone(), kind, source, face_name: None, lost: false });
             id
         } else {
             self.add_link(kind, source, geom)?

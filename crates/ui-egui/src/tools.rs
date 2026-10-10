@@ -80,7 +80,7 @@ pub fn hint(id: &str) -> String {
         "sketch.circle.center" => "Circle: click the centre, then a point on the circle".into(),
         "sketch.arc.three_point" => "Arc: click start, end, then a point on the arc".into(),
         "sketch.arc.center_point" => "Arc: click centre, start, then end (counter-clockwise)".into(),
-        "sketch.dimension" => "Dimension: pick a line, circle or arc (or two points/lines)".into(),
+        "sketch.dimension" => "Dimension: pick one or two entities, then click to place the value".into(),
         "sketch.slot.center_to_center" | "sketch.slot.overall" => "Slot: click both ends, then the width".into(),
         _ if id.starts_with("sketch.constraint.") => "Constraint: pick the sketch entities".into(),
         _ => crate::sketch_tools::hint(id).unwrap_or_else(|| "Click in the sketch".into()),
@@ -142,31 +142,21 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
         Kind::Dimension => {
             let hits = pick(app, proj, pos);
             let hit = hits.iter().find_map(|h| match h {
-                Hit::SketchPoint { id, .. } => Some((id.clone(), true)),
-                Hit::SketchCurve { id, .. } => Some((id.clone(), false)),
+                Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
                 _ => None,
             });
-            if let Some((id, is_point)) = hit {
-                tool.picks.push(id.clone());
-                let st = app.session.world_state();
-                let is_line = app
-                    .session
-                    .active_sketch
-                    .and_then(|s| st.sketch(s))
-                    .and_then(|ss| ss.sketch.curve_index(&id).and_then(|c| ss.sketch.curves.get(c).cloned()))
-                    .map(|c| matches!(c.kind, solvecraft_engine::sketch::CurveKind::Line { .. }));
-                let ready = (tool.picks.len() == 1 && !is_point && is_line != Some(true)) || tool.picks.len() >= 2;
-                let single_line = tool.picks.len() == 1 && is_line == Some(true);
-                if ready || single_line {
-                    // A single line gets its length right away; a second pick (line or point) replaces it.
-                    if let Ok(v) = app.run("sketch.dimension", json!({"entities": tool.picks}))
-                        && let Some(p) = v["param"].as_str()
-                    {
-                        // The value is edited in place, selected so typing replaces it.
-                        crate::dim_view::edit_param(app, p);
-                    }
-                    tool.picks.clear();
+            if let Some(id) = hit {
+                if !tool.picks.contains(&id) && tool.picks.len() < 2 {
+                    tool.picks.push(id);
                 }
+            } else if !tool.picks.is_empty()
+                && let Some((at, _)) = sketch_point_at(app, proj, pos)
+                && let Ok(v) = app.run("sketch.dimension", json!({"entities": tool.picks, "text_at": [at.x, at.y]}))
+            {
+                if let Some(p) = v["param"].as_str() {
+                    crate::dim_view::edit_param(app, p);
+                }
+                tool.picks.clear();
             }
         }
     }
