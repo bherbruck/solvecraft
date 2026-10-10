@@ -187,7 +187,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     }
     let tk = Tokens::get();
     let is_sel = |id: &str| app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { id: x } if x == id));
-    let hover = ui.input(|i| i.pointer.hover_pos()).filter(|p| proj.rect.contains(*p)).and_then(hit);
+    let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(hit);
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let font = FontId::proportional(12.0);
     let centres = chain_centres(sk);

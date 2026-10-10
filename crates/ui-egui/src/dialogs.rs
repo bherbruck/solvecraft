@@ -480,10 +480,12 @@ impl Dialog {
                                 .collect::<Vec<_>>()
                         })
                         .unwrap_or_else(|| vec![sel.clone()]),
+                    (Kind::Measure { .. }, _) => vec![crate::viewport::measurement_selection(s, sel)],
+                    _ if inp.multi => crate::viewport::grouped_selection(s, sel),
                     _ => vec![sel.clone()],
                 };
                 for x in picked {
-                    if !inp.items.contains(&x) {
+                    if !inp.items.iter().any(|y| selection::same_item(y, &x)) {
                         inp.items.push(x);
                     }
                 }
@@ -631,8 +633,11 @@ impl Dialog {
 
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
+        let measure = matches!(self.kind, Kind::Measure { .. });
+        let sel = if measure { crate::viewport::measurement_selection(s, &sel) } else { sel };
         let chain = matches!(self.kind, Kind::Fillet { chain: true, .. });
-        let mut picked = vec![sel.clone()];
+        let mut picked =
+            if !measure && self.active_input().is_some_and(|i| i.multi) { crate::viewport::grouped_selection(s, &sel) } else { vec![sel.clone()] };
         // Tangent chain: an edge brings the edges that continue it smoothly.
         if chain
             && let Sel::Edge { body, index, .. } = &sel
@@ -667,13 +672,15 @@ impl Dialog {
     }
 
     /// Box selection result: replace (or add to) the active input.
-    pub fn take_box(&mut self, sels: Vec<Sel>, add: bool) {
+    pub fn take_box(&mut self, s: &Session, sels: Vec<Sel>, add: bool) {
+        let measure = matches!(self.kind, Kind::Measure { .. });
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
         if !add {
             inp.items.clear();
         }
         for x in sels {
-            if fits(inp.accept, &x) && !inp.items.contains(&x) {
+            let x = if measure { crate::viewport::measurement_selection(s, &x) } else { x };
+            if fits(inp.accept, &x) && !inp.items.iter().any(|y| selection::same_item(y, &x)) {
                 inp.items.push(x);
             }
         }
@@ -1848,7 +1855,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Err(e) => d.error = Some(e),
         }
     }
-    if !(keep && !cancel) {
+    if !keep || cancel {
         crate::dialogs_motion::closed(app, &mut d, applied);
     }
     if keep && !cancel {

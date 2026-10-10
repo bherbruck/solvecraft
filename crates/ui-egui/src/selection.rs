@@ -8,6 +8,15 @@ use solvecraft_engine::geom::Vec3;
 
 use crate::viewport::Hit;
 
+/// Model picks retain an on-surface point, but their identity is the body and topology index.
+pub(crate) fn same_item(a: &Sel, b: &Sel) -> bool {
+    match (a, b) {
+        (Sel::Edge { body: a, index: i, .. }, Sel::Edge { body: b, index: j, .. })
+        | (Sel::Face { body: a, index: i, .. }, Sel::Face { body: b, index: j, .. }) => a == b && i == j,
+        _ => a == b,
+    }
+}
+
 /// What a selection input accepts (bit set).
 pub type Accept = u16;
 pub const PROFILES: Accept = 1;
@@ -73,11 +82,11 @@ impl SelInput {
             return;
         }
         // A pick of something already in (or a chain fully in) takes it out.
-        if picked.iter().all(|p| self.items.contains(p)) {
-            self.items.retain(|x| !picked.contains(x));
+        if picked.iter().all(|p| self.items.iter().any(|x| same_item(x, p))) {
+            self.items.retain(|x| !picked.iter().any(|p| same_item(x, p)));
         } else {
             for p in picked {
-                if !self.items.contains(&p) {
+                if !self.items.iter().any(|x| same_item(x, &p)) {
                     self.items.push(p);
                 }
             }

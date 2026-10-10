@@ -520,7 +520,7 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     let u = (pa - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
     let v = (pb - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
     let half = 0.5 * u.cross(v).atan2(u.dot(v)).abs();
-    if half < 1e-6 || half > std::f64::consts::FRAC_PI_2 - 1e-9 {
+    if !(1e-6..=std::f64::consts::FRAC_PI_2 - 1e-9).contains(&half) {
         return Err(bad(cmd, "the lines are parallel"));
     }
     let d = r / half.tan();

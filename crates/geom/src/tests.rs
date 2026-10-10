@@ -85,6 +85,46 @@ fn tangent_chains_follow_smooth_edges() {
 }
 
 #[test]
+fn circular_rims_group_only_closed_cocircular_edges() {
+    let arc = |start: f64, sweep: f64, yscale: f64| -> Vec<Vec3> {
+        (0..=32)
+            .map(|i| {
+                let a = start + sweep * i as f64 / 32.0;
+                Vec3::new(10.0 * a.cos(), yscale * 10.0 * a.sin(), 5.0)
+            })
+            .collect()
+    };
+    let pi = std::f64::consts::PI;
+    let mut m = Mesh {
+        positions: vec![Vec3::new(-10.0, -10.0, 5.0), Vec3::new(10.0, 10.0, 5.0)],
+        edges: vec![arc(0.0, pi, 1.0), arc(2.0 * pi, -pi, 1.0)],
+        ..Default::default()
+    };
+    assert_eq!(m.circular_rim(0), vec![0, 1]);
+    assert_eq!(m.circular_rim(1), vec![0, 1]);
+    // A hidden seam cannot form a selectable rim.
+    m.seams = vec![false, true];
+    assert_eq!(m.circular_rim(0), vec![0]);
+    m.seams.clear();
+    m.edges[1] = arc(pi, pi / 2.0, 1.0);
+    assert_eq!(m.circular_rim(0), vec![0]);
+    // A closed, smooth ellipse is not a circle.
+    m.edges = vec![arc(0.0, pi, 0.7), arc(pi, pi, 0.7)];
+    assert_eq!(m.circular_rim(0), vec![0]);
+    assert_eq!(m.circular_rim(99), vec![99]);
+}
+
+#[test]
+fn surface_patches_cross_only_hidden_seams() {
+    let mut m = Mesh { edge_faces: vec![vec![0, 1], vec![1, 2], vec![2, 3]], seams: vec![true, true, false], ..Default::default() };
+    assert_eq!(m.surface_patch(0), vec![0, 1, 2]);
+    assert_eq!(m.surface_patch(2), vec![0, 1, 2]);
+    assert_eq!(m.surface_patch(3), vec![3]);
+    m.seams.clear();
+    assert_eq!(m.surface_patch(0), vec![0]);
+}
+
+#[test]
 fn cubic_and_conic_segments_measure_exactly() {
     use crate::{Loop2, Seg2, Vec2};
     // An ellipse (a = 5, b = 3) as four quarter conics: area π a b.

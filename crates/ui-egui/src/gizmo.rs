@@ -255,7 +255,7 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     }
     let state: Option<State> = ui.data(|d| d.get_temp(id));
     let pointer = ui.input(|i| i.pointer.hover_pos());
-    let hovered = if state.is_none() { pointer.filter(|p| proj.rect.contains(*p)).and_then(|p| hit(&sh, p)) } else { None };
+    let hovered = if state.is_none() { pointer.filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(|p| hit(&sh, p)) } else { None };
     let active = state.map(|s| s.handle).or(hovered);
     let hot = |h: Handle| active == Some(h);
     let col = |h: Handle, i: usize| if hot(h) { tk.accent } else { axis_color(i) };
