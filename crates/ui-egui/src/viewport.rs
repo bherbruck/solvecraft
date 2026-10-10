@@ -2074,16 +2074,16 @@ pub(crate) fn cube_point(app: &SolveApp, rect: Rect, p: Vec3) -> Pos2 {
 /// Half a view cube face, in pixels.
 const CUBE_SCALE: f64 = 32.0;
 
-/// The view cube (top right): a cube with chamfered corners. Its 14 targets are the 6 faces
-/// (orthographic views) and the 8 corner facets (iso views); the edges between them are not
-/// targets. Hover lights the face or facet under the pointer, a click turns the view to it, the
-/// house goes home.
 /// The camera's basis in its up-axis frame (Z up): the cube's TOP is the world's up, X, Y or Z.
 fn cube_basis(cam: &Camera) -> (Vec3, Vec3, Vec3) {
     let (r, u, b) = cam.basis();
     (cam.to_frame(r), cam.to_frame(u), cam.to_frame(b))
 }
 
+/// The view cube (top right): a cube with chamfered corners. Its 26 targets are the 6 faces
+/// (orthographic views), the 12 edges (the views halfway between their two faces) and the 8
+/// corner facets (iso views); an edge is picked by a band along it on both faces it joins.
+/// Hover lights the target under the pointer, a click turns the view to it, the house goes home.
 fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let t = Tokens::get();
     let c = pos2(rect.right() - 80.0, rect.top() + 80.0);
@@ -2092,6 +2092,7 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let painter = ui.painter_at(rect);
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(rect));
     let targets = cube_targets();
+    let drawn = cube_drawn(&targets, (r, u, b), c);
     let shapes = cube_projected(&targets, (r, u, b), c);
     let hovered = hover.and_then(|h| cube_hit(&shapes, h));
     // Axis triad from the cube's back corner, drawn first: the cube hides what is behind it.
@@ -2103,20 +2104,26 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         painter.line_segment([at, tip], Stroke::new(2.0, Color32::from_rgb(col.0, col.1, col.2)));
     }
     // Back to front: the faces and facets turned toward the camera.
-    for (i, pts) in shapes.iter().rev() {
+    for (i, pts) in drawn.iter().rev() {
         let tg = &targets[*i];
-        let n = tg.normal();
-        let shade = (0.75 + 0.25 * n.dot(b)) as f32;
-        let fill = if tg.corner { t.cube_face.gamma_multiply(shade * 0.92) } else { t.cube_face.gamma_multiply(shade) };
+        let shade = (0.75 + 0.25 * tg.normal().dot(b)) as f32;
+        let fill = if tg.kind == CubeKind::Corner { t.cube_face.gamma_multiply(shade * 0.92) } else { t.cube_face.gamma_multiply(shade) };
         painter.extend(projected_polygon(pts, fill.to_opaque(), Stroke::new(1.0, t.cube_edge)));
+    }
+    // The hovered target's patches (an edge's band lights on both its faces), and each target's
+    // handle at its front patch (published last, so it wins).
+    for (i, pts) in shapes.iter().rev() {
         if hovered == Some(*i) {
             painter.extend(projected_polygon(pts, t.accent_soft, Stroke::new(1.0, t.accent)));
         }
-        let centre = cube_centroid(pts);
-        crate::scenario::publish_handle(&format!("cube:{}", tg.name), centre);
+        crate::scenario::publish_handle(&format!("cube:{}", targets[*i].name), cube_centroid(pts));
+    }
+    for (i, _) in drawn.iter().rev() {
+        let tg = &targets[*i];
+        let n = tg.normal();
         // Fades out as the face turns edge-on.
         let ink = (n.dot(b) / 0.3).clamp(0.0, 1.0) as f32;
-        if !tg.corner && ink > 0.05 {
+        if tg.kind == CubeKind::Face && ink > 0.05 {
             painter.add(cube_label(ui.ctx(), &tg.name.to_uppercase(), n, (r, u), c, Color32::from_rgb(40, 44, 52).gamma_multiply(ink)));
         }
     }
@@ -2124,7 +2131,7 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if let Some(i) = hovered {
         crate::scenario::publish_handle(&format!("cube_hover:{}", targets[i].name), hover.unwrap_or(c));
     }
-    // Clicked: the view from the face's or facet's direction (target → eye).
+    // Clicked: the view from the target's direction (target → eye).
     let clicked = hovered.filter(|_| ui.input(|i| i.pointer.primary_clicked())).map(|i| targets[i].dir);
     let home = Rect::from_center_size(pos2(c.x - 52.0, c.y - 48.0), vec2(18.0, 18.0));
     let hr = ui.interact(home, ui.id().with("vc_home"), Sense::click());
@@ -2145,14 +2152,26 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
 /// How far along each edge a view cube corner is cut off (the cube's faces are at ±1).
 const CUBE_CHAMFER: f64 = 0.38;
 
-/// A view cube target: a face or a corner facet, its view direction (target → eye) and outline
-/// (cube units).
+/// How far into each face an edge's band reaches (the cube's faces are at ±1).
+const CUBE_EDGE_BAND: f64 = 0.18;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CubeKind {
+    Face,
+    Edge,
+    Corner,
+}
+
+/// A view cube target: a face, an edge or a corner facet, its view direction (target → eye), the
+/// outline it is drawn with (cube units; none for an edge, which is drawn as part of its faces)
+/// and the patches that pick it, each with its normal.
 #[derive(Clone, Debug)]
 pub(crate) struct CubeTarget {
     pub name: String,
     pub dir: Vec3,
-    pub corner: bool,
+    pub kind: CubeKind,
     pub outline: Vec<Vec3>,
+    pub patches: Vec<(Vec3, Vec<Vec3>)>,
 }
 
 impl CubeTarget {
@@ -2161,36 +2180,72 @@ impl CubeTarget {
     }
 }
 
-/// The 14 targets: 6 octagonal faces and 8 triangular corner facets.
+/// A target's name from its direction: its sides, top or bottom first, then front or back, then
+/// right or left (`top`, `top-front`, `top-front-right`).
+fn cube_target_name(d: Vec3) -> String {
+    [(d.z, "top", "bottom"), (d.y, "back", "front"), (d.x, "right", "left")]
+        .iter()
+        .filter(|(v, _, _)| v.abs() > 0.5)
+        .map(|(v, pos, neg)| if *v > 0.0 { *pos } else { *neg })
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// An octagon on face `n` (in-face axes `e1`, `e2`): its sides at `side` from the face's centre,
+/// its corners cut from `along` on.
+fn cube_octagon(n: Vec3, (e1, e2): (Vec3, Vec3), side: f64, along: f64) -> Vec<Vec3> {
+    let (s, a) = (side, along);
+    [(-a, -s), (a, -s), (s, -a), (s, a), (a, s), (-a, s), (-s, a), (-s, -a)].iter().map(|(x, y)| n + e1 * *x + e2 * *y).collect()
+}
+
+/// The 26 targets: 6 octagonal faces, 8 triangular corner facets and 12 edges. A face is picked
+/// inside the bands along its edges; an edge by its band on each of its two faces, ending at the
+/// corner facets.
 pub(crate) fn cube_targets() -> Vec<CubeTarget> {
-    let k = CUBE_CHAMFER;
+    let (k, w) = (CUBE_CHAMFER, CUBE_EDGE_BAND);
+    let faces = [
+        Vec3::new(0.0, -1.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(-1.0, 0.0, 0.0),
+        Vec3::Z,
+        Vec3::new(0.0, 0.0, -1.0),
+    ];
     let mut out = Vec::new();
-    for (n, name) in [
-        (Vec3::new(0.0, -1.0, 0.0), "front"),
-        (Vec3::new(0.0, 1.0, 0.0), "back"),
-        (Vec3::new(1.0, 0.0, 0.0), "right"),
-        (Vec3::new(-1.0, 0.0, 0.0), "left"),
-        (Vec3::Z, "top"),
-        (Vec3::new(0.0, 0.0, -1.0), "bottom"),
-    ] {
-        let (e1, e2) = cube_face_axes(n);
-        let uv =
-            [(-1.0 + k, -1.0), (1.0 - k, -1.0), (1.0, -1.0 + k), (1.0, 1.0 - k), (1.0 - k, 1.0), (-1.0 + k, 1.0), (-1.0, 1.0 - k), (-1.0, -1.0 + k)];
-        out.push(CubeTarget { name: name.into(), dir: n, corner: false, outline: uv.iter().map(|(a, b2)| n + e1 * *a + e2 * *b2).collect() });
+    for n in faces {
+        let axes = cube_face_axes(n);
+        let inner = cube_octagon(n, axes, 1.0 - w, 1.0 - k + w);
+        out.push(CubeTarget {
+            name: cube_target_name(n),
+            dir: n,
+            kind: CubeKind::Face,
+            outline: cube_octagon(n, axes, 1.0, 1.0 - k),
+            patches: vec![(n, inner)],
+        });
     }
     for sz in [1.0, -1.0] {
         for sy in [-1.0, 1.0] {
             for sx in [1.0, -1.0] {
                 let corner = Vec3::new(sx, sy, sz);
-                let name = format!(
-                    "{}-{}-{}",
-                    if sz > 0.0 { "top" } else { "bottom" },
-                    if sy < 0.0 { "front" } else { "back" },
-                    if sx > 0.0 { "right" } else { "left" }
-                );
                 let outline = vec![corner - Vec3::X * (sx * k), corner - Vec3::Y * (sy * k), corner - Vec3::Z * (sz * k)];
-                out.push(CubeTarget { name, dir: corner, corner: true, outline });
+                let patch = (corner, outline.clone());
+                out.push(CubeTarget { name: cube_target_name(corner), dir: corner, kind: CubeKind::Corner, outline, patches: vec![patch] });
             }
+        }
+    }
+    // The band on face `n` along its edge toward face `s`: from the edge in to `w`, its ends on
+    // the corner facets' cuts.
+    let band = |n: Vec3, s: Vec3, along: Vec3| {
+        let a = 1.0 - k;
+        let inside = n + s * (1.0 - w);
+        vec![n + s - along * a, n + s + along * a, inside + along * (a + w), inside - along * (a + w)]
+    };
+    for (i, n1) in faces.iter().enumerate() {
+        for n2 in faces.iter().skip(i + 1).filter(|n2| n1.dot(**n2).abs() < 0.5) {
+            let along = n1.cross(*n2);
+            let dir = *n1 + *n2;
+            let patches = vec![(*n1, band(*n1, *n2, along)), (*n2, band(*n2, *n1, along))];
+            out.push(CubeTarget { name: cube_target_name(dir), dir, kind: CubeKind::Edge, outline: Vec::new(), patches });
         }
     }
     out
@@ -2225,22 +2280,34 @@ fn cube_label(ctx: &egui::Context, text: &str, n: Vec3, ru: (Vec3, Vec3), c: Pos
     Shape::mesh(mesh)
 }
 
-/// The targets turned toward the camera (basis `rub`), front first, as screen polygons around
-/// the cube's centre `c`.
-pub(crate) fn cube_projected(targets: &[CubeTarget], rub: (Vec3, Vec3, Vec3), c: Pos2) -> Vec<(usize, Vec<Pos2>)> {
+/// The polygons (target index, normal, outline) turned toward the camera (basis `rub`), front
+/// first, as screen polygons around the cube's centre `c`.
+fn cube_project<'a>(polys: impl Iterator<Item = (usize, Vec3, &'a [Vec3])>, rub: (Vec3, Vec3, Vec3), c: Pos2) -> Vec<(usize, Vec<Pos2>)> {
     let (r, u, b) = rub;
-    let mut v: Vec<(usize, f64, Vec<Pos2>)> = targets
-        .iter()
-        .enumerate()
-        .filter(|(_, tg)| tg.normal().dot(b) > 1e-3)
-        .map(|(i, tg)| (i, tg.normal().dot(b), tg.outline.iter().map(|p| cube_to_screen((r, u), c, *p)).collect()))
+    let mut v: Vec<(usize, f64, Vec<Pos2>)> = polys
+        .map(|(i, n, outline)| (i, n.normalized().unwrap_or(n).dot(b), outline))
+        .filter(|(_, facing, _)| *facing > 1e-3)
+        .map(|(i, facing, outline)| (i, facing, outline.iter().map(|p| cube_to_screen((r, u), c, *p)).collect()))
         .collect();
     v.sort_by(|a, b2| b2.1.total_cmp(&a.1));
     v.into_iter().map(|(i, _, p)| (i, p)).collect()
 }
 
-/// The target under `p`. The faces and facets tile the cube, so a point on an edge between two
-/// of them (where neither polygon claims it) goes to the nearer one, within a few pixels.
+/// The targets' patches turned toward the camera, front first, each with its target's index: what
+/// the pointer picks.
+pub(crate) fn cube_projected(targets: &[CubeTarget], rub: (Vec3, Vec3, Vec3), c: Pos2) -> Vec<(usize, Vec<Pos2>)> {
+    let patches = targets.iter().enumerate().flat_map(|(i, tg)| tg.patches.iter().map(move |(n, o)| (i, *n, o.as_slice())));
+    cube_project(patches, rub, c)
+}
+
+/// The faces and corner facets turned toward the camera, front first: what is drawn.
+fn cube_drawn(targets: &[CubeTarget], rub: (Vec3, Vec3, Vec3), c: Pos2) -> Vec<(usize, Vec<Pos2>)> {
+    let outlines = targets.iter().enumerate().filter(|(_, tg)| !tg.outline.is_empty()).map(|(i, tg)| (i, tg.dir, tg.outline.as_slice()));
+    cube_project(outlines, rub, c)
+}
+
+/// The target under `p`. The patches tile the cube, so a point on a line between two of them
+/// (where neither polygon claims it) goes to the nearer one, within a few pixels.
 pub(crate) fn cube_hit(shapes: &[(usize, Vec<Pos2>)], p: Pos2) -> Option<usize> {
     if let Some((i, _)) = shapes.iter().find(|(_, pts)| point_in_poly(p, pts)) {
         return Some(*i);
@@ -2776,21 +2843,47 @@ mod tests {
     }
 
     #[test]
-    fn view_cube_has_14_targets_each_hit_where_drawn() {
+    fn view_cube_has_26_targets_each_hit_where_drawn() {
         let targets = cube_targets();
-        assert_eq!(targets.len(), 14);
-        assert_eq!(targets.iter().filter(|t| t.corner).count(), 8);
+        assert_eq!(targets.len(), 26);
+        let count = |k: CubeKind| targets.iter().filter(|t| t.kind == k).count();
+        assert_eq!((count(CubeKind::Face), count(CubeKind::Edge), count(CubeKind::Corner)), (6, 12, 8));
+        let mut names: Vec<&str> = targets.iter().map(|t| t.name.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), 26, "names are unique");
         let c = pos2(100.0, 100.0);
         for (i, tg) in targets.iter().enumerate() {
-            // Seen from a little off its own direction, its middle hits it.
+            // Seen from a little off its own direction, the middle of each of its patches hits it.
             let shapes = cube_projected(&targets, basis_from(tg.dir + Vec3::new(0.11, 0.07, 0.05)), c);
-            let pts = &shapes.iter().find(|(j, _)| *j == i).expect("visible").1;
-            assert_eq!(cube_hit(&shapes, cube_centroid(pts)), Some(i), "{}", tg.name);
+            let mine: Vec<_> = shapes.iter().filter(|(j, _)| *j == i).collect();
+            assert_eq!(mine.len(), tg.patches.len(), "{}: every patch visible", tg.name);
+            for (_, pts) in mine {
+                assert_eq!(cube_hit(&shapes, cube_centroid(pts)), Some(i), "{}", tg.name);
+            }
         }
-        // From an iso view: 3 faces and the 4 facets turned toward it.
+        // From an iso view: 3 faces, the 4 bands on each and the 4 facets turned toward it.
         let shapes = cube_projected(&targets, basis_from(Vec3::new(1.0, -1.0, 1.0)), c);
-        assert_eq!(shapes.len(), 3 + 4);
+        assert_eq!(shapes.len(), 3 + 3 * 4 + 4);
         assert_eq!(cube_hit(&shapes, pos2(400.0, 400.0)), None);
+    }
+
+    /// The patches tile the cube: every point of the drawn cube picks a target, from any direction.
+    #[test]
+    fn view_cube_patches_cover_the_drawn_cube() {
+        let targets = cube_targets();
+        let c = pos2(100.0, 100.0);
+        for dir in orbit_directions().step_by(11) {
+            let rub = basis_from(dir);
+            let shapes = cube_projected(&targets, rub, c);
+            for (_, pts) in cube_drawn(&targets, rub, c) {
+                let centre = cube_centroid(&pts);
+                // Each outline vertex pulled a little toward the middle, and the middle itself.
+                for p in pts.iter().map(|p| *p + (centre - *p) * 0.05).chain([centre]) {
+                    assert!(cube_hit(&shapes, p).is_some(), "{p:?} from {dir:?} picks nothing");
+                }
+            }
+        }
     }
 
     /// From any direction, including faces turned nearly edge-on, everything drawn stays within
@@ -2803,7 +2896,8 @@ mod tests {
         let limit = (3f64.sqrt() * CUBE_SCALE) as f32 + 3.0;
         let mut worst = 0.0f32;
         for dir in orbit_directions() {
-            for (_, pts) in cube_projected(&targets, basis_from(dir), c) {
+            let rub = basis_from(dir);
+            for (_, pts) in cube_drawn(&targets, rub, c).into_iter().chain(cube_projected(&targets, rub, c)) {
                 for p in drawn_points(projected_polygon(&pts, Color32::GRAY, Stroke::new(1.0, Color32::BLACK))) {
                     worst = worst.max(p.distance(c));
                 }
@@ -2814,7 +2908,7 @@ mod tests {
 
     #[test]
     fn view_cube_labels_read_upright_in_their_own_view() {
-        for tg in cube_targets().iter().filter(|t| !t.corner) {
+        for tg in cube_targets().iter().filter(|t| t.kind == CubeKind::Face) {
             // The view clicking the face turns to (TOP and BOTTOM with yaw 0).
             let mut cam = solvecraft_engine::render::Camera::default().looking_from(tg.dir);
             if tg.dir.z.abs() > 0.5 {
@@ -2826,7 +2920,7 @@ mod tests {
         }
     }
 
-    /// From any direction, each label is printed within its face.
+    /// From any direction, each label is printed within its face, clear of the edge bands.
     #[test]
     fn view_cube_labels_stay_on_their_faces() {
         let ctx = egui::Context::default();
@@ -2838,7 +2932,7 @@ mod tests {
                 let (r, u, b) = basis_from(dir);
                 for (i, pts) in cube_projected(&targets, (r, u, b), c) {
                     let tg = &targets[i];
-                    if tg.corner {
+                    if tg.kind != CubeKind::Face {
                         continue;
                     }
                     for p in drawn_points(vec![cube_label(ui.ctx(), &tg.name.to_uppercase(), tg.normal(), (r, u), c, Color32::BLACK)]) {
@@ -2854,24 +2948,40 @@ mod tests {
     }
 
     #[test]
-    fn view_cube_edges_are_not_targets() {
+    fn view_cube_edges_are_targets() {
         let targets = cube_targets();
         let c = pos2(100.0, 100.0);
-        let shapes = cube_projected(&targets, basis_from(Vec3::new(1.0, -1.2, 0.9)), c);
-        let (r, u, _) = basis_from(Vec3::new(1.0, -1.2, 0.9));
-        let to2 = |p: Vec3| pos2(c.x + (p.dot(r) * CUBE_SCALE) as f32, c.y - (p.dot(u) * CUBE_SCALE) as f32);
         let name = |i: Option<usize>| i.map(|i| targets[i].name.clone()).unwrap_or_default();
-        // On the top-front edge, its middle and near its ends: a neighbouring face (or facet).
+        let at = |dir: Vec3, p: Vec3| {
+            let (r, u, b) = basis_from(dir);
+            let shapes = cube_projected(&targets, (r, u, b), c);
+            name(cube_hit(&shapes, cube_to_screen((r, u), c, p)))
+        };
+        let iso = Vec3::new(1.0, -1.2, 0.9);
+        // On the top-front edge, along it, and just off it on either face: the edge.
         for x in [-0.5, 0.0, 0.5] {
-            let hit = name(cube_hit(&shapes, to2(Vec3::new(x, -1.0, 1.0))));
-            assert!(hit == "top" || hit == "front", "edge point {x}: {hit}");
+            for p in [Vec3::new(x, -1.0, 1.0), Vec3::new(x, -0.9, 1.0), Vec3::new(x, -1.0, 0.9)] {
+                assert_eq!(at(iso, p), "top-front", "{p:?}");
+            }
         }
-        let end = name(cube_hit(&shapes, to2(Vec3::new(0.9, -1.0, 1.0))));
-        assert!(["top", "front", "top-front-right"].contains(&end.as_str()), "{end}");
-        // Every direction a click turns to is a face's or a corner's: none along an edge.
-        for tg in &targets {
-            let zeros = [tg.dir.x, tg.dir.y, tg.dir.z].iter().filter(|v| v.abs() < 1e-9).count();
-            assert!(zeros == 2 || zeros == 0, "{}: {:?}", tg.name, tg.dir);
+        // Clear of the band: the face; at the end of the edge: the corner.
+        assert_eq!(at(iso, Vec3::new(0.0, -0.7, 1.0)), "top");
+        assert_eq!(at(iso, Vec3::new(0.0, -1.0, 0.7)), "front");
+        assert_eq!(at(iso, Vec3::new(0.85, -1.0, 0.95)), "top-front-right");
+        // A vertical edge too.
+        assert_eq!(at(iso, Vec3::new(0.95, -1.0, 0.0)), "front-right");
+        // Looking straight at FRONT, its four edges are bands along its border, and the edges
+        // running away from the view are hidden behind its corners.
+        let front = Vec3::new(0.0, -1.0, 0.0);
+        assert_eq!(at(front, Vec3::new(0.0, -1.0, 0.95)), "top-front");
+        assert_eq!(at(front, Vec3::new(0.0, -1.0, -0.95)), "bottom-front");
+        assert_eq!(at(front, Vec3::new(0.95, -1.0, 0.0)), "front-right");
+        assert_eq!(at(front, Vec3::new(-0.95, -1.0, 0.0)), "front-left");
+        assert_eq!(at(front, Vec3::new(0.0, -1.0, 0.0)), "front");
+        // An edge turns the view halfway between its two faces.
+        for tg in targets.iter().filter(|t| t.kind == CubeKind::Edge) {
+            let n: Vec<f64> = [tg.dir.x, tg.dir.y, tg.dir.z].iter().copied().filter(|v| v.abs() > 1e-9).collect();
+            assert!(n.len() == 2 && n.iter().all(|v| (v.abs() - 1.0).abs() < 1e-9), "{}: {:?}", tg.name, tg.dir);
         }
     }
 
