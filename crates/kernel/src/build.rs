@@ -795,12 +795,67 @@ pub enum PathSeg {
     },
 }
 
+impl PathSeg {
+    /// Unit directions of the path where the segment starts and ends.
+    fn tangents(&self) -> Option<(Vec3, Vec3)> {
+        match *self {
+            PathSeg::Line { a, b } => {
+                let t = (b - a).normalized()?;
+                Some((t, t))
+            }
+            PathSeg::Arc { a, center, axis, angle } => {
+                let k = axis.normalized()?;
+                let end = rotate_about(a, center, k, angle);
+                Some((k.cross(a - center).normalized()?, k.cross(end - center).normalized()?))
+            }
+        }
+    }
+
+    /// Points along the segment (an arc within `tol` of its chords), without its start.
+    fn points_after_start(&self, tol: f64) -> Vec<Vec3> {
+        match *self {
+            PathSeg::Line { b, .. } => vec![b],
+            PathSeg::Arc { a, center, axis, angle } => {
+                let Some(k) = axis.normalized() else { return vec![a] };
+                let r = (a - center).len();
+                let step = if r > tol { 2.0 * (1.0 - tol / r).acos() } else { angle.abs() };
+                let n = ((angle.abs() / step.max(1e-6)).ceil() as usize).clamp(1, 512);
+                (1..=n).map(|i| rotate_about(a, center, k, angle * i as f64 / n as f64)).collect()
+            }
+        }
+    }
+}
+
+/// `p` turned by `angle` about the unit axis `k` through `center` (right hand).
+fn rotate_about(p: Vec3, center: Vec3, k: Vec3, angle: f64) -> Vec3 {
+    let v = p - center;
+    let (s, c) = angle.sin_cos();
+    center + v * c + k.cross(v) * s + k * (k.dot(v) * (1.0 - c))
+}
+
 /// Sweep a planar region (outer loop) along a chain of path segments, keeping the profile
-/// perpendicular to the path (lines translate it, arcs rotate it).
+/// perpendicular to the path (lines translate it, arcs rotate it). A path with sharp corners
+/// is swept as a polyline, mitred at the corners.
 pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> {
     region_ok(region)?;
     if path.is_empty() || path.len() > 1000 {
         return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
+    }
+    // Segment by segment the profile only follows a path whose direction runs on across each
+    // joint: at a corner the next line would slide the profile within its own plane.
+    let ends: Vec<(Vec3, Vec3)> =
+        path.iter().map(PathSeg::tangents).collect::<Option<_>>().ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+    let corner = ends.windows(2).any(|w| w[0].1.dot(w[1].0) < (1e-3f64).cos());
+    if corner {
+        let first = match path.first() {
+            Some(PathSeg::Line { a, .. } | PathSeg::Arc { a, .. }) => *a,
+            None => return Err(KernelError::Invalid("the path needs 1…1000 segments".into())),
+        };
+        let mut pts = vec![first];
+        for seg in path {
+            pts.extend(seg.points_after_start(1e-2));
+        }
+        return crate::sweep_path::sweep_path(plane, region, &pts);
     }
     // The outer loop and each hole, swept along the path; the ends are capped with holes.
     let mut starts = vec![wire(plane, &region.outer.ccw())?];

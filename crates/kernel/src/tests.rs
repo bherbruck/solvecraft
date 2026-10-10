@@ -259,6 +259,22 @@ fn loft_and_sweep() {
 }
 
 #[test]
+fn sweep_round_a_sharp_corner_is_mitred() {
+    // A 2 × 2 square centred on an L of two 10 mm lines: lines alone would slide the profile
+    // along the second leg within its own plane (an empty, inside-out body). Mitred, the
+    // volume is the area times the path length.
+    let sq =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(-1.0, -1.0), Vec2::new(1.0, -1.0), Vec2::new(1.0, 1.0), Vec2::new(-1.0, 1.0)]), holes: vec![] };
+    let path = [
+        PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 0.0, 10.0) },
+        PathSeg::Line { a: Vec3::new(0.0, 0.0, 10.0), b: Vec3::new(10.0, 0.0, 10.0) },
+    ];
+    let b = sweep(&Plane::XY, &sq, &path).unwrap();
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, 80.0) < 1e-9, "{}", m.volume);
+}
+
+#[test]
 fn moving_a_body_with_an_intersection_curve_edge_ends() {
     // A cylinder cut by a tilted box keeps an elliptical intersection curve as an edge. Moving
     // such a body scales the curve's tolerance by the matrix norm, whose root refinement cycled
