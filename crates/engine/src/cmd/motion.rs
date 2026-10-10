@@ -179,6 +179,8 @@ fn deepest(a: &solvecraft_geom::Mesh, b: &solvecraft_geom::Mesh, tol: f64) -> f6
 
 /// Ray parity along a skew direction (no axis-aligned edge hits).
 fn inside(p: Vec3, tris: &[[Vec3; 3]]) -> bool {
+    // Fixed ray coordinates, not an approximation used to compute Euler's constant.
+    #[allow(clippy::approx_constant)]
     let dir = Vec3::new(0.577_215_664_9, 0.327_118_441_9, 0.751_891_438_7);
     let mut n = 0;
     for [a, b, c] in tris {

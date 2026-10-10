@@ -71,6 +71,15 @@ People trust SolveCraft with their designs; a crash loses their work. **This out
 - **Never break wasm**: everything below the apps must build for `wasm32-unknown-unknown`
   (`cargo xtask wasm`, part of `cargo xtask ci`).
 
+## Application releases
+Development pushes are not application releases. Follow `docs/releasing.md` when asked to
+prepare or ship a release: choose the version from the actual changes, update Cargo.toml and
+Cargo.lock, pass the quality gates, advance `release` without force-pushing, and verify the
+resulting draft and its artifacts. When shipping is authorized, publish that verified draft
+and confirm its tag and downstream deployment. Do not auto-release every push to `main`, infer
+version bumps solely from commit prefixes, overwrite published versions, or push release tags
+before the draft is verified.
+
 ## Running and looking at the app
 - `cargo run --release -p solvecraft -- --sample --control PORT` (sample design + control channel).
   Pick a free port. Without a display, run it under `Xvfb :99` with `DISPLAY=:99`.
