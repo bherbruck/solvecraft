@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
         .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool"),
-    CommandSpec::new("solid.mirror", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ | {origin, x_dir, y_dir}"),
+    CommandSpec::new("solid.mirror", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ|construction plane name or id|{origin, normal}|{origin, x_dir, y_dir} (a construction plane keeps the mirror following it)"),
     CommandSpec::new("solid.hole", "Hole", hole)
         .at("SOLID", "CREATE")
         .icon("hole")
@@ -829,35 +829,35 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.mirror";
     let bodies = string_list(p, "bodies");
     let features = if bodies.is_empty() { source_features(s, p, cmd)? } else { Vec::new() };
-    let plane = match p.get("plane") {
-        Some(Value::String(n)) if solvecraft_geom::Plane::named(n).is_some() => solvecraft_doc::PlaneRef::Origin { name: n.to_ascii_uppercase() },
-        Some(o @ Value::Object(_)) => {
-            let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
-            let pl = match (o.get("x_dir").and_then(vec3), o.get("y_dir").and_then(vec3), o.get("normal").and_then(vec3)) {
-                (Some(x), Some(y), _) => solvecraft_geom::Plane::new(origin, x, y),
-                (_, _, Some(n)) => solvecraft_geom::Plane::from_normal(origin, n),
-                _ => None,
-            };
-            solvecraft_doc::PlaneRef::Custom { plane: pl.ok_or_else(|| bad(cmd, "plane needs x_dir and y_dir, or normal"))? }
-        }
-        _ => return Err(bad(cmd, "`plane` must be XY, XZ, YZ or {origin, normal}")),
-    };
+    let plane = plane_param(s, p.get("plane"), cmd)?;
     let combine = bool_(p, "combine").unwrap_or(false);
     add_feature(s, p, FeatureKind::Mirror { features, plane, bodies, combine })
 }
 
-/// A plane reference from a parameter: an origin plane, a construction plane name, or an
-/// explicit plane `{origin, x_dir, y_dir}` / `{origin, normal}`.
+/// A plane reference from a parameter: an origin plane, a construction plane (by name or
+/// feature id; kept by name, so the feature follows the plane when it changes), or an
+/// explicit plane `{origin, x_dir, y_dir}` / `{origin, normal}`. Every command that takes a
+/// plane reads it here.
 pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solvecraft_doc::PlaneRef> {
     use solvecraft_doc::PlaneRef;
+    const WANT: &str = "XY, XZ, YZ, a construction plane name or id, or {origin, normal}";
+    let construction = |r: &str| match s.doc.find_feature(r) {
+        Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { name: f.name.clone() }),
+        Some(f) => Err(bad(cmd, format!("`{}` is not a construction plane (a plane is {WANT})", f.name))),
+        None => Err(bad(cmd, format!("no plane `{r}` (a plane is {WANT})"))),
+    };
     match v {
-        Some(Value::String(n)) if solvecraft_geom::Plane::named(n).is_some() => Ok(PlaneRef::Origin { name: n.to_ascii_uppercase() }),
-        Some(Value::String(n)) => match s.doc.find_feature(n).map(|f| &f.kind) {
-            Some(FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { name: n.clone() }),
-            _ => Err(bad(cmd, format!("no plane `{n}`"))),
+        Some(Value::String(n)) if solvecraft_geom::Plane::named(n.trim()).is_some() => Ok(PlaneRef::Origin { name: n.trim().to_ascii_uppercase() }),
+        Some(Value::String(n)) => construction(n.trim()),
+        Some(Value::Number(id)) => match id.as_u64() {
+            Some(id) => construction(&id.to_string()),
+            None => Err(bad(cmd, format!("`plane` must be {WANT}"))),
         },
         Some(o @ Value::Object(_)) => {
-            let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
+            let origin = match o.get("origin") {
+                None => Vec3::ZERO,
+                Some(x) => vec3(x).ok_or_else(|| bad(cmd, "the plane's `origin` must be a point [x, y, z]"))?,
+            };
             let pl = match (o.get("x_dir").and_then(vec3), o.get("y_dir").and_then(vec3), o.get("normal").and_then(vec3)) {
                 (Some(x), Some(y), _) => solvecraft_geom::Plane::new(origin, x, y),
                 (_, _, Some(n)) => solvecraft_geom::Plane::from_normal(origin, n),
@@ -865,7 +865,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             };
             Ok(PlaneRef::Custom { plane: pl.ok_or_else(|| bad(cmd, "plane needs x_dir and y_dir, or normal"))? })
         }
-        _ => Err(bad(cmd, "`plane` must be XY, XZ, YZ, a construction plane name or {origin, normal}")),
+        _ => Err(bad(cmd, format!("`plane` must be {WANT}"))),
     }
 }
 
