@@ -1,10 +1,18 @@
-# Every pull request must pass `cargo xtask ci`: fmt, clippy -D warnings, tests in release mode,
-# the asset and layer checks, and the wasm build check.
+# Fast checks always run; native builds run for code/CI changes.
+# Cross-compilation is opt-in through Run workflow; release builds remain in release.yml.
 name: CI
 
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      cross_compile:
+        description: "Also check WebAssembly and RISC-V (before a release)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -14,23 +22,134 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  ci:
-    runs-on: ubuntu-latest
+  changes:
+    name: Select checks
+    runs-on: ubuntu-24.04
+    outputs:
+      native: ${{ steps.paths.outputs.native }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: paths
+        name: Detect code and CI changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          native=false
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            native=true
+          else
+            # Compare both old and new paths of renames; unknown paths run native checks.
+            git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                .github/workflows/ci.yml) native=true ;;
+                *.rs|Cargo.toml|Cargo.lock|*/Cargo.toml|.cargo/*|rust-toolchain*) native=true ;;
+                docs/*|*.md|.github/*|packaging/*|LICENSE*|NOTICE|THIRD-PARTY-LICENSES.txt) ;;
+                *) native=true ;;
+              esac
+            done < "$RUNNER_TEMP/ci-paths"
+          fi
+          echo "native=$native" >> "$GITHUB_OUTPUT"
+
+  checks:
+    name: Format and repository checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: repo-checks
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Asset attribution
+        run: cargo xtask assets
+      - name: Licences
+        run: cargo xtask licences --check
+      - name: Dependency layers
+        run: cargo xtask layers
+
+  clippy:
+    name: Native Linux Clippy
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: native-clippy
+      - run: cargo clippy --workspace --all-targets --release --locked -- -D warnings
+
+  tests:
+    name: Native Linux tests
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: native-tests
+      - name: Compile tests
+        run: cargo test --workspace --release --locked --no-run
+      - name: Run tests
+        run: cargo test --workspace --release --locked
+
+  # Preserve the existing check name for branch protection, including docs-only PRs.
+  ci:
+    needs: [changes, checks, clippy, tests]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify required checks
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CHECKS: ${{ needs.checks.result }}
+          NATIVE: ${{ needs.changes.outputs.native }}
+          CLIPPY: ${{ needs.clippy.result }}
+          TESTS: ${{ needs.tests.result }}
+        run: |
+          test "$CHANGES" = success
+          test "$CHECKS" = success
+          if [ "$NATIVE" = true ]; then
+            test "$CLIPPY" = success
+            test "$TESTS" = success
+          fi
+
+  wasm:
+    name: Compile WebAssembly (manual)
+    if: github.event_name == 'workflow_dispatch' && inputs.cross_compile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo xtask ci
-
-
+        with:
+          key: wasm
+      - run: cargo xtask wasm
 
   riscv64-gates:
-    name: gates (riscv64)
+    name: Compile RISC-V (manual)
+    if: github.event_name == 'workflow_dispatch' && inputs.cross_compile
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Check out craft-fonts
@@ -42,6 +161,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: riscv64gc-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: riscv64
       - name: Install cross-compilation dependencies
         run: |
           # Ubuntu's regular archive serves amd64; RISC-V packages live in ports.
