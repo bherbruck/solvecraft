@@ -165,6 +165,8 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.ui.show_grid.hash(&mut h);
     app.ui.visual_style.hash(&mut h);
     app.ui.ground_shadow.hash(&mut h);
+    // The section plane (its cut outlines are part of the model scene).
+    section_plane(app).map(|(o, n)| [o.x, o.y, o.z, n.x, n.y, n.z].map(f64::to_bits)).hash(&mut h);
     app.cam.up.hash(&mut h);
     (app.cam.pitch > 0.0).hash(&mut h);
     app.ui.show_sketches.hash(&mut h);
@@ -281,6 +283,15 @@ fn build_scene(app: &SolveApp) -> GpuScene {
     if app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0 {
         ground_shadow(&mut sc, app, &st);
     }
+    // Section: the outline of each body where the plane cuts it.
+    if let Some((o, n)) = section_plane(app) {
+        let col = c4(tk.text.gamma_multiply(0.9));
+        for b in st.bodies.iter().filter(|b| !app.ui.hidden_bodies.contains(&b.name)) {
+            for (a, c) in section_segments(&b.mesh(), o, n) {
+                sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
+            }
+        }
+    }
     for sid in visible_sketches(app) {
         let Some(ss) = st.sketch(sid) else { continue };
         let active = s.active_sketch == Some(sid);
@@ -363,6 +374,28 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, st: &solvecraft_engine::doc:
             }
         }
     }
+}
+
+/// Where the plane through `o` with normal `n` cuts a mesh: one segment per crossed triangle,
+/// nudged a hair to the kept side (so the clip leaves them drawn).
+pub(crate) fn section_segments(m: &solvecraft_engine::geom::Mesh, o: Vec3, n: Vec3) -> Vec<(Vec3, Vec3)> {
+    let eps = 1e-4 * (1.0 + m.bounds().diagonal());
+    let mut out = Vec::new();
+    for t in &m.triangles {
+        let Some(p) = m.tri(t) else { continue };
+        let d = p.map(|q| n.dot(q - o));
+        let mut pts = Vec::with_capacity(2);
+        for (i, j) in [(0, 1), (1, 2), (2, 0)] {
+            if (d[i] < 0.0) != (d[j] < 0.0) {
+                let s = d[i] / (d[i] - d[j]);
+                pts.push(p[i] + (p[j] - p[i]) * s - n * eps);
+            }
+        }
+        if let [a, b] = pts[..] {
+            out.push((a, b));
+        }
+    }
+    out
 }
 
 /// The drawn pieces of a polyline in a dash pattern (on, off, on, off… lengths).
@@ -2190,6 +2223,26 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn section_outlines_follow_the_cut() {
+        let mut s = solvecraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let st = s.model.state();
+        let m = st.bodies[0].mesh();
+        let (o, n) = (Vec3::new(0.0, 15.0, 0.0), Vec3::new(0.0, -1.0, 0.0));
+        let segs = section_segments(&m, o, n);
+        assert!(segs.len() >= 4, "{segs:?}");
+        // On the plane (a hair to the kept side) and around the 40 x 20 cut.
+        let mut len = 0.0;
+        for (a, b) in &segs {
+            assert!((a.y - 15.0).abs() < 0.01 && (b.y - 15.0).abs() < 0.01);
+            len += a.dist(*b);
+        }
+        assert!((len - 120.0).abs() < 0.5, "outline length {len}");
+        // A plane that misses the body cuts nothing.
+        assert!(section_segments(&m, Vec3::new(0.0, 99.0, 0.0), n).is_empty());
+    }
 
     #[test]
     fn selection_shows_where_the_model_hides_it() {

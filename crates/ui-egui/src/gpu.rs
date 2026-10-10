@@ -328,7 +328,9 @@ fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f3
     let fw = fwidth(ndv);
     if (clipped(i.wp)) { discard; }
     if (!front && length(u.clip.xyz) > 0.5) {
-        return out_color(u.cap);
+        // The cut face: the cap colour, hatched at 45 degrees on screen.
+        let h = fract((i.pos.x + i.pos.y) / 9.0);
+        return out_color(vec4<f32>(select(u.cap.rgb, u.cap.rgb * 0.62, h < 0.22), u.cap.a));
     }
     if (u.ana.x > 0.5 && length(i.n) > 0.5) {
         return analysis(i, k);
