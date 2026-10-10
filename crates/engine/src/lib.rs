@@ -170,6 +170,20 @@ pub struct Session {
     pub analysis: Option<SurfaceAnalysis>,
     /// What is hidden or shown in the view (`browser.visibility`).
     pub visibility: Visibility,
+    /// States to go back to (`edit.checkpoint`, `edit.restore_checkpoint`): how batches of
+    /// commands are undone however long the undo history is.
+    pub(crate) checkpoints: Vec<Checkpoint>,
+    next_checkpoint: u64,
+}
+
+/// The design, active sketch and undo history at an `edit.checkpoint`.
+#[derive(Clone, Debug)]
+pub(crate) struct Checkpoint {
+    pub id: u64,
+    pub doc: Arc<Document>,
+    pub active_sketch: Option<u64>,
+    pub undo: Vec<Snapshot>,
+    pub redo: Vec<Snapshot>,
 }
 
 /// Items hidden or shown one by one (view state, not part of the design and not an undo step).
@@ -204,6 +218,8 @@ pub enum SurfaceAnalysis {
 }
 
 const MAX_UNDO: usize = 200;
+/// Checkpoints kept (the oldest go first).
+const MAX_CHECKPOINTS: usize = 16;
 const MAX_LOG: usize = 2000;
 
 impl Default for Session {
@@ -235,6 +251,8 @@ impl Session {
             clipboard: Vec::new(),
             section: None,
             analysis: None,
+            checkpoints: Vec::new(),
+            next_checkpoint: 1,
             visibility: Visibility::default(),
         }
     }
@@ -356,6 +374,44 @@ impl Session {
         }
     }
 
+    /// Remember the design, active sketch and undo history; returns the checkpoint's id.
+    pub fn checkpoint(&mut self) -> u64 {
+        let id = self.next_checkpoint;
+        self.next_checkpoint += 1;
+        self.checkpoints.push(Checkpoint {
+            id,
+            doc: self.doc.clone(),
+            active_sketch: self.active_sketch,
+            undo: self.undo.clone(),
+            redo: self.redo.clone(),
+        });
+        if self.checkpoints.len() > MAX_CHECKPOINTS {
+            self.checkpoints.remove(0);
+        }
+        id
+    }
+
+    /// Go back to checkpoint `id` as if nothing since had happened (the undo history too). It
+    /// and later checkpoints are used up.
+    pub fn restore_checkpoint(&mut self, id: u64) -> Result<()> {
+        let i = self.checkpoints.iter().position(|c| c.id == id).ok_or_else(|| EngineError::Other(format!("no checkpoint {id}")))?;
+        let Some(c) = self.checkpoints.drain(i..).next() else { return Err(EngineError::Other(format!("no checkpoint {id}"))) };
+        self.doc = c.doc;
+        self.active_sketch = c.active_sketch;
+        self.undo = c.undo;
+        self.redo = c.redo;
+        self.selection.clear();
+        self.refresh();
+        Ok(())
+    }
+
+    /// Forget checkpoint `id` (and later ones) without going back.
+    pub fn drop_checkpoint(&mut self, id: u64) {
+        if let Some(i) = self.checkpoints.iter().position(|c| c.id == id) {
+            self.checkpoints.truncate(i);
+        }
+    }
+
     /// A scratch copy of the session (same design and model, no history or log) to try
     /// commands on without touching this one.
     pub fn scratch(&self) -> Session {
@@ -377,6 +433,8 @@ impl Session {
             clipboard: self.clipboard.clone(),
             section: None,
             analysis: None,
+            checkpoints: Vec::new(),
+            next_checkpoint: 1,
             visibility: Visibility::default(),
         }
     }
