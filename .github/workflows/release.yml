@@ -169,60 +169,6 @@ jobs:
 
 
 
-  linux-riscv64:
-    name: Linux riscv64
-    needs: version
-    runs-on: ubuntu-24.04
-    env:
-      SOLVECRAFT_VERSION: ${{ needs.version.outputs.version }}
-      SOLVECRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Check out craft-fonts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: storytold/craft-fonts
-          ref: ${{ env.CRAFT_FONTS_REF }}
-          path: craft-fonts
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: riscv64gc-unknown-linux-gnu
-      - name: Install cross-compilation dependencies
-        run: |
-          # Ubuntu's regular archive serves amd64; RISC-V packages live in ports.
-          # The 24.04 runner uses deb822 sources, so scope every Ubuntu stanza.
-          sudo sed -i '/^Architectures:/d; /^Types:/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
-          sudo tee /etc/apt/sources.list.d/riscv64.sources >/dev/null <<'EOF'
-          Types: deb
-          URIs: http://ports.ubuntu.com/ubuntu-ports
-          Suites: noble noble-updates noble-backports noble-security
-          Components: main restricted universe multiverse
-          Architectures: riscv64
-          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-          EOF
-          sudo dpkg --add-architecture riscv64
-          sudo apt-get update
-          sudo apt-get install -y gcc-riscv64-linux-gnu libasound2-dev:riscv64 libxkbcommon-dev:riscv64 \
-            libwayland-dev:riscv64 libx11-dev:riscv64 libxrandr-dev:riscv64 libxi-dev:riscv64 libgl1-mesa-dev:riscv64
-      - name: Build and package
-        env:
-          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
-          PKG_CONFIG_SYSROOT_DIR: /
-          PKG_CONFIG_PATH: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          PKG_CONFIG_ALLOW_CROSS: 1
-        run: |
-          . "$HOME/.cargo/env"
-          export CRAFT_FONTS_DIR="$PWD/craft-fonts" CRAFT_FONTS_REQUIRED=1
-          export CROSS_ARCH=riscv64
-          export CROSS_TARGET=riscv64gc-unknown-linux-gnu
-          export DEB_ARCH=riscv64
-          # We skip nfpm (deb/rpm) and AppImage for now on riscv64
-          bash packaging/linux/package.sh --formats "tar"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-linux-riscv64
-          path: dist/release/*.tar.gz
-          if-no-files-found: error
   freebsd:
     name: FreeBSD x86_64
     needs: version
