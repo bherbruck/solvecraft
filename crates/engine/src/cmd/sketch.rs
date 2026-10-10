@@ -27,7 +27,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("rect")
         .key("R")
         .enabled(in_sketch)
-        .params("p0, p1: opposite corners [x,y]; construction?"),
+        .params("p0, p1: opposite corners [x,y]; construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)"),
     CommandSpec::new("sketch.rectangle.three_point", "3-Point Rectangle", rect_three_point)
         .at("SKETCH", "CREATE")
         .icon("rect3")
@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("rect_center")
         .enabled(in_sketch)
-        .params("center, corner"),
+        .params("center, corner. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)"),
     CommandSpec::new("sketch.circle.center", "Center Diameter Circle", circle_center)
         .at("SKETCH", "CREATE")
         .icon("circle")
@@ -526,6 +526,27 @@ fn rect_constraints(sk: &mut Sketch, l: &[usize]) -> Result<Vec<String>> {
     Ok(cons)
 }
 
+/// Which side and corner of an axis-aligned rectangle is which, from its lines and corner
+/// points as `polygon_lines` made them (counter-clockwise from the bottom-left corner), so a
+/// caller can dimension it without inspecting the sketch first.
+fn rect_names(sk: &Sketch, l: &[usize], pts: &[usize]) -> Value {
+    let curve = |i: usize| l.get(i).and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone());
+    let point = |i: usize| pts.get(i).and_then(|q| sk.points.get(*q)).map(|q| q.id.clone());
+    json!({
+        "sides": {"bottom": curve(0), "right": curve(1), "top": curve(2), "left": curve(3)},
+        "corners": {"bottom_left": point(0), "bottom_right": point(1), "top_right": point(2), "top_left": point(3)},
+    })
+}
+
+/// `result` plus the rectangle's named sides and corners.
+fn rect_result(sk_out: (Vec<String>, Vec<String>), names: Value, info: Value) -> Value {
+    let mut out = result(sk_out, info);
+    if let (Some(o), Value::Object(n)) = (out.as_object_mut(), names) {
+        o.extend(n);
+    }
+    out
+}
+
 fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.two_point";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
@@ -533,13 +554,13 @@ fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the corners must differ in x and y"));
     }
     let (lo, hi) = (Vec2::new(a.x.min(b.x), a.y.min(b.y)), Vec2::new(a.x.max(b.x), a.y.max(b.y)));
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
-        let (l, _) = polygon_lines(sk, &[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)])?;
+    let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
+        let (l, pts) = polygon_lines(sk, &[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)])?;
         let cons = rect_constraints(sk, &l)?;
         mark_construction(sk, &l, p);
-        Ok((ids_of(sk, &l), cons))
+        Ok(((ids_of(sk, &l), cons), rect_names(sk, &l, &pts)))
     })?;
-    Ok(result(out, info))
+    Ok(rect_result(out, names, info))
 }
 
 fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
@@ -549,7 +570,7 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
     if h.x < 1e-9 || h.y < 1e-9 {
         return Err(bad(cmd, "the corner must differ from the centre in x and y"));
     }
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
         let (l, pts) = polygon_lines(sk, &[c - h, Vec2::new(c.x + h.x, c.y - h.y), c + h, Vec2::new(c.x - h.x, c.y + h.y)])?;
         let mut cons = rect_constraints(sk, &l)?;
         // Both diagonals (construction), the centre at their crossing. Only the first carries
@@ -567,9 +588,9 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
             cons.push(add_c(sk, ConstraintKind::Midpoint { p: cp, l: diag })?);
         }
         mark_construction(sk, &l, p);
-        Ok((ids_of(sk, &l), cons))
+        Ok(((ids_of(sk, &l), cons), rect_names(sk, &l, &pts)))
     })?;
-    Ok(result(out, info))
+    Ok(rect_result(out, names, info))
 }
 
 fn rect_three_point(s: &mut Session, p: &Value) -> Result<Value> {
