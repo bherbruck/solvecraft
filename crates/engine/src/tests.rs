@@ -637,6 +637,19 @@ fn section_analysis() {
     assert!(s.execute("inspect.section", &json!({"plane": {"normal": [0, 0, 0]}})).is_err());
     run(&mut s, "inspect.section", json!({"clear": true}));
     assert!(s.section.is_none());
+    // XZ's normal is -Y: an offset moves the cut to -Y, `at` places it at a world Y, and the
+    // result says where the cut landed either way.
+    let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 10}));
+    assert_eq!((r["section"]["axis"].as_str(), r["section"]["at"].as_f64()), (Some("Y"), Some(-10.0)), "{r}");
+    for (plane, at, flip) in [("XZ", -282.5, false), ("XZ", 7.0, true), ("XY", 3.0, false), ("YZ", -4.0, true)] {
+        let r = run(&mut s, "inspect.section", json!({"plane": plane, "at": at, "flip": flip}));
+        assert_eq!(r["section"]["at"].as_f64(), Some(at), "{plane} {r}");
+        let (o, _) = s.section.unwrap();
+        assert!(((o.x + o.y + o.z) - at).abs() < 1e-12, "{plane} {o:?}");
+    }
+    assert!(s.execute("inspect.section", &json!({"plane": "XZ", "at": 1, "offset": 1})).is_err());
+    assert!(s.execute("inspect.section", &json!({"plane": {"normal": [0, 1, 0]}, "at": 1})).is_err());
+    run(&mut s, "inspect.section", json!({"clear": true}));
     assert!(Arc::ptr_eq(&doc, &s.doc));
     assert_eq!(s.undo.len(), undo);
 }

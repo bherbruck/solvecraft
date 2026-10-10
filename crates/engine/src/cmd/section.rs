@@ -8,11 +8,12 @@ use super::CommandSpec;
 use crate::params::{bad, bool_, expr, vec3};
 use crate::{Result, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.section", "Section Analysis", section)
-    .at("SOLID", "INSPECT")
-    .icon("section")
-    .noundo()
-    .params("plane: XY|XZ|YZ | {origin, normal}; offset?: expr along the normal; flip?: bool; or clear: true")];
+pub static COMMANDS: &[CommandSpec] =
+    &[CommandSpec::new("inspect.section", "Section Analysis", section).at("SOLID", "INSPECT").icon("section").noundo().params(
+        "plane: XY|XZ|YZ | {origin, normal}; offset?: expr along the plane's normal (XY: +Z, XZ: -Y, YZ: +X); \
+         at?: expr, the cut's world coordinate on the named plane's axis (XY: Z, XZ: Y, YZ: X), instead of offset; \
+         flip?: bool; or clear: true. Returns the cut's origin and normal, and for a named plane its axis and at",
+    )];
 
 fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.section";
@@ -21,21 +22,34 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
         s.revision += 1;
         return Ok(json!({"section": null}));
     }
-    let (origin, normal) = match p.get("plane") {
+    // A named plane's world axis: which component of a point lies along its normal.
+    let (origin, normal, axis) = match p.get("plane") {
         Some(Value::String(n)) => {
             let pl = Plane::named(n).ok_or_else(|| bad(cmd, format!("unknown plane `{n}` (XY, XZ, YZ)")))?;
-            (pl.origin, pl.normal())
+            let normal = pl.normal();
+            let axis = [normal.x, normal.y, normal.z].iter().position(|c| c.abs() > 0.5);
+            (pl.origin, normal, axis)
         }
         Some(o @ Value::Object(_)) => {
             let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
             let n = o.get("normal").and_then(vec3).and_then(|n| n.normalized()).ok_or_else(|| bad(cmd, "the plane needs a non-zero `normal`"))?;
-            (origin, n)
+            (origin, n, None)
         }
         _ => return Err(bad(cmd, "`plane` must be XY, XZ, YZ or {origin, normal}")),
     };
-    let offset = match expr(p, "offset") {
-        Some(e) => s.doc.eval(&e, solvecraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("offset: {e}")))?,
-        None => 0.0,
+    let length = |key: &str| -> Result<Option<f64>> {
+        match expr(p, key) {
+            Some(e) => s.doc.eval(&e, solvecraft_doc::expr::Kind::Length).map(Some).map_err(|e| bad(cmd, format!("{key}: {e}"))),
+            None => Ok(None),
+        }
+    };
+    let (offset, at) = (length("offset")?, length("at")?);
+    let offset = match (offset, at, axis) {
+        (Some(_), Some(_), _) => return Err(bad(cmd, "give either `offset` (along the normal) or `at` (a world coordinate), not both")),
+        (_, Some(_), None) => return Err(bad(cmd, "`at` needs a named plane (XY, XZ, YZ); move an {origin, normal} plane by its origin")),
+        // The named planes pass through the world origin, so the offset is `at` signed by the normal.
+        (_, Some(at), Some(i)) => at * axis_component(normal, i).signum(),
+        (offset, None, _) => offset.unwrap_or(0.0),
     };
     if !origin.is_finite() || !offset.is_finite() {
         return Err(bad(cmd, "the plane must be finite"));
@@ -44,5 +58,18 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let origin = origin + normal * offset * if bool_(p, "flip").unwrap_or(false) { -1.0 } else { 1.0 };
     s.section = Some((origin, normal));
     s.revision += 1;
-    Ok(json!({"section": {"origin": origin, "normal": normal}}))
+    let mut section = json!({"origin": origin, "normal": normal});
+    if let Some(i) = axis {
+        section["axis"] = json!(["X", "Y", "Z"].get(i).copied().unwrap_or("?"));
+        section["at"] = json!(axis_component(origin, i));
+    }
+    Ok(json!({"section": section}))
+}
+
+fn axis_component(v: Vec3, i: usize) -> f64 {
+    match i {
+        0 => v.x,
+        1 => v.y,
+        _ => v.z,
+    }
 }
