@@ -3,6 +3,7 @@
 //! ```text
 //! solvecraft-cli run <script.json|design.solvecraft|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet]
 //! solvecraft-cli eval <script.json|design.solvecraft|part.step> (alias: inspect) measurements as JSON
+//! solvecraft-cli bench-open <design.solvecraft> [--parse-only] loading timings as JSON lines
 //! solvecraft-cli snapshot <script|design> --out shot.png [--width W] [--height H] [--view iso|front|top|…]
 //! solvecraft-cli exec <command> [json-params]                 run one command on an empty design
 //! solvecraft-cli commands                                     the command registry as JSON
@@ -31,6 +32,7 @@ const USAGE: &str = "usage:
   solvecraft-cli run <script.json|design.solvecraft|part.step> [--in design.solvecraft|part.step] [--out FILE]... [--save FILE] [--quiet] [--results]
   solvecraft-cli run --in <design.solvecraft|part.step> [--out FILE]...
   solvecraft-cli eval <script.json|design.solvecraft|part.step>     (alias: inspect; or --in FILE)
+  solvecraft-cli bench-open <design.solvecraft> [--parse-only]
   solvecraft-cli snapshot <script|design> --out shot.png [--width W] [--height H] [--view iso|front|back|top|bottom|left|right]
   solvecraft-cli exec <command> [json-params]
   solvecraft-cli commands
@@ -74,6 +76,7 @@ fn main() -> ExitCode {
         Some("save-stress") => cmd_save_stress(&args[1..]),
         // Hidden: time recomputes after parameter edits (docs/perf.md).
         Some("bench-edit") => cmd_bench_edit(&args[1..]),
+        Some("bench-open") => cmd_bench_open(&args[1..]),
         Some("--version" | "-V") => {
             println!("solvecraft-cli {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -349,5 +352,36 @@ fn cmd_bench_edit(args: &[String]) -> Result<(), String> {
     time(&mut s, "undo", "edit.undo", json!({}))?;
     time(&mut s, "redo", "edit.redo", json!({}))?;
     println!("{}", pretty(&json!(out)));
+    Ok(())
+}
+
+/// Separate file reading, JSON decoding/repair, timeline evaluation and display meshing.
+fn cmd_bench_open(args: &[String]) -> Result<(), String> {
+    let path = args.first().ok_or("usage: solvecraft-cli bench-open <design.solvecraft> [--parse-only]")?;
+    let t = std::time::Instant::now();
+    let len = std::fs::metadata(path).map_err(|e| format!("{path}: {e}"))?.len();
+    if len > solvecraft_engine::io::MAX_DESIGN_BYTES as u64 {
+        return Err(format!("{path}: file too large"));
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+    let read_ms = t.elapsed().as_secs_f64() * 1000.0;
+    println!("{}", json!({"step": "read", "ms": read_ms, "bytes": bytes.len()}));
+    let t = std::time::Instant::now();
+    let doc = solvecraft_engine::io::read_design(&bytes).map_err(|e| e.to_string())?;
+    let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
+    println!("{}", json!({"step": "parse", "ms": parse_ms, "features": doc.features.len()}));
+    if args.iter().any(|a| a == "--parse-only") {
+        return Ok(());
+    }
+    let t = std::time::Instant::now();
+    let s = Session::new(doc);
+    println!("{}", json!({"step": "evaluate", "ms": t.elapsed().as_secs_f64() * 1000.0}));
+    for r in &s.model.results {
+        println!("{}", json!({"step": "feature", "id": r.id, "name": r.name, "ms": r.ms, "error": r.error}));
+    }
+    let t = std::time::Instant::now();
+    let st = s.world_state();
+    let triangles: usize = st.bodies.iter().map(|b| b.mesh().triangles.len()).sum();
+    println!("{}", json!({"step": "mesh", "ms": t.elapsed().as_secs_f64() * 1000.0, "bodies": st.bodies.len(), "triangles": triangles}));
     Ok(())
 }

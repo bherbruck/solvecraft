@@ -1,3 +1,35 @@
+# Design loading
+
+`solvecraft-cli bench-open design.solvecraft` reports JSON lines for file reading,
+JSON decoding and migrations (including input-name repair), timeline evaluation, individual
+features, and world placement/display meshing. `--parse-only` stops before geometry evaluation.
+The parse timer includes document validation and repair, not just the JSON parser.
+
+Windows x64, optimized `ci` profile, measured during other builds:
+
+| Design | Parse/repair | Evaluate | Display meshes |
+|---|---:|---:|---:|
+| 19-feature enclosure, 34 KB | 1.2 ms | 14.9 s | 6 ms |
+| 25-feature assembly, 15.2 MB, 2,990 bodies | 21 ms | 12.5 s | 2.1 s |
+| Generated 1,000 independent boxes, 185 KB | 5 ms | 0.82 s | 0.15 s |
+| Generated 5,000 boxes in five grids, 10 features | 0.45 ms | 17.6 s | 0.81 s |
+
+The enclosures spend most of evaluation in joins and cuts, not parsing. Designs save feature
+definitions; opening them rebuilds their geometry. Those times remain after the repair fix.
+
+A separate generated timeline with missing input names reproduced minutes in the reader:
+
+| Timeline (geometry rolled back) | Parse/repair before | After |
+|---|---:|---:|
+| 2,000 boxes, 6,000 unnamed inputs | 78.1 s | 10–20 ms |
+| 5,000 boxes, 15,000 unnamed inputs | interrupted after 131 s, still repairing | 26–46 ms |
+
+Previously, each missing input restarted the `d1`, `d2`, … search, scanning the document for
+every candidate. This approaches cubic work as unnamed inputs accumulate. Loading now reserves
+names once and assigns missing names with an advancing cursor. Existing names, names on later
+features, parameter collisions and reuse of surplus names retain the previous behavior.
+Regression tests compare the old and bulk repairs and load a 5,000-feature unnamed timeline.
+
 # Viewport performance
 
 Measured with the control channel (`ui.inspect` `frame_ms`: CPU time of one UI frame, which

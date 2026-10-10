@@ -398,6 +398,55 @@ impl Document {
         }
     }
 
+    /// Repair a loaded timeline in one pass. Reserve even later features' names, just as
+    /// `name_feature_inputs` does, without restarting a document scan for every `dN` candidate.
+    pub(crate) fn name_all_feature_inputs(&mut self) {
+        let mut taken: BTreeMap<String, usize> = BTreeMap::new();
+        for name in self.params.iter().map(|p| &p.name).chain(self.features.iter().flat_map(|f| &f.param_names)) {
+            *taken.entry(name.clone()).or_default() += 1;
+        }
+        let mut next = 1usize;
+        for f in &mut self.features {
+            let n = f.kind.inputs().len();
+            for k in 0..n {
+                if f.param_names.get(k).is_some_and(|name| !name.is_empty()) {
+                    continue;
+                }
+                let name = loop {
+                    let name = format!("d{next}");
+                    next += 1;
+                    if !taken.contains_key(&name) {
+                        break name;
+                    }
+                };
+                if f.param_names.len() <= k {
+                    f.param_names.resize(k + 1, String::new());
+                }
+                // Empty slots cannot collide with a generated name.
+                if let Some(slot) = f.param_names.get_mut(k) {
+                    *slot = name.clone();
+                }
+                taken.insert(name, 1);
+            }
+            // Match the single-feature repair: surplus names become available only after
+            // this feature has been repaired. Counts preserve names shared with parameters.
+            for name in f.param_names.drain(n..) {
+                if let Some(count) = taken.get_mut(&name) {
+                    *count -= 1;
+                    if *count == 0 {
+                        taken.remove(&name);
+                        if let Some(i) = name.strip_prefix('d').and_then(|s| s.parse::<usize>().ok())
+                            && name == format!("d{i}")
+                            && i > 0
+                        {
+                            next = next.min(i);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Change a parameter: a stored one, or a feature input by its name.
     /// A typed length that is a bare number means the design's units: it gets that unit written
     /// in (feature inputs are stored in mm otherwise). Anything else is returned unchanged.

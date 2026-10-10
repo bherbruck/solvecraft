@@ -197,10 +197,7 @@ fn rigid(m: &crate::Mat) -> bool {
 
 /// Feature input names and component occurrences, which format 1 files may predate.
 fn normalise(d: &mut Document) -> Result<()> {
-    let ids: Vec<u64> = d.features.iter().map(|f| f.id).collect();
-    for id in ids {
-        d.name_feature_inputs(id);
-    }
+    d.name_all_feature_inputs();
     let missing: Vec<(u64, u64)> =
         d.components.iter().filter(|c| !d.occurrences.iter().any(|o| o.component == c.id)).map(|c| (c.id, c.parent)).collect();
     for (c, p) in missing {
@@ -212,6 +209,70 @@ fn normalise(d: &mut Document) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bulk_input_repair_preserves_existing_names_and_reuses_surplus_names() {
+        let mut d = Document::new("input repair");
+        d.set_param("d2", "1", None, None).unwrap();
+        for i in 0..5 {
+            d.add_feature(
+                crate::FeatureKind::Box {
+                    corner: ["0".into(), "0".into(), "0".into()],
+                    length: "10".into(),
+                    width: "10".into(),
+                    height: "10".into(),
+                    operation: crate::Operation::NewBody,
+                },
+                Some(&format!("Box{i}")),
+            )
+            .unwrap();
+        }
+        d.features[0].param_names = vec!["".into(), "custom".into(), "".into(), "d1".into(), "d2".into()];
+        d.features[1].param_names.clear();
+        d.features[2].param_names = vec!["d7".into(), "".into(), "d9".into()];
+        d.features[3].param_names = vec!["d7".into(), "d11".into(), "d12".into(), "d1".into()];
+        d.features[4].param_names.clear();
+        let mut expected = d.clone();
+        for id in expected.features.iter().map(|f| f.id).collect::<Vec<_>>() {
+            expected.name_feature_inputs(id);
+        }
+        d.name_all_feature_inputs();
+        assert_eq!(d, expected);
+        assert_eq!(read(&d.to_json()).unwrap(), d);
+    }
+
+    #[test]
+    fn large_unnamed_timeline_loads_with_unique_inputs() {
+        let mut d = Document::new("large input repair");
+        let id = d
+            .add_feature(
+                crate::FeatureKind::Box {
+                    corner: ["0".into(), "0".into(), "0".into()],
+                    length: "10".into(),
+                    width: "10".into(),
+                    height: "10".into(),
+                    operation: crate::Operation::NewBody,
+                },
+                None,
+            )
+            .unwrap();
+        let mut f = d.feature(id).unwrap().clone();
+        f.param_names.clear();
+        d.features = (1..=5000)
+            .map(|id| {
+                let mut f = f.clone();
+                f.id = id;
+                f
+            })
+            .collect();
+        d.next_id = 5001;
+        let back = read(&d.to_json()).unwrap();
+        let names: Vec<_> = back.features.iter().flat_map(|f| &f.param_names).collect();
+        assert_eq!(names.len(), 15000);
+        assert_eq!(names.first().unwrap().as_str(), "d1");
+        assert_eq!(names.last().unwrap().as_str(), "d15000");
+        assert_eq!(names.iter().collect::<std::collections::BTreeSet<_>>().len(), names.len());
+    }
 
     #[test]
     fn versions() {
