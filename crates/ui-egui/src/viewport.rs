@@ -1997,8 +1997,10 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         }
         let centre = cube_centroid(pts);
         crate::scenario::publish_handle(&format!("cube:{}", tg.name), centre);
-        if !tg.corner && n.dot(b) > 0.35 {
-            painter.text(centre, Align2::CENTER_CENTER, tg.name.to_uppercase(), FontId::proportional(9.5), Color32::from_rgb(40, 44, 52));
+        // Fades out as the face turns edge-on.
+        let ink = (n.dot(b) / 0.3).clamp(0.0, 1.0) as f32;
+        if !tg.corner && ink > 0.05 {
+            painter.add(cube_label(ui.ctx(), &tg.name.to_uppercase(), n, (r, u), c, Color32::from_rgb(40, 44, 52).gamma_multiply(ink)));
         }
     }
     crate::scenario::publish_count("cube_highlights", f64::from(u8::from(hovered.is_some())));
@@ -2077,16 +2079,44 @@ pub(crate) fn cube_targets() -> Vec<CubeTarget> {
     out
 }
 
+/// Where a point in cube units is drawn, for the camera's right and up `ru` and the cube's
+/// centre `c`.
+fn cube_to_screen((r, u): (Vec3, Vec3), c: Pos2, p: Vec3) -> Pos2 {
+    pos2(c.x + (p.dot(r) * CUBE_SCALE) as f32, c.y - (p.dot(u) * CUBE_SCALE) as f32)
+}
+
+/// A face's text directions (right, up): read from outside the cube, and upright in the view
+/// clicking the face turns to (TOP and BOTTOM: the plan views, front edge at the bottom).
+fn cube_label_axes(n: Vec3) -> (Vec3, Vec3) {
+    if n.z.abs() > 0.5 { (Vec3::X, Vec3::Y * n.z.signum()) } else { (Vec3::Z.cross(n), Vec3::Z) }
+}
+
+/// A face's label printed on the face: laid out flat, then mapped through the cube's projection,
+/// so it turns and foreshortens with the face.
+fn cube_label(ctx: &egui::Context, text: &str, n: Vec3, ru: (Vec3, Vec3), c: Pos2, color: Color32) -> Shape {
+    let galley = ctx.fonts_mut(|f| f.layout(text.to_string(), FontId::proportional(9.5), color, f32::INFINITY));
+    let options = egui::epaint::TessellationOptions { round_text_to_pixels: false, ..Default::default() };
+    let mut tess = egui::epaint::Tessellator::new(ctx.pixels_per_point(), options, ctx.fonts(|f| f.font_image_size()), vec![]);
+    let mut mesh = egui::Mesh::default();
+    let at = (-galley.size() / 2.0).to_pos2();
+    tess.tessellate_text(&egui::epaint::TextShape::new(at, galley, color), &mut mesh);
+    let (right, up) = cube_label_axes(n);
+    for v in &mut mesh.vertices {
+        let p = n + right * (f64::from(v.pos.x) / CUBE_SCALE) - up * (f64::from(v.pos.y) / CUBE_SCALE);
+        v.pos = cube_to_screen(ru, c, p);
+    }
+    Shape::mesh(mesh)
+}
+
 /// The targets turned toward the camera (basis `rub`), front first, as screen polygons around
 /// the cube's centre `c`.
 pub(crate) fn cube_projected(targets: &[CubeTarget], rub: (Vec3, Vec3, Vec3), c: Pos2) -> Vec<(usize, Vec<Pos2>)> {
     let (r, u, b) = rub;
-    let to2 = |p: Vec3| pos2(c.x + (p.dot(r) * CUBE_SCALE) as f32, c.y - (p.dot(u) * CUBE_SCALE) as f32);
     let mut v: Vec<(usize, f64, Vec<Pos2>)> = targets
         .iter()
         .enumerate()
         .filter(|(_, tg)| tg.normal().dot(b) > 1e-3)
-        .map(|(i, tg)| (i, tg.normal().dot(b), tg.outline.iter().map(|p| to2(*p)).collect()))
+        .map(|(i, tg)| (i, tg.normal().dot(b), tg.outline.iter().map(|p| cube_to_screen((r, u), c, *p)).collect()))
         .collect();
     v.sort_by(|a, b2| b2.1.total_cmp(&a.1));
     v.into_iter().map(|(i, _, p)| (i, p)).collect()
@@ -2334,6 +2364,47 @@ mod tests {
             }
         }
         assert!(worst <= limit, "a vertex {worst} px from the centre (limit {limit})");
+    }
+
+    #[test]
+    fn view_cube_labels_read_upright_in_their_own_view() {
+        for tg in cube_targets().iter().filter(|t| !t.corner) {
+            // The view clicking the face turns to (TOP and BOTTOM with yaw 0).
+            let mut cam = solvecraft_engine::render::Camera::default().looking_from(tg.dir);
+            if tg.dir.z.abs() > 0.5 {
+                cam.yaw = 0.0;
+            }
+            let (r, u, _) = cam.basis();
+            let (right, up) = cube_label_axes(tg.dir);
+            assert!(right.dot(r) > 0.99 && up.dot(u) > 0.99, "{}: right·r {} up·u {}", tg.name, right.dot(r), up.dot(u));
+        }
+    }
+
+    /// From any direction, each label is printed within its face.
+    #[test]
+    fn view_cube_labels_stay_on_their_faces() {
+        let ctx = egui::Context::default();
+        let (mut worst, mut drawn) = (f32::NEG_INFINITY, 0);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let targets = cube_targets();
+            let c = pos2(100.0, 100.0);
+            for dir in orbit_directions().step_by(7) {
+                let (r, u, b) = basis_from(dir);
+                for (i, pts) in cube_projected(&targets, (r, u, b), c) {
+                    let tg = &targets[i];
+                    if tg.corner {
+                        continue;
+                    }
+                    for p in drawn_points(vec![cube_label(ui.ctx(), &tg.name.to_uppercase(), tg.normal(), (r, u), c, Color32::BLACK)]) {
+                        let outside = if point_in_poly(p, &pts) { 0.0 } else { poly_distance(p, &pts) };
+                        worst = worst.max(outside);
+                        drawn += 1;
+                    }
+                }
+            }
+        });
+        assert!(drawn > 10_000, "only {drawn} label vertices drawn");
+        assert!(worst <= 0.5, "a label vertex {worst} px outside its face");
     }
 
     #[test]
