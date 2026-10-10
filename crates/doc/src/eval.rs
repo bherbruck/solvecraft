@@ -1948,11 +1948,29 @@ fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
 }
 
 /// Apply transformed copies of the tools of `features` (patterns, mirrors).
-fn replay(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, features: &[String], mats: &[Mat]) -> Result<()> {
+fn replay(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    features: &[String],
+    mats: &[Mat],
+    warning: &mut Option<String>,
+) -> Result<()> {
     if features.is_empty() {
         return Err(DocError::Invalid("no features selected".into()));
     }
-    for name in features {
+    // A suppressed feature has nothing to copy: its copies go with it.
+    let suppressed: Vec<&String> = features.iter().filter(|n| doc.find_feature(n).is_some_and(|x| x.suppressed)).collect();
+    if !suppressed.is_empty() {
+        let list = suppressed.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ");
+        *warning = Some(if suppressed.len() == features.len() {
+            format!("nothing to copy: {list} suppressed")
+        } else {
+            format!("{list} suppressed and not copied")
+        });
+    }
+    for name in features.iter().filter(|n| !suppressed.contains(n)) {
         // A sketch and its extrude often share a name; the feature that makes geometry wins.
         let src = doc
             .features
@@ -2515,7 +2533,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         FeatureKind::Pattern { features, pattern, bodies } => {
             let mats = pattern_transforms(vals, st, pattern)?;
             if bodies.is_empty() {
-                return replay(doc, vals, f, st, features, &mats);
+                return replay(doc, vals, f, st, features, &mats, warning);
             }
             // Bodies: each copy is a new body named after its source.
             for n in bodies {
@@ -2531,7 +2549,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         FeatureKind::Mirror { features, plane, bodies, combine } => {
             let pl = doc.resolve_plane_in(vals, plane, 0, Some(st))?;
             if bodies.is_empty() {
-                return replay(doc, vals, f, st, features, &[mirror_matrix(&pl)]);
+                return replay(doc, vals, f, st, features, &[mirror_matrix(&pl)], warning);
             }
             let m = mirror_matrix(&pl);
             for n in bodies {

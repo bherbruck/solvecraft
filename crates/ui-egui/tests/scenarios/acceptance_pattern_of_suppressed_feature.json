@@ -1,8 +1,5 @@
 [
  {
-  "pending": "#42: suppressing a patterned feature keeps the pattern's copies"
- },
- {
   "note": "Acceptance (#27): suppressing the PCB standoff takes the patterned copies with it."
  },
  {

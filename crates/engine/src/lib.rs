@@ -434,6 +434,8 @@ mod delete_face_tests;
 #[cfg(test)]
 mod extent_tests;
 #[cfg(test)]
+mod pattern_suppress_tests;
+#[cfg(test)]
 mod profile_refs_tests;
 #[cfg(test)]
 mod split_face_tests;
