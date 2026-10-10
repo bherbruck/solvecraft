@@ -20,7 +20,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.create", "Create Sketch", create_sketch)
         .at("SOLID", "CREATE")
         .icon("sketch")
-        .params("plane: XY|XZ|YZ | {origin, x_dir, y_dir} | {face: [x,y,z]} (planar face at point), offset?: expr, name?"),
+        .params("plane: XY|XZ|YZ | construction plane name or id | {origin, x_dir, y_dir} | {face: [x,y,z]} (planar face at point), offset?: expr, name?"),
     CommandSpec::new("sketch.edit", "Edit Sketch", edit_sketch).icon("sketch").params("sketch: id or name"),
     CommandSpec::new("sketch.finish", "Finish Sketch", finish_sketch).at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo(),
     CommandSpec::new("sketch.line", "Line", draw_line)
@@ -348,15 +348,8 @@ pub(super) fn result(sk_out: (Vec<String>, Vec<String>), info: Value) -> Value {
 pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
     let base = match p.get("plane") {
         None => PlaneRef::Origin { name: "XY".into() },
-        Some(Value::String(n)) => {
-            if Plane::named(n).is_some() {
-                PlaneRef::Origin { name: n.to_ascii_uppercase() }
-            } else if matches!(s.doc.find_feature(n).map(|f| &f.kind), Some(FeatureKind::ConstructionPlane { .. })) {
-                PlaneRef::Construction { name: n.clone() }
-            } else {
-                return Err(bad(cmd, format!("unknown plane `{n}` (XY, XZ, YZ or a construction plane)")));
-            }
-        }
+        // An origin plane, or a construction plane by name or id.
+        Some(v @ (Value::String(_) | Value::Number(_))) => super::features::plane_param(s, Some(v), cmd)?,
         Some(v @ Value::Object(o)) => {
             if let Some(fp) = o.get("face").and_then(vec3) {
                 // A planar face of a body at this point, as the active component sees the model
@@ -388,7 +381,7 @@ pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
                 PlaneRef::Custom { plane: Plane::new(origin, x, y).ok_or_else(|| bad(cmd, "degenerate plane"))? }
             }
         }
-        _ => return Err(bad(cmd, "`plane` must be XY, XZ, YZ or an object")),
+        _ => return Err(bad(cmd, "`plane` must be XY, XZ, YZ, a construction plane name or id, or an object")),
     };
     Ok(match expr(p, "offset") {
         Some(d) => PlaneRef::Offset { base: Box::new(base), distance: d },

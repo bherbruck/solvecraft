@@ -10,7 +10,7 @@ use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] =
     &[CommandSpec::new("inspect.section", "Section Analysis", section).at("SOLID", "INSPECT").icon("section").noundo().params(
-        "plane: XY|XZ|YZ | {origin, normal}; offset?: expr along the plane's normal (XY: +Z, XZ: +Y, YZ: +X); \
+        "plane: XY|XZ|YZ | construction plane name or id | {origin, normal}; offset?: expr along the plane's normal (XY: +Z, XZ: +Y, YZ: +X); \
          at?: expr, the cut's world coordinate on the named plane's axis (XY: Z, XZ: Y, YZ: X), instead of offset; \
          flip?: bool; or clear: true. Returns the cut's origin and normal, and for a named plane its axis and at",
     )];
@@ -24,18 +24,31 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // A named plane's world axis: which component of a point lies along its normal.
     let (origin, normal, axis) = match p.get("plane") {
-        Some(Value::String(n)) => {
-            let pl = Plane::named(n).ok_or_else(|| bad(cmd, format!("unknown plane `{n}` (XY, XZ, YZ)")))?;
+        Some(Value::String(n)) if Plane::named(n.trim()).is_some() => {
+            let pl = Plane::named(n.trim()).ok_or_else(|| bad(cmd, format!("unknown plane `{n}`")))?;
             let normal = pl.normal();
             let axis = [normal.x, normal.y, normal.z].iter().position(|c| c.abs() > 0.5);
             (pl.origin, normal, axis)
+        }
+        // A construction plane (name or id): where it is now.
+        Some(v @ (Value::String(_) | Value::Number(_))) => {
+            let r = super::features::plane_param(s, Some(v), cmd)?;
+            let solvecraft_doc::PlaneRef::Construction { name } = &r else { return Err(bad(cmd, "`plane` must be a plane")) };
+            let st = s.model.state();
+            let pl = st
+                .construct
+                .iter()
+                .find(|c| &c.name == name)
+                .and_then(|c| if let solvecraft_doc::construct::ConstructGeom::Plane(pl) = &c.geom { Some(*pl) } else { None })
+                .ok_or_else(|| bad(cmd, format!("construction plane `{name}` is not built (rolled back, suppressed or failed)")))?;
+            (pl.origin, pl.normal(), None)
         }
         Some(o @ Value::Object(_)) => {
             let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
             let n = o.get("normal").and_then(vec3).and_then(|n| n.normalized()).ok_or_else(|| bad(cmd, "the plane needs a non-zero `normal`"))?;
             (origin, n, None)
         }
-        _ => return Err(bad(cmd, "`plane` must be XY, XZ, YZ or {origin, normal}")),
+        _ => return Err(bad(cmd, "`plane` must be XY, XZ, YZ, a construction plane name or id, or {origin, normal}")),
     };
     let length = |key: &str| -> Result<Option<f64>> {
         match expr(p, key) {
