@@ -436,6 +436,29 @@ fn chamfer_top_loop_mitres() {
 }
 
 #[test]
+fn chamfer_sloped_basin_rim() {
+    let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
+    let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
+    let pocket =
+        loft(&[(Plane::XY.offset(30.0), rectangle(20.0, 4.0, 80.0, 50.0)), (Plane::XY.offset(10.0), rectangle(30.0, 20.0, 70.0, 40.0))]).unwrap();
+    let basin = boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap();
+    let result = chamfer(&basin, &[Vec3::new(50.0, 4.0, 30.0)], 2.0).unwrap();
+    // The removed triangular section has area s² sin(phi)/2. Its length varies
+    // linearly between the sloped end walls, so its centroid gives the mean length.
+    let drop = 2.0 / 1.64_f64.sqrt();
+    let removed = drop * (60.0 - drop / 3.0);
+    let before = measure(&basin).unwrap();
+    let after = measure(&result).unwrap();
+    assert!(rel(after.volume, before.volume - removed) < 1e-8, "{} vs {}", after.volume, before.volume - removed);
+    assert_eq!(after.merged.faces, before.merged.faces + 1);
+    assert_eq!(result.lumps().unwrap().len(), 1);
+    assert!(result.validity().is_empty());
+    let mesh = result.tessellate(0.01).unwrap();
+    assert!(!mesh.contains(Vec3::new(50.0, 3.5, 29.9)));
+    assert!(mesh.contains(Vec3::new(50.0, 3.5, 28.0)));
+}
+
+#[test]
 #[ignore]
 fn debug_chamfer_cut() {
     let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();

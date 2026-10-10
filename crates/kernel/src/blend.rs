@@ -1,8 +1,8 @@
 //! Edge fillets and chamfers as a local B-rep operation.
 //!
-//! Supported: a straight, convex edge between two planar faces whose two end vertices each
-//! touch exactly one more planar face perpendicular to the edge (the common case for edges of
-//! extruded and box-like parts). The two side faces are trimmed back, the end faces get an arc
+//! Supported locally: a straight edge between two planar faces whose two end vertices each
+//! touch exactly one more planar face. Fillets require perpendicular end faces; chamfers
+//! intersect their offset rails with the end planes, including sloped walls. The end faces get an arc
 //! (fillet) or a line (chamfer) at the corner, and a cylindrical (or planar) face is inserted.
 //! The result is exact. Edges meeting at an already blended corner, curved edges and other
 //! configurations are reported as not supported yet.
@@ -153,6 +153,8 @@ fn blend_geometry(
         g: usize,
         e1: mt::Edge,
         e2: mt::Edge,
+        a: Vec3,
+        b: Vec3,
     }
     let mut ends: Vec<End> = Vec::new();
     for (v, p) in [(&v0, p0), (&v1, p1)] {
@@ -161,9 +163,19 @@ fn blend_geometry(
         let [g] = others[..] else { return Err(unsupported("each end of the edge must touch exactly one more face")) };
         let gf = faces.get(g).ok_or_else(|| KernelError::Failed("face".into()))?;
         let ng = plane_normal(gf).ok_or_else(|| unsupported("the faces at the edge ends must be planar"))?;
-        if ng.dot(d).abs() < 1.0 - 1e-9 {
+        if shape == Shape::Round && ng.dot(d).abs() < 1.0 - 1e-9 {
             return Err(unsupported("the faces at the edge ends must be perpendicular to the edge"));
         }
+        if ng.dot(d).abs() < 1e-9 {
+            return Err(unsupported("an end face parallel to the edge"));
+        }
+        // Each rail is parallel to the original edge and set back by s in its side
+        // face. Slide its endpoint along d until it lies on the actual end plane.
+        let endpoint = |t: Vec3| {
+            let q = p + t * s;
+            if shape == Shape::Flat { q - d * (ng.dot(t) * s / ng.dot(d)) } else { q }
+        };
+        let (a, b) = (endpoint(t1), endpoint(t2));
         // Edges at v shared by g with f1 and with f2.
         let shared = |fi: usize| -> Result<mt::Edge> {
             let f = faces.get(fi).ok_or_else(|| KernelError::Failed("face".into()))?;
@@ -172,26 +184,34 @@ fn blend_geometry(
                 .ok_or_else(|| unsupported("unexpected corner topology"))
         };
         let (e1, e2) = (shared(i1)?, shared(i2)?);
-        for (e, t) in [(&e1, t1), (&e2, t2)] {
+        for (e, q) in [(&e1, a), (&e2, b)] {
             if !matches!(e.curve(), mt::Curve::Line(_)) {
                 return Err(unsupported("the edges at the corners must be straight"));
             }
             let other = if e.front() == v { vtx(e.back()) } else { vtx(e.front()) };
-            let along = (other - p).dot(t);
-            if (other - p - t * along).len() > tol * 100.0 + 1e-7 || along <= s + tol {
+            let delta = other - p;
+            let len = delta.len();
+            let dir = delta.normalized().ok_or_else(|| unsupported("zero-length corner edge"))?;
+            let along = (q - p).dot(dir);
+            // An inner rim extends the neighbouring rim edge away from its other
+            // vertex. This is valid; passing that other vertex is not.
+            if (q - p - dir * along).len() > tol * 100.0 + 1e-7 || along >= len - tol || (shape == Shape::Round && along <= tol) {
                 return Err(unsupported("the blend is larger than the neighbouring faces"));
             }
         }
-        ends.push(End { v: v.clone(), g, e1, e2 });
+        ends.push(End { v: v.clone(), g, e1, e2, a, b });
     }
     let [end0, end1] = &ends[..] else { return Err(KernelError::Failed("ends".into())) };
     if end0.g == end1.g {
         return Err(unsupported("both ends touch the same face"));
     }
-    let a0 = builder::vertex(p3(p0 + t1 * s));
-    let b0 = builder::vertex(p3(p0 + t2 * s));
-    let a1 = builder::vertex(p3(p1 + t1 * s));
-    let b1 = builder::vertex(p3(p1 + t2 * s));
+    if (end1.a - end0.a).dot(d) <= tol || (end1.b - end0.b).dot(d) <= tol {
+        return Err(unsupported("the blend is larger than the neighbouring faces"));
+    }
+    let a0 = builder::vertex(p3(end0.a));
+    let b0 = builder::vertex(p3(end0.b));
+    let a1 = builder::vertex(p3(end1.a));
+    let b1 = builder::vertex(p3(end1.b));
     // Corner curves on the end faces (A → B) and the blend surface. The arc centre is r from
     // both faces (inside the material for a convex edge, outside for a concave one); the arc's
     // middle is the point nearest the old edge.
@@ -860,4 +880,34 @@ fn chamfer_tool_sides(cur: &Body, p: Vec3, s: f64, sides: Option<(ChamferSide, b
     }
     let region = solvecraft_geom::Region2 { outer: lp, holes: vec![] };
     crate::build::extrude(&plane, &[region], 0.0, len + 2.0 * ext)?.pop().ok_or_else(|| KernelError::Failed("chamfer tool".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solvecraft_geom::{Loop2, Plane, Region2, Vec2};
+
+    #[test]
+    fn local_chamfer_intersects_sloped_end_planes() {
+        for slope in [-0.5, 0.5] {
+            let region = Region2 {
+                outer: Loop2::polygon(&[Vec2::ZERO, Vec2::new(40.0, 0.0), Vec2::new(40.0 - slope * 20.0, 20.0), Vec2::new(slope * 20.0, 20.0)]),
+                holes: vec![],
+            };
+            let body = crate::extrude(&Plane::XY, &[region], 0.0, 20.0).unwrap().pop().unwrap();
+            let pick = [Vec3::new(20.0, 0.0, 20.0)];
+            let result = blend(&body, &pick, 2.0, Shape::Flat, "chamfer").unwrap();
+            let removed = 2.0 * (40.0 - 2.0 * slope * 2.0 / 3.0);
+            let actual = crate::measure(&body).unwrap().volume - crate::measure(&result).unwrap().volume;
+            assert!((actual - removed).abs() < 1e-6, "{actual} vs {removed}");
+            assert!(result.validity().is_empty());
+            // The new corner vertices lie on both original end planes.
+            for point in [Vec3::new(slope * 2.0, 2.0, 20.0), Vec3::new(40.0 - slope * 2.0, 2.0, 20.0)] {
+                assert!(result.solid.vertex_iter().any(|v| vtx(&v).dist(point) < 1e-8));
+            }
+            assert!(blend(&body, &pick, 25.0, Shape::Flat, "chamfer").is_err());
+            // Oblique fillet caps need elliptical trims, which this local path does not build.
+            assert!(blend(&body, &pick, 2.0, Shape::Round, "fillet").is_err());
+        }
+    }
 }

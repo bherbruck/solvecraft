@@ -1648,6 +1648,34 @@ fn unitless_parameters_used_as_lengths_take_the_design_units() {
     assert!((max(0) - 50.8).abs() < 1e-9 && (max(1) - 50.8).abs() < 1e-9 && (max(2) - 10.0).abs() < 1e-9, "{m}");
 }
 
+/// A chamfer on a tapered pocket survives parameter edits and undo/redo.
+#[test]
+fn chamfer_sloped_basin_rim_recomputes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 30}));
+    for (name, z, p0, p1) in [("Rim", 30, [20, 4], [80, 50]), ("Floor", 10, [30, 20], [70, 40])] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": z, "name": name}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    run(&mut s, "solid.loft", json!({"sections": [{"sketch": "Rim"}, {"sketch": "Floor"}], "operation": "cut"}));
+    run(&mut s, "parameters.add", json!({"name": "rim_chamfer", "expression": "1 mm"}));
+    let base = volume(&mut s);
+    run(&mut s, "solid.chamfer", json!({"edges": [[50, 4, 30]], "distance": "rim_chamfer"}));
+    let expected = |size: f64| {
+        let drop = size / 1.64_f64.sqrt();
+        base - 0.5 * size * drop * (60.0 - drop / 3.0)
+    };
+    assert!(rel(volume(&mut s), expected(1.0)) < 1e-8);
+    let edited = run(&mut s, "parameters.change", json!({"name": "rim_chamfer", "expression": "2 mm"}));
+    assert_eq!(edited["errors"].as_array().unwrap().len(), 0, "{edited}");
+    assert!(rel(volume(&mut s), expected(2.0)) < 1e-8);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(rel(volume(&mut s), expected(1.0)) < 1e-8);
+    run(&mut s, "edit.redo", json!({}));
+    assert!(rel(volume(&mut s), expected(2.0)) < 1e-8);
+}
+
 /// Chamfers with two distances or a distance and an angle.
 #[test]
 fn unequal_chamfers() {
