@@ -30,7 +30,7 @@ jobs:
 
   riscv64-gates:
     name: gates (riscv64)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Check out craft-fonts
@@ -44,6 +44,17 @@ jobs:
           targets: riscv64gc-unknown-linux-gnu
       - name: Install cross-compilation dependencies
         run: |
+          # Ubuntu's regular archive serves amd64; RISC-V packages live in ports.
+          # The 24.04 runner uses deb822 sources, so scope every Ubuntu stanza.
+          sudo sed -i '/^Architectures:/d; /^Types:/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+          sudo tee /etc/apt/sources.list.d/riscv64.sources >/dev/null <<'EOF'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble noble-updates noble-backports noble-security
+          Components: main restricted universe multiverse
+          Architectures: riscv64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
           sudo dpkg --add-architecture riscv64
           sudo apt-get update
           sudo apt-get install -y gcc-riscv64-linux-gnu libasound2-dev:riscv64 libxkbcommon-dev:riscv64 \
