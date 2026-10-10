@@ -51,6 +51,9 @@ pub struct ViewportState {
     pub orbit_pivot: Option<Vec3>,
     /// Continuous orbit: the view turns about the vertical until the next click or key.
     pub spin: bool,
+    /// A left press on the view cube, held: where the pointer was when the view last orbited
+    /// (dragging from the cube orbits; a press that doesn't move is a click).
+    pub cube_drag: Option<Pos2>,
     pub build_ms: f64,
     /// The right-click menu, open at this screen position.
     pub context_menu: Option<Pos2>,
@@ -1401,7 +1404,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let (dx, dy) = (delta.x as f64, delta.y as f64);
         let mode = if middle || secondary_down {
             crate::prefs::nav_mode(app, middle, secondary_down, mods)
-        } else if primary_down {
+        } else if primary_down && app.viewport.cube_drag.is_none() {
             app.viewport.nav
         } else {
             None
@@ -2080,21 +2083,55 @@ fn cube_basis(cam: &Camera) -> (Vec3, Vec3, Vec3) {
     (cam.to_frame(r), cam.to_frame(u), cam.to_frame(b))
 }
 
+/// A left press on the view cube held and dragged orbits the view about its centre, the model
+/// following the pointer as with the other orbits. The press itself turns nothing: a press that
+/// doesn't move is a click. A press on a floating window over the cube is the window's. Returns
+/// whether the cube is being dragged (held past a click).
+fn view_cube_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, targets: &[CubeTarget], c: Pos2) -> bool {
+    let (pressed, down, decided, origin, pos) = ui.input(|i| {
+        let p = &i.pointer;
+        (p.primary_pressed(), p.primary_down(), p.is_decidedly_dragging(), p.press_origin(), p.interact_pos())
+    });
+    if pressed && ui.rect_contains_pointer(rect) {
+        let (r, u, b) = cube_basis(&app.cam);
+        let shapes = cube_projected(targets, (r, u, b), c);
+        app.viewport.cube_drag = origin.filter(|p| cube_hit(&shapes, *p).is_some());
+    }
+    if !down {
+        app.viewport.cube_drag = None;
+    }
+    let Some(last) = app.viewport.cube_drag.filter(|_| decided) else { return false };
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    // From where the view last turned (the press, at first), so the move it took to tell a drag
+    // from a click turns the view too.
+    if let Some(p) = pos
+        && p != last
+    {
+        app.cancel_view_animation();
+        app.cam.orbit(f64::from(p.x - last.x), f64::from(p.y - last.y));
+        app.viewport.cube_drag = Some(p);
+        ui.ctx().request_repaint();
+    }
+    true
+}
+
 /// The view cube (top right): a cube with chamfered corners. Its 26 targets are the 6 faces
 /// (orthographic views), the 12 edges (the views halfway between their two faces) and the 8
 /// corner facets (iso views); an edge is picked by a band along it on both faces it joins.
-/// Hover lights the target under the pointer, a click turns the view to it, the house goes home.
+/// Hover lights the target under the pointer, a click turns the view to it, a drag from the cube
+/// orbits, the house goes home.
 fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let t = Tokens::get();
     let c = pos2(rect.right() - 80.0, rect.top() + 80.0);
+    let targets = cube_targets();
+    let orbiting = view_cube_orbit(app, ui, rect, &targets, c);
     let (r, u, b) = cube_basis(&app.cam);
     let (wr, wu, _) = app.cam.basis();
     let painter = ui.painter_at(rect);
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(rect));
-    let targets = cube_targets();
     let drawn = cube_drawn(&targets, (r, u, b), c);
     let shapes = cube_projected(&targets, (r, u, b), c);
-    let hovered = hover.and_then(|h| cube_hit(&shapes, h));
+    let hovered = if orbiting { None } else { hover.and_then(|h| cube_hit(&shapes, h)) };
     // Axis triad from the cube's back corner, drawn first: the cube hides what is behind it.
     // The corner is in the cube's frame, the axes are the world's.
     let o = Vec3::new(-1.0, -1.0, -1.0);

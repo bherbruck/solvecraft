@@ -17,7 +17,8 @@
   Preferences switches to SolidWorks or Inventor style). The view cube and the navigation bar
   change the view: a cube face turns to look straight at it (TOP and BOTTOM keep the current
   heading, squared to the nearest quarter turn), an edge to the view halfway between
-  its two faces, a chamfered corner to that corner's iso view, and the house goes home. Right-click for the marking menu: eight commands around the cursor, plus a
+  its two faces, a chamfered corner to that corner's iso view, and the house goes home.
+  Press on the cube and drag to orbit. Right-click for the marking menu: eight commands around the cursor, plus a
   menu for whatever is under it.
 - **Dialogs** dock on the right with a live preview. Most features also show drag handles and a
   value box in the viewport.

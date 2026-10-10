@@ -31,6 +31,11 @@
  {"call": "ui.view", "params": {"view": "home"}},
  {"click": {"handle": "cube:top-back-right"}},
  {"expect": {"camera": {"yaw_deg": -135, "pitch_deg": 35.26}}},
+ {"note": "Pressing on the cube and dragging orbits the view by the whole drag (48 px right: 22°), and the release is not a click on the face pressed."},
+ {"call": "ui.view", "params": {"view": "front"}},
+ {"expect": {"camera": {"yaw_deg": 0, "pitch_deg": 0}}},
+ {"drag": [{"cube": [0, -1, 0]}, {"cube": [1.5, -1, 0]}]},
+ {"expect": {"camera": {"yaw_deg": 22, "pitch_deg": 0}}},
  {"move": [800, 500]},
  {"expect": {"count": {"name": "cube_highlights", "value": 0}}}
 ]
