@@ -3068,6 +3068,7 @@ dependencies = [
  "serde_json",
  "solvecraft-engine",
  "solvecraft-ui-egui",
+ "winit",
 ]
 
 [[package]]

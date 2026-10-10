@@ -132,6 +132,17 @@ fn main() -> eframe::Result {
         multisampling: samples,
         ..Default::default()
     };
+    let mut options = options;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    // winit has no file drag-and-drop on Wayland (only on X11), so dropping files from the file
+    // manager showed a "no" cursor. Run through XWayland when it's there; SOLVECRAFT_WAYLAND=1
+    // keeps the native Wayland backend.
+    if std::env::var_os("DISPLAY").is_some() && std::env::var_os("SOLVECRAFT_WAYLAND").is_none() {
+        options.event_loop_builder = Some(Box::new(|b| {
+            use winit::platform::x11::EventLoopBuilderExtX11;
+            b.with_x11();
+        }));
+    }
     eframe::run_native(
         "SolveCraft",
         options,
