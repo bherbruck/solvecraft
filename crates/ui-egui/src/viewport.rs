@@ -2141,11 +2141,33 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     }
     if let Some(dir) = clicked {
         let mut to = app.cam.looking_from(app.cam.from_frame(dir));
-        // TOP and BOTTOM turn to the standard plan views (front edge at the bottom).
+        // TOP and BOTTOM turn the view as little as they can: the heading to the nearest quarter
+        // turn, so the cube lands square without spinning round.
         if dir.x == 0.0 && dir.y == 0.0 {
-            to.yaw = 0.0;
+            to.yaw = nearest_quarter_turn(app.cam.yaw);
         }
         app.animate_to(to);
+    }
+}
+
+/// The heading in whole quarter turns nearest `yaw` (radians). Halfway between two (an iso view,
+/// such as home), the one nearer heading 0, the standard plan view with the front edge at the
+/// bottom.
+fn nearest_quarter_turn(yaw: f64) -> f64 {
+    if !yaw.is_finite() {
+        return 0.0;
+    }
+    let q = std::f64::consts::FRAC_PI_2;
+    let lo = (yaw / q).floor() * q;
+    let hi = lo + q;
+    let (dlo, dhi) = (yaw - lo, hi - yaw);
+    if (dlo - dhi).abs() < 1e-6 {
+        let off_front = |a: f64| ((a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI).abs();
+        if off_front(lo) <= off_front(hi) { lo } else { hi }
+    } else if dlo < dhi {
+        lo
+    } else {
+        hi
     }
 }
 
@@ -2257,8 +2279,9 @@ fn cube_to_screen((r, u): (Vec3, Vec3), c: Pos2, p: Vec3) -> Pos2 {
     pos2(c.x + (p.dot(r) * CUBE_SCALE) as f32, c.y - (p.dot(u) * CUBE_SCALE) as f32)
 }
 
-/// A face's text directions (right, up): read from outside the cube, and upright in the view
-/// clicking the face turns to (TOP and BOTTOM: the plan views, front edge at the bottom).
+/// A face's text directions (right, up): read from outside the cube, and upright in the face's
+/// standard view (TOP and BOTTOM: the plan views with the front edge at the bottom; clicked from
+/// another heading, they turn with the cube).
 fn cube_label_axes(n: Vec3) -> (Vec3, Vec3) {
     if n.z.abs() > 0.5 { (Vec3::X, Vec3::Y * n.z.signum()) } else { (Vec3::Z.cross(n), Vec3::Z) }
 }
@@ -2909,7 +2932,7 @@ mod tests {
     #[test]
     fn view_cube_labels_read_upright_in_their_own_view() {
         for tg in cube_targets().iter().filter(|t| t.kind == CubeKind::Face) {
-            // The view clicking the face turns to (TOP and BOTTOM with yaw 0).
+            // The face's standard view (TOP and BOTTOM with yaw 0).
             let mut cam = solvecraft_engine::render::Camera::default().looking_from(tg.dir);
             if tg.dir.z.abs() > 0.5 {
                 cam.yaw = 0.0;
@@ -2945,6 +2968,28 @@ mod tests {
         });
         assert!(drawn > 10_000, "only {drawn} label vertices drawn");
         assert!(worst <= 0.5, "a label vertex {worst} px outside its face");
+    }
+
+    #[test]
+    fn view_cube_top_turns_to_the_nearest_quarter_turn() {
+        // (current heading, heading after TOP or BOTTOM), degrees.
+        for (from, to) in [
+            (0.0, 0.0),
+            (30.0, 0.0),
+            (-80.0, -90.0),
+            (100.0, 90.0),
+            (170.0, 180.0),
+            (400.0, 360.0),
+            // Halfway (iso views): toward the standard plan view.
+            (-45.0, 0.0),
+            (45.0, 0.0),
+            (135.0, 90.0),
+            (-135.0, -90.0),
+        ] {
+            let got = nearest_quarter_turn(f64::to_radians(from)).to_degrees();
+            assert!((got - to).abs() < 1e-9, "{from}° → {got}°, expected {to}°");
+        }
+        assert_eq!(nearest_quarter_turn(f64::NAN), 0.0);
     }
 
     #[test]
