@@ -30,8 +30,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-ARCH="$(uname -m)"
+ARCH="${CROSS_ARCH:-$(uname -m)}"
 case "$ARCH" in
+  riscv64) DEB_ARCH=riscv64 ;;
   x86_64) DEB_ARCH=amd64 ;;
   aarch64 | arm64) ARCH=aarch64; DEB_ARCH=arm64 ;;
   *) echo "unsupported architecture $ARCH" >&2; exit 2 ;;
@@ -42,9 +43,20 @@ BASENAME="solvecraft-$VERSION-linux-$ARCH"
 echo "==> SolveCraft $VERSION for Linux $ARCH ($FORMATS)"
 
 if [ "$SKIP_BUILD" = 0 ]; then
-  (cd "$ROOT" && cargo build --release --locked -p solvecraft -p solvecraft-cli)
+  if [ -n "${CROSS_TARGET:-}" ]; then
+    (cd "$ROOT" && cargo build --release --locked -p solvecraft -p solvecraft-cli --target "$CROSS_TARGET")
+    BIN="$CARGO_TARGET_DIR/$CROSS_TARGET/release"
+  else
+    (cd "$ROOT" && cargo build --release --locked -p solvecraft -p solvecraft-cli)
+    BIN="$CARGO_TARGET_DIR/release"
+  fi
+else
+  if [ -n "${CROSS_TARGET:-}" ]; then
+    BIN="$CARGO_TARGET_DIR/$CROSS_TARGET/release"
+  else
+    BIN="$CARGO_TARGET_DIR/release"
+  fi
 fi
-BIN="$CARGO_TARGET_DIR/release"
 WORK="$CARGO_TARGET_DIR/linux-package"
 STAGE="$WORK/root"
 rm -rf "$WORK"
