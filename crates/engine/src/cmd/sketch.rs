@@ -1443,6 +1443,8 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         place_text(sk, &id, text_at);
         Ok((pname, name, cur))
     })?;
+    // Report what the dimension measures once the sketch is solved, not the geometry before.
+    let current = solved_measure(s, p, cmd).unwrap_or(current);
     if driven {
         return Ok(json!({"param": Value::Null, "driven": true, "type": kind_name, "measured": current, "sketch": info}));
     }
@@ -1451,6 +1453,12 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let v = s.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
     Ok(json!({"param": param, "type": kind_name, "expression": v, "measured": current, "sketch": info}))
+}
+
+/// What the dimension just added (the sketch's last constraint) measures on the solved sketch.
+fn solved_measure(s: &Session, p: &Value, cmd: &str) -> Option<f64> {
+    let sk = s.doc.sketch(target_sketch(s, p, cmd).ok()?).ok()?;
+    solvecraft_sketch::measure_dimension(sk, &sk.constraints.last()?.kind)
 }
 
 /// Keep a dimension's text where it was placed (`at`, sketch coordinates), relative to the

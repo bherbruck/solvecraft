@@ -48,6 +48,26 @@ fn redundant_constraints_and_dimensions_are_refused_driven_ones_measure() {
     assert_eq!(g["fully_constrained"], true);
 }
 
+/// `measured` is the dimension on the solved sketch: a trough drawn 99.84 long and dimensioned
+/// 100 reports 100, not the length it had before solving.
+#[test]
+fn a_dimension_reports_the_solved_value() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [99.84, 40.2]}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "p1", "b": "origin"}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 100}));
+    assert!((d["measured"].as_f64().unwrap() - 100.0).abs() < 1e-6, "{d}");
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": "40 mm"}));
+    assert!((d["measured"].as_f64().unwrap() - 40.0).abs() < 1e-6, "{d}");
+    // A driven dimension measures the solved geometry too.
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["p1", "p3"], "driven": true}));
+    assert!((d["measured"].as_f64().unwrap() - 100.0_f64.hypot(40.0)).abs() < 1e-6, "{d}");
+    let c = run(&mut s, "sketch.circle.center", json!({"center": [50, 20], "radius": 7.3}));
+    let c = ids(&c["curves"])[0].clone();
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [c], "value": 15}));
+    assert!((d["measured"].as_f64().unwrap() - 15.0).abs() < 1e-6, "{d}");
+}
+
 #[test]
 fn curvature_polygon_arc_length_linear_diameter() {
     let mut s = new_sketch();
