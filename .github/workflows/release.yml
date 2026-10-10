@@ -3,6 +3,7 @@
 # Push to `release` to build packages and create/update a DRAFT GitHub Release. The version
 # comes from [workspace.package] in Cargo.toml. An agent verifies the artifacts and publishes
 # the draft separately; see docs/releasing.md. Tags and pushes to main do not trigger releases.
+# At midnight Eastern, changed main commits build and publish a nightly pre-release.
 # A version with a suffix (0.2.0-rc.1) is a pre-release. Nothing is signed yet.
 #
 #   Linux x86_64, aarch64   AppImage (+ .zsync), .deb, .rpm, .flatpak, .tar.gz     packaging/linux
@@ -15,6 +16,9 @@
 name: Release
 
 on:
+  schedule:
+    - cron: '0 0 * * *'
+      timezone: America/New_York
   push:
     branches: [release]
   workflow_dispatch:
@@ -39,17 +43,30 @@ jobs:
   version:
     runs-on: ubuntu-latest
     outputs:
+      build: ${{ steps.changed.outputs.build }}
       version: ${{ steps.v.outputs.version }}
       date: ${{ steps.v.outputs.date }}
       prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: changed
+        name: Skip unchanged nightly builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash packaging/nightly.sh
       - id: v
+        if: steps.changed.outputs.build == 'true'
         name: Resolve version
         env:
           REQUEST_DRAFT: ${{ inputs.draft || false }}
         run: |
           . packaging/env.sh
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            # Unique SemVer without committing daily version bumps to main.
+            VERSION="${VERSION%%-*}-nightly.$(TZ=America/New_York date +%Y%m%d).$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT"
+          fi
           if ! printf '%s' "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$'; then
             echo "::error::Cargo.toml must contain a version like 1.2.3 or 1.2.3-rc.1"
             exit 1
@@ -65,6 +82,8 @@ jobs:
   # The app icon in every size, drawn by solvecraft-cli (no image files are committed), for the
   # Windows jobs: the ARM64 build is cross-compiled and can't run there to draw its own.
   icons:
+    needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,6 +104,7 @@ jobs:
   linux:
     name: Linux ${{ matrix.arch }}
     needs: version
+    if: needs.version.outputs.build == 'true'
     # The oldest GitHub-hosted image, so the binaries only need glibc >= 2.35.
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -135,6 +155,7 @@ jobs:
   flatpak:
     name: Flatpak ${{ matrix.arch }}
     needs: [version, linux]
+    if: needs.version.outputs.build == 'true'
     # Repackages the Linux job's tarball (the same binaries as the AppImage/deb/rpm); no Rust
     # build here. 24.04 for a newer flatpak-builder than 22.04 ships.
     runs-on: ${{ matrix.runner }}
@@ -172,6 +193,7 @@ jobs:
   freebsd:
     name: FreeBSD x86_64
     needs: version
+    if: needs.version.outputs.build == 'true'
     # GitHub has no FreeBSD runners: build in a FreeBSD 14.3 VM.
     runs-on: ubuntu-latest
     timeout-minutes: 180
@@ -212,6 +234,7 @@ jobs:
   macos:
     name: macOS universal
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: macos-14
     env:
       SOLVECRAFT_VERSION: ${{ needs.version.outputs.version }}
@@ -235,6 +258,7 @@ jobs:
   windows:
     name: Windows ${{ matrix.arch }}
     needs: [version, icons]
+    if: needs.version.outputs.build == 'true'
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -277,6 +301,7 @@ jobs:
   web:
     name: Web (wasm)
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-latest
     env:
       SOLVECRAFT_VERSION: ${{ needs.version.outputs.version }}
@@ -302,8 +327,9 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Draft GitHub Release or dry-run artifacts
+    name: GitHub Release or dry-run artifacts
     needs: [version, linux, flatpak, freebsd, macos, windows, web]
+    if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -323,6 +349,18 @@ jobs:
         run: |
           (cd artifacts && sha256sum -- * | tee SHA256SUMS.txt)
           sed "s/{version}/$VERSION/g" .github/release-notes.md >notes.md
+      - name: Publish nightly pre-release
+        if: github.event_name == 'schedule'
+        working-directory: artifacts
+        run: |
+          tag="v$VERSION"
+          sha256sum --check SHA256SUMS.txt
+          # Stage all packages before publishing. Published tags are never replaced.
+          gh release create "$tag" --draft --prerelease --latest=false \
+            --title "SolveCraft v$VERSION (nightly)" --target "$GITHUB_SHA" \
+            --notes-file ../notes.md --generate-notes -- *
+          gh release edit "$tag" --draft=false --prerelease --latest=false
+          echo "### Published nightly: $tag (\`${GITHUB_SHA::9}\`)" >>"$GITHUB_STEP_SUMMARY"
       - name: Create or update the draft release
         if: github.ref == 'refs/heads/release' && (github.event_name == 'push' || inputs.draft)
         working-directory: artifacts
