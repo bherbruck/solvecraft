@@ -6,7 +6,7 @@ use solvecraft_doc::expr::Kind;
 use solvecraft_geom::Vec3;
 
 use super::CommandSpec;
-use super::features::{add_feature, check_expr, feature_sketch, plane_param, profiles};
+use super::features::{add_feature, axis_dir_param, check_expr, feature_sketch, plane_param, point_param, profiles};
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
 use crate::{Result, Session};
 
@@ -16,7 +16,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("solid.coil", "Coil", coil).at("SOLID", "CREATE").icon("coil").params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
-         base?: [x,y,z]; axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; operation?, targets?, name?, body_name?",
+         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; operation?, targets?, name?, body_name?",
     ),
     CommandSpec::new("solid.rib", "Rib", rib)
         .at("SOLID", "CREATE")
@@ -43,17 +43,8 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.coil";
-    let base = p.get("base").and_then(vec3).unwrap_or(Vec3::ZERO);
-    let axis = match p.get("axis") {
-        None => Vec3::Z,
-        Some(Value::String(a)) => match a.to_ascii_uppercase().as_str() {
-            "X" => Vec3::X,
-            "Y" => Vec3::Y,
-            "Z" => Vec3::Z,
-            _ => return Err(bad(cmd, "`axis` must be X, Y, Z or [x, y, z]")),
-        },
-        Some(v) => vec3(v).and_then(|a| a.normalized()).ok_or_else(|| bad(cmd, "`axis` must be X, Y, Z or a non-zero [x, y, z]"))?,
-    };
+    let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| solvecraft_doc::point_expr(Vec3::ZERO));
+    let axis = axis_dir_param(p, cmd)?;
     let diameter = req_expr(cmd, p, "diameter")?;
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     let turns = expr(p, "revolutions").or_else(|| expr(p, "turns"));

@@ -36,6 +36,7 @@ fn join_extrude_from_a_chamfered_top_face() {
 }
 
 mod component_frames;
+mod primitive_points;
 mod robustness;
 
 /// Sketch a 40 x 30 rectangle with dimensions, extrude 20, fillet a vertical edge, cut a hole.

@@ -684,6 +684,13 @@ pub(crate) const DESIGN_LEN: &str = "\u{1}design_len";
 
 /// An expression's value. A length that comes out unit-less without being a bare number (a
 /// unit-less parameter used as a length) is in the design's units.
+/// A point given as length expressions.
+fn point(vals: &BTreeMap<String, Value>, p: &crate::PointExpr) -> Result<Vec3> {
+    let [x, y, z] = p;
+    let v = Vec3::new(val(vals, x, Kind::Length)?, val(vals, y, Kind::Length)?, val(vals, z, Kind::Length)?);
+    if [v.x, v.y, v.z].iter().all(|c| c.is_finite() && c.abs() < 1e9) { Ok(v) } else { Err(DocError::Invalid("the position is out of range".into())) }
+}
+
 fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f64> {
     let scale = vals.get(DESIGN_LEN).map(|x| x.v).unwrap_or(1.0);
     if k == Kind::Length && scale != 1.0 && !expr::is_literal(e) {
@@ -1537,6 +1544,7 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
             Ok(vec![kernel::loft_to_point(&ss.plane, &r.outer, ps.plane.to_world(q.pos))?])
         }
         FeatureKind::Coil { base, axis, diameter, pitch, turns, section_size, section, position, start_angle, clockwise, .. } => {
+            let base = &point(vals, base)?;
             let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
             let (d, p, n, s) = (
                 val(vals, diameter, Kind::Length)?,
@@ -1624,14 +1632,15 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
         }
         FeatureKind::Box { corner, length, width, height, .. } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
-            Ok(vec![kernel::box_solid(*corner, *corner + s)?])
+            let corner = point(vals, corner)?;
+            Ok(vec![kernel::box_solid(corner, corner + s)?])
         }
         FeatureKind::Cylinder { base, axis, radius, height, .. } => {
-            Ok(vec![kernel::cylinder(*base, *axis, val(vals, radius, Kind::Length)?, val(vals, height, Kind::Length)?)?])
+            Ok(vec![kernel::cylinder(point(vals, base)?, *axis, val(vals, radius, Kind::Length)?, val(vals, height, Kind::Length)?)?])
         }
-        FeatureKind::Sphere { center, radius, .. } => Ok(vec![kernel::sphere(*center, val(vals, radius, Kind::Length)?)?]),
+        FeatureKind::Sphere { center, radius, .. } => Ok(vec![kernel::sphere(point(vals, center)?, val(vals, radius, Kind::Length)?)?]),
         FeatureKind::Torus { center, major, minor, .. } => {
-            Ok(vec![kernel::torus(*center, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?])
+            Ok(vec![kernel::torus(point(vals, center)?, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?])
         }
         FeatureKind::Hole { diameter, depth, hole, to, .. } => {
             let (spots, dir) = hole_spots(st, f)?;
@@ -2689,19 +2698,20 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         }
         FeatureKind::Box { corner, length, width, height, operation } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
-            let b = kernel::box_solid(*corner, *corner + s)?;
+            let corner = point(vals, corner)?;
+            let b = kernel::box_solid(corner, corner + s)?;
             apply_op(st, f, vec![b], *operation, &[])
         }
         FeatureKind::Cylinder { base, axis, radius, height, operation } => {
-            let b = kernel::cylinder(*base, *axis, val(vals, radius, Kind::Length)?, val(vals, height, Kind::Length)?)?;
+            let b = kernel::cylinder(point(vals, base)?, *axis, val(vals, radius, Kind::Length)?, val(vals, height, Kind::Length)?)?;
             apply_op(st, f, vec![b], *operation, &[])
         }
         FeatureKind::Sphere { center, radius, operation } => {
-            let b = kernel::sphere(*center, val(vals, radius, Kind::Length)?)?;
+            let b = kernel::sphere(point(vals, center)?, val(vals, radius, Kind::Length)?)?;
             apply_op(st, f, vec![b], *operation, &[])
         }
         FeatureKind::Torus { center, major, minor, operation } => {
-            let b = kernel::torus(*center, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?;
+            let b = kernel::torus(point(vals, center)?, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?;
             apply_op(st, f, vec![b], *operation, &[])
         }
         FeatureKind::Combine { target, tools, operation, keep_tools } => {
@@ -2970,7 +2980,13 @@ mod chain_tests {
     fn tangent_chain_follows_smooth_edges() {
         let mut doc = Document::new("T");
         doc.add_feature(
-            FeatureKind::Box { corner: Vec3::ZERO, length: "40".into(), width: "30".into(), height: "20".into(), operation: Operation::NewBody },
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "40".into(),
+                width: "30".into(),
+                height: "20".into(),
+                operation: Operation::NewBody,
+            },
             None,
         )
         .unwrap();

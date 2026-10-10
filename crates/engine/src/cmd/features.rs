@@ -1,7 +1,7 @@
 //! Solid feature commands: extrude, revolve, fillet, chamfer, primitives, combine, move.
 
 use serde_json::{Value, json};
-use solvecraft_doc::{AxisRef, Direction, Extent, FeatureKind, Operation, ProfileSel, expr::Kind};
+use solvecraft_doc::{AxisRef, Direction, Extent, FeatureKind, Operation, PointExpr, ProfileSel, expr::Kind, point_expr};
 use solvecraft_geom::Vec3;
 
 use super::CommandSpec;
@@ -23,10 +23,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sweep")
         .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; operation?"),
     CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2 or more, in order); operation?"),
-    CommandSpec::new("solid.box", "Box", prim_box).at("SOLID", "CREATE").icon("box").params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z]; operation?"),
-    CommandSpec::new("solid.cylinder", "Cylinder", prim_cylinder).at("SOLID", "CREATE").icon("cylinder").params("radius | diameter, height: expr; base?: [x,y,z]; axis?: [x,y,z]; operation?"),
-    CommandSpec::new("solid.sphere", "Sphere", prim_sphere).at("SOLID", "CREATE").icon("sphere").params("radius | diameter: expr; center?: [x,y,z]; operation?"),
-    CommandSpec::new("solid.torus", "Torus", prim_torus).at("SOLID", "CREATE").icon("torus").params("major, minor: expr (radii); center?; operation?"),
+    CommandSpec::new("solid.box", "Box", prim_box).at("SOLID", "CREATE").icon("box").params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z] (numbers in mm or length expressions; default: the origin); operation?"),
+    CommandSpec::new("solid.cylinder", "Cylinder", prim_cylinder).at("SOLID", "CREATE").icon("cylinder").params("radius | diameter, height: expr; base?: [x,y,z] (centre of the bottom: numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); operation?"),
+    CommandSpec::new("solid.sphere", "Sphere", prim_sphere).at("SOLID", "CREATE").icon("sphere").params("radius | diameter: expr; center?: [x,y,z] (numbers in mm or length expressions; default: the origin); operation?"),
+    CommandSpec::new("solid.torus", "Torus", prim_torus).at("SOLID", "CREATE").icon("torus").params("major, minor: expr (radii); center?: [x,y,z] (numbers in mm or length expressions; default: the origin); operation?"),
     CommandSpec::new("solid.fillet", "Fillet", fillet)
         .at("SOLID", "MODIFY")
         .icon("fillet")
@@ -484,19 +484,59 @@ fn radius_expr(p: &Value, cmd: &str) -> Result<String> {
     }
 }
 
+/// A placement point: `[x, y, z]` (or `{x, y, z}`) of numbers (mm) or length expressions;
+/// the origin when it is not given. Anything else is refused (never read as the origin).
+pub(super) fn point_param(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<Option<PointExpr>> {
+    let Some(v) = p.get(key) else { return Ok(None) };
+    let want = || bad(cmd, format!("`{key}` must be a point [x, y, z] of numbers or length expressions"));
+    let coords: Vec<&Value> = match v {
+        Value::Array(a) if a.len() == 3 => a.iter().collect(),
+        Value::Object(o) => ["x", "y", "z"].iter().map(|k| o.get(*k)).collect::<Option<Vec<_>>>().ok_or_else(want)?,
+        _ => return Err(want()),
+    };
+    let mut out = PointExpr::default();
+    for (slot, (c, axis)) in out.iter_mut().zip(coords.into_iter().zip(["x", "y", "z"])) {
+        let e = expr(&json!({ "v": c }), "v").ok_or_else(want)?;
+        let x = s.doc.eval(&e, Kind::Length).map_err(|err| bad(cmd, format!("{key} {axis}: {err}")))?;
+        if !(x.is_finite() && x.abs() < 1e9) {
+            return Err(bad(cmd, format!("{key} {axis} is out of range")));
+        }
+        *slot = e;
+    }
+    Ok(Some(out))
+}
+
+/// An axis direction: X|Y|Z or a non-zero `[x, y, z]`; `Z` when it is not given.
+pub(super) fn axis_dir_param(p: &Value, cmd: &str) -> Result<Vec3> {
+    match p.get("axis") {
+        None => Ok(Vec3::Z),
+        Some(Value::String(a)) => match a.trim().to_ascii_uppercase().as_str() {
+            "X" => Ok(Vec3::X),
+            "Y" => Ok(Vec3::Y),
+            "Z" => Ok(Vec3::Z),
+            _ => Err(bad(cmd, "`axis` must be X, Y, Z or [x, y, z]")),
+        },
+        Some(v) => vec3(v).and_then(|a| a.normalized()).ok_or_else(|| bad(cmd, "`axis` must be X, Y, Z or a non-zero [x, y, z]")),
+    }
+}
+
 fn prim_box(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.box";
     let (l, w, h) = (req_expr(cmd, p, "length")?, req_expr(cmd, p, "width")?, req_expr(cmd, p, "height")?);
     for (e, n) in [(&l, "length"), (&w, "width"), (&h, "height")] {
         check_expr(s, e, Kind::Length, cmd, n)?;
     }
-    let corner = match (p.get("corner").and_then(vec3), p.get("center").and_then(vec3)) {
+    let corner = match (point_param(s, p, "corner", cmd)?, point_param(s, p, "center", cmd)?) {
         (Some(c), _) => c,
-        (None, Some(c)) => {
-            let v = |e: &str| s.doc.eval(e, Kind::Length).unwrap_or(0.0);
-            c - Vec3::new(v(&l), v(&w), v(&h)) * 0.5
+        // The corner half a size back from the centre (numbers stay numbers).
+        (None, Some([cx, cy, cz])) => {
+            let back = |c: String, size: &String| match (c.parse::<f64>(), size.parse::<f64>()) {
+                (Ok(a), Ok(b)) => format!("{}", a - b / 2.0),
+                _ => format!("({c}) - ({size}) / 2"),
+            };
+            [back(cx, &l), back(cy, &w), back(cz, &h)]
         }
-        _ => Vec3::ZERO,
+        _ => point_expr(Vec3::ZERO),
     };
     add_feature(s, p, FeatureKind::Box { corner, length: l, width: w, height: h, operation: operation(p, cmd)? })
 }
@@ -507,8 +547,8 @@ fn prim_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
     let height = req_expr(cmd, p, "height")?;
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
     check_expr(s, &height, Kind::Length, cmd, "height")?;
-    let base = p.get("base").and_then(vec3).unwrap_or(Vec3::ZERO);
-    let axis = p.get("axis").and_then(vec3).unwrap_or(Vec3::Z);
+    let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
+    let axis = axis_dir_param(p, cmd)?;
     add_feature(s, p, FeatureKind::Cylinder { base, axis, radius, height, operation: operation(p, cmd)? })
 }
 
@@ -516,7 +556,7 @@ fn prim_sphere(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.sphere";
     let radius = radius_expr(p, cmd)?;
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
-    let center = p.get("center").and_then(vec3).unwrap_or(Vec3::ZERO);
+    let center = point_param(s, p, "center", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
     add_feature(s, p, FeatureKind::Sphere { center, radius, operation: operation(p, cmd)? })
 }
 
@@ -525,7 +565,7 @@ fn prim_torus(s: &mut Session, p: &Value) -> Result<Value> {
     let (major, minor) = (req_expr(cmd, p, "major")?, req_expr(cmd, p, "minor")?);
     check_expr(s, &major, Kind::Length, cmd, "major")?;
     check_expr(s, &minor, Kind::Length, cmd, "minor")?;
-    let center = p.get("center").and_then(vec3).unwrap_or(Vec3::ZERO);
+    let center = point_param(s, p, "center", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
     add_feature(s, p, FeatureKind::Torus { center, major, minor, operation: operation(p, cmd)? })
 }
 

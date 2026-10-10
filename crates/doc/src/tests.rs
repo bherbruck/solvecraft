@@ -165,7 +165,13 @@ fn errors_are_reported_not_fatal() {
     doc.add_feature(FeatureKind::Fillet { edges: vec![Vec3::new(500.0, 0.0, 0.0)], radius: "1".into(), body: None, style: Default::default() }, None)
         .unwrap();
     doc.add_feature(
-        FeatureKind::Box { corner: Vec3::ZERO, length: "nope".into(), width: "1".into(), height: "1".into(), operation: Operation::NewBody },
+        FeatureKind::Box {
+            corner: point_expr(Vec3::ZERO),
+            length: "nope".into(),
+            width: "1".into(),
+            height: "1".into(),
+            operation: Operation::NewBody,
+        },
         None,
     )
     .unwrap();
@@ -202,13 +208,19 @@ fn params_and_serialization() {
 fn primitives_and_combine() {
     let mut doc = Document::new("p");
     doc.add_feature(
-        FeatureKind::Box { corner: Vec3::ZERO, length: "10".into(), width: "10".into(), height: "10".into(), operation: Operation::NewBody },
+        FeatureKind::Box {
+            corner: point_expr(Vec3::ZERO),
+            length: "10".into(),
+            width: "10".into(),
+            height: "10".into(),
+            operation: Operation::NewBody,
+        },
         None,
     )
     .unwrap();
     doc.add_feature(
         FeatureKind::Cylinder {
-            base: Vec3::new(5.0, 5.0, 0.0),
+            base: point_expr(Vec3::new(5.0, 5.0, 0.0)),
             axis: Vec3::Z,
             radius: "2".into(),
             height: "20".into(),

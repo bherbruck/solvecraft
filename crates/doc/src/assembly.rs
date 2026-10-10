@@ -164,6 +164,39 @@ fn map_geo_ref(m: &Mat, g: &mut crate::construct::GeoRef) {
     g.map_points(&mut |p: &mut Vec3| *p = apply_point(m, *p), &mut |pl: &mut PlaneRef| map_plane_ref(m, pl));
 }
 
+/// Map a point given as expressions by `m`: numbers stay numbers; a coordinate that is an
+/// expression stays one (`m · (x, y, z) + t`, written out), so it still follows its parameters.
+pub fn map_point_expr(m: &Mat, p: &mut crate::PointExpr) {
+    let num = |e: &String| e.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+    if let [Some(x), Some(y), Some(z)] = [num(&p[0]), num(&p[1]), num(&p[2])] {
+        *p = crate::point_expr(apply_point(m, Vec3::new(x, y, z)));
+        return;
+    }
+    let old = p.clone();
+    for (row, out) in p.iter_mut().enumerate() {
+        let mut constant = m[3][row];
+        let mut terms: Vec<String> = Vec::new();
+        for (col, e) in old.iter().enumerate() {
+            let c = m[col][row];
+            if c.abs() < 1e-12 {
+                continue;
+            }
+            match num(e) {
+                Some(v) => constant += c * v,
+                None if (c - 1.0).abs() < 1e-12 => terms.push(format!("({e})")),
+                None => terms.push(format!("{c} * ({e})")),
+            }
+        }
+        let mut e = terms.join(" + ");
+        if terms.is_empty() {
+            e = format!("{constant} mm");
+        } else if constant.abs() >= 1e-12 {
+            e = format!("{e} {} {} mm", if constant < 0.0 { '-' } else { '+' }, constant.abs());
+        }
+        *out = e;
+    }
+}
+
 impl FeatureKind {
     /// Map the feature's world geometry (points, directions, explicit planes) by `m`.
     pub fn transform_geometry(&mut self, m: &Mat) {
@@ -207,12 +240,12 @@ impl FeatureKind {
                 map_plane_ref(m, neutral);
                 dir(pull);
             }
-            FeatureKind::Box { corner, .. } => pt(corner),
+            FeatureKind::Box { corner, .. } => map_point_expr(m, corner),
             FeatureKind::Cylinder { base, axis, .. } => {
-                pt(base);
+                map_point_expr(m, base);
                 dir(axis);
             }
-            FeatureKind::Sphere { center, .. } | FeatureKind::Torus { center, .. } => pt(center),
+            FeatureKind::Sphere { center, .. } | FeatureKind::Torus { center, .. } => map_point_expr(m, center),
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { dir1, dir2, .. }, .. } => {
                 dir(dir1);
                 if let Some(d) = dir2 {
@@ -259,7 +292,7 @@ impl FeatureKind {
             }
             FeatureKind::SheetBase { .. } | FeatureKind::SheetContour { .. } | FeatureKind::SheetUnfold { .. } => {}
             FeatureKind::Coil { base, axis, .. } => {
-                pt(base);
+                map_point_expr(m, base);
                 dir(axis);
             }
             FeatureKind::ReplaceFace { faces, target, .. } => {
