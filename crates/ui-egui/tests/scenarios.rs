@@ -70,9 +70,10 @@ fn angle_dimension_both_interactive_workflows() {
 fn home_tab_and_file_recent_open_designs() {
     use serde_json::json;
     let mut h = Harness::new();
+    let path = h.dir.join("recent.solvecraft").to_string_lossy().into_owned();
     h.run(&json!([
         {"call":"engine.execute","params":{"command":"solid.box","params":{"length":10,"width":10,"height":10}}},
-        {"call":"engine.execute","params":{"command":"file.save_as","params":{"path":"$DIR/recent.solvecraft"}}},
+        {"call":"engine.execute","params":{"command":"file.save_as","params":{"path":path}}},
         {"click":{"handle":"tab:home"}},
         {"expect":{"home":true,"documents":1}},
         {"click":{"handle":"tab:design:0"}},
@@ -84,7 +85,6 @@ fn home_tab_and_file_recent_open_designs() {
         {"widget":"Open Recent"}
     ]))
     .unwrap();
-    let path = h.dir.join("recent.solvecraft").to_string_lossy().into_owned();
     h.run(&json!([
         {"widget":path},
         {"expect":{"home":false,"bodies":1,"documents":3}}
