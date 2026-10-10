@@ -35,6 +35,8 @@ pub struct ViewportState {
     hl_slot: SceneSlot,
     hl_key: u64,
     cpu: Option<(u64, egui::TextureHandle)>,
+    /// Nothing will look at the frame (the headless scenario harness): skip the software render.
+    pub no_pixels: bool,
     pub nav: Option<NavMode>,
     /// What a click would pick now (after the active command's filter).
     pub hover: Option<Hit>,
@@ -1927,6 +1929,9 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 }
 
 fn cpu_render(app: &mut SolveApp, ctx: &egui::Context, painter: &egui::Painter, rect: Rect, proj: &Proj) {
+    if app.viewport.no_pixels {
+        return;
+    }
     let mut h = std::collections::hash_map::DefaultHasher::new();
     scene_key(app).hash(&mut h);
     for v in [proj.cam.yaw, proj.cam.pitch, proj.cam.distance, proj.cam.target.x, proj.cam.target.y, proj.cam.target.z] {

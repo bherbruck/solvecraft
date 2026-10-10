@@ -22,10 +22,20 @@ fn killed_mid_save_the_old_file_survives() {
     assert_eq!(round_of(&path).as_deref(), Some("0"));
     let mut kills = 0;
     let mut seen = std::collections::BTreeSet::new();
+    let modified = || std::fs::metadata(&path).and_then(|m| m.modified()).ok();
     for i in 0..25u64 {
+        let before = modified();
         let mut child = Command::new(exe).args(["save-stress", &path.to_string_lossy(), "100000"]).spawn().unwrap();
-        // Let it get into its save loop (building the design takes a moment), then kill it.
-        std::thread::sleep(Duration::from_millis(150 + (i * 37) % 200));
+        // Wait until it is in its save loop (its first save replaced the file) and has reached a
+        // round that varies from kill to kill, however busy the machine is; then kill it a
+        // varying while later.
+        let target = i % 10;
+        let reached = || modified() != before && round_of(&path).and_then(|r| r.parse::<u64>().ok()).is_some_and(|r| r >= target);
+        let t0 = std::time::Instant::now();
+        while !reached() && t0.elapsed() < Duration::from_secs(20) && child.try_wait().unwrap().is_none() {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        std::thread::sleep(Duration::from_millis((i * 7) % 30));
         if child.try_wait().unwrap().is_none() {
             child.kill().unwrap();
             kills += 1;

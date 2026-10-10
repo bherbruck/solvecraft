@@ -170,6 +170,8 @@ impl Harness {
     /// File pickers answer like a person would: save into the scenario's folder, open the file
     /// the scenario chose.
     fn install(&mut self) {
+        // Frames are laid out, never painted.
+        self.app.viewport.no_pixels = true;
         let dir = self.dir.clone();
         self.app.services.pick_save = Some(Box::new(move |name, _| Some(dir.join(name).to_string_lossy().into_owned())));
         let next = self.next_file.clone();
