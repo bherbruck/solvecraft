@@ -2275,9 +2275,7 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
             ui.add_enabled_ui(s.show, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Speed");
-                    for sp in crate::agent_cursor::Speed::ALL {
-                        ui.selectable_value(&mut s.speed, sp, sp.label());
-                    }
+                    crate::agent_cursor::speed_slider(ui, &mut s.speed);
                 });
                 ui.checkbox(&mut s.follow_camera, "Follow camera (Look At sketches)");
             });

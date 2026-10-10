@@ -27,7 +27,7 @@
 //! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_cursor, msaa,
 //!   length_decimals, angle_decimals); returns them all
 //! - `ui.capture {action?: capture|revert|cancel}`: the Capture Position question
-//! - `ui.agent_cursor {show?, speed?: instant|normal|slow, follow_camera?}`: the agent cursor
+//! - `ui.agent_cursor {show?, speed?: 1–5 (times) | "instant", follow_camera?}`: the agent cursor
 //!   (#35); while it is shown, `engine.execute` first glides to the command's button and picks
 //!   and replies once the command has run (`"animate": false` skips that one call)
 //! - `ui.resize {width, height}`, `app.quit`
@@ -107,9 +107,9 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 s.follow_camera = v;
             }
             if let Some(v) = p.get("speed") {
-                match serde_json::from_value(v.clone()) {
-                    Ok(sp) => s.speed = sp,
-                    Err(_) => return err("speed must be instant, normal or slow"),
+                match crate::agent_cursor::Speed::from_value(v) {
+                    Some(sp) => s.speed = sp,
+                    None => return err("speed must be a number from 1 to 5, or \"instant\""),
                 }
             }
             ok(json!(app.ui.agent_cursor))

@@ -9,7 +9,7 @@
 //! - `{"click": AT, "double"?, "shift"?, "ctrl"?, "button"?}`, `{"move": AT}`,
 //!   `{"drag": [AT, AT], "shift"?, "ctrl"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
 //!   or `{"sketch": [x,y]}` (the sketch being edited)
-//! - `{"queued": "engine.execute", "params": {…}, "min_frames"?: n}`: a request sent the way an
+//! - `{"queued": "engine.execute", "params": {…}, "min_frames"?: n, "max_frames"?: n}`: a request sent the way an
 //!   agent's arrive (through the app's request queue, answered between frames, so the agent
 //!   cursor can act it out first); fails if the answer came in fewer than `min_frames` frames
 //! - `{"call": "ui.view", "params": {…}}`: any other control request (`fail: true` expects an
@@ -374,6 +374,11 @@ impl Harness {
                 let min = s.get("min_frames").and_then(Value::as_u64).unwrap_or(0);
                 if (frames as u64) < min {
                     return Err(format!("{m} was answered after {frames} frames: the agent cursor did not act it out ({min})"));
+                }
+                if let Some(max) = s.get("max_frames").and_then(Value::as_u64)
+                    && frames as u64 > max
+                {
+                    return Err(format!("{m} was answered after {frames} frames, more than {max}"));
                 }
                 v
             } else if let Some(f) = s.get("script").and_then(Value::as_str) {

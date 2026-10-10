@@ -507,11 +507,7 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui.end_row();
             ui.label("Agent cursor speed");
             ui.add_enabled_ui(s.show, |ui| {
-                ui.horizontal(|ui| {
-                    for sp in crate::agent_cursor::Speed::ALL {
-                        ui.selectable_value(&mut s.speed, sp, sp.label());
-                    }
-                });
+                crate::agent_cursor::speed_slider(ui, &mut s.speed);
             });
             ui.end_row();
             ui.label("");

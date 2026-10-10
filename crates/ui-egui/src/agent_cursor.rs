@@ -21,34 +21,85 @@ use solvecraft_engine::geom::{Vec2, Vec3};
 use crate::SolveApp;
 use crate::control::ControlResponse;
 
-/// How fast the pointer moves.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// How fast the pointer moves: 1× to 5×, or Instant (no animation: the command runs at once
+/// and the pointer jumps to where it acted, with a click ripple). Saved and sent as a number,
+/// or "instant"; the old "slow" and "normal" read as 1×.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Speed {
-    /// No animation: the command runs at once.
+    Times(f64),
     Instant,
-    #[default]
-    Normal,
-    Slow,
+}
+
+impl Default for Speed {
+    fn default() -> Self {
+        Speed::Times(1.0)
+    }
 }
 
 impl Speed {
-    pub const ALL: [Speed; 3] = [Speed::Instant, Speed::Normal, Speed::Slow];
-    pub fn label(self) -> &'static str {
+    /// From a number (1–5) or a name ("instant"; "slow" and "normal" are 1×).
+    pub fn from_value(v: &Value) -> Option<Speed> {
+        match v {
+            Value::Number(n) => n.as_f64().filter(|x| x.is_finite() && (1.0..=5.0).contains(x)).map(Speed::Times),
+            Value::String(s) => match s.to_ascii_lowercase().as_str() {
+                "instant" => Some(Speed::Instant),
+                "slow" | "normal" => Some(Speed::Times(1.0)),
+                "fast" => Some(Speed::Times(2.0)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    pub fn label(self) -> String {
         match self {
-            Speed::Instant => "Instant",
-            Speed::Normal => "Normal",
-            Speed::Slow => "Slow",
+            Speed::Instant => "Instant".into(),
+            Speed::Times(x) => {
+                let s = format!("{x:.1}");
+                format!("{}×", s.trim_end_matches(".0"))
+            }
         }
     }
     /// Seconds to glide to a stop, and to click there.
     fn times(self) -> (f64, f64) {
         match self {
             Speed::Instant => (0.0, 0.0),
-            Speed::Normal => (0.45, 0.25),
-            Speed::Slow => (0.9, 0.45),
+            Speed::Times(x) => {
+                let x = x.clamp(1.0, 5.0);
+                (0.45 / x, 0.25 / x)
+            }
         }
     }
+}
+
+impl Serialize for Speed {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Speed::Instant => s.serialize_str("instant"),
+            Speed::Times(x) => s.serialize_f64(*x),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Speed {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        Ok(Speed::from_value(&v).unwrap_or_default())
+    }
+}
+
+/// The speed as a slider: 1× to 5× in half steps, and Instant at the far right.
+pub fn speed_slider(ui: &mut egui::Ui, speed: &mut Speed) -> egui::Response {
+    let mut v = match *speed {
+        Speed::Times(x) => x.clamp(1.0, 5.0),
+        Speed::Instant => 5.5,
+    };
+    let r = ui.add(
+        egui::Slider::new(&mut v, 1.0..=5.5).step_by(0.5).custom_formatter(|v, _| if v > 5.25 { "Instant".into() } else { Speed::Times(v).label() }),
+    );
+    if r.changed() {
+        *speed = if v > 5.25 { Speed::Instant } else { Speed::Times(v) };
+    }
+    r
 }
 
 /// The settings (kept with the other view settings).
@@ -176,7 +227,7 @@ fn walk<'a>(v: &'a Value, key: Option<&'a str>, f: &mut dyn FnMut(Option<&'a str
 /// back when it should simply run.
 pub fn intercept(app: &mut SolveApp, method: &str, params: &Value, reply: &Sender<ControlResponse>) -> bool {
     let s = app.ui.agent_cursor;
-    if !s.show || s.speed == Speed::Instant || !matches!(method, "engine.execute" | "command") {
+    if !s.show || !matches!(method, "engine.execute" | "command") {
         return false;
     }
     if params.get("animate").and_then(Value::as_bool) == Some(false) {
@@ -185,6 +236,14 @@ pub fn intercept(app: &mut SolveApp, method: &str, params: &Value, reply: &Sende
     let Some(cmd) = params.get("command").or(params.get("id")).and_then(Value::as_str) else { return false };
     let inner = params.get("params").cloned().unwrap_or(json!({}));
     let stops: VecDeque<Pos2> = stops(app, cmd, &inner).into();
+    if s.speed == Speed::Instant {
+        // No animation: the command runs now; the pointer jumps to where it acted.
+        if let Some(last) = stops.back() {
+            app.agent.pos = Some(*last);
+            app.agent.ripples.push((*last, app.now));
+        }
+        return false;
+    }
     if stops.is_empty() {
         return false;
     }
@@ -335,5 +394,26 @@ mod tests {
         assert!(rect.contains(want));
         // Off-screen places are skipped rather than pointed at outside the view.
         assert!(stops(&a, "solid.hole", &json!({"position": [1e6, 0, 0]})).iter().all(|p| rect.contains(*p)));
+    }
+
+    #[test]
+    fn speeds_read_old_and_new_settings() {
+        // Saved settings from before #79: slow and normal are 1×, instant stays.
+        for (v, want) in [
+            (json!("slow"), Speed::Times(1.0)),
+            (json!("normal"), Speed::Times(1.0)),
+            (json!("instant"), Speed::Instant),
+            (json!(3), Speed::Times(3.0)),
+        ] {
+            assert_eq!(Speed::from_value(&v), Some(want), "{v}");
+            let s: Settings = serde_json::from_value(json!({"show": true, "speed": v})).unwrap();
+            assert_eq!(s.speed, want);
+        }
+        assert_eq!(Speed::from_value(&json!(9)), None);
+        assert_eq!(serde_json::to_value(Speed::Instant).unwrap(), json!("instant"));
+        assert_eq!(serde_json::to_value(Speed::Times(2.5)).unwrap(), json!(2.5));
+        assert_eq!((Speed::Times(1.0).label(), Speed::Times(2.5).label(), Speed::Instant.label()), ("1×".into(), "2.5×".into(), "Instant".into()));
+        // Faster glides take less time.
+        assert!(Speed::Times(5.0).times().0 < Speed::Times(1.0).times().0);
     }
 }
