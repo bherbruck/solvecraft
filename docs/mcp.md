@@ -69,8 +69,11 @@ Errors: an unknown tool or arguments that don't match the tool's schema are JSON
 `-32602` errors; an engine failure (bad command parameters, a feature that fails) is a tool
 result with `isError: true` and the engine's message, which the model can read and correct.
 
-`batch` rollback undoes as many steps as the batch added to the undo history; batches that
-themselves call `edit.undo`, `file.new` or `doc.open` are not rolled back exactly.
+`batch` rollback goes back to an engine checkpoint (`edit.checkpoint`) taken before the first
+step: the design, the active sketch and the undo history are restored exactly as they were,
+however long the history is. Batches that call `file.new` or `doc.open` get the design back,
+not its file path. (An older app without checkpoints falls back to undoing as many steps as
+the batch added to the undo history.)
 
 ## Demo: an enclosure built over MCP
 

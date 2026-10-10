@@ -855,6 +855,35 @@ fn deleting_a_path_sketch_deletes_its_pipe() {
     assert!(s.model.results.iter().all(|r| r.error.is_none()));
 }
 
+/// Regression: batches were rolled back by undoing as many steps as the undo history grew,
+/// which is none once the history is full, leaving their sketches behind.
+#[test]
+fn checkpoint_restores_with_a_full_undo_history() {
+    let mut s = Session::default();
+    for i in 0..MAX_UNDO + 5 {
+        run(&mut s, "parameters.add", json!({"name": format!("p{i}"), "expression": "1 mm"}));
+    }
+    assert_eq!(s.undo.len(), MAX_UNDO);
+    let labels: Vec<String> = s.undo.iter().map(|u| u.label.clone()).collect();
+    let doc = s.doc.clone();
+    let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "TapHole"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 2}));
+    assert!(s.active_sketch.is_some());
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
+    assert!(Arc::ptr_eq(&s.doc, &doc) && s.active_sketch.is_none());
+    assert!(s.doc.find_feature("TapHole").is_none());
+    assert_eq!(s.undo.iter().map(|u| u.label.clone()).collect::<Vec<_>>(), labels);
+    // Used up: a second restore is an error, not a jump somewhere else.
+    assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).is_err());
+    // Forgetting one leaves the design alone.
+    let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Kept"}));
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id, "forget": true}));
+    assert!(s.doc.find_feature("Kept").is_some());
+    assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).is_err());
+}
+
 #[test]
 fn components_occurrences_and_world_placement() {
     let mut s = Session::default();

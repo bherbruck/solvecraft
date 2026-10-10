@@ -10,6 +10,12 @@ use crate::{EngineError, Result, Sel, Session, Snapshot};
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo(),
     CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo(),
+    CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint)
+        .noundo()
+        .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint)"),
+    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", restore_checkpoint)
+        .noundo()
+        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included"),
     CommandSpec::new("timeline.compute_all", "Compute All", compute_all).at("SOLID", "MODIFY").icon("compute").noundo(),
     CommandSpec::new("timeline.delete", "Delete", delete)
         .at("SOLID", "MODIFY")
@@ -58,6 +64,21 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
     s.refresh();
     Ok(json!({"redone": label}))
+}
+
+fn checkpoint(s: &mut Session, _p: &Value) -> Result<Value> {
+    Ok(json!({"checkpoint": s.checkpoint()}))
+}
+
+fn restore_checkpoint(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "edit.restore_checkpoint";
+    let id = p.get("checkpoint").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`checkpoint` must be an id from edit.checkpoint"))?;
+    if bool_(p, "forget") == Some(true) {
+        s.drop_checkpoint(id);
+        return Ok(json!({"checkpoint": id, "restored": false}));
+    }
+    s.restore_checkpoint(id)?;
+    Ok(json!({"checkpoint": id, "restored": true}))
 }
 
 fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
