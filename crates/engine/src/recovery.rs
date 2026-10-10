@@ -140,7 +140,11 @@ impl Autosaver {
                 let _ = fs::remove_file(&p);
             }
         }
-        let id = format!("{}-{}", unix_now(), std::process::id());
+        // Unique within the process too: an app started again in the same second (tests that
+        // "crash" and restart) must not take over the crashed app's entry.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id = format!("{}-{}-{seq}", unix_now(), std::process::id());
         let lock = OpenOptions::new().create(true).truncate(false).write(true).open(file(dir, &id, "lock")).map_err(io)?;
         lock.lock().map_err(io)?;
         Ok(Autosaver { dir: dir.to_path_buf(), id, interval, lock: Some(lock), last: None, last_at: Instant::now(), has_entry: false })
@@ -222,6 +226,21 @@ mod tests {
         assert_eq!(entry.features, 1);
         remove(&d, &entry.id);
         assert!(orphans(&d).is_empty());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_app_restarted_in_the_same_second_still_offers_the_crashed_ones_work() {
+        let d = dir("restart");
+        let mut s = Session::default();
+        let mut a = Autosaver::new(&d, Duration::from_secs(3600)).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        assert!(a.save(&s).unwrap());
+        drop(a);
+        let b = Autosaver::new(&d, Duration::from_secs(3600)).unwrap();
+        let found = orphans(&d);
+        assert_eq!(found.len(), 1, "the crashed app's entry is offered");
+        assert_ne!(found[0].id, b.id);
         let _ = fs::remove_dir_all(&d);
     }
 
