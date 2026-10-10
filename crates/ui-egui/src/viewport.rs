@@ -1478,6 +1478,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             analysis: analysis_uniform(app),
             access: crate::access::map(app),
             outline: matches!(app.ui.visual_style, 0 | 3),
+            eye: {
+                let e = proj.cam.eye().to_f32();
+                [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }]
+            },
         };
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
     } else {

@@ -94,6 +94,8 @@ fn msaa() -> u16 {
 const CUSTOM_TITLEBAR: bool = !cfg!(target_os = "macos");
 
 const DEPTH_BITS: u8 = 24;
+/// The section cap marks where it shows in the stencil.
+const STENCIL_BITS: u8 = 8;
 const MSAA: u16 = 4;
 
 fn main() -> eframe::Result {
@@ -129,6 +131,7 @@ fn main() -> eframe::Result {
             .with_title_shown(false)
             .with_app_id("ai.storyteller.solvecraft"),
         depth_buffer: DEPTH_BITS,
+        stencil_buffer: STENCIL_BITS,
         multisampling: samples,
         ..Default::default()
     };
@@ -155,7 +158,7 @@ fn main() -> eframe::Result {
                 app.load_prefs(&p);
             }
             if let Some(rs) = &cc.wgpu_render_state {
-                app.set_wgpu(rs, DEPTH_BITS, u32::from(samples));
+                app.set_wgpu(rs, DEPTH_BITS, STENCIL_BITS, u32::from(samples));
             }
             if let Some(port) = control_port {
                 let rx = control_server::start(port, cc.egui_ctx.clone());
