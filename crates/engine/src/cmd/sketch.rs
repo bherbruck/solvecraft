@@ -9,6 +9,13 @@ use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_vec2, str_, string_list, vec2, vec3};
 use crate::{EngineError, Result, Session};
 
+/// The `connect` parameter every drawing command takes (see `connect_points`).
+macro_rules! connect_doc {
+    () => {
+        "; connect?: bool (default true: a new point landing exactly on an existing point, the origin too, is made coincident with it)"
+    };
+}
+
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.create", "Create Sketch", create_sketch)
         .at("SOLID", "CREATE")
@@ -21,71 +28,71 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("line")
         .key("L")
         .enabled(in_sketch)
-        .params("points: [[x,y] | \"l1.end\" | {at, ref}…], closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)"),
+        .params(concat!("points: [[x,y] | \"l1.end\" | {at, ref}…], closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)", connect_doc!())),
     CommandSpec::new("sketch.rectangle.two_point", "2-Point Rectangle", rect_two_point)
         .at("SKETCH", "CREATE")
         .icon("rect")
         .key("R")
         .enabled(in_sketch)
-        .params("p0, p1: opposite corners [x,y]; construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)"),
+        .params(concat!("p0, p1: opposite corners [x,y]; construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!())),
     CommandSpec::new("sketch.rectangle.three_point", "3-Point Rectangle", rect_three_point)
         .at("SKETCH", "CREATE")
         .icon("rect3")
         .enabled(in_sketch)
-        .params("p0, p1: first edge; p2: point on the opposite edge"),
+        .params(concat!("p0, p1: first edge; p2: point on the opposite edge", connect_doc!())),
     CommandSpec::new("sketch.rectangle.center", "Center Rectangle", rect_center)
         .at("SKETCH", "CREATE")
         .icon("rect_center")
         .enabled(in_sketch)
-        .params("center, corner. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)"),
+        .params(concat!("center, corner. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!())),
     CommandSpec::new("sketch.circle.center", "Center Diameter Circle", circle_center)
         .at("SKETCH", "CREATE")
         .icon("circle")
         .key("C")
         .enabled(in_sketch)
-        .params("center: [x,y] or point ref, radius | diameter: number"),
+        .params(concat!("center: [x,y] or point ref, radius | diameter: number", connect_doc!())),
     CommandSpec::new("sketch.circle.two_point", "2-Point Circle", circle_two)
         .at("SKETCH", "CREATE")
         .icon("circle2")
         .enabled(in_sketch)
-        .params("p0, p1: diameter ends"),
+        .params(concat!("p0, p1: diameter ends", connect_doc!())),
     CommandSpec::new("sketch.circle.three_point", "3-Point Circle", circle_three)
         .at("SKETCH", "CREATE")
         .icon("circle3")
         .enabled(in_sketch)
-        .params("p0, p1, p2"),
-    CommandSpec::new("sketch.arc.three_point", "3-Point Arc", arc_three).at("SKETCH", "CREATE").icon("arc3").enabled(in_sketch).params("start, end, through"),
+        .params(concat!("p0, p1, p2", connect_doc!())),
+    CommandSpec::new("sketch.arc.three_point", "3-Point Arc", arc_three).at("SKETCH", "CREATE").icon("arc3").enabled(in_sketch).params(concat!("start, end, through", connect_doc!())),
     CommandSpec::new("sketch.arc.center_point", "Center Point Arc", arc_center)
         .at("SKETCH", "CREATE")
         .icon("arc_center")
         .enabled(in_sketch)
-        .params("center, start, end (counter-clockwise from start) | center, start, sweep: signed degrees"),
+        .params(concat!("center, start, end (counter-clockwise from start) | center, start, sweep: signed degrees", connect_doc!())),
     CommandSpec::new("sketch.polygon.inscribed", "Inscribed Polygon", polygon_inscribed)
         .at("SKETCH", "CREATE")
         .icon("polygon")
         .enabled(in_sketch)
-        .params("center, radius (to vertices), sides, angle?: deg"),
+        .params(concat!("center, radius (to vertices), sides, angle?: deg", connect_doc!())),
     CommandSpec::new("sketch.polygon.circumscribed", "Circumscribed Polygon", polygon_circumscribed)
         .at("SKETCH", "CREATE")
         .icon("polygon")
         .enabled(in_sketch)
-        .params("center, radius (to edge midpoints), sides, angle?: deg"),
+        .params(concat!("center, radius (to edge midpoints), sides, angle?: deg", connect_doc!())),
     CommandSpec::new("sketch.polygon.edge", "Edge Polygon", polygon_edge)
         .at("SKETCH", "CREATE")
         .icon("polygon")
         .enabled(in_sketch)
-        .params("p0, p1: one edge, sides"),
+        .params(concat!("p0, p1: one edge, sides", connect_doc!())),
     CommandSpec::new("sketch.slot.center_to_center", "Center to Center Slot", slot_c2c)
         .at("SKETCH", "CREATE")
         .icon("slot")
         .enabled(in_sketch)
-        .params("p0, p1: arc centres, width"),
+        .params(concat!("p0, p1: arc centres, width", connect_doc!())),
     CommandSpec::new("sketch.slot.overall", "Overall Slot", slot_overall)
         .at("SKETCH", "CREATE")
         .icon("slot")
         .enabled(in_sketch)
-        .params("p0, p1: overall ends, width"),
-    CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params("point: [x,y], id?"),
+        .params(concat!("p0, p1: overall ends, width", connect_doc!())),
+    CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params(concat!("point: [x,y], id?", connect_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
         "entities: [refs], type?: auto|distance|horizontal|vertical|length|radius|diameter|angle, value?: number or expression (default: current)",
     ),
@@ -216,6 +223,47 @@ pub(super) fn edit<T>(
     *doc.sketch_mut(id)? = sk;
     *s.doc_mut() = doc;
     Ok((out, json!({"solved": rep.ok(), "dof": rep.dof})))
+}
+
+/// How close (mm) a new point must land to an existing one to be connected to it.
+const CONNECT_TOL: f64 = 1e-6;
+
+/// New points (index `first` on) that land on an existing point, the origin included, get a
+/// coincident constraint to it, as when a click snaps there; `connect: false` leaves them free.
+fn connect_points(sk: &mut Sketch, first: usize, p: &Value) -> Result<Vec<String>> {
+    if !bool_(p, "connect").unwrap_or(true) {
+        return Ok(Vec::new());
+    }
+    // The existing points by x, for a range lookup per new point.
+    let mut old: Vec<(Vec2, usize)> = (0..first.min(sk.points.len())).filter_map(|i| Some((sk.point(i)?, i))).collect();
+    old.sort_by(|a, b| a.0.x.total_cmp(&b.0.x));
+    let mut ties = Vec::new();
+    for q in first..sk.points.len() {
+        let Some(at) = sk.point(q) else { continue };
+        let from = old.partition_point(|(o, _)| o.x < at.x - CONNECT_TOL);
+        let hit =
+            old.iter().skip(from).take_while(|(o, _)| o.x <= at.x + CONNECT_TOL).filter(|(o, _)| o.dist(at) < CONNECT_TOL).map(|(_, i)| *i).min();
+        if let Some(o) = hit {
+            ties.push((o, q));
+        }
+    }
+    ties.into_iter().map(|(o, q)| add_c(sk, ConstraintKind::Coincident { p: o, q })).collect()
+}
+
+/// `edit` for drawing commands whose step returns (curve ids, constraint ids): the points it
+/// adds are connected to the existing points they land on (see [`connect_points`]).
+pub(super) fn draw(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    f: impl FnOnce(&mut Sketch, &mut solvecraft_doc::Document) -> Result<(Vec<String>, Vec<String>)>,
+) -> Result<((Vec<String>, Vec<String>), Value)> {
+    edit(s, p, cmd, false, |sk, doc| {
+        let first = sk.points.len();
+        let (curves, mut cons) = f(sk, doc)?;
+        cons.extend(connect_points(sk, first, p)?);
+        Ok((curves, cons))
+    })
 }
 
 /// A point argument: `[x, y]` (new point), a point reference string, or `{at, ref}`.
@@ -425,7 +473,7 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
     let closed = bool_(p, "closed").unwrap_or(false);
     let infer = bool_(p, "infer").unwrap_or(false);
     let ids = string_list(p, "ids");
-    let ((curves, cons), info) = edit(s, p, cmd, false, |sk, _| {
+    let ((curves, cons), info) = draw(s, p, cmd, |sk, _| {
         let args: Vec<PArg> = list.iter().map(|v| parg(sk, v, cmd)).collect::<Result<_>>()?;
         let n = args.len();
         let segs = if closed { n } else { n - 1 };
@@ -555,9 +603,11 @@ fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let (lo, hi) = (Vec2::new(a.x.min(b.x), a.y.min(b.y)), Vec2::new(a.x.max(b.x), a.y.max(b.y)));
     let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
+        let first = sk.points.len();
         let (l, pts) = polygon_lines(sk, &[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)])?;
-        let cons = rect_constraints(sk, &l)?;
+        let mut cons = rect_constraints(sk, &l)?;
         mark_construction(sk, &l, p);
+        cons.extend(connect_points(sk, first, p)?);
         Ok(((ids_of(sk, &l), cons), rect_names(sk, &l, &pts)))
     })?;
     Ok(rect_result(out, names, info))
@@ -571,6 +621,7 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the corner must differ from the centre in x and y"));
     }
     let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
+        let first = sk.points.len();
         let (l, pts) = polygon_lines(sk, &[c - h, Vec2::new(c.x + h.x, c.y - h.y), c + h, Vec2::new(c.x - h.x, c.y + h.y)])?;
         let mut cons = rect_constraints(sk, &l)?;
         // Both diagonals (construction), the centre at their crossing. Only the first carries
@@ -588,6 +639,7 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
             cons.push(add_c(sk, ConstraintKind::Midpoint { p: cp, l: diag })?);
         }
         mark_construction(sk, &l, p);
+        cons.extend(connect_points(sk, first, p)?);
         Ok(((ids_of(sk, &l), cons), rect_names(sk, &l, &pts)))
     })?;
     Ok(rect_result(out, names, info))
@@ -602,7 +654,7 @@ fn rect_three_point(s: &mut Session, p: &Value) -> Result<Value> {
     if w.abs() < 1e-9 {
         return Err(bad(cmd, "p2 must not be on the first edge"));
     }
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, _| {
         let (l, _) = polygon_lines(sk, &[a, b, b + n * w, a + n * w])?;
         let mut cons = Vec::new();
         if let [l0, l1, l2, l3] = l[..] {
@@ -630,7 +682,7 @@ fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let r = radius_arg(p, cmd)?;
     let id = str_(p, "id").map(str::to_string);
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, _| {
         let c = req_parg(sk, p, "center", cmd)?;
         let ci = sk.add_circle(c.pos(), r, c.idx(), id.as_deref())?;
         mark_construction(sk, &[ci], p);
@@ -646,7 +698,7 @@ fn circle_two(s: &mut Session, p: &Value) -> Result<Value> {
     if r < 1e-9 {
         return Err(bad(cmd, "the points must differ"));
     }
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, _| {
         let ci = sk.add_circle((a + b) * 0.5, r, None, None)?;
         Ok((ids_of(sk, &[ci]), Vec::new()))
     })?;
@@ -671,7 +723,7 @@ fn circle_three(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.three_point";
     let (a, b, c) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?, req_vec2(cmd, p, "p2")?);
     let (o, r) = circumcircle(a, b, c).ok_or_else(|| bad(cmd, "the points are collinear"))?;
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, _| {
         let ci = sk.add_circle(o, r, None, None)?;
         Ok((ids_of(sk, &[ci]), Vec::new()))
     })?;
@@ -682,7 +734,7 @@ fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.three_point";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let id = str_(p, "id").map(str::to_string);
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, _| {
         let (a, b) = (req_parg(sk, p, "start", cmd)?, req_parg(sk, p, "end", cmd)?);
         let t = req_vec2(cmd, p, "through")?;
         let (o, _) = circumcircle(a.pos(), t, b.pos()).ok_or_else(|| bad(cmd, "the points are collinear"))?;
@@ -705,7 +757,7 @@ fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let id = str_(p, "id").map(str::to_string);
     let sweep = num(p, "sweep");
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, _| {
         let c = req_parg(sk, p, "center", cmd)?;
         let a = req_parg(sk, p, "start", cmd)?;
         if let Some(sw) = sweep {
@@ -742,7 +794,7 @@ fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, start: f64, n: usize, inscribed: bool) -> Result<Value> {
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, _| {
         let corners: Vec<Vec2> = (0..n).map(|i| center + Vec2::from_angle(start + std::f64::consts::TAU * i as f64 / n as f64) * r_vertex).collect();
         let (l, pts) = polygon_lines(sk, &corners)?;
         let mut cons = Vec::new();
@@ -818,7 +870,7 @@ pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w:
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, _| {
         let pts: Vec<usize> =
             [c0 - n * h, c1 - n * h, c1 + n * h, c0 + n * h].iter().map(|q| sk.add_point(*q, None)).collect::<std::result::Result<_, _>>()?;
         let (p0, p1, p2, p3) = (pts[0], pts[1], pts[2], pts[3]);
@@ -858,11 +910,12 @@ fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.point";
     let at = req_vec2(cmd, p, "point")?;
     let id = str_(p, "id").map(str::to_string);
-    let (pid, info) = edit(s, p, cmd, false, |sk, _| {
+    let ((pid, cons), info) = edit(s, p, cmd, false, |sk, _| {
         let i = sk.add_point(at, id.as_deref())?;
-        Ok(sk.points.get(i).map(|q| q.id.clone()).unwrap_or_default())
+        let cons = connect_points(sk, i, p)?;
+        Ok((sk.points.get(i).map(|q| q.id.clone()).unwrap_or_default(), cons))
     })?;
-    Ok(json!({"point": pid, "sketch": info}))
+    Ok(json!({"point": pid, "constraints": cons, "sketch": info}))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1070,6 +1123,15 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.coincident";
+    // Already tied (e.g. connected when it was drawn there): nothing to add.
+    let sk = s.doc.sketch(target_sketch(s, p, cmd)?)?;
+    let pt = |k: &str| p.get(k).and_then(Value::as_str).and_then(|r| sk.resolve_point(r));
+    if let (Some(a), Some(b)) = (pt("a"), pt("b"))
+        && let Some(c) = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (a, b) || (p, q) == (b, a)))
+    {
+        let rep = solve(&mut sk.clone());
+        return Ok(json!({"constraint": c.id, "existing": true, "sketch": {"solved": rep.ok(), "dof": rep.dof}}));
+    }
     constrain(s, p, cmd, |sk| {
         let aref = p.get("a").and_then(Value::as_str).unwrap_or_default();
         let bref = p.get("b").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`b` must be a point or curve"))?;

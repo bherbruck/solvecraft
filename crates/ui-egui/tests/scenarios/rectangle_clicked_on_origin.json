@@ -1,0 +1,14 @@
+[
+  {"note": "A rectangle whose first corner is clicked on the origin is tied to it once (the engine connects it), so two dimensions fully constrain it."},
+  {"start": "sketch.create"},
+  {"click": {"plane": "XY"}},
+  {"start": "sketch.rectangle.two_point"},
+  {"click": {"sketch": [0, 0]}},
+  {"click": {"sketch": [30, 20]}},
+  {"key": "Escape"},
+  {"expect": {"query": {"command": "sketch.inspect", "path": ["dof"], "value": 2}}},
+  {"expect": {"query": {"command": "sketch.inspect", "path": ["constraints", 4, "type"], "value": "coincident"}}},
+  {"expect": {"query": {"command": "sketch.inspect", "path": ["constraints", 5], "value": null}}},
+  {"key": "Z", "cmd": true},
+  {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 0], "value": null}}}
+]
