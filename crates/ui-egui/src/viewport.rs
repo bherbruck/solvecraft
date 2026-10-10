@@ -2155,13 +2155,16 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         }
         crate::scenario::publish_handle(&format!("cube:{}", targets[*i].name), cube_centroid(pts));
     }
+    let labels: Vec<String> = targets.iter().filter(|tg| tg.kind == CubeKind::Face).map(|tg| tg.name.to_uppercase()).collect();
+    let size = cube_label_size(ui.ctx(), &labels);
     for (i, _) in drawn.iter().rev() {
         let tg = &targets[*i];
         let n = tg.normal();
         // Fades out as the face turns edge-on.
         let ink = (n.dot(b) / 0.3).clamp(0.0, 1.0) as f32;
         if tg.kind == CubeKind::Face && ink > 0.05 {
-            painter.add(cube_label(ui.ctx(), &tg.name.to_uppercase(), n, (r, u), c, Color32::from_rgb(40, 44, 52).gamma_multiply(ink)));
+            let color = Color32::from_rgb(40, 44, 52).gamma_multiply(ink);
+            painter.add(cube_label(ui.ctx(), &tg.name.to_uppercase(), size, n, (r, u), c, color));
         }
     }
     crate::scenario::publish_count("cube_highlights", f64::from(u8::from(hovered.is_some())));
@@ -2323,10 +2326,24 @@ fn cube_label_axes(n: Vec3) -> (Vec3, Vec3) {
     if n.z.abs() > 0.5 { (Vec3::X, Vec3::Y * n.z.signum()) } else { (Vec3::Z.cross(n), Vec3::Z) }
 }
 
-/// A face's label printed on the face: laid out flat, then mapped through the cube's projection,
-/// so it turns and foreshortens with the face.
-fn cube_label(ctx: &egui::Context, text: &str, n: Vec3, ru: (Vec3, Vec3), c: Pos2, color: Color32) -> Shape {
-    let galley = ctx.fonts_mut(|f| f.layout(text.to_string(), FontId::proportional(9.5), color, f32::INFINITY));
+/// How much of a face the widest face label spans.
+const CUBE_LABEL_WIDTH: f32 = 0.9;
+
+/// The face labels' font size: one size for all, the widest of `labels` spanning
+/// `CUBE_LABEL_WIDTH` of a face.
+fn cube_label_size(ctx: &egui::Context, labels: &[String]) -> f32 {
+    let probe = 10.0;
+    let widest = labels
+        .iter()
+        .map(|s| ctx.fonts_mut(|f| f.layout_no_wrap(s.clone(), FontId::proportional(probe), Color32::WHITE).size().x))
+        .fold(0.0, f32::max);
+    if widest > 0.0 { probe * CUBE_LABEL_WIDTH * 2.0 * CUBE_SCALE as f32 / widest } else { probe }
+}
+
+/// A face's label printed on the face at `size`: laid out flat, then mapped through the cube's
+/// projection, so it turns and foreshortens with the face.
+fn cube_label(ctx: &egui::Context, text: &str, size: f32, n: Vec3, ru: (Vec3, Vec3), c: Pos2, color: Color32) -> Shape {
+    let galley = ctx.fonts_mut(|f| f.layout(text.to_string(), FontId::proportional(size), color, f32::INFINITY));
     let options = egui::epaint::TessellationOptions { round_text_to_pixels: false, ..Default::default() };
     let mut tess = egui::epaint::Tessellator::new(ctx.pixels_per_point(), options, ctx.fonts(|f| f.font_image_size()), vec![]);
     let mut mesh = egui::Mesh::default();
@@ -2980,22 +2997,44 @@ mod tests {
         }
     }
 
-    /// From any direction, each label is printed within its face, clear of the edge bands.
+    fn face_labels(targets: &[CubeTarget]) -> Vec<String> {
+        targets.iter().filter(|t| t.kind == CubeKind::Face).map(|t| t.name.to_uppercase()).collect()
+    }
+
+    /// The widest label spans 90% of its face, looking straight at it.
+    #[test]
+    fn view_cube_widest_label_spans_most_of_its_face() {
+        let ctx = egui::Context::default();
+        let mut span = 0.0f32;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let targets = cube_targets();
+            let size = cube_label_size(ui.ctx(), &face_labels(&targets));
+            let front = Vec3::new(0.0, -1.0, 0.0);
+            let (r, u, _) = basis_from(front);
+            let pts = drawn_points(vec![cube_label(ui.ctx(), "BOTTOM", size, front, (r, u), pos2(100.0, 100.0), Color32::BLACK)]);
+            let (lo, hi) = pts.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), p| (lo.min(p.x), hi.max(p.x)));
+            span = (hi - lo) / (2.0 * CUBE_SCALE as f32);
+        });
+        assert!((span - CUBE_LABEL_WIDTH).abs() < 0.05, "BOTTOM spans {span} of the face");
+    }
+
+    /// From any direction, each label is printed within its face.
     #[test]
     fn view_cube_labels_stay_on_their_faces() {
         let ctx = egui::Context::default();
         let (mut worst, mut drawn) = (f32::NEG_INFINITY, 0);
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             let targets = cube_targets();
+            let size = cube_label_size(ui.ctx(), &face_labels(&targets));
             let c = pos2(100.0, 100.0);
             for dir in orbit_directions().step_by(7) {
                 let (r, u, b) = basis_from(dir);
-                for (i, pts) in cube_projected(&targets, (r, u, b), c) {
+                for (i, pts) in cube_drawn(&targets, (r, u, b), c) {
                     let tg = &targets[i];
                     if tg.kind != CubeKind::Face {
                         continue;
                     }
-                    for p in drawn_points(vec![cube_label(ui.ctx(), &tg.name.to_uppercase(), tg.normal(), (r, u), c, Color32::BLACK)]) {
+                    for p in drawn_points(vec![cube_label(ui.ctx(), &tg.name.to_uppercase(), size, tg.normal(), (r, u), c, Color32::BLACK)]) {
                         let outside = if point_in_poly(p, &pts) { 0.0 } else { poly_distance(p, &pts) };
                         worst = worst.max(outside);
                         drawn += 1;
