@@ -423,6 +423,70 @@ fn span_step(ns: &[Vec3], s: &[f64]) -> Option<Vec3> {
 }
 
 /// A line or circular arc through an edge (by samples): `None` for other curves.
+/// Maximum straight edges per face checked pairwise for crossings.
+const MAX_CROSSING_EDGES: usize = 2000;
+
+/// Where the moved straight edges of a planar face cross each other (or a loop of straight
+/// edges turns round), if they do. Faces next to a collapsed round are left to the other checks.
+fn crossed_loops(
+    faces: &[mt::Face],
+    old: &[Surf],
+    newpos: &HashMap<mt::VertexID, Vec3>,
+    edge_collapsed: &dyn Fn(&mt::Edge) -> bool,
+    size: f64,
+) -> Option<Vec3> {
+    let eps = size * 1e-9;
+    for (f, sf) in faces.iter().zip(old) {
+        let Surf::Plane { n, .. } = *sf else { continue };
+        if f.edge_iter().any(|e| edge_collapsed(&e)) {
+            continue;
+        }
+        let (u, w) = (n.any_perp(), n.cross(n.any_perp()));
+        let flat = |p: Vec3| (p.dot(u), p.dot(w));
+        // Straight edges as (vertex ids, old ends, new ends) in the plane.
+        let mut segs: Vec<([mt::VertexID; 2], [(f64, f64); 2])> = Vec::new();
+        for wire in f.absolute_boundaries() {
+            let (mut area_old, mut area_new, mut straight) = (0.0, 0.0, true);
+            for e in wire.edge_iter() {
+                let (v0, v1) = (e.front(), e.back());
+                let (Some(q0), Some(q1)) = (newpos.get(&v0.id()), newpos.get(&v1.id())) else { return None };
+                let (o0, o1, n0, n1) = (flat(from_p3(v0.point())), flat(from_p3(v1.point())), flat(*q0), flat(*q1));
+                area_old += o0.0 * o1.1 - o1.0 * o0.1;
+                area_new += n0.0 * n1.1 - n1.0 * n0.1;
+                if arc_mid(e, size * 1e-6) == Some(None) {
+                    segs.push(([v0.id(), v1.id()], [n0, n1]));
+                } else {
+                    straight = false;
+                }
+            }
+            if straight && area_old.abs() > eps && area_old * area_new <= 0.0 {
+                return wire.vertex_iter().next().and_then(|v| newpos.get(&v.id()).copied());
+            }
+        }
+        if segs.len() > MAX_CROSSING_EDGES {
+            continue;
+        }
+        let side = |a: (f64, f64), c: (f64, f64), p: (f64, f64)| (c.0 - a.0) * (p.1 - a.1) - (c.1 - a.1) * (p.0 - a.0);
+        for (i, (ia, [a0, a1])) in segs.iter().enumerate() {
+            for (ib, [b0, b1]) in segs.iter().skip(i + 1) {
+                if ia.iter().any(|v| ib.contains(v)) {
+                    continue;
+                }
+                let (s0, s1) = (side(*a0, *a1, *b0), side(*a0, *a1, *b1));
+                let (t0, t1) = (side(*b0, *b1, *a0), side(*b0, *b1, *a1));
+                let tol = eps * size;
+                if ((s0 > tol && s1 < -tol) || (s0 < -tol && s1 > tol)) && ((t0 > tol && t1 < -tol) || (t0 < -tol && t1 > tol)) {
+                    let k = t0 / (t0 - t1);
+                    let (x, y) = (a0.0 + (a1.0 - a0.0) * k, a0.1 + (a1.1 - a0.1) * k);
+                    let d = n.dot(newpos.get(&ia[0]).copied().unwrap_or_default());
+                    return Some(u * x + w * y + n * d);
+                }
+            }
+        }
+    }
+    None
+}
+
 pub(crate) fn arc_mid(e: &mt::Edge, tol: f64) -> Option<Option<Vec3>> {
     use mt::{BoundedCurve, ParametricCurve};
     let c = e.curve();
@@ -625,6 +689,15 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
         if old_v.len() > size * 1e-6 && old_v.dot(new_v) < 0.0 {
             return Err(fail("not supported yet: the move is larger than a wall or step is thick (faces would cross)"));
         }
+    }
+    // A plane's loops crossing after the move: a rim or ledge narrower than the move (the hole
+    // in a top face sliding past its outer edge) turns part of the face inside out, though no
+    // edge turns round.
+    if let Some(at) = crossed_loops(&faces, &old, &newpos, &edge_collapsed, size) {
+        return Err(fail(&format!(
+            "not supported yet: the move is larger than a rim or ledge near [{:.1}, {:.1}, {:.1}] is wide (a face would turn inside out)",
+            at.x, at.y, at.z
+        )));
     }
     guard("offset", || {
         // Vertices of collapsed faces that land together become one.
