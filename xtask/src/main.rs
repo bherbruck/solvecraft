@@ -322,10 +322,10 @@ fn cmd_ci() -> Result<(), String> {
     c.args(["fmt", "--all", "--", "--check"]);
     run(c, "cargo fmt --check")?;
     let mut c = cargo();
-    c.args(["clippy", "--workspace", "--all-targets", "--release", "--", "-D", "warnings"]);
+    c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
     run(c, "cargo clippy -D warnings")?;
     let mut c = cargo();
-    c.args(["test", "--workspace", "--release"]);
+    c.args(["test", "--workspace", "--profile", "ci"]);
     run(c, "cargo test")?;
     assets::run(&root())?;
     licences::run(&root(), true)?;

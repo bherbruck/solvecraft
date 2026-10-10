@@ -72,6 +72,21 @@ opt-level = 2
 [profile.dev]
 opt-level = 1
 
+# Tests and lints (`cargo xtask ci`, GitHub CI): quick to build, quick enough to run. Light
+# optimisation, line tables only (file:line in backtraces), no LTO. Debug assertions are off because
+# truck's debug-only checks reject valid geometry (seam edges, closed edges); that was the only
+# reason the tests used to build with --release, which cost most of CI's time.
+[profile.ci]
+inherits = "dev"
+opt-level = 1
+debug = "line-tables-only"
+debug-assertions = false
+overflow-checks = true
+incremental = false
+
+[profile.ci.package."*"]
+opt-level = 2
+
 [profile.release]
 opt-level = 3
 lto = "thin"

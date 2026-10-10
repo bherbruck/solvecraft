@@ -90,7 +90,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: native-clippy
-      - run: cargo clippy --workspace --all-targets --release --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --profile ci --locked -- -D warnings
 
   tests:
     name: Native Linux tests
@@ -105,9 +105,9 @@ jobs:
         with:
           key: native-tests
       - name: Compile tests
-        run: cargo test --workspace --release --locked --no-run
+        run: cargo test --workspace --profile ci --locked --no-run
       - name: Run tests
-        run: cargo test --workspace --release --locked
+        run: cargo test --workspace --profile ci --locked
 
   # Preserve the existing check name for branch protection, including docs-only PRs.
   ci:
