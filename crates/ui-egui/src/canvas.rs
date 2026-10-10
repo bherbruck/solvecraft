@@ -13,7 +13,7 @@ use solvecraft_engine::geom::{Mesh, Vec3};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::theme::Tokens;
-use crate::viewport::Proj;
+use crate::viewport::{Proj, projected_polygon};
 
 /// Where the dialog's geometry is: a base point and, for values that can be dragged, the
 /// direction a growing value points.
@@ -145,6 +145,13 @@ fn format_len(v: f64) -> String {
     format!("{} mm", if s == "-0" { "0" } else { s })
 }
 
+/// The offset plane preview: a square of half side `h` around `c`, square to `n`.
+fn offset_plane_quad(proj: &Proj, c: Vec3, n: Vec3, h: f64) -> Option<Vec<Pos2>> {
+    let u = n.cross(if n.z.abs() < 0.9 { Vec3::Z } else { Vec3::X }).normalized()?;
+    let v = n.cross(u);
+    [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().map(|(a, b)| proj.to_screen(c + u * (a * h) + v * (b * h))).collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog, base: Vec3, bs: Pos2, dir: Option<Vec3>) {
     let t = Tokens::get();
@@ -168,16 +175,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // An offset plane shows where it will be.
     if let (Kind::OffsetPlane { offset }, Some(n)) = (&d.kind, dir)
         && let Ok(off) = app.session.doc.eval(offset, ValueKind::Length)
-        && let Some(u) = n.cross(if n.z.abs() < 0.9 { Vec3::Z } else { Vec3::X }).normalized()
+        && let Some(q) = offset_plane_quad(proj, base + n * off, n, half_height * 0.25)
     {
-        let v = n.cross(u);
-        let h = half_height * 0.25;
-        let c = base + n * off;
-        let q: Vec<Pos2> =
-            [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().filter_map(|(a, b)| proj.to_screen(c + u * (a * h) + v * (b * h))).collect();
-        if q.len() == 4 {
-            painter.add(egui::Shape::convex_polygon(q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
-        }
+        painter.extend(projected_polygon(&q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
     }
     // Holes: the depth arrow points into the material (empty depth: through all); the
     // diameter is typed in the box.
@@ -411,6 +411,30 @@ fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn offset_plane_preview_stays_within_its_square() {
+        let rect = egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let mut worst = f32::NEG_INFINITY;
+        for n in [Vec3::X, Vec3::Y, Vec3::Z] {
+            for dir in crate::viewport::orbit_directions() {
+                let cam = solvecraft_engine::render::Camera::default().looking_from(dir);
+                let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
+                let h = cam.half_height() * 0.25;
+                let (Some(q), Some(c), Some(side)) =
+                    (offset_plane_quad(&proj, Vec3::ZERO, n, h), proj.to_screen(Vec3::ZERO), proj.to_screen(cam.basis().0 * h))
+                else {
+                    continue;
+                };
+                // The square's half diagonal on screen (an orthographic view), plus stroke and feathering.
+                let limit = c.distance(side) * 2f32.sqrt() + 3.0;
+                for p in crate::viewport::drawn_points(projected_polygon(&q, Color32::GRAY, Stroke::new(1.2, Color32::BLACK))) {
+                    worst = worst.max(p.distance(c) - limit);
+                }
+            }
+        }
+        assert!(worst <= 0.0, "a vertex {worst} px past the square");
+    }
 
     #[test]
     fn snapping_steps_and_formatting() {
