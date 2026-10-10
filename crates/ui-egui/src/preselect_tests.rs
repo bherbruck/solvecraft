@@ -297,7 +297,7 @@ fn boundary_fill_finds_the_cells_and_fills_the_ticked_ones() {
     app.dialog = Some(d);
     // The dialog finds the cells on its next frame.
     let ctx = egui::Context::default();
-    let _ = ctx.run_ui(Default::default(), |ui| crate::dialogs::show(&mut app, ui.ctx()));
+    ctx.run_ui(Default::default(), |ui| crate::dialogs::show(&mut app, ui.ctx())).textures_delta.clear();
     let mut d = app.dialog.take().unwrap();
     let Kind::BoundaryFill { cells, .. } = &mut d.kind else { panic!() };
     // Only A, only B, and both.
