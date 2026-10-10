@@ -146,7 +146,8 @@ pub struct ViewportCallback {
     pub access: Option<AccessMap>,
     /// Draw silhouette outlines around the model (visual styles with edges).
     pub outline: bool,
-    /// Eye position and 1 for a perspective camera (0: orthographic), for the section cap's depth.
+    /// Eye position and 1 for a perspective camera (0: orthographic), for the section cap's depth
+    /// and the depth bias.
     pub eye: [f32; 4],
 }
 
@@ -279,7 +280,7 @@ const SHADER: &str = r#"
 struct U {
     vp: mat4x4<f32>,
     back: vec4<f32>,   // xyz = toward the eye, w = 1 for linear output
-    screen: vec4<f32>, // viewport width, height (px), depth bias, silhouettes on (1)
+    screen: vec4<f32>, // viewport width, height (px), depth bias (see `biased_z`), silhouettes on (1)
     clip: vec4<f32>,   // section plane: normal, d (zero normal: no section)
     cap: vec4<f32>,    // colour of the inside of cut bodies
     ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature), parameter
@@ -483,11 +484,23 @@ fn shade(i: TOut) -> vec4<f32> {
     return out_color(vec4<f32>(min(i.c.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), i.c.a));
 }
 
+/// Clip-space z of `p` (clipped to `c`) pulled `s` depth biases toward the eye (pushed away
+/// when negative). Orthographic depth is linear in distance, so the bias is a fixed step of it.
+/// Perspective depth is not: near the far plane a fixed step spans tens of millimetres (edges
+/// showed through walls), so the point moves toward the eye by a fraction of its distance.
+fn biased_z(p: vec3<f32>, c: vec4<f32>, s: f32) -> f32 {
+    if (u.eye.w > 0.5) {
+        let q = u.vp * vec4<f32>(mix(p, u.eye.xyz, u.screen.z * 8.0 * s), 1.0);
+        return q.z / max(q.w, 1e-6) * c.w;
+    }
+    return c.z - u.screen.z * s * c.w;
+}
+
 @vertex
 fn vs_ghost(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: vec4<f32>) -> TOut {
     var o: TOut;
     o.pos = u.vp * vec4<f32>(p, 1.0);
-    o.pos.z = o.pos.z + u.screen.z * 4.0 * o.pos.w;
+    o.pos.z = biased_z(p, o.pos, -4.0);
     o.n = n;
     o.c = c;
     o.wp = p;
@@ -519,7 +532,7 @@ fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(
     let base = select(ca, cb, t > 0.5);
     let off = nrm * s * w * 0.5 + dir * (t * 2.0 - 1.0) * w * 0.5;
     var o: LOut;
-    o.pos = vec4<f32>(base.xy + off / half * base.w, base.z - u.screen.z * base.w, base.w);
+    o.pos = vec4<f32>(base.xy + off / half * base.w, biased_z(select(a, b, t > 0.5), base, 1.0), base.w);
     o.c = c;
     o.wp = select(a, b, t > 0.5);
     return o;
@@ -546,7 +559,7 @@ fn vs_img(@location(0) p: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) a:
     var o: IOut;
     o.pos = u.vp * vec4<f32>(p, 1.0);
     // Pulled toward the eye like lines, so a decal on a face is not lost in it.
-    o.pos.z = o.pos.z - u.screen.z * o.pos.w;
+    o.pos.z = biased_z(p, o.pos, 1.0);
     o.uv = uv;
     o.a = a;
     o.wp = p;
