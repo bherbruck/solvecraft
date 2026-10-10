@@ -162,6 +162,51 @@ jobs:
           path: dist/release/*.flatpak
           if-no-files-found: error
 
+
+
+  linux-riscv64:
+    name: Linux riscv64
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      SOLVECRAFT_VERSION: ${{ needs.version.outputs.version }}
+      SOLVECRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out craft-fonts
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          repository: storytold/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv64gc-unknown-linux-gnu
+      - name: Install cross-compilation dependencies
+        run: |
+          sudo dpkg --add-architecture riscv64
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-linux-gnu libasound2-dev:riscv64 libxkbcommon-dev:riscv64 \
+            libwayland-dev:riscv64 libx11-dev:riscv64 libxrandr-dev:riscv64 libxi-dev:riscv64 libgl1-mesa-dev:riscv64
+      - name: Build and package
+        env:
+          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+          PKG_CONFIG_SYSROOT_DIR: /
+          PKG_CONFIG_PATH: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          PKG_CONFIG_ALLOW_CROSS: 1
+        run: |
+          . "$HOME/.cargo/env"
+          export CRAFT_FONTS_DIR="$PWD/craft-fonts" CRAFT_FONTS_REQUIRED=1
+          export CROSS_ARCH=riscv64
+          export CROSS_TARGET=riscv64gc-unknown-linux-gnu
+          export DEB_ARCH=riscv64
+          # We skip nfpm (deb/rpm) and AppImage for now on riscv64
+          bash packaging/linux/package.sh --formats "tar"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-riscv64
+          path: dist/release/*.tar.gz
+          if-no-files-found: error
   freebsd:
     name: FreeBSD x86_64
     needs: version
