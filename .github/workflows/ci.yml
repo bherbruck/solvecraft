@@ -107,7 +107,8 @@ jobs:
       - name: Compile tests
         run: cargo test --workspace --profile ci --locked --no-run
       - name: Run tests
-        run: cargo test --workspace --profile ci --locked
+        # Every test binary at once (cargo test runs them one after another).
+        run: cargo xtask test --locked
 
   # Preserve the existing check name for branch protection, including docs-only PRs.
   ci:

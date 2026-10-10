@@ -8,6 +8,7 @@ mod book;
 mod layers;
 mod licences;
 mod parity;
+mod test;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -33,8 +34,12 @@ commands:
   licences [--check]
                   write THIRD-PARTY-LICENSES.txt (the licences of every shipped crate, embedded
                   in the programs); --check fails when it is out of date
+  test [CARGO ARGS] [-- TEST ARGS]
+                  build the tests with the ci profile, then run every test binary at once
+                  (and the doc tests alongside)
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
-  ci              fmt --check, clippy -D warnings, test, assets, licences --check, layers, wasm (stops at first failure)
+  ci              fmt --check, assets, licences --check, layers, clippy -D warnings, then the tests
+                  with the wasm check alongside (stops at the first failing step)
 ";
 
 fn main() -> ExitCode {
@@ -48,6 +53,10 @@ fn main() -> ExitCode {
         Some("step-corpus") => cmd_step_corpus(rest.iter().find(|a| !a.starts_with("--")).copied(), rest.contains(&"--iges")),
         Some("book") => book::run(&root(), !rest.contains(&"--no-build")),
         Some("licences") => licences::run(&root(), rest.contains(&"--check")),
+        Some("test") => {
+            let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
+            test::run(cargo_args, test_args, vec![test::doc_tests(cargo_args, test_args)])
+        }
         Some("ci") => cmd_ci(),
         Some("wasm") => cmd_wasm(),
         Some("-h" | "--help" | "help") | None => {
@@ -201,18 +210,25 @@ fn cmd_oracle() -> Result<(), String> {
 /// Never break wasm: every layered crate (everything below the apps) and the web app must
 /// build for the browser.
 fn cmd_wasm() -> Result<(), String> {
+    let (c, n) = wasm_check()?;
+    run(c, &format!("cargo check --target wasm32-unknown-unknown ({n} crates)"))?;
+    println!("wasm: {n} crates build for wasm32-unknown-unknown");
+    Ok(())
+}
+
+/// The wasm check and how many crates it covers. It uses the ci profile so the host build
+/// scripts and proc macros built for clippy and the tests are reused.
+fn wasm_check() -> Result<(Command, usize), String> {
     let crates = layers::from_metadata(&metadata()?)?;
     let mut set: Vec<String> =
         crates.iter().filter(|c| matches!(layers::classify(&c.name), Some(layers::Class::Layer(_)))).map(|c| c.name.clone()).collect();
     set.push("solvecraft-web".into());
     let mut c = cargo();
-    c.args(["check", "--target", "wasm32-unknown-unknown"]);
+    c.args(["check", "--target", "wasm32-unknown-unknown", "--profile", "ci"]);
     for p in &set {
         c.args(["-p", p]);
     }
-    run(c, &format!("cargo check --target wasm32-unknown-unknown ({} crates)", set.len()))?;
-    println!("wasm: {} crates build for wasm32-unknown-unknown", set.len());
-    Ok(())
+    Ok((c, set.len()))
 }
 
 /// Import every oracle STEP file (exported by Fusion) and compare with Fusion's measurements;
@@ -317,20 +333,20 @@ a manifold solid B-rep on the same surfaces a STEP export uses, with its name an
     if pass == list.len() { Ok(()) } else { Err(format!("{} file(s) failed", list.len() - pass)) }
 }
 
+/// The quick gates first, so they fail fast; the wasm check (and doc tests) run while the test
+/// binaries do, which leaves cargo's build lock free.
 fn cmd_ci() -> Result<(), String> {
     let mut c = cargo();
     c.args(["fmt", "--all", "--", "--check"]);
     run(c, "cargo fmt --check")?;
-    let mut c = cargo();
-    c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
-    run(c, "cargo clippy -D warnings")?;
-    let mut c = cargo();
-    c.args(["test", "--workspace", "--profile", "ci"]);
-    run(c, "cargo test")?;
     assets::run(&root())?;
     licences::run(&root(), true)?;
     cmd_layers()?;
-    cmd_wasm()?;
+    let mut c = cargo();
+    c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
+    run(c, "cargo clippy -D warnings")?;
+    let (wasm, n) = wasm_check()?;
+    test::run(&[], &[], vec![(format!("wasm32-unknown-unknown check ({n} crates)"), wasm), test::doc_tests(&[], &[])])?;
     eprintln!("ci: all gates passed");
     Ok(())
 }
