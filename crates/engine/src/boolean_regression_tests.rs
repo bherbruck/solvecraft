@@ -35,7 +35,10 @@ fn shallow_loft_cut_from_the_top_face() {
 
 #[test]
 fn oblique_cut_through_a_small_arc_matches_a_split() {
-    let scripts = [include_str!("../../../examples/regressions/oblique_cut_of_cylinder.json")];
+    let scripts = [
+        include_str!("../../../examples/regressions/oblique_cut_of_cylinder.json"),
+        include_str!("../../../examples/regressions/oblique_cut_of_cylinder_hang.json"),
+    ];
     // The same bar split by the prism's tilted top: the piece above it is the cut's result.
     let mut split = Session::default();
     let script: Value = serde_json::from_str(scripts[0]).unwrap();

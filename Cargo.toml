@@ -98,3 +98,4 @@ debug = 0
 truck-shapeops = { path = "vendor/truck-shapeops" }
 truck-stepio = { path = "vendor/truck-stepio" }
 truck-meshalgo = { path = "vendor/truck-meshalgo" }
+matext4cgmath = { path = "vendor/matext4cgmath" }
