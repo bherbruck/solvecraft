@@ -125,7 +125,8 @@ pub struct Extent {
     /// Optional second side distance (two-sided extrude), along the negative normal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distance2: Option<String>,
-    /// Start offset from the sketch plane (expression).
+    /// Start offset from the sketch plane (expression), along the sketch normal whatever the
+    /// direction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_offset: Option<String>,
     /// Through all bodies in the direction(s) instead of `distance`.
