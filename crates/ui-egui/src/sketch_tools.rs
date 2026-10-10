@@ -291,7 +291,7 @@ pub fn refine_snap(
 
 /// The constraint glyph under a screen position (its constraint id).
 pub fn glyph_at(pos: Pos2) -> Option<String> {
-    GLYPHS.with(|g| g.borrow().iter().find(|(_, c)| c.distance(pos) <= 7.0).map(|(id, _)| id.clone()))
+    GLYPHS.with(|g| g.borrow().iter().find(|(_, c)| c.distance(pos) <= GLYPH * 0.6).map(|(id, _)| id.clone()))
 }
 
 /// Constraint glyphs drawn last frame: (constraint id, screen centre).
@@ -304,7 +304,7 @@ pub fn click_glyph(app: &mut SolveApp, _proj: &Proj, pos: Pos2) -> bool {
     if app.session.active_sketch.is_none() {
         return false;
     }
-    let hit = GLYPHS.with(|g| g.borrow().iter().find(|(_, c)| c.distance(pos) <= 7.0).map(|(id, _)| id.clone()));
+    let hit = GLYPHS.with(|g| g.borrow().iter().find(|(_, c)| c.distance(pos) <= GLYPH * 0.6).map(|(id, _)| id.clone()));
     let used = hit.is_some();
     PICKED.with(|p| *p.borrow_mut() = hit.clone());
     if let Some(id) = hit {
@@ -891,7 +891,10 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
 
 /// Constraint glyphs of the active sketch: a small badge per constraint at its anchor
 /// (conflicting ones red).
-fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+/// Glyph size and spacing (screen pixels).
+const GLYPH: f32 = 15.0;
+
+fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Pos2>) {
     let Some(sid) = active_sketch(app) else { return };
     let st = app.session.world_state();
     let Some(ss) = st.sketch(sid) else { return };
@@ -900,87 +903,172 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         return;
     }
     let tk = crate::theme::Tokens::get();
-    let mut placed: Vec<Pos2> = Vec::new();
     let picked = PICKED.with(|p| p.borrow().clone());
-    let mut drawn: Vec<(String, Pos2)> = Vec::new();
+    // Where each glyph goes: beside its entity (to its left, away from the line), every entity
+    // of a two-entity constraint getting one; glyphs that would overlap step along.
+    let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
     for c in &ss.sketch.constraints {
         if c.kind.is_dimension() {
             continue;
         }
-        let Some(at) = glyph_anchor(&ss.sketch, &c.kind) else { continue };
-        let Some(mut sp) = proj.to_screen(ss.plane.to_world(at)) else { continue };
-        sp += egui::vec2(9.0, -9.0);
-        // Keep glyphs at one spot from overlapping.
-        while placed.iter().any(|q| q.distance(sp) < 12.0) {
-            sp += egui::vec2(13.0, 0.0);
+        for (at, dir) in glyph_anchors(&ss.sketch, &c.kind) {
+            let Some(base) = proj.to_screen(ss.plane.to_world(at)) else { continue };
+            // The entity's direction on screen, and its side.
+            let side = match dir.and_then(|d| proj.to_screen(ss.plane.to_world(at + d))) {
+                Some(q) => {
+                    let t = (q - base).normalized();
+                    if t.length() > 0.5 { egui::vec2(-t.y, t.x) } else { egui::vec2(0.7, -0.7) }
+                }
+                None => egui::vec2(0.7, -0.7),
+            };
+            let step = if dir.is_some() { egui::vec2(side.y, -side.x) } else { egui::vec2(1.0, 0.0) };
+            let mut sp = base + side * (GLYPH * 0.9);
+            for _ in 0..12 {
+                if !placed.iter().any(|(_, q, _)| q.distance(sp) < GLYPH + 1.0) {
+                    break;
+                }
+                sp += step * (GLYPH + 2.0);
+            }
+            placed.push((c.id.clone(), sp, base));
         }
-        placed.push(sp);
-        let failing = ss.report.failing.contains(&c.id);
-        let selected = picked.as_deref() == Some(c.id.as_str())
-            || app.session.selection.iter().any(|s| matches!(s, solvecraft_engine::Sel::SketchConstraint { id } if *id == c.id));
+    }
+    let hovered = hover.and_then(|h| placed.iter().find(|(_, q, _)| q.distance(h) <= GLYPH * 0.6).map(|(id, _, _)| id.clone()));
+    // The hovered (or selected) constraint's entities lit up.
+    if let Some(id) = hovered.as_ref().or(picked.as_ref())
+        && let Some(c) = ss.sketch.constraints.iter().find(|c| &c.id == id)
+    {
+        let (cs, ps) = constraint_entities(&c.kind);
+        for ci in cs {
+            let pts: Vec<Pos2> = ss.sketch.polyline(ci).iter().filter_map(|q| proj.to_screen(ss.plane.to_world(*q))).collect();
+            painter.add(egui::Shape::line(pts, Stroke::new(3.0, tk.accent.gamma_multiply(0.7))));
+        }
+        for pi in ps {
+            if let Some(q) = ss.sketch.point(pi).and_then(|q| proj.to_screen(ss.plane.to_world(q))) {
+                painter.circle_filled(q, 4.5, tk.accent);
+            }
+        }
+    }
+    let mut drawn: Vec<(String, Pos2)> = Vec::new();
+    for (id, sp, base) in &placed {
+        let Some(c) = ss.sketch.constraints.iter().find(|c| &c.id == id) else { continue };
+        let failing = ss.report.failing.contains(id);
+        let selected = picked.as_deref() == Some(id.as_str())
+            || app.session.selection.iter().any(|s| matches!(s, solvecraft_engine::Sel::SketchConstraint { id: x } if x == id));
+        let lit = selected || hovered.as_deref() == Some(id.as_str());
         let col = if failing {
             tk.error
-        } else if selected {
+        } else if lit {
             tk.accent
         } else {
-            tk.text_dim
+            tk.glyph_text
         };
-        drawn.push((c.id.clone(), sp));
-        let r = egui::Rect::from_center_size(sp, egui::vec2(12.0, 12.0));
-        painter.rect_filled(r, 2.0, tk.panel.gamma_multiply(0.85));
-        painter.rect_stroke(r, 2.0, Stroke::new(0.8, col), egui::StrokeKind::Inside);
-        painter.text(sp, egui::Align2::CENTER_CENTER, glyph_letter(c.kind.name()), egui::FontId::proportional(9.0), col);
+        // A faint leader back to the entity when the glyph was pushed away from it.
+        if sp.distance(*base) > GLYPH * 1.6 {
+            painter.line_segment([*base, *sp], Stroke::new(0.8, tk.text_dim.gamma_multiply(0.6)));
+        }
+        let r = egui::Rect::from_center_size(*sp, egui::vec2(GLYPH, GLYPH));
+        painter.rect_filled(r, 3.0, if lit { tk.accent_soft } else { tk.glyph_bg });
+        painter.rect_stroke(r, 3.0, Stroke::new(1.0, if failing || lit { col } else { tk.glyph_edge }), egui::StrokeKind::Inside);
+        match glyph_icon(c.kind.name()) {
+            Some(icon) => crate::icons::paint(painter, r.shrink(2.0), icon, col, tk.glyph_bg, col),
+            None => {
+                painter.text(*sp, egui::Align2::CENTER_CENTER, glyph_letter(c.kind.name()), egui::FontId::proportional(10.5), col);
+            }
+        }
+        drawn.push((id.clone(), *sp));
+    }
+    if let (Some(id), Some(h)) = (hovered, hover)
+        && let Some(c) = ss.sketch.constraints.iter().find(|c| c.id == id)
+    {
+        let label = format!("{} ({id})", c.kind.name());
+        let at = h + egui::vec2(12.0, 12.0);
+        let g = painter.layout_no_wrap(label, egui::FontId::proportional(11.0), tk.text);
+        painter.rect_filled(egui::Rect::from_min_size(at, g.size()).expand(3.0), 3.0, tk.panel);
+        painter.galley(at, g, tk.text);
     }
     GLYPHS.with(|g| *g.borrow_mut() = drawn);
 }
 
+/// Toolbar icons used as glyphs (H and V stay letters, which tell them apart).
+fn glyph_icon(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "Coincident" => "c_coincident",
+        "Parallel" => "c_parallel",
+        "Perpendicular" => "c_perpendicular",
+        "Collinear" => "c_collinear",
+        "Tangent" => "c_tangent",
+        "Smooth" => "c_smooth",
+        "Equal" => "c_equal",
+        "Concentric" => "c_concentric",
+        "MidPoint" => "c_midpoint",
+        "Symmetry" => "c_symmetry",
+        "Fix" => "c_fix",
+        _ => return None,
+    })
+}
+
+/// The curves and points a constraint ties together.
+fn constraint_entities(k: &solvecraft_engine::sketch::ConstraintKind) -> (Vec<usize>, Vec<usize>) {
+    use solvecraft_engine::sketch::ConstraintKind::*;
+    match *k {
+        Coincident { p, q } | HorizontalPoints { p, q } | VerticalPoints { p, q } => (vec![], vec![p, q]),
+        Fix { p } => (vec![], vec![p]),
+        Midpoint { p, l } => (vec![l], vec![p]),
+        PointOnCurve { p, c } => (vec![c], vec![p]),
+        Symmetric { p, q, l } => (vec![l], vec![p, q]),
+        Horizontal { l } | Vertical { l } => (vec![l], vec![]),
+        Parallel { a, b }
+        | Perpendicular { a, b }
+        | Collinear { a, b }
+        | Equal { a, b }
+        | Concentric { a, b }
+        | Tangent { a, b }
+        | Smooth { a, b } => (vec![a, b], vec![]),
+        _ => (vec![], vec![]),
+    }
+}
+
 fn glyph_letter(name: &str) -> &'static str {
     match name {
-        "Coincident" => "\u{25cf}",
         "Horizontal" => "H",
         "Vertical" => "V",
-        "Parallel" => "//",
-        "Perpendicular" => "\u{22a5}",
-        "Collinear" => "\u{2261}",
-        "Tangent" => "T",
-        "Smooth" => "G2",
-        "Equal" => "=",
-        "Concentric" => "\u{25ce}",
-        "MidPoint" => "M",
-        "Symmetry" => "[]",
-        "Fix" => "\u{1f512}",
         _ => "?",
     }
 }
 
-fn glyph_anchor(sk: &solvecraft_engine::sketch::Sketch, k: &solvecraft_engine::sketch::ConstraintKind) -> Option<Vec2> {
+/// Where a constraint's glyphs go: one per entity (the middle of a curve, with its direction
+/// there; a point, without).
+fn glyph_anchors(sk: &solvecraft_engine::sketch::Sketch, k: &solvecraft_engine::sketch::ConstraintKind) -> Vec<(Vec2, Option<Vec2>)> {
     use solvecraft_engine::sketch::ConstraintKind::*;
-    // Half way along the curve.
-    let mid = |c: usize| -> Option<Vec2> {
+    // Half way along the curve, and the direction there.
+    let mid = |c: usize| -> Option<(Vec2, Option<Vec2>)> {
         let poly = sk.polyline(c);
         let total: f64 = poly.windows(2).map(|w| w[0].dist(w[1])).sum();
         let mut acc = 0.0;
         for w in poly.windows(2) {
             let l = w[0].dist(w[1]);
             if acc + l >= total * 0.5 && l > 0.0 {
-                return Some(w[0].lerp(w[1], (total * 0.5 - acc) / l));
+                return Some((w[0].lerp(w[1], (total * 0.5 - acc) / l), (w[1] - w[0]).normalized()));
             }
             acc += l;
         }
-        poly.first().copied()
+        poly.first().map(|p| (*p, None))
     };
+    let pt = |p: usize| sk.point(p).map(|q| (q, None));
     match *k {
-        Coincident { p, .. } | Fix { p } | Midpoint { p, .. } | PointOnCurve { p, .. } => sk.point(p),
-        HorizontalPoints { p, q } | VerticalPoints { p, q } | Symmetric { p, q, .. } => Some((sk.point(p)? + sk.point(q)?) * 0.5),
-        Horizontal { l } | Vertical { l } => mid(l),
-        Parallel { a, .. }
-        | Perpendicular { a, .. }
-        | Collinear { a, .. }
-        | Equal { a, .. }
-        | Concentric { a, .. }
-        | Tangent { a, .. }
-        | Smooth { a, .. } => mid(a),
-        _ => None,
+        Coincident { p, .. } | Fix { p } | Midpoint { p, .. } | PointOnCurve { p, .. } => pt(p).into_iter().collect(),
+        HorizontalPoints { p, q } | VerticalPoints { p, q } | Symmetric { p, q, .. } => {
+            sk.point(p).zip(sk.point(q)).map(|(a, b)| ((a + b) * 0.5, None)).into_iter().collect()
+        }
+        Horizontal { l } | Vertical { l } => mid(l).into_iter().collect(),
+        Parallel { a, b }
+        | Perpendicular { a, b }
+        | Collinear { a, b }
+        | Equal { a, b }
+        | Concentric { a, b }
+        | Tangent { a, b }
+        | Smooth { a, b } => [mid(a), mid(b)].into_iter().flatten().collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -1002,7 +1090,7 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 /// Per frame, after the viewport is drawn: constraint glyphs and the text-entry box.
 pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
     SHIFT.with(|c| c.set(ui.input(|i| i.modifiers.shift)));
-    glyphs(app, painter, proj);
+    glyphs(app, painter, proj, ui.input(|i| i.pointer.hover_pos()));
     snap_hint(app, painter, proj);
     combs(app, painter, proj);
     if DEFERRED.with(|d| d.replace(false)) {

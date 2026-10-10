@@ -1,0 +1,14 @@
+[
+  {"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}},
+  {"call": "engine.execute", "params": {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 20]}}},
+  {"call": "engine.execute", "params": {"command": "sketch.circle.center", "params": {"center": [60, 10], "radius": 5}}},
+  {"call": "engine.execute", "params": {"command": "sketch.line", "params": {"points": [[45, -10], [75, -10]]}}},
+  {"call": "engine.execute", "params": {"command": "sketch.line", "params": {"points": [[45, 30], [75, 30]]}}},
+  {"call": "engine.execute", "params": {"command": "sketch.constraint.parallel", "params": {"a": "l5", "b": "l6"}}},
+  {"call": "engine.execute", "params": {"command": "sketch.constraint.tangent", "params": {"a": "l5", "b": "c1"}}},
+  {"call": "engine.execute", "params": {"command": "sketch.constraint.tangent", "params": {"a": "l6", "b": "c1"}}},
+  {"call": "engine.execute", "params": {"command": "sketch.constraint.equal", "params": {"a": "l5", "b": "l6"}}},
+  {"call": "ui.view", "params": {"view": "top"}},
+  {"call": "ui.view", "params": {"view": "fit"}},
+  {"expect": {"glyphs": {"k1": 1, "k5": 2, "k6": 2, "k7": 2, "k8": 2}}}
+]

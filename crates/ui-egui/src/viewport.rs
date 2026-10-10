@@ -6,7 +6,7 @@ use serde_json::json;
 use solvecraft_engine::Sel;
 use solvecraft_engine::geom::{Vec2, Vec3};
 use solvecraft_engine::render::{Camera, Mat4, Rgb};
-use solvecraft_engine::sketch::{ConstraintKind, CurveKind};
+use solvecraft_engine::sketch::CurveKind;
 use solvecraft_engine::view::{colors, grid_step, sketch_consumed, sketch_lines};
 use std::hash::{Hash, Hasher};
 
@@ -1812,7 +1812,7 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
 }
 
-/// Sketch points, dimension labels and constraint glyphs of the active sketch.
+/// Sketch points and the status of the active sketch (constraint glyphs: `sketch_tools`).
 fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
     let st = app.session.world_state();
@@ -1840,9 +1840,6 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.rect_filled(Rect::from_center_size(sp, vec2(5.0, 5.0)), 0.0, c);
         }
     }
-    for c in sk.constraints.iter().filter(|c| !c.kind.is_dimension() && !sk.view.hide_constraints) {
-        glyph(painter, proj, ss, &c.kind);
-    }
     // Sketch status.
     if let Some(r) = app.viewport.rect {
         let msg = if !ss.report.ok() {
@@ -1855,35 +1852,6 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         let c = if ss.report.ok() { t.sketch_accent } else { t.error };
         painter.text(pos2(r.left() + 12.0, r.top() + 12.0), Align2::LEFT_TOP, msg, FontId::proportional(13.0), c);
     }
-}
-
-fn line_mid(sk: &solvecraft_engine::sketch::Sketch, l: usize) -> Option<(Vec2, Vec2)> {
-    match sk.curves.get(l)?.kind {
-        CurveKind::Line { a, b } => Some((sk.point(a)?, sk.point(b)?)),
-        _ => None,
-    }
-}
-
-/// Small constraint markers next to the constrained geometry.
-fn glyph(painter: &egui::Painter, proj: &Proj, ss: &solvecraft_engine::doc::SolvedSketch, k: &ConstraintKind) {
-    use ConstraintKind::*;
-    let sk = &ss.sketch;
-    let (anchor, label) = match *k {
-        Horizontal { l } => (line_mid(sk, l).map(|(a, b)| (a + b) * 0.5), "H"),
-        Vertical { l } => (line_mid(sk, l).map(|(a, b)| (a + b) * 0.5), "V"),
-        Parallel { a, .. } => (line_mid(sk, a).map(|(p, q)| (p + q) * 0.5), "//"),
-        Perpendicular { a, .. } => (line_mid(sk, a).map(|(p, q)| (p + q) * 0.5), "L"),
-        Tangent { a, .. } => (line_mid(sk, a).map(|(p, q)| (p + q) * 0.5).or_else(|| sk.center(a)), "T"),
-        Equal { a, .. } => (line_mid(sk, a).map(|(p, q)| (p + q) * 0.5).or_else(|| sk.center(a)), "="),
-        Fix { p } => (sk.point(p), "F"),
-        _ => (None, ""),
-    };
-    let Some(a) = anchor.and_then(|a| proj.to_screen(ss.plane.to_world(a))) else { return };
-    let r = Rect::from_center_size(a + vec2(10.0, -10.0), vec2(13.0, 13.0));
-    let t = Tokens::get();
-    painter.rect_filled(r, 2.0, t.glyph_bg);
-    painter.rect_stroke(r, 2.0, Stroke::new(1.0, t.glyph_edge), egui::StrokeKind::Inside);
-    painter.text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional(10.0), t.glyph_text);
 }
 
 fn cpu_render(app: &mut SolveApp, ctx: &egui::Context, painter: &egui::Painter, rect: Rect, proj: &Proj) {

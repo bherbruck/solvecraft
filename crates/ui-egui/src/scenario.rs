@@ -518,7 +518,7 @@ fn approx(got: f64, want: &Value, what: &str) -> Result<(), String> {
 /// Checks: `bodies` (count), `volume` / `area` (total, number or [value, rel tol]), `faces`,
 /// `features` (count), `errors` (timeline features in error, default 0), `dialog` (null: none
 /// open, or a word its kind must contain), `tool` (null or command id), `sketching` (bool),
-/// `selection` (count), `param` ({name: value}), `sketch_status` (solved|…), `dof`, `query`
+/// `selection` (count), `glyphs` ({constraint id: count}, none overlapping), `param` ({name: value}), `sketch_status` (solved|…), `dof`, `query`
 /// ({command, params?, path, value}: a command's result).
 pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
     let doc = h.call("document.inspect", json!({"measure": true}))["result"].clone();
@@ -654,6 +654,21 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
             "tool" => {
                 if ui["tool"] != *v {
                     return Err(format!("tool: got {}, want {v}", ui["tool"]));
+                }
+            }
+            "glyphs" => {
+                // {constraint id: glyphs drawn for it}; glyphs never overlap one another.
+                let g = crate::sketch_tools::glyph_positions();
+                for (id, n) in v.as_object().ok_or("glyphs takes {constraint id: count}")? {
+                    let got = g.iter().filter(|(x, _)| x == id).count();
+                    if n.as_u64() != Some(got as u64) {
+                        return Err(format!("glyphs of {id}: got {got}, want {n} (drawn: {g:?})"));
+                    }
+                }
+                for (i, (a, p)) in g.iter().enumerate() {
+                    if let Some((b, _)) = g.iter().skip(i + 1).find(|(_, q)| q.distance(*p) < 14.0) {
+                        return Err(format!("glyphs of {a} and {b} overlap at {p:?}"));
+                    }
                 }
             }
             "sketching" => {
