@@ -81,6 +81,26 @@ fn parametric_plate_reevaluates() {
     assert!(rel(measure(&m.state().bodies[0].body).unwrap().volume, 50.0 * 30.0 * 10.0) < 1e-9);
 }
 
+/// Setting a parameter back takes the earlier results from the cache: nothing is recomputed, but
+/// the evaluation reports the features it restored (their geometry did change back).
+#[test]
+fn set_back_reports_restored_features() {
+    let (mut doc, _) = plate_doc();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (2, 0));
+    doc.set_param("width", "50 mm", None, None).unwrap();
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (2, 0));
+    doc.set_param("width", "40 mm", None, None).unwrap();
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (0, 2));
+    assert!(rel(measure(&m.state().bodies[0].body).unwrap().volume, 24000.0) < 1e-9);
+    // No change: nothing recomputed and nothing restored.
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (0, 0));
+}
+
 #[test]
 fn box_fillet_cut_timeline() {
     let (mut doc, _) = plate_doc();

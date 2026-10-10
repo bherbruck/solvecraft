@@ -129,7 +129,8 @@ pub fn tool_definitions() -> Vec<Value> {
             "set_parameter",
             "Set a parameter",
             "Create or change a user parameter and re-evaluate the timeline. `value` is a number (mm) or an expression \
-             (\"40 mm\", \"width * 2\", \"30 deg\"). Returns the new value, the features recomputed and any features that now fail.",
+             (\"40 mm\", \"width * 2\", \"30 deg\"). Returns the new value, the features recomputed (`recomputed`), the features whose earlier \
+             result for the same inputs was reused instead (`restored`, e.g. after setting a value back) and any features that now fail.",
             obj(
                 json!({
                     "name": string("Parameter name"),

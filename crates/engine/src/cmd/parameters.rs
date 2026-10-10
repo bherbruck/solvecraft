@@ -12,7 +12,8 @@ use crate::{EngineError, Result, Session};
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.change", "Change Parameters", change_param).at("SOLID", "MODIFY").icon("params").params(
         "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\" (new parameters default to their value's unit), comment?, \
-             favorite?: bool, new_name?: rename (references follow); or delete: name",
+             favorite?: bool, new_name?: rename (references follow); or delete: name → recomputed: features rebuilt, \
+         restored: features whose earlier result for the same inputs was reused (e.g. a value set back)",
     ),
     CommandSpec::new("parameters.list", "List Parameters", list).noundo().params(
         "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value in its unit, \
@@ -107,6 +108,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     out["value"] = json!(vals.get(&name).map(|v| v.v));
     out["display_value"] = json!(s.doc.param_display_value(&vals, &name));
     out["recomputed"] = json!(s.model.last_recomputed);
+    out["restored"] = json!(s.model.last_restored);
     out["errors"] = json!(failing(s));
     Ok(out)
 }
