@@ -23,7 +23,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      pages: write
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
