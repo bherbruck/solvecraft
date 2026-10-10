@@ -11,7 +11,7 @@ use egui_wgpu::wgpu::util::DeviceExt;
 pub const TRI_SIZE: usize = 28;
 /// Line instance: a, b (3 × f32 each), colour (4 × u8), width in pixels (f32).
 pub const LINE_SIZE: usize = 32;
-const UNIFORM_SIZE: u64 = 192;
+const UNIFORM_SIZE: u64 = 208;
 
 /// CPU-side geometry waiting to be uploaded. The model scene changes with the design; the
 /// highlight scene (hover, selection, the origin widget) changes often and is small.
@@ -146,6 +146,8 @@ pub struct ViewportCallback {
     pub access: Option<AccessMap>,
     /// Draw silhouette outlines around the model (visual styles with edges).
     pub outline: bool,
+    /// Eye position and 1 for a perspective camera (0: orthographic), for the section cap's depth.
+    pub eye: [f32; 4],
 }
 
 /// Heights of the model seen from a direction (an orthographic depth map): a point is reachable
@@ -208,6 +210,9 @@ impl Batches {
 
 struct Resources {
     tri: wgpu::RenderPipeline,
+    /// While a section is shown (when the depth buffer has a stencil): `tri` marking where the
+    /// cap shows, then the cap again at the section plane's depth, so it hides the inside.
+    tri_cut: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
     /// Highlight triangles over the model (depth test ≤, no depth write).
     tri_hl: wgpu::RenderPipeline,
     trans: wgpu::RenderPipeline,
@@ -281,6 +286,7 @@ struct U {
     pull: vec4<f32>,   // draft pull direction
     acc_u: vec4<f32>,  // accessibility map axes (xyz, offset)
     acc_v: vec4<f32>,
+    eye: vec4<f32>,    // eye position, w = 1 for perspective (0: orthographic, looking along -back)
 };
 
 @group(1) @binding(2) var acc_t: texture_2d<f32>;
@@ -321,6 +327,41 @@ fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: 
 /// Opaque model surfaces: cut by the section plane, the inside shows as a flat cap colour.
 @fragment
 fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let c = solid(i, front);
+    return c;
+}
+
+struct CutOut {
+    @location(0) c: vec4<f32>,
+    @builtin(frag_depth) depth: f32,
+};
+
+/// The section cap (the inside seen through the cut, drawn on the far walls' back faces where
+/// they are the visible surface) again, at the depth of the section plane rather than of the
+/// far wall, so the cut face hides what lies inside the body instead of showing it like a
+/// pane of glass.
+@fragment
+fn fs_solid_cut(i: TOut, @builtin(front_facing) front: bool) -> CutOut {
+    var o: CutOut;
+    o.c = solid(i, front);
+    o.depth = cap_depth(i.wp, i.pos.z);
+    return o;
+}
+
+/// Depth of the section plane on the view ray through `wp` (a far wall seen through the cut),
+/// never behind the wall itself (`z`).
+fn cap_depth(wp: vec3<f32>, z: f32) -> f32 {
+    var dir = -u.back.xyz;
+    if (u.eye.w > 0.5) { dir = wp - u.eye.xyz; }
+    let dn = dot(u.clip.xyz, dir);
+    if (abs(dn) < 1e-9) { return z; }
+    let p = wp + dir * ((u.clip.w - dot(u.clip.xyz, wp)) / dn);
+    let c = u.vp * vec4<f32>(p, 1.0);
+    if (c.w <= 0.0) { return z; }
+    return clamp(c.z / c.w, 0.0, z);
+}
+
+fn solid(i: TOut, front: bool) -> vec4<f32> {
     // Derivatives first, in uniform control flow (browsers' WGSL compilers reject them after
     // a branch that returns; the whole shader module then fails and nothing is drawn).
     let k = curvature(i);
@@ -699,27 +740,29 @@ impl Resources {
             bind_group_layouts: &[Some(&bgl), Some(&access_bgl)],
             immediate_size: 0,
         });
-        let solid = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("sc_tris"),
-            layout: Some(&solid_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_tri"),
-                buffers: &[Some(tri_layout())],
-                compilation_options: Default::default(),
-            },
-            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
-            depth_stencil: depth(wgpu::CompareFunction::Less, true),
-            multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_solid"),
-                targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
-                compilation_options: Default::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let solid = |label: &str, fs: &str, cull: Option<wgpu::Face>, ds: Option<wgpu::DepthStencilState>| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&solid_layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_tri"),
+                    buffers: &[Some(tri_layout())],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: cull, ..Default::default() },
+                depth_stencil: ds,
+                multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some(fs),
+                    targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         let access_bind = access_texture(device, None, &access_bgl, 1, &[]);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("sc_image"),
@@ -733,7 +776,29 @@ impl Resources {
             sampler,
             textures: Default::default(),
             quads: Vec::new(),
-            tri: solid,
+            tri: solid("sc_tris", "fs_solid", None, depth(wgpu::CompareFunction::Less, true)),
+            tri_cut: t.depth.filter(|f| f.has_stencil_aspect()).map(|format| {
+                // The visible surface marks the stencil: 1 where it is a back face (the cap).
+                use wgpu::StencilOperation::{Keep, Replace, Zero};
+                let face = |pass_op| wgpu::StencilFaceState { compare: wgpu::CompareFunction::Always, fail_op: Keep, depth_fail_op: Keep, pass_op };
+                let mark = wgpu::DepthStencilState {
+                    format,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState { front: face(Zero), back: face(Replace), read_mask: 0xff, write_mask: 0xff },
+                    bias: Default::default(),
+                };
+                // Then the cap's back faces again, only there, at the section plane's depth.
+                let only = wgpu::StencilFaceState { compare: wgpu::CompareFunction::Equal, ..face(Keep) };
+                let cap = wgpu::DepthStencilState {
+                    format,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: wgpu::StencilState { front: only, back: only, read_mask: 0xff, write_mask: 0 },
+                    bias: Default::default(),
+                };
+                (solid("sc_tris_mark", "fs_solid", None, Some(mark)), solid("sc_tris_cap", "fs_solid_cut", Some(wgpu::Face::Front), Some(cap)))
+            }),
             access_bgl,
             access_bind,
             access_version: 0,
@@ -795,9 +860,10 @@ impl Batches {
     }
 }
 
-/// Create the pipelines. Call once with the app's render state and its depth/MSAA settings.
-pub fn install(rs: &egui_wgpu::RenderState, depth_bits: u8, samples: u32) -> GpuTarget {
-    let t = GpuTarget { format: rs.target_format, depth: egui_wgpu::depth_format_from_bits(depth_bits, 0), samples };
+/// Create the pipelines. Call once with the app's render state and its depth/stencil/MSAA
+/// settings. Without a stencil the section cap does not hide the inside of cut bodies.
+pub fn install(rs: &egui_wgpu::RenderState, depth_bits: u8, stencil_bits: u8, samples: u32) -> GpuTarget {
+    let t = GpuTarget { format: rs.target_format, depth: egui_wgpu::depth_format_from_bits(depth_bits, stencil_bits), samples };
     let res = Resources::new(&rs.device, t);
     rs.renderer.write().callback_resources.insert(res);
     t
@@ -901,8 +967,20 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         let (m, h, pv) = (&res.model, &res.highlight, &res.preview);
         lines(pass, &res.overlay, &m.under);
         pass.set_bind_group(1, &res.access_bind, &[]);
-        tris(pass, &res.tri, &m.tris);
-        tris(pass, &res.tri, &pv.tris);
+        let cut = res.tri_cut.as_ref().filter(|_| self.clip[..3].iter().map(|c| c * c).sum::<f32>() > 0.25);
+        match cut {
+            Some((mark, cap)) => {
+                pass.set_stencil_reference(1);
+                tris(pass, mark, &m.tris);
+                tris(pass, mark, &pv.tris);
+                tris(pass, cap, &m.tris);
+                tris(pass, cap, &pv.tris);
+            }
+            None => {
+                tris(pass, &res.tri, &m.tris);
+                tris(pass, &res.tri, &pv.tris);
+            }
+        }
         tris(pass, &res.tri_hl, &h.tris);
         lines(pass, &res.line, &m.lines);
         lines(pass, &res.line_hidden, &m.hidden);
@@ -943,6 +1021,7 @@ pub fn uniform_bytes(cb: &ViewportCallback, w: f32, h: f32, linear: bool) -> Vec
         }
         None => v.extend([0.0; 8]),
     }
+    v.extend(cb.eye);
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 

@@ -376,7 +376,8 @@ mod web {
                             app.load_prefs(&p);
                         }
                         if let Some(rs) = &cc.wgpu_render_state {
-                            app.set_wgpu(rs, DEPTH_BITS, 1);
+                            // eframe's web painter has no stencil buffer.
+                            app.set_wgpu(rs, DEPTH_BITS, 0, 1);
                         }
                         if query().contains("sample") {
                             if let Err(e) = app.session.run_script(&solvecraft_engine::sample::script()) {
