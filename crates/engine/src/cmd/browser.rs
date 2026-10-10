@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use solvecraft_doc::FeatureKind;
 
 use super::CommandSpec;
-use crate::params::{bad, str_};
+use crate::params::{bad, bool_, str_};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -34,6 +34,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("view.delete", "Delete Named View", view_delete).params("view: name"),
     CommandSpec::new("view.list", "List Named Views", view_list).noundo(),
     CommandSpec::new("browser.order", "Order Browser Items", order).params("folder, component?, order: [keys] (the folder's items in display order)"),
+    CommandSpec::new("browser.visibility", "Show/Hide", visibility).icon("eye").noundo().params(
+        "visible: bool; items?: [sketch id or name | body name | construction name | O|X|Y|Z|XY|XZ|YZ]; \
+         or folder?: bodies|sketches|construction|origin (all of it). View state: not saved, not an undo step",
+    ),
 ];
 
 const FOLDERS: [&str; 3] = ["bodies", "sketches", "construction"];
@@ -153,6 +157,83 @@ fn order(s: &mut Session, p: &Value) -> Result<Value> {
         d.browser_order.insert(key, order);
     }
     Ok(json!({}))
+}
+
+const ORIGIN: [&str; 7] = ["O", "X", "Y", "Z", "XY", "XZ", "YZ"];
+
+/// A browser item whose visibility can change.
+enum Shown {
+    Sketch(u64),
+    Body(String),
+    /// Origin items and construction geometry, by name.
+    Origin(String),
+}
+
+fn is_construction(k: &FeatureKind) -> bool {
+    matches!(k, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+}
+
+fn shown_item(s: &Session, key: &str) -> Option<Shown> {
+    if let Some(f) = s.doc.find_feature(key) {
+        if matches!(f.kind, FeatureKind::Sketch { .. }) {
+            return Some(Shown::Sketch(f.id));
+        }
+        if is_construction(&f.kind) {
+            return Some(Shown::Origin(f.name.clone()));
+        }
+    }
+    if s.world_state().bodies.iter().any(|b| b.name == key) {
+        return Some(Shown::Body(key.to_string()));
+    }
+    ORIGIN.iter().find(|o| o.eq_ignore_ascii_case(key)).map(|o| Shown::Origin(o.to_string()))
+}
+
+fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "browser.visibility";
+    let visible = bool_(p, "visible").ok_or_else(|| bad(cmd, "`visible` must be true or false"))?;
+    let items: Vec<Shown> = match (str_(p, "folder"), p.get("items")) {
+        (Some(_), Some(_)) => return Err(bad(cmd, "give `items` or `folder`, not both")),
+        (Some("bodies"), None) => s.world_state().bodies.iter().map(|b| Shown::Body(b.name.clone())).collect(),
+        (Some("sketches"), None) => s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)).collect(),
+        (Some("construction"), None) => s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())).collect(),
+        (Some("origin"), None) => ORIGIN.iter().map(|o| Shown::Origin(o.to_string())).collect(),
+        (Some(f), None) => return Err(bad(cmd, format!("unknown folder `{f}` (bodies, sketches, construction, origin)"))),
+        (None, Some(_)) => {
+            let keys = keys(p, "items", cmd)?;
+            if keys.is_empty() {
+                return Err(bad(cmd, "`items` must list sketches, bodies or construction geometry"));
+            }
+            // Every item is found before anything changes.
+            keys.iter()
+                .map(|k| shown_item(s, k).ok_or_else(|| bad(cmd, format!("no sketch, body or construction item `{k}`"))))
+                .collect::<Result<_>>()?
+        }
+        (None, None) => return Err(bad(cmd, "`items` or `folder` is required")),
+    };
+    let v = &mut s.visibility;
+    for it in &items {
+        match it {
+            Shown::Sketch(id) => {
+                v.hidden_sketches.retain(|x| x != id);
+                v.shown_sketches.retain(|x| x != id);
+                if visible { v.shown_sketches.push(*id) } else { v.hidden_sketches.push(*id) }
+            }
+            Shown::Body(n) => {
+                v.hidden_bodies.retain(|x| x != n);
+                if !visible {
+                    v.hidden_bodies.push(n.clone());
+                }
+            }
+            Shown::Origin(n) => {
+                v.hidden_origin.retain(|x| x != n);
+                if !visible {
+                    v.hidden_origin.push(n.clone());
+                }
+            }
+        }
+    }
+    s.revision += 1;
+    Ok(json!({ "visible": visible, "changed": items.len(), "visibility": s.visibility }))
 }
 
 fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
@@ -339,6 +420,9 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
         d.body_components.insert(name.to_string(), c);
     }
     rename_key(d, "bodies", &old, name);
+    for b in s.visibility.hidden_bodies.iter_mut().filter(|b| **b == old) {
+        *b = name.to_string();
+    }
     Ok(json!({"body": old, "name": name}))
 }
 
@@ -476,6 +560,60 @@ mod tests {
         }
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.named_views.len(), 2);
+    }
+
+    #[test]
+    fn helper_sketches_hide_and_show() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        let floor = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [50, 0]], "construction": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        let drain = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.point", json!({"point": [25, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Floor"}));
+        let body = s.model.state().bodies[0].name.clone();
+        let drain_name = s.doc.feature(drain).unwrap().name.clone();
+        let cam = solvecraft_render::Camera::default();
+        let lines = |s: &Session| crate::view::scene(s, &cam).lines.len();
+        let shown = |s: &mut Session| {
+            let d = run(s, "document.inspect", json!({}));
+            d["sketches"].as_array().unwrap().iter().filter(|x| x["visible"] == true).count()
+        };
+        let (n0, undo0, doc0) = (lines(&s), s.undo.len(), s.doc.clone());
+        assert_eq!(shown(&mut s), 2);
+        // By id and by name; the view loses their lines, the design and its history don't change.
+        let r = run(&mut s, "browser.visibility", json!({"items": [floor, drain_name], "visible": false}));
+        assert_eq!(r["changed"], 2);
+        assert_eq!(shown(&mut s), 0);
+        assert!(lines(&s) < n0);
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &doc0) && s.undo.len() == undo0, "view state, not a design change");
+        run(&mut s, "browser.visibility", json!({"folder": "sketches", "visible": true}));
+        assert_eq!(lines(&s), n0);
+        // Bodies (following a rename) and construction planes.
+        run(&mut s, "browser.visibility", json!({"items": [body.clone(), "Floor", "xy"], "visible": false}));
+        assert!(crate::view::scene(&s, &cam).meshes.is_empty());
+        assert_eq!(s.visibility.hidden_origin, vec!["Floor".to_string(), "XY".to_string()]);
+        run(&mut s, "body.rename", json!({"body": body, "name": "Tray"}));
+        assert_eq!(s.visibility.hidden_bodies, vec!["Tray".to_string()]);
+        let d = run(&mut s, "document.inspect", json!({}));
+        assert_eq!(d["bodies"][0]["visible"], false);
+        // Hostile input is refused and changes nothing.
+        let before = s.visibility.clone();
+        for p in [
+            json!({"items": [floor]}),
+            json!({"items": [floor], "visible": "no"}),
+            json!({"items": [floor, "Nope"], "visible": false}),
+            json!({"items": [], "visible": false}),
+            json!({"items": "Floor", "visible": false}),
+            json!({"folder": "sketches", "items": [floor], "visible": false}),
+            json!({"folder": "nope", "visible": false}),
+            json!({"visible": false}),
+        ] {
+            assert!(s.execute("browser.visibility", &p).is_err(), "{p}");
+        }
+        assert_eq!(s.visibility, before);
     }
 
     #[test]

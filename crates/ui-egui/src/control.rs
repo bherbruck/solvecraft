@@ -119,6 +119,7 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "ui.inspect" => ok(json!({
             "ui": serde_json::to_value(&app.ui).unwrap_or_default(),
+            "visibility": app.session.visibility,
             "viewport": app.viewport.rect.map(|r| json!([r.left(), r.top(), r.width(), r.height()])),
             "camera": app.cam,
             "tool": app.tool.as_ref().map(|t| t.cmd),
@@ -149,18 +150,30 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
             ok(json!({"open": app.home.open, "recent": app.home.recent}))
         }
         "ui.set" => {
+            // What is hidden lives in the session (`browser.visibility`); `ui.set` still sets it.
+            const VIS: [(&str, &str); 4] = [
+                ("hiddenBodies", "hidden_bodies"),
+                ("hiddenOrigin", "hidden_origin"),
+                ("hiddenSketches", "hidden_sketches"),
+                ("shownSketches", "shown_sketches"),
+            ];
             let mut cur = serde_json::to_value(&app.ui).unwrap_or(json!({}));
-            if let (Some(o), Some(src)) = (cur.as_object_mut(), p.as_object()) {
+            let mut vis = serde_json::to_value(&app.session.visibility).unwrap_or(json!({}));
+            if let (Some(o), Some(vo), Some(src)) = (cur.as_object_mut(), vis.as_object_mut(), p.as_object()) {
                 for (k, v) in src {
-                    o.insert(k.clone(), v.clone());
+                    match VIS.iter().find(|(camel, _)| camel == k) {
+                        Some((_, snake)) => vo.insert(snake.to_string(), v.clone()),
+                        None => o.insert(k.clone(), v.clone()),
+                    };
                 }
             }
-            match serde_json::from_value::<crate::UiState>(cur) {
-                Ok(u) => {
+            match (serde_json::from_value::<crate::UiState>(cur), serde_json::from_value::<solvecraft_engine::Visibility>(vis)) {
+                (Ok(u), Ok(v)) => {
                     app.ui = u;
+                    app.session.visibility = v;
                     ok(serde_json::to_value(&app.ui).unwrap_or_default())
                 }
-                Err(e) => err(e),
+                (Err(e), _) | (_, Err(e)) => err(e),
             }
         }
         "ui.view" => {

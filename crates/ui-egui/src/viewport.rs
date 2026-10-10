@@ -192,8 +192,9 @@ fn visible_sketches(app: &SolveApp) -> Vec<u64> {
         .iter()
         .filter(|s| {
             app.session.active_sketch == Some(s.feature)
-                || (!app.ui.hidden_sketches.contains(&s.feature)
-                    && (app.ui.shown_sketches.contains(&s.feature) || (app.ui.show_sketches && !sketch_consumed(&app.session, s.feature))))
+                || (!app.session.visibility.hidden_sketches.contains(&s.feature)
+                    && (app.session.visibility.shown_sketches.contains(&s.feature)
+                        || (app.ui.show_sketches && !sketch_consumed(&app.session, s.feature))))
         })
         .map(|s| s.feature)
         .collect()
@@ -210,9 +211,9 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.cam.up.hash(&mut h);
     (app.cam.pitch > 0.0).hash(&mut h);
     app.ui.show_sketches.hash(&mut h);
-    app.ui.hidden_bodies.hash(&mut h);
-    app.ui.hidden_sketches.hash(&mut h);
-    app.ui.shown_sketches.hash(&mut h);
+    app.session.visibility.hidden_bodies.hash(&mut h);
+    app.session.visibility.hidden_sketches.hash(&mut h);
+    app.session.visibility.shown_sketches.hash(&mut h);
     app.ui.hidden_profiles.hash(&mut h);
     app.session.active_component.hash(&mut h);
     app.preview.replaced.hash(&mut h);
@@ -262,7 +263,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         }
     }
     for b in &st.bodies {
-        if app.ui.hidden_bodies.contains(&b.name) || app.preview.replaced.contains(&b.name) {
+        if app.session.visibility.hidden_bodies.contains(&b.name) || app.preview.replaced.contains(&b.name) {
             continue;
         }
         // With a component active, bodies outside it are drawn faded.
@@ -326,7 +327,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
     // Section: the outline of each body where the plane cuts it.
     if let Some((o, n)) = section_plane(app) {
         let col = c4(tk.text.gamma_multiply(0.9));
-        for b in st.bodies.iter().filter(|b| !app.ui.hidden_bodies.contains(&b.name)) {
+        for b in st.bodies.iter().filter(|b| !app.session.visibility.hidden_bodies.contains(&b.name)) {
             for (a, c) in section_segments(&b.mesh(), o, n) {
                 sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
             }
@@ -367,7 +368,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
 fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, st: &solvecraft_engine::doc::ModelState) {
     // The bodies' box in the camera's Z-up frame (the ground is its XY plane).
     let mut b = solvecraft_engine::geom::Aabb3::EMPTY;
-    for x in st.bodies.iter().filter(|x| !app.ui.hidden_bodies.contains(&x.name)) {
+    for x in st.bodies.iter().filter(|x| !app.session.visibility.hidden_bodies.contains(&x.name)) {
         let bb = x.mesh().bounds();
         if bb.is_empty() {
             continue;
@@ -484,7 +485,7 @@ pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
     let creating = !app.ui.show_origin && app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Sketch));
     origin_quads(origin_size(app.cam.half_height()))
         .into_iter()
-        .filter(|(n, _, _)| creating || !app.ui.hidden_origin.iter().any(|h| h == n))
+        .filter(|(n, _, _)| creating || !app.session.visibility.hidden_origin.iter().any(|h| h == n))
         .collect()
 }
 
@@ -492,7 +493,10 @@ pub fn origin_axes(app: &SolveApp) -> Vec<(&'static str, Vec3)> {
     if !app.origin_visible() {
         return Vec::new();
     }
-    [("X", Vec3::X), ("Y", Vec3::Y), ("Z", Vec3::Z)].into_iter().filter(|(n, _)| !app.ui.hidden_origin.iter().any(|h| h == n)).collect()
+    [("X", Vec3::X), ("Y", Vec3::Y), ("Z", Vec3::Z)]
+        .into_iter()
+        .filter(|(n, _)| !app.session.visibility.hidden_origin.iter().any(|h| h == n))
+        .collect()
 }
 
 /// Construction axes shown, as segments: across the model where the axis passes it (a little
@@ -503,7 +507,7 @@ pub fn construction_axis_segments(app: &SolveApp) -> Vec<(String, Vec3, Vec3)> {
     let bb = solvecraft_engine::view::bounds(&app.session);
     solvecraft_engine::view::construction_axes(&app.session)
         .into_iter()
-        .filter(|(_, n, _, _)| !app.ui.hidden_origin.contains(n))
+        .filter(|(_, n, _, _)| !app.session.visibility.hidden_origin.contains(n))
         .map(|(_, name, o, d)| {
             let (mut lo, mut hi) = (-h, h);
             if !bb.is_empty() {
@@ -527,7 +531,7 @@ pub fn construction_axis_segments(app: &SolveApp) -> Vec<(String, Vec3, Vec3)> {
 pub fn construction_points(app: &SolveApp) -> Vec<(String, Vec3)> {
     solvecraft_engine::view::construction_points(&app.session)
         .into_iter()
-        .filter(|(_, n, _)| !app.ui.hidden_origin.contains(n))
+        .filter(|(_, n, _)| !app.session.visibility.hidden_origin.contains(n))
         .map(|(_, n, p)| (n, p))
         .collect()
 }
@@ -537,7 +541,7 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
     let h = origin_size(app.cam.half_height()) * 1.2;
     solvecraft_engine::view::construction_planes(&app.session)
         .into_iter()
-        .filter(|(_, n, _)| !app.ui.hidden_origin.contains(n))
+        .filter(|(_, n, _)| !app.session.visibility.hidden_origin.contains(n))
         .map(|(_, name, pl)| {
             let (o, x, y) = (pl.origin, pl.x * h, pl.y * h);
             (name, pl.normal(), [o - x - y, o + x - y, o + x + y, o - x + y])
@@ -625,7 +629,7 @@ fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     (std::sync::Arc::as_ptr(&app.session.world_state()) as usize).hash(&mut h);
     app.session.active_sketch.hash(&mut h);
     app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
-    app.ui.hidden_bodies.hash(&mut h);
+    app.session.visibility.hidden_bodies.hash(&mut h);
     app.ui.perspective.hash(&mut h);
     (proj.rect.width().to_bits(), proj.rect.height().to_bits()).hash(&mut h);
     let key = h.finish();
@@ -701,7 +705,7 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     // Nearest face along the ray (hides what is behind it).
     let mut bestf: Option<(f64, Hit)> = None;
     for b in &st.bodies {
-        if app.ui.hidden_bodies.contains(&b.name) {
+        if app.session.visibility.hidden_bodies.contains(&b.name) {
             continue;
         }
         // Bodies whose box the ray misses (or enters behind the best hit so far) are skipped.
@@ -727,7 +731,7 @@ pub fn pick(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     let mut bestv: Option<(f32, Hit)> = None;
     let mut beste: Option<(f32, Hit)> = None;
     for b in &st.bodies {
-        if app.ui.hidden_bodies.contains(&b.name) {
+        if app.session.visibility.hidden_bodies.contains(&b.name) {
             continue;
         }
         // Only bodies whose outline on screen is near the cursor can have an edge under it.
@@ -1075,8 +1079,8 @@ fn highlight_key(app: &SolveApp) -> u64 {
     crate::theme::is_dark().hash(&mut h);
     app.preview.replaced.hash(&mut h);
     app.origin_visible().hash(&mut h);
-    app.ui.hidden_origin.hash(&mut h);
-    app.ui.hidden_bodies.hash(&mut h);
+    app.session.visibility.hidden_origin.hash(&mut h);
+    app.session.visibility.hidden_bodies.hash(&mut h);
     app.cam.half_height().to_bits().hash(&mut h);
     app.cam.back().x.to_bits().hash(&mut h);
     h.finish()
@@ -1159,7 +1163,7 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
             }
             Sel::Body { name } => {
                 if let Some(b) = st.body(name)
-                    && !app.ui.hidden_bodies.contains(name)
+                    && !app.session.visibility.hidden_bodies.contains(name)
                 {
                     let m = b.mesh();
                     for f in 0..b.body.face_count() {
@@ -1205,7 +1209,7 @@ fn build_highlight(app: &SolveApp) -> GpuScene {
         let k = t.hover_face_lift;
         let lit =
             |b: &solvecraft_engine::doc::ModelBody| Some(b.feature) == app.viewport.hover_feature || app.viewport.hover_bodies.contains(&b.name);
-        for b in st.bodies.iter().filter(|b| lit(b) && !app.ui.hidden_bodies.contains(&b.name)) {
+        for b in st.bodies.iter().filter(|b| lit(b) && !app.session.visibility.hidden_bodies.contains(&b.name)) {
             let c = body_rgb(app, &b.name);
             let m = b.mesh();
             for f in 0..b.body.face_count() {
@@ -1783,7 +1787,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     } else {
         let accept = app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).unwrap_or(BODIES);
         for b in &st.bodies {
-            if app.ui.hidden_bodies.contains(&b.name) {
+            if app.session.visibility.hidden_bodies.contains(&b.name) {
                 continue;
             }
             let m = b.mesh();
@@ -1845,7 +1849,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
 fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
     if app.origin_visible()
-        && !app.ui.hidden_origin.iter().any(|h| h == "O")
+        && !app.session.visibility.hidden_origin.iter().any(|h| h == "O")
         && let Some(o) = proj.to_screen(Vec3::ZERO)
     {
         painter.circle(o, 4.5, t.origin_point, Stroke::new(1.0, Color32::from_gray(110)));
@@ -2456,7 +2460,7 @@ mod tests {
         // It is an axis for dialogs (pattern directions, revolve axes), and hiding it hides it.
         let (o, dir) = crate::dialogs::axis_of(&app, &Sel::Axis { name: name.clone() }).unwrap();
         assert!(o.dist(Vec3::new(0.0, 0.0, 20.0)) < 1e-6 && dir.dist(d) < 1e-6);
-        app.ui.hidden_origin.push(name);
+        app.session.visibility.hidden_origin.push(name);
         assert!(construction_axis_segments(&app).is_empty());
     }
 }

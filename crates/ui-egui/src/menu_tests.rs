@@ -58,7 +58,7 @@ fn face_menu_hides_and_finds_the_body() {
     context_menu::run_item(&mut app, &find(&items, "Find in Timeline"), pos2(0.0, 0.0));
     assert!(matches!(app.session.selection.as_slice(), [solvecraft_engine::Sel::Feature { .. }]));
     context_menu::run_item(&mut app, &find(&items, "Show/Hide"), pos2(0.0, 0.0));
-    assert_eq!(app.ui.hidden_bodies, vec![b]);
+    assert_eq!(app.session.visibility.hidden_bodies, vec![b]);
 }
 
 #[test]
@@ -69,8 +69,8 @@ fn body_menu_isolates_renames_locks_and_deletes() {
     let t = Target::Body { name: b.clone() };
     let items = context_menu::items(&app, &t);
     context_menu::run_item(&mut app, &find(&items, "Isolate"), pos2(0.0, 0.0));
-    assert_eq!(app.ui.hidden_bodies.len(), 1, "the other body is hidden");
-    assert!(!app.ui.hidden_bodies.contains(&b));
+    assert_eq!(app.session.visibility.hidden_bodies.len(), 1, "the other body is hidden");
+    assert!(!app.session.visibility.hidden_bodies.contains(&b));
     // Rename through the rename box.
     context_menu::run_item(&mut app, &find(&items, "Rename"), pos2(10.0, 10.0));
     assert!(context_menu::finish_rename(&mut app, Some("Base"), true));
@@ -184,7 +184,7 @@ fn folder_and_group_menus_make_rename_and_drop_groups() {
     assert!(context_menu::finish_rename(&mut app, Some("Parts"), true));
     assert_eq!(app.session.doc.browser_groups[0].name, "Parts");
     act(&mut app, &t, "Show/Hide");
-    assert_eq!(app.ui.hidden_bodies.len(), 2);
+    assert_eq!(app.session.visibility.hidden_bodies.len(), 2);
     act(&mut app, &t, "Ungroup");
     assert!(app.session.doc.browser_groups.is_empty());
     act(&mut app, &folder, "New Group");
@@ -351,7 +351,7 @@ fn menus_follow_fusion_order() {
     let origin = context_menu::items(&app, &Target::Origin);
     order(&origin, &["Show/Hide", "Show All", "Hide Planes", "Hide Axes"]);
     context_menu::run_item(&mut app, &find(&origin, "Hide Planes"), pos2(0.0, 0.0));
-    assert!(["XY", "XZ", "YZ"].iter().all(|p| app.ui.hidden_origin.iter().any(|h| h == p)));
+    assert!(["XY", "XZ", "YZ"].iter().all(|p| app.session.visibility.hidden_origin.iter().any(|h| h == p)));
     app.run("select.clear", json!({})).unwrap();
     let empty = context_menu::items(&app, &Target::Viewport);
     order(&empty, &["Pan", "Zoom", "Orbit", "Show All", "Unisolate", "Extrude", "Fillet"]);
@@ -367,17 +367,17 @@ fn v_toggles_what_is_selected() {
     app.run("select.set", json!({"items": [{"type": "body", "name": b}, {"type": "plane", "name": "XY"}, {"type": "feature", "id": sk}]})).unwrap();
     crate::browser::set_sketch_visible(&mut app, sk, true);
     context_menu::toggle_visibility(&mut app);
-    assert!(app.ui.hidden_bodies.contains(&b) && app.ui.hidden_origin.iter().any(|h| h == "XY"));
+    assert!(app.session.visibility.hidden_bodies.contains(&b) && app.session.visibility.hidden_origin.iter().any(|h| h == "XY"));
     assert!(!crate::browser::sketch_visible(&app, sk));
     context_menu::toggle_visibility(&mut app);
-    assert!(app.ui.hidden_bodies.is_empty() && app.ui.hidden_origin.is_empty());
+    assert!(app.session.visibility.hidden_bodies.is_empty() && app.session.visibility.hidden_origin.is_empty());
     assert!(crate::browser::sketch_visible(&app, sk));
     // Components picked in the browser hide their bodies.
     app.run("component.from_bodies", json!({"bodies": [b.clone()]})).unwrap();
     app.run("select.clear", json!({})).unwrap();
     app.tree.picked_components = vec![app.session.doc.components[0].id];
     context_menu::toggle_visibility(&mut app);
-    assert_eq!(app.ui.hidden_bodies, vec![b]);
+    assert_eq!(app.session.visibility.hidden_bodies, vec![b]);
     assert_eq!(find(&context_menu::items(&app, &Target::Body { name: body(&app) }), "Show/Hide").shortcut, "V");
 }
 

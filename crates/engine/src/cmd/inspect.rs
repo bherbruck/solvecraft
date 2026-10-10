@@ -170,6 +170,7 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
         "profiles": profiles,
         "links": sk.links,
         "wires": sk.wires.iter().map(|w| json!({"id": w.id, "points": w.pts.len(), "start": w.pts.first(), "end": w.pts.last(), "link": w.link})).collect::<Vec<_>>(),
+        "visible": crate::view::sketch_shown(s, id),
     }))
 }
 
@@ -207,18 +208,27 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     let with_measure = bool_(p, "measure").unwrap_or(false);
-    let bodies: Vec<Value> =
-        st.bodies.iter().map(|b| if with_measure { measure_json(b) } else { json!({"name": b.name, "feature": b.feature}) }).collect();
+    let bodies: Vec<Value> = st
+        .bodies
+        .iter()
+        .map(|b| {
+            let mut v = if with_measure { measure_json(b) } else { json!({"name": b.name, "feature": b.feature}) };
+            if let Some(o) = v.as_object_mut() {
+                o.insert("visible".into(), json!(!s.visibility.hidden_bodies.contains(&b.name)));
+            }
+            v
+        })
+        .collect();
     let sketches: Vec<Value> = st
         .sketches
         .iter()
-        .map(|ss| json!({"id": ss.feature, "name": ss.name, "dof": ss.report.dof, "status": ss.report.status, "curves": ss.sketch.curves.len(), "profiles": ss.profiles.len()}))
+        .map(|ss| json!({"id": ss.feature, "name": ss.name, "dof": ss.report.dof, "status": ss.report.status, "curves": ss.sketch.curves.len(), "profiles": ss.profiles.len(), "visible": crate::view::sketch_shown(s, ss.feature)}))
         .collect();
     Ok(json!({
         "name": s.doc.name, "units": s.doc.units, "path": s.path, "dirty": s.is_dirty(), "revision": s.revision,
         "active_sketch": s.active_sketch, "marker": marker,
         "params": params, "timeline": timeline, "bodies": bodies, "sketches": sketches,
-        "selection": s.selection, "undo": s.undo.len(), "redo": s.redo.len(),
+        "selection": s.selection, "undo": s.undo.len(), "redo": s.redo.len(), "hidden_origin": s.visibility.hidden_origin,
     }))
 }
 

@@ -358,7 +358,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     if has(|s| matches!(s, Sel::Face { .. })) {
         let face = sel.iter().find_map(|s| if let Sel::Face { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
         let (feature, sketch) = body_feature_and_sketch(app, &face);
-        let hidden = app.ui.hidden_bodies.contains(&face);
+        let hidden = app.session.visibility.hidden_bodies.contains(&face);
         v.push(cmd(app, "sketch.create", "Create Sketch"));
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "construct.plane.offset", "Offset Plane"));
@@ -379,7 +379,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "inspect.measure", "Measure"));
     } else if has(|s| matches!(s, Sel::Edge { .. })) {
         let body = sel.iter().find_map(|s| if let Sel::Edge { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
-        let hidden = app.ui.hidden_bodies.contains(&body);
+        let hidden = app.session.visibility.hidden_bodies.contains(&body);
         v.push(cmd(app, "solid.fillet", "Fillet"));
         v.push(cmd(app, "solid.chamfer", "Chamfer"));
         v.push(Item::sep());
@@ -403,9 +403,9 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.fit", "Fit", "fit"));
         v.push(act("ui.home", "Home View", "home"));
         v.push(Item::sep());
-        let anything_hidden = !app.ui.hidden_bodies.is_empty() || !app.ui.hidden_sketches.is_empty();
+        let anything_hidden = !app.session.visibility.hidden_bodies.is_empty() || !app.session.visibility.hidden_sketches.is_empty();
         v.push(act("ui.showAll", "Show All", "eye").on(anything_hidden));
-        v.push(act("ui.showAll", "Unisolate", "").on(!app.ui.hidden_bodies.is_empty()));
+        v.push(act("ui.showAll", "Unisolate", "").on(!app.session.visibility.hidden_bodies.is_empty()));
         v.push(Item::sep());
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.fillet", "Fillet"));
@@ -428,7 +428,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
 
 fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     let names = json!(bodies);
-    let all_hidden = bodies.iter().all(|b| app.ui.hidden_bodies.contains(b));
+    let all_hidden = bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
     let one = bodies.len() == 1;
     let locked = bodies.iter().all(|b| app.ui.locked_bodies.contains(b));
     let items = json!(bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>());
@@ -506,7 +506,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let occ = doc.occurrence_of(id);
     let active = app.session.active_component == id;
     let bodies = component_bodies(app, id);
-    let hidden = !bodies.is_empty() && bodies.iter().all(|b| app.ui.hidden_bodies.contains(b));
+    let hidden = !bodies.is_empty() && bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
     let names = json!(bodies);
     let mut v = Vec::new();
     if id != 0 {
@@ -666,18 +666,19 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.finishSketch" => app.finish_sketch(),
         "ui.hide" => {
             for b in bodies {
-                if !app.ui.hidden_bodies.contains(&b) {
-                    app.ui.hidden_bodies.push(b);
+                if !app.session.visibility.hidden_bodies.contains(&b) {
+                    app.session.visibility.hidden_bodies.push(b);
                 }
             }
         }
-        "ui.show" => app.ui.hidden_bodies.retain(|b| !bodies.contains(b)),
+        "ui.show" => app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b)),
         "ui.showAll" => {
-            app.ui.hidden_bodies.clear();
-            app.ui.hidden_sketches.clear();
+            app.session.visibility.hidden_bodies.clear();
+            app.session.visibility.hidden_sketches.clear();
         }
         "ui.isolate" => {
-            app.ui.hidden_bodies = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
+            app.session.visibility.hidden_bodies =
+                app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
         }
         "ui.lock" => {
             let locked = bodies.iter().all(|b| app.ui.locked_bodies.contains(b));
@@ -822,14 +823,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.originAll" => {
             app.ui.show_origin = true;
-            app.ui.hidden_origin.retain(|h| !["O", "X", "Y", "Z", "XY", "XZ", "YZ"].contains(&h.as_str()));
+            app.session.visibility.hidden_origin.retain(|h| !["O", "X", "Y", "Z", "XY", "XZ", "YZ"].contains(&h.as_str()));
         }
         "ui.originPart" => {
             let show = p.get("show").and_then(Value::as_bool).unwrap_or(true);
             for k in strs(&p, "keys") {
-                app.ui.hidden_origin.retain(|h| *h != k);
+                app.session.visibility.hidden_origin.retain(|h| *h != k);
                 if !show {
-                    app.ui.hidden_origin.push(k);
+                    app.session.visibility.hidden_origin.push(k);
                 }
             }
         }
@@ -925,16 +926,16 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         })
         .collect();
     let canvases = app.tree.picked_canvases.clone();
-    let any_visible = bodies.iter().any(|b| !app.ui.hidden_bodies.contains(b))
+    let any_visible = bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b))
         || sketches.iter().any(|s| crate::browser::sketch_visible(app, *s))
-        || origin.iter().any(|o| !app.ui.hidden_origin.contains(o))
+        || origin.iter().any(|o| !app.session.visibility.hidden_origin.contains(o))
         || app.session.doc.canvases.iter().any(|c| canvases.contains(&c.id) && c.visible);
     let hide = any_visible;
-    app.ui.hidden_bodies.retain(|b| !bodies.contains(b));
-    app.ui.hidden_origin.retain(|o| !origin.contains(o));
+    app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b));
+    app.session.visibility.hidden_origin.retain(|o| !origin.contains(o));
     if hide {
-        app.ui.hidden_bodies.extend(bodies);
-        app.ui.hidden_origin.extend(origin);
+        app.session.visibility.hidden_bodies.extend(bodies);
+        app.session.visibility.hidden_origin.extend(origin);
     }
     for s in sketches {
         crate::browser::set_sketch_visible(app, s, !hide);
@@ -1007,7 +1008,7 @@ fn commit_rename(app: &mut SolveApp, r: &Rename) {
     match &r.what {
         RenameWhat::Body(old) => {
             if app.run("body.rename", json!({ "body": old, "name": name })).is_ok() {
-                for list in [&mut app.ui.hidden_bodies, &mut app.ui.locked_bodies] {
+                for list in [&mut app.session.visibility.hidden_bodies, &mut app.ui.locked_bodies] {
                     for b in list.iter_mut().filter(|b| *b == old) {
                         *b = name.clone();
                     }

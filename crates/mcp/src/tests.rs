@@ -214,6 +214,23 @@ fn batch_stops_at_first_error_and_rolls_back() {
 }
 
 #[test]
+fn helper_sketches_can_be_hidden() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 40, "width": 40, "height": 2}}));
+    let sk = tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY"}}))["sketch"].clone();
+    tool(&mut s, "execute", json!({"command": "sketch.line", "params": {"points": [[0, 0], [40, 0]], "construction": true}}));
+    tool(&mut s, "execute", json!({"command": "sketch.finish"}));
+    let visible = |s: &mut Server| tool(s, "inspect_design", json!({"measure": false}))["sketches"][0]["visible"].clone();
+    assert_eq!(visible(&mut s), true);
+    tool(&mut s, "execute", json!({"command": "browser.visibility", "params": {"items": [sk], "visible": false}}));
+    assert_eq!(visible(&mut s), false);
+    let r = raw_tool(&mut s, "execute", json!({"command": "browser.visibility", "params": {"items": ["Nope"], "visible": false}}));
+    assert_eq!(r["result"]["isError"], true);
+    tool(&mut s, "execute", json!({"command": "browser.visibility", "params": {"folder": "sketches", "visible": true}}));
+    assert_eq!(visible(&mut s), true);
+}
+
+#[test]
 fn unknown_tools_and_bad_arguments_are_clean_errors() {
     let mut s = server();
     let r = raw_tool(&mut s, "make_coffee", json!({}));
