@@ -25,6 +25,16 @@ fn slab_pocket_loft() -> (f64, f64) {
 }
 
 #[test]
+fn loft_cut_beside_a_round_hole() {
+    let s = replay(include_str!("../../../examples/regressions/loft_cut_beside_round_hole.json"));
+    let (pocketed, loft) = slab_pocket_loft();
+    let hole = std::f64::consts::PI * 17.5 * 17.5 * 25.0;
+    let want = pocketed - loft - hole;
+    let got = volume(&s, "Body1");
+    assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
+}
+
+#[test]
 fn shallow_loft_cut_from_the_top_face() {
     let s = replay(include_str!("../../../examples/regressions/shallow_loft_cut_from_top_face.json"));
     let (_, loft) = slab_pocket_loft();

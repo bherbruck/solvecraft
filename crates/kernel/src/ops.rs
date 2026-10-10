@@ -515,6 +515,15 @@ pub fn transform(body: &Body, translate: Vec3, origin: Vec3, axis: Vec3, angle: 
 /// Split a body with a plane: the parts on the positive and the negative side of the plane
 /// (only the non-empty ones).
 pub fn split_by_plane(body: &Body, plane: &solvecraft_geom::Plane) -> Result<Vec<Body>> {
+    let mut out = Vec::new();
+    for positive in [true, false] {
+        out.extend(half_space(body, plane, positive)?);
+    }
+    Ok(out)
+}
+
+/// The part of a body on one side of a plane (`None` when nothing is there).
+pub(crate) fn half_space(body: &Body, plane: &solvecraft_geom::Plane, positive: bool) -> Result<Option<Body>> {
     body.require_brep("split")?;
     let size = body.size();
     let mut bb = solvecraft_geom::Aabb3::EMPTY;
@@ -532,12 +541,7 @@ pub fn split_by_plane(body: &Body, plane: &solvecraft_geom::Plane) -> Result<Vec
         ]),
         holes: vec![],
     };
-    let mut out = Vec::new();
-    for (lo, hi) in [(0.0, reach), (-reach, 0.0)] {
-        let half = crate::build::extrude(plane, std::slice::from_ref(&sq), lo, hi)?.pop().ok_or_else(|| KernelError::Failed("half space".into()))?;
-        if let Some(part) = boolean(body, &half, BoolOp::Intersect)? {
-            out.push(part);
-        }
-    }
-    Ok(out)
+    let (lo, hi) = if positive { (0.0, reach) } else { (-reach, 0.0) };
+    let half = crate::build::extrude(plane, std::slice::from_ref(&sq), lo, hi)?.pop().ok_or_else(|| KernelError::Failed("half space".into()))?;
+    boolean(body, &half, BoolOp::Intersect)
 }
