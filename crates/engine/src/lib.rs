@@ -504,6 +504,8 @@ impl Session {
 }
 
 #[cfg(test)]
+mod boolean_regression_tests;
+#[cfg(test)]
 mod construct_tests;
 #[cfg(test)]
 mod delete_face_tests;
