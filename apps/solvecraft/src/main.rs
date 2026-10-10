@@ -132,6 +132,7 @@ fn main() -> eframe::Result {
         multisampling: samples,
         ..Default::default()
     };
+    #[cfg(all(unix, not(target_os = "macos")))]
     let mut options = options;
     #[cfg(all(unix, not(target_os = "macos")))]
     // winit has no file drag-and-drop on Wayland (only on X11), so dropping files from the file
