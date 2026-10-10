@@ -168,6 +168,22 @@ pub struct Session {
     pub section: Option<(Vec3, Vec3)>,
     /// Surface analysis shading the model (zebra, draft, curvature map).
     pub analysis: Option<SurfaceAnalysis>,
+    /// What is hidden or shown in the view (`browser.visibility`).
+    pub visibility: Visibility,
+}
+
+/// Items hidden or shown one by one (view state, not part of the design and not an undo step).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Visibility {
+    /// Bodies by name.
+    pub hidden_bodies: Vec<String>,
+    /// Origin items (O, X, Y, Z, XY, XZ, YZ) and construction geometry, by name.
+    pub hidden_origin: Vec<String>,
+    /// Sketches by feature id.
+    pub hidden_sketches: Vec<u64>,
+    /// Finished sketches shown although a feature uses them.
+    pub shown_sketches: Vec<u64>,
 }
 
 /// A way of shading the model's faces to judge their shape (view state, not part of the design).
@@ -219,6 +235,7 @@ impl Session {
             clipboard: Vec::new(),
             section: None,
             analysis: None,
+            visibility: Visibility::default(),
         }
     }
 
@@ -360,6 +377,7 @@ impl Session {
             clipboard: self.clipboard.clone(),
             section: None,
             analysis: None,
+            visibility: Visibility::default(),
         }
     }
 

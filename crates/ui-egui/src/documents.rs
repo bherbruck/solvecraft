@@ -27,10 +27,6 @@ pub struct DocSlot {
 /// The per-design part of the UI state (what is hidden, shown or locked).
 #[derive(Clone, Debug, Default)]
 struct DocView {
-    hidden_bodies: Vec<String>,
-    hidden_origin: Vec<String>,
-    hidden_sketches: Vec<u64>,
-    shown_sketches: Vec<u64>,
     hidden_profiles: Vec<u64>,
     shown_dims: Vec<u64>,
     locked_bodies: Vec<String>,
@@ -63,10 +59,6 @@ impl Documents {
 fn take_view(app: &mut SolveApp) -> DocView {
     let u = &mut app.ui;
     DocView {
-        hidden_bodies: std::mem::take(&mut u.hidden_bodies),
-        hidden_origin: std::mem::take(&mut u.hidden_origin),
-        hidden_sketches: std::mem::take(&mut u.hidden_sketches),
-        shown_sketches: std::mem::take(&mut u.shown_sketches),
         hidden_profiles: std::mem::take(&mut u.hidden_profiles),
         shown_dims: std::mem::take(&mut u.shown_dims),
         locked_bodies: std::mem::take(&mut u.locked_bodies),
@@ -75,10 +67,6 @@ fn take_view(app: &mut SolveApp) -> DocView {
 
 fn put_view(app: &mut SolveApp, v: DocView) {
     let u = &mut app.ui;
-    u.hidden_bodies = v.hidden_bodies;
-    u.hidden_origin = v.hidden_origin;
-    u.hidden_sketches = v.hidden_sketches;
-    u.shown_sketches = v.shown_sketches;
     u.hidden_profiles = v.hidden_profiles;
     u.shown_dims = v.shown_dims;
     u.locked_bodies = v.locked_bodies;

@@ -101,9 +101,6 @@ pub struct UiState {
     pub show_grid: bool,
     pub show_origin: bool,
     pub perspective: bool,
-    pub hidden_bodies: Vec<String>,
-    /// Origin items (O, X, Y, Z, XY, XZ, YZ) and construction planes hidden one by one.
-    pub hidden_origin: Vec<String>,
     pub show_sketches: bool,
     pub palette_open: bool,
     /// Dark theme (the default); a preference kept between runs.
@@ -118,9 +115,6 @@ pub struct UiState {
     pub ground_shadow: bool,
     /// The world's up axis (Z or Y; #3): the camera, view cube, home view and ground follow it.
     pub up_axis: solvecraft_engine::render::UpAxis,
-    /// Sketches hidden one by one, and finished sketches shown although a feature uses them.
-    pub hidden_sketches: Vec<u64>,
-    pub shown_sketches: Vec<u64>,
     /// Sketches whose closed profiles are not shaded.
     pub hidden_profiles: Vec<u64>,
     /// Finished sketches whose dimensions are shown.
@@ -140,8 +134,6 @@ impl Default for UiState {
             show_grid: true,
             show_origin: true,
             perspective: false,
-            hidden_bodies: Vec::new(),
-            hidden_origin: Vec::new(),
             show_sketches: true,
             palette_open: false,
             dark: true,
@@ -150,8 +142,6 @@ impl Default for UiState {
             visual_style: 0,
             ground_shadow: true,
             up_axis: Default::default(),
-            hidden_sketches: Vec::new(),
-            shown_sketches: Vec::new(),
             hidden_profiles: Vec::new(),
             shown_dims: Vec::new(),
             locked_bodies: Vec::new(),
@@ -594,7 +584,7 @@ impl SolveApp {
     pub fn origin_visible(&self) -> bool {
         self.ui.show_origin
             || (self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::Sketch))
-                && !self.session.world_state().bodies.iter().any(|b| !self.ui.hidden_bodies.contains(&b.name)))
+                && !self.session.world_state().bodies.iter().any(|b| !self.session.visibility.hidden_bodies.contains(&b.name)))
     }
 
     pub fn set_status(&mut self, s: impl Into<String>, error: bool) {

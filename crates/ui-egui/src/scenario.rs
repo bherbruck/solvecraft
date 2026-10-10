@@ -730,8 +730,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
             }
             "hidden" => {
                 // Bodies hidden in the view.
-                let h = &ui["ui"]["hidden_bodies"];
-                let h = if h.is_null() { &ui["ui"]["hiddenBodies"] } else { h };
+                let h = &ui["visibility"]["hidden_bodies"];
                 if h != v {
                     return Err(format!("hidden bodies: got {h}, want {v}"));
                 }
