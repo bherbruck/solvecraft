@@ -29,7 +29,7 @@ pub use assembly::{IDENTITY, Mat, Occurrence, apply_point, apply_vector, is_iden
 pub use document::*;
 pub use eval::{
     EdgeRef, FeatureResult, Model, ModelBody, ModelState, SolvedSketch, ThreadInfo, edge_names_for, edge_refs, parse_metric_thread, pattern_matrices,
-    world_state,
+    state_in_frame, world_state,
 };
 pub use params::{ParamRow, ParamUser, cycles};
 pub use solvecraft_kernel as kernel;

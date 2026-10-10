@@ -90,6 +90,70 @@
  {
   "call": "engine.execute",
   "params": {
+   "command": "parameters.change",
+   "params": {
+    "name": "wall",
+    "expression": "2.4 mm"
+   }
+  }
+ },
+ {
+  "expect": {
+   "errors": 0,
+   "bodies": 2
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "parameters.change",
+   "params": {
+    "name": "height",
+    "expression": "30 mm"
+   }
+  }
+ },
+ {
+  "expect": {
+   "errors": 0,
+   "bodies": 2
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "parameters.change",
+   "params": {
+    "name": "height",
+    "expression": "25 mm"
+   }
+  }
+ },
+ {
+  "expect": {
+   "errors": 0,
+   "bodies": 2
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "parameters.change",
+   "params": {
+    "name": "wall",
+    "expression": "2 mm"
+   }
+  }
+ },
+ {
+  "expect": {
+   "errors": 0,
+   "bodies": 2
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
    "command": "file.save_as",
    "params": {
     "path": "$DIR/enclosure.solvecraft"

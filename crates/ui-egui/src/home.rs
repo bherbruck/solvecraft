@@ -1,6 +1,6 @@
 //! The start page: New Design, Open, the recent designs and the built-in samples, each with a
 //! picture of the design rendered from it. Shown on launch without a file and from the house
-//! button; it closes when a design is opened or started, or the design changes.
+//! button or the first document tab; selecting a design returns to its view.
 
 use std::collections::HashMap;
 
@@ -24,8 +24,7 @@ pub struct HomeState {
     pub open: bool,
     /// Recent design paths, newest first (kept in the preferences).
     pub recent: Vec<String>,
-    /// The session revision when the page opened (a change closes it).
-    rev: u64,
+    pub opened_at: std::collections::BTreeMap<String, u64>,
     thumbs: HashMap<String, Option<egui::TextureHandle>>,
     samples: HashMap<usize, Session>,
     /// Keys asked for and not made yet.
@@ -37,9 +36,8 @@ pub struct HomeState {
 }
 
 impl HomeState {
-    pub fn show(&mut self, rev: u64) {
+    pub fn show(&mut self, _rev: u64) {
         self.open = true;
-        self.rev = rev;
     }
 
     /// Put a design at the top of the recent list.
@@ -47,6 +45,8 @@ impl HomeState {
         self.recent.retain(|p| p != path);
         self.recent.insert(0, path.to_string());
         self.recent.truncate(MAX_RECENT);
+        self.opened_at.insert(path.to_string(), web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+        self.opened_at.retain(|p, _| self.recent.contains(p));
         self.thumbs.remove(path);
     }
 }
@@ -179,9 +179,8 @@ pub fn open_sample(app: &mut SolveApp, i: usize) {
     }
 }
 
-fn open_recent(app: &mut SolveApp, path: &str) {
+pub fn open_recent(app: &mut SolveApp, path: &str) {
     if !solvecraft_engine::io::vfs::exists(path) {
-        app.home.recent.retain(|p| p != path);
         app.set_status(format!("{path} is no longer there"), true);
         return;
     }
@@ -191,10 +190,6 @@ fn open_recent(app: &mut SolveApp, path: &str) {
 
 /// The page itself (in place of the toolbar, browser and viewport).
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if app.session.revision != app.home.rev {
-        app.home.open = false;
-        return;
-    }
     poll(app, ui.ctx());
     let t = Tokens::get();
     let samples = solvecraft_engine::sample::samples();
@@ -261,6 +256,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
             ui.add_space(24.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.hyperlink_to("Documentation", crate::help::DOCS_URL);
+                ui.hyperlink_to("Report an Issue", "https://github.com/bherbruck/solvecraft/issues/new");
+                ui.hyperlink_to("What's new", "https://github.com/bherbruck/solvecraft/releases/latest");
+                if ui.link("Keyboard Shortcuts").clicked() {
+                    app.keymap.open = true;
+                    app.keymap.read_only = true;
+                }
+                if ui.link("Preferences").clicked() {
+                    crate::prefs::open_at(app, 0);
+                }
+            });
+            ui.add_space(16.0);
             section(ui, "Recent");
             if recent.is_empty() {
                 ui.label(RichText::new("Designs you open or save appear here.").color(t.text_dim));
@@ -269,20 +277,46 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let Some(p) = recent.get(i) else { return };
                     let path = std::path::Path::new(p);
                     let name = path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
-                    let folder = path.parent().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
                     let missing = !solvecraft_engine::io::vfs::exists(p);
-                    let sub = if missing {
+                    let mut sub = if missing {
                         "missing".to_string()
                     } else if p.starts_with("/opfs/") {
                         // The web build keeps designs in the browser's own storage.
                         "in this browser".to_string()
                     } else {
-                        folder
+                        p.clone()
                     };
-                    if card(ui, Pic::Ready(app.home.thumbs.get(p.as_str()).and_then(Option::as_ref)), &name, &sub, missing)
-                        .on_hover_text(p.as_str())
-                        .clicked()
-                    {
+                    if let Some(time) = app.home.opened_at.get(p) {
+                        let now = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(*time);
+                        let seconds = now.saturating_sub(*time);
+                        let ago = if seconds < 60 {
+                            "just now".to_string()
+                        } else if seconds < 3600 {
+                            format!("{} min ago", seconds / 60)
+                        } else if seconds < 86400 {
+                            format!("{} h ago", seconds / 3600)
+                        } else {
+                            format!("{} days ago", seconds / 86400)
+                        };
+                        sub.push_str(&format!("\nOpened {ago}"));
+                    }
+                    let response = card(ui, Pic::Ready(app.home.thumbs.get(p.as_str()).and_then(Option::as_ref)), &name, &sub, missing)
+                        .on_hover_text(p.as_str());
+                    crate::scenario::publish_handle(&format!("home:recent:{i}"), response.rect.center());
+                    response.context_menu(|ui| {
+                        if ui.button("Remove from list").clicked() {
+                            app.home.recent.retain(|x| x != p);
+                            app.home.opened_at.remove(p);
+                            ui.close();
+                        }
+                        if !cfg!(target_arch = "wasm32") && ui.button("Show in folder").clicked() {
+                            if let Some(show) = &app.services.show_in_folder {
+                                show(p);
+                            }
+                            ui.close();
+                        }
+                    });
+                    if response.clicked() {
                         let p = p.clone();
                         action = Some(Box::new(move |app: &mut SolveApp| open_recent(app, &p)));
                     }
@@ -340,7 +374,7 @@ enum Pic<'a> {
 /// A design card: its picture (a spinner while it renders), name and a line under it.
 fn card(ui: &mut egui::Ui, pic: Pic, name: &str, sub: &str, dim: bool) -> egui::Response {
     let t = Tokens::get();
-    let size = vec2(THUMB[0] as f32 + 16.0, THUMB[1] as f32 + 62.0);
+    let size = vec2(THUMB[0] as f32 + 16.0, THUMB[1] as f32 + 80.0);
     let (r, resp) = ui.allocate_exact_size(size, Sense::click());
     let hover = resp.hovered();
     ui.painter().rect(

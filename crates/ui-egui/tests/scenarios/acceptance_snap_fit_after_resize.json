@@ -1,8 +1,5 @@
 [
  {
-  "pending": "#41: a snap fit stays at its old point when its wall moves (a floating body)"
- },
- {
   "note": "Acceptance (#27): the board grows 40 \u2192 50 mm deep; the snap fit stays on the moved front wall."
  },
  {

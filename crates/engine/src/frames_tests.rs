@@ -144,3 +144,106 @@ fn sketch_on_a_face_follows_a_moved_body() {
     let c = sketch_point_world(&mut s, "OnTop", "p1");
     assert!((c.z - 25.0).abs() < 1e-6, "{c:?}");
 }
+
+/// A 1 x 1 PNG for canvases.
+const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+/// Canvases belong to the active component and move with its occurrence; one put on a moved
+/// component's face from the root sits on the face (and stays the root's).
+#[test]
+fn canvases_move_with_their_component() {
+    let mut s = moved_part();
+    let part = s.active_component;
+    assert_ne!(part, 0);
+    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "XY", "name": "Plan"}));
+    // From the root, on the moved block's top face (world).
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": {"face": [65, 10, 10]}, "name": "Lid", "width": 10}));
+    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "XZ", "name": "Root"}));
+    let (vals, _) = s.doc.param_values();
+    let world = |s: &Session, name: &str| {
+        let c = s.doc.canvases.iter().find(|c| c.name == name).unwrap();
+        (c.component, s.doc.canvas_plane(&vals, c).unwrap())
+    };
+    let (c, p) = world(&s, "Plan");
+    assert_eq!(c, part);
+    assert!(near(p.origin, Vec3::new(50.0, 0.0, 0.0)), "{:?}", p.origin);
+    let (c, p) = world(&s, "Lid");
+    assert_eq!(c, 0, "the active component's");
+    let lid = s.doc.canvases.iter().find(|c| c.name == "Lid").unwrap();
+    let centre = p.to_world(lid.center);
+    assert!(near(centre, Vec3::new(65.0, 10.0, 10.0)), "{centre:?}");
+    assert_eq!(world(&s, "Root").0, 0);
+    // Moving the occurrence carries its canvases, not the root's.
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 40, 0]}));
+    let (vals, _) = s.doc.param_values();
+    let plan = s.doc.canvases.iter().find(|c| c.name == "Plan").unwrap();
+    assert!(near(s.doc.canvas_plane(&vals, plan).unwrap().origin, Vec3::new(50.0, 40.0, 0.0)));
+    let lid = s.doc.canvases.iter().find(|c| c.name == "Lid").unwrap();
+    let centre = s.doc.canvas_plane(&vals, lid).unwrap().to_world(lid.center);
+    assert!(near(centre, Vec3::new(65.0, 10.0, 10.0)), "{centre:?}");
+    let root = s.doc.canvases.iter().find(|c| c.name == "Root").unwrap();
+    assert!(near(s.doc.canvas_plane(&vals, root).unwrap().origin, Vec3::ZERO));
+    // The component survives a save and reopen.
+    let back = solvecraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(back.canvases, s.doc.canvases);
+}
+
+/// World points of a sketch's curves' points (sorted).
+fn sketch_world_points(s: &mut Session, sketch: &str) -> Vec<Vec3> {
+    let si = run(s, "sketch.inspect", json!({ "sketch": sketch }));
+    si["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            let w = &p["world"];
+            Vec3::new(w[0].as_f64().unwrap(), w[1].as_f64().unwrap(), w[2].as_f64().unwrap())
+        })
+        .collect()
+}
+
+/// A block "C" (40 x 30 x 20) in its own component, the root active again.
+fn block_in_component() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "C"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    s
+}
+
+/// The user's "big square": a sketch made in the root on a moved component's face lies on the
+/// face where it is shown, its projected loop on the face's edges (moved and turned), and it
+/// follows when the occurrence moves on.
+#[test]
+fn root_sketch_on_a_moved_components_face() {
+    let mut s = block_in_component();
+    run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "translate": [100, 0, 0]}));
+    let r = run(&mut s, "sketch.create", json!({"plane": {"face": [120, 15, 20]}, "name": "Top"}));
+    assert!(!r["projected"].is_null(), "the face's edges are projected: {r}");
+    run(&mut s, "sketch.finish", json!({}));
+    let pts = sketch_world_points(&mut s, "Top");
+    assert!(pts.len() >= 4, "{pts:?}");
+    // Every point but the sketch's origin (the model origin on the face plane).
+    for p in pts.iter().filter(|p| !near(**p, Vec3::new(0.0, 0.0, 20.0))) {
+        assert!((p.z - 20.0).abs() < 1e-6 && p.x > 100.0 - 1e-6 && p.x < 140.0 + 1e-6 && p.y > -1e-6 && p.y < 30.0 + 1e-6, "{p:?}");
+    }
+    for corner in [Vec3::new(100.0, 0.0, 20.0), Vec3::new(140.0, 30.0, 20.0)] {
+        assert!(pts.iter().any(|p| near(*p, corner)), "{corner:?} in {pts:?}");
+    }
+    assert_eq!(s.doc.find_feature("Top").unwrap().component, 0, "the sketch is the root's");
+
+    // Turned 90 degrees about Z (around the world origin): the top face is now x -30..0, y 0..40.
+    let mut s = block_in_component();
+    run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [-15, 20, 20]}, "name": "Top"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let pts = sketch_world_points(&mut s, "Top");
+    for corner in [Vec3::new(0.0, 0.0, 20.0), Vec3::new(-30.0, 40.0, 20.0)] {
+        assert!(pts.iter().any(|p| near(*p, corner)), "{corner:?} in {pts:?}");
+    }
+    // Projected geometry stays on the face when the occurrence moves on (the link re-resolves).
+    run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "translate": [0, 0, 5]}));
+    let pts = sketch_world_points(&mut s, "Top");
+    assert!(pts.iter().any(|p| near(*p, Vec3::new(-30.0, 40.0, 25.0))), "{pts:?}");
+}

@@ -15,6 +15,12 @@ pub enum BoolOp {
     Intersect,
 }
 
+/// Whether a union can sew two matching planar faces without intersecting them.
+/// Callers can retain the exact touching tool instead of extending it into material.
+pub fn can_join_touching_faces(a: &Body, b: &Body) -> bool {
+    a.solid.boundaries().len() == 1 && b.solid.boundaries().len() == 1 && crate::coplanar::glue(a, b).is_some_and(|r| r.is_ok())
+}
+
 /// Shifts applied to both operands on retries. The boolean classifies some faces by casting a
 /// ray whose direction is derived from point coordinates; moving both solids (and the result
 /// back) leaves the geometry unchanged but changes those rays.
@@ -46,7 +52,10 @@ fn mismatch(a: &solvecraft_geom::Mesh, b: &solvecraft_geom::Mesh, result: &solve
     let hi = ba.max.min(bb.max);
     let all = ba.union(&bb);
     let mut boxes = vec![(all, 300usize)];
-    if lo.x < hi.x && lo.y < hi.y && lo.z < hi.z {
+    // A touching seam can overlap by round-off only. Samples there sit on the
+    // operands' boundaries, where ray parity cannot classify membership reliably.
+    let gap = all.diagonal().max(1.0) * 1e-9;
+    if hi.x - lo.x > gap && hi.y - lo.y > gap && hi.z - lo.z > gap {
         boxes.push((solvecraft_geom::Aabb3 { min: lo, max: hi }, 900));
     }
     let (ia_idx, ib_idx, ir_idx) = (a.inside_index(), b.inside_index(), result.inside_index());

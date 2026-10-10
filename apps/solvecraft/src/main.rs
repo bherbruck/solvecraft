@@ -61,6 +61,7 @@ fn services() -> Services {
                 .add_filter("STEP", &["step", "stp", "STEP", "STP"])
                 .add_filter("IGES", &["igs", "iges", "IGS", "IGES"])
                 .add_filter("Mesh (3MF, STL)", &["3mf", "3MF", "stl", "STL"])
+                .add_filter("Sketch drawings (DXF, SVG)", &["dxf", "DXF", "svg", "SVG"])
                 .add_filter("All files", &["*"])
                 .pick_file()
                 .map(|p| p.to_string_lossy().to_string())
@@ -69,6 +70,23 @@ fn services() -> Services {
             rfd::FileDialog::new().set_file_name(name).add_filter("File", exts).save_file().map(|p| p.to_string_lossy().to_string())
         })),
         graphics_path: graphics_path().map(|p| p.to_string_lossy().to_string()),
+        show_in_folder: Some(Box::new(|path| {
+            let folder = std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."));
+            let mut command = std::process::Command::new(if cfg!(target_os = "windows") {
+                "explorer"
+            } else if cfg!(target_os = "macos") {
+                "open"
+            } else {
+                "xdg-open"
+            });
+            command.arg(folder);
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000);
+            }
+            let _ = command.spawn();
+        })),
     }
 }
 

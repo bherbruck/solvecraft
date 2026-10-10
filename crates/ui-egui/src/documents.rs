@@ -98,6 +98,7 @@ fn swap_in(app: &mut SolveApp, slot: DocSlot) -> DocSlot {
 
 /// Make tab `i` the active design.
 pub fn switch(app: &mut SolveApp, i: usize) {
+    app.home.open = false;
     if i == app.docs.active || i >= app.docs.slots.len() {
         return;
     }
@@ -293,6 +294,25 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
 /// + for a new design.
 pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let t = Tokens::get();
+    let home = Rect::from_min_size(pos2(x0, r.top() + 5.0), vec2(66.0, r.height() - 5.0));
+    let response = ui.interact(home, ui.id().with("home_tab"), Sense::click());
+    ui.painter().rect_filled(
+        home,
+        5.0,
+        if app.home.open {
+            t.toolbar
+        } else if response.hovered() {
+            t.hover
+        } else {
+            Color32::from_white_alpha(10)
+        },
+    );
+    ui.painter().text(home.center(), Align2::CENTER_CENTER, "Home", FontId::proportional(13.0), if app.home.open { t.text } else { t.app_bar_text });
+    crate::scenario::publish_handle("tab:home", home.center());
+    if response.clicked() {
+        app.home.show(app.session.revision);
+    }
+    let x0 = x0 + 70.0;
     let info = tabs_info(app);
     let n = info.len();
     let (first, shown, w) = layout(n, app.docs.active, x1 - x0);
@@ -301,8 +321,9 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let mut shut: Option<usize> = None;
     for (i, (name, dirty)) in info.iter().enumerate().skip(first).take(shown) {
         let tr = Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(w - 2.0, r.height() - 5.0));
-        let active = i == app.docs.active || app.docs.slots.is_empty();
+        let active = !app.home.open && (i == app.docs.active || app.docs.slots.is_empty());
         let resp = ui.interact(tr, ui.id().with(("doc_tab", i)), Sense::click_and_drag());
+        crate::scenario::publish_handle(&format!("tab:design:{i}"), tr.center());
         // The tabs are part of the title bar: dragging one moves the window, a double click
         // maximizes it.
         if app.custom_titlebar || app.integrated_titlebar {
@@ -389,7 +410,6 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     ui.painter().line_segment([c - vec2(0.0, 6.0), c + vec2(0.0, 6.0)], s);
     if presp.on_hover_text("New Design (Ctrl+N)").clicked() {
         new_design(app);
-        app.home.show(app.session.revision);
     }
     if let Some(i) = shut {
         close(app, i, false);

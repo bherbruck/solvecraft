@@ -77,6 +77,7 @@ fn prism_of(b: &Body, d: Vec3, plane: &Plane, tol: f64) -> Option<Prism> {
     let mut hi = f64::NEG_INFINITY;
     let mut tops: Vec<&mt::Face> = Vec::new();
     let mut top_h = Vec::new();
+    let mut bottom_h = Vec::new();
     for f in b.solid.face_iter() {
         let surf = f.oriented_surface();
         if let mt::Surface::Plane(p) = &surf {
@@ -90,6 +91,7 @@ fn prism_of(b: &Body, d: Vec3, plane: &Plane, tol: f64) -> Option<Prism> {
                 continue;
             }
             if n.dot(d) < -1.0 + 1e-9 {
+                bottom_h.push(h);
                 lo = lo.min(h);
                 continue;
             }
@@ -110,7 +112,7 @@ fn prism_of(b: &Body, d: Vec3, plane: &Plane, tol: f64) -> Option<Prism> {
         }
     }
     // One height for every top (and bottom) cap.
-    if top_h.iter().any(|h| (h - hi).abs() > tol) || !(lo.is_finite() && hi > lo + tol) {
+    if top_h.iter().any(|h| (h - hi).abs() > tol) || bottom_h.iter().any(|h| (h - lo).abs() > tol) || !(lo.is_finite() && hi > lo + tol) {
         return None;
     }
     let mut regions = Vec::new();
@@ -382,6 +384,129 @@ fn boolean2d(a: &[Region2], b: &[Region2], op: BoolOp, tol: f64) -> Option<Vec<R
 }
 
 /// The boolean done on prism sections, or `None` when it doesn't apply.
+/// The pieces of a segment between the given points (those lying on it, inside it).
+fn split_seg(seg: &Seg2, pts: &[Vec2], tol: f64) -> Option<Vec<Seg2>> {
+    if !matches!(seg, Seg2::Line { .. } | Seg2::Arc { .. }) {
+        return None;
+    }
+    let mut ts: Vec<f64> = pts
+        .iter()
+        .filter_map(|p| {
+            let t = seg.closest_param(*p);
+            (t > 1e-9 && t < 1.0 - 1e-9 && seg.point_at(t).dist(*p) < tol).then_some(t)
+        })
+        .collect();
+    ts.sort_by(f64::total_cmp);
+    ts.dedup_by(|x, y| (*x - *y).abs() < 1e-9);
+    let mut out = Vec::new();
+    let mut t0 = 0.0;
+    for t1 in ts.into_iter().chain(std::iter::once(1.0)) {
+        out.push(match *seg {
+            Seg2::Line { .. } => Seg2::Line { a: seg.point_at(t0), b: seg.point_at(t1) },
+            Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center, radius, start: start + sweep * t0, sweep: sweep * (t1 - t0) },
+            _ => return None,
+        });
+        t0 = t1;
+    }
+    Some(out)
+}
+
+/// The union of two prisms along `d` stacked end to end (or overlapping) with different
+/// sections, sewn from its faces: each slab between the prisms' end levels has walls over its
+/// section's outline; each level has a face up over the section below less the one above, and
+/// a face down over the one above less the one below. Every outline is split where any other
+/// meets it, so the faces share their edges. `None` when a slab is empty or a curve isn't a
+/// line or an arc.
+fn sew_stack(plane: &Plane, d: Vec3, pa: &Prism, pb: &Prism, tol: f64) -> Option<Result<Body>> {
+    use crate::sew::{EdgeSpec, FaceSpec, SurfSpec};
+    let mut levels = vec![pa.lo, pa.hi, pb.lo, pb.hi];
+    levels.sort_by(f64::total_cmp);
+    levels.dedup_by(|x, y| (*x - *y).abs() < tol);
+    let covers = |p: &Prism, z0: f64, z1: f64| p.lo <= z0 + tol && p.hi >= z1 - tol;
+    let mut slabs: Vec<Vec<Region2>> = Vec::new();
+    for w in levels.windows(2) {
+        let (z0, z1) = (*w.first()?, *w.get(1)?);
+        let s = match (covers(pa, z0, z1), covers(pb, z0, z1)) {
+            (true, true) => boolean2d(&pa.regions, &pb.regions, BoolOp::Union, tol)?,
+            (true, false) => pa.regions.clone(),
+            (false, true) => pb.regions.clone(),
+            (false, false) => return None,
+        };
+        slabs.push(oriented(&s));
+    }
+    // Faces at each level: up where the slab below sticks out, down where the one above does.
+    let diff = |x: &[Region2], y: &[Region2]| -> Option<Vec<Region2>> {
+        match (x.is_empty(), y.is_empty()) {
+            (true, _) => Some(Vec::new()),
+            (false, true) => Some(x.to_vec()),
+            (false, false) => boolean2d(x, y, BoolOp::Cut, tol).map(|r| oriented(&r)),
+        }
+    };
+    let mut caps: Vec<(f64, bool, Vec<Region2>)> = Vec::new();
+    for (k, z) in levels.iter().enumerate() {
+        let below: &[Region2] = if k == 0 { &[] } else { slabs.get(k - 1)? };
+        let above: &[Region2] = slabs.get(k).map(Vec::as_slice).unwrap_or(&[]);
+        caps.push((*z, true, diff(below, above)?));
+        caps.push((*z, false, diff(above, below)?));
+    }
+    // Every segment end, everywhere: outlines split there.
+    let loops_of =
+        |rs: &[Region2]| -> Vec<Loop2> { rs.iter().flat_map(|r| std::iter::once(r.outer.clone()).chain(r.holes.iter().cloned())).collect() };
+    let mut pts: Vec<Vec2> = Vec::new();
+    for lp in slabs.iter().flat_map(|s| loops_of(s)).chain(caps.iter().flat_map(|c| loops_of(&c.2))) {
+        for sg in &lp.segs {
+            pts.push(sg.start());
+            pts.push(sg.end());
+        }
+    }
+    let at = |u: Vec2, z: f64| plane.to_world(u) + d * z;
+    let edge = |sg: &Seg2, z: f64| -> EdgeSpec {
+        match sg {
+            Seg2::Arc { .. } => EdgeSpec::Arc { a: at(sg.start(), z), b: at(sg.end(), z), mid: at(sg.point_at(0.5), z) },
+            _ => EdgeSpec::Line { a: at(sg.start(), z), b: at(sg.end(), z) },
+        }
+    };
+    let mut faces: Vec<FaceSpec> = Vec::new();
+    for (i, s) in slabs.iter().enumerate() {
+        let (z0, z1) = (*levels.get(i)?, *levels.get(i + 1)?);
+        for lp in loops_of(s) {
+            for sg0 in &lp.segs {
+                for sg in split_seg(sg0, &pts, tol)? {
+                    let (a, b) = (sg.start(), sg.end());
+                    let lp3 = vec![
+                        edge(&sg, z0),
+                        EdgeSpec::Line { a: at(b, z0), b: at(b, z1) },
+                        edge(&sg.reversed(), z1),
+                        EdgeSpec::Line { a: at(a, z1), b: at(a, z0) },
+                    ];
+                    let tangent = plane.dir_to_world(sg.derivative(0.5));
+                    let outward = tangent.cross(d).normalized()?;
+                    let surface = match sg {
+                        Seg2::Arc { .. } => SurfSpec::Extruded { a: at(a, z0), b: at(b, z0), mid: at(sg.point_at(0.5), z0), dir: d * (z1 - z0) },
+                        _ => SurfSpec::Plane,
+                    };
+                    faces.push(FaceSpec { loops: vec![lp3], surface, probe: Some((at(sg.point_at(0.5), (z0 + z1) / 2.0), outward)) });
+                }
+            }
+        }
+    }
+    for (z, up, rs) in &caps {
+        for r in rs {
+            let mut loops = Vec::new();
+            for lp in std::iter::once(&r.outer).chain(&r.holes) {
+                let mut segs: Vec<Seg2> = Vec::new();
+                for sg in &lp.segs {
+                    segs.extend(split_seg(sg, &pts, tol)?);
+                }
+                let segs: Vec<Seg2> = if *up { segs } else { segs.iter().rev().map(Seg2::reversed).collect() };
+                loops.push(segs.iter().map(|sg| edge(sg, *z)).collect::<Vec<_>>());
+            }
+            faces.push(FaceSpec { loops, surface: SurfSpec::Plane, probe: None });
+        }
+    }
+    Some(crate::sew::sew(&faces))
+}
+
 pub(crate) fn prism_boolean(a: &Body, b: &Body, op: BoolOp) -> Option<Result<Option<Body>>> {
     let size = a.size().max(b.size());
     let tol = (size * 1e-7).max(1e-9) * 10.0;
@@ -423,10 +548,10 @@ pub(crate) fn prism_boolean(a: &Body, b: &Body, op: BoolOp) -> Option<Result<Opt
         return Some(Ok(None));
     }
     let (lo, hi) = if stacked {
-        // Only when the sections are the same (the union adds nothing to either).
+        // Different sections (a boss hanging over a plate's edge): sewn slab by slab.
         let (u, x, y) = (area(&regions), area(&pa.regions), area(&pb.regions));
         if (u - x).abs() > tol * (1.0 + u) || (u - y).abs() > tol * (1.0 + u) {
-            return None;
+            return sew_stack(&plane, d, &pa, &pb, tol).map(|r| r.map(Some));
         }
         (pa.lo.min(pb.lo), pa.hi.max(pb.hi))
     } else {

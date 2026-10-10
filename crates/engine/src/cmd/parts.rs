@@ -231,7 +231,7 @@ fn cyl(s: &mut Session, d: f64, z0: f64, z1: f64, op: &str) -> Result<()> {
 /// A solid of revolution about z from a closed (r, z) outline, as one body or joined.
 fn revolve(s: &mut Session, pts: &[(f64, f64)], op: &str) -> Result<()> {
     run(s, "sketch.create", json!({"plane": "XZ"}))?;
-    let points: Vec<[f64; 2]> = pts.iter().map(|(r, z)| [*r, *z]).collect();
+    let points: Vec<[f64; 2]> = pts.iter().map(|(r, z)| [*r, -*z]).collect();
     run(s, "sketch.line", json!({"points": points, "closed": true}))?;
     run(s, "sketch.finish", json!({}))?;
     run(s, "solid.revolve", json!({"axis": "y", "operation": op}))?;

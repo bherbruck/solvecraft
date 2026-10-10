@@ -273,7 +273,20 @@ pub fn refresh_links(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelS
     let mut warn = Vec::new();
     let links = sk.links.clone();
     for l in &links {
-        match resolve(doc, vals, st, plane, l.kind, &l.source) {
+        let mut source = l.source.clone();
+        if let (Some(name), LinkSource::Face { at, .. }) = (&l.face_name, &mut source) {
+            if let Some((p, split)) = crate::naming::point_on_face(st, name, *at) {
+                *at = p;
+                if split {
+                    warn.push(format!("projected face `{name}` was split; using the nearest piece"));
+                }
+            } else {
+                sk.set_link_lost(&l.id, true);
+                warn.push(format!("projected face `{name}` no longer exists"));
+                continue;
+            }
+        }
+        match resolve(doc, vals, st, plane, l.kind, &source) {
             Ok(r) => {
                 sk.set_link_source(&l.id, r.source);
                 let _ = sk.set_link_wires(&l.id, &r.wires);

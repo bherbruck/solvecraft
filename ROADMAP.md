@@ -1,6 +1,6 @@
 # SolveCraft roadmap
 
-Status as of **2026-10-09**. SolveCraft targets Fusion-style parametric modelling (sketch →
+Status as of **2026-10-10**. SolveCraft targets Fusion-style parametric modelling (sketch →
 features → parametric timeline) as an open, pure-Rust, agent-drivable application.
 
 ## At a glance
@@ -10,11 +10,18 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 | Where are we? | **M0, M1, M13 done; M2, M5–M7, M9, M10, M14 in progress.** Sketch with solver and the full SKETCH create/modify set; extrude, revolve (two sides, symmetric, to object), fillet/chamfer (variable radius, chord length, a radius per edge, corner patches), holes, threads (cosmetic and modelled), patterns, mirror, shell (inside/outside/both), draft, loft, sweep, coil, split body and split face, delete face, construction planes, axes and points; persistent naming of faces and edges; parameters and configurations; components, joints, motion studies, exploded views; sheet metal and a plastic enclosure subset; STEP/IGES/3MF/STL/OBJ/DXF; autosave and crash recovery; desktop and browser (wasm) app, CLI, MCP server, oracle harness. |
 | Command parity (in scope) | **328 / 541 (61%)** in-scope commands; SOLID + SKETCH **185 / 291 (64%)** — [docs/parity.md](docs/parity.md) |
 | Fusion oracle | **76 / 76 parts match** — [docs/oracle.md](docs/oracle.md) |
-| Tests | 596 (41 of them UI scenarios): solver, profiles, kernel booleans/blends/measures, expressions, timeline, persistent naming, file formats and migrations, assemblies, sheet metal, engine end-to-end, hostile-input fuzz over every command |
+| Tests | Solver, profiles, kernel booleans/blends/measures, expressions, timeline, persistent naming, file formats and migrations, assemblies, sheet metal, engine end-to-end, hostile-input fuzz over every command and headless UI scenarios. `cargo xtask ci` reports the current passing counts. |
 | Gates | `cargo xtask ci`: fmt, clippy -D warnings, tests, asset attribution, layering, wasm32 build — green |
 | Time to a useful alpha (M0–M6) | ≈ **82 agent hours** remain (sum of the M1–M6 estimates below) |
 
 ## Scope (owner decision, 2026-10-07)
+
+The issue batch adds preservation of blind pockets in through cuts, associative projected
+offsets and plastic face placements, XZ (+Y normal) with a v6 migration preserving older
+designs, interactive angle placement, file-picker sketch imports, Home/recent controls,
+toolbar overflow, and the remaining component-frame and assembly WIP work. The enclosure
+acceptance scenarios now include board resizes; STEP reopening is automated. Inspection in
+Fusion remains an external acceptance step. See [WIP reconciliation](docs/wip-reconciliation.md).
 
 In scope, in priority order:
 1. SOLID and SKETCH (now).

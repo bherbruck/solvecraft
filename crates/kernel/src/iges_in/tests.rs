@@ -150,7 +150,8 @@ fn a_drill_point_round_trips_through_iges() {
     let plate = box_solid(Vec3::new(-20.0, -15.0, 0.0), Vec3::new(20.0, 15.0, 10.0)).unwrap();
     let profile =
         Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 2.0), Vec2::new(4.0, 5.0), Vec2::new(4.0, 11.0), Vec2::new(0.0, 11.0)]), holes: vec![] };
-    let hole = crate::revolve(&Plane::XZ, &[profile], Vec2::ZERO, Vec2::new(0.0, 1.0), std::f64::consts::TAU).unwrap().pop().unwrap();
+    let plane = Plane { y: Vec3::Z, ..Plane::XZ }; // Positive profile heights are world +Z.
+    let hole = crate::revolve(&plane, &[profile], Vec2::ZERO, Vec2::new(0.0, 1.0), std::f64::consts::TAU).unwrap().pop().unwrap();
     let drilled = boolean(&plate, &hole, BoolOp::Cut).unwrap().unwrap();
     let v = 12000.0 - std::f64::consts::PI * 16.0 * (5.0 + 1.0);
     assert!(rel(measure(&drilled).unwrap().volume, v) < 1e-3);

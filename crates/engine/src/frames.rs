@@ -30,6 +30,12 @@ enum K {
     Plane,
     /// A body name, or a list of them.
     Body,
+    /// A point (or a list of picks) for the sketch being made or edited: into that sketch's
+    /// component frame, whichever component the geometry under it belongs to (a sketch in the
+    /// root on a moved component's face finds the face where it is shown).
+    Here,
+    /// A plane object for a new sketch or canvas: into the active component's frame.
+    HerePlane,
 }
 
 use K::*;
@@ -56,11 +62,12 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "plastic.lip" | "sheet.convert" => &[("face", Pick), ("body", Body)],
         "sheet.flange" | "sheet.hem" => &[("edges", Picks), ("body", Body)],
         "sheet.fold" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
-        "sketch.create" | "sketch.redefine" => &[("plane", Plane)],
-        "canvas.decal" => &[("face", Pick)],
-        "sketch.intersect" => &[("refs", Picks)],
-        "sketch.project_to_surface" | "sketch.isoparametric_curve" => &[("face", Pick), ("body", Body)],
-        "sketch.intersection_curve" => &[("a", Picks), ("b", Picks)],
+        "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
+        "canvas.decal" => &[("face", Here)],
+        "canvas.insert" => &[("plane", HerePlane), ("at", Here)],
+        "sketch.project" | "sketch.intersect" | "sketch.include_3d" => &[("refs", Here), ("ref", Here)],
+        "sketch.project_to_surface" | "sketch.isoparametric_curve" => &[("face", Here)],
+        "sketch.intersection_curve" => &[("a", Here), ("b", Here)],
         "inspect.curvature_comb" | "inspect.minimum_radius" | "inspect.isocurve" => &[("edges", Picks), ("faces", Picks)],
         "parts.insert" | "parts.fastener" => &[("at", Pick), ("point", Make), ("direction", Dir)],
         "appearance.assign" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
@@ -75,6 +82,8 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
 struct Frames {
     bodies: Vec<(String, String, Mat)>,
     active: Mat,
+    /// The frame of the sketch being edited (its component), else the active component's.
+    sketch: Mat,
 }
 
 fn frames(s: &Session) -> Frames {
@@ -104,7 +113,8 @@ fn frames(s: &Session) -> Frames {
             (world, own, m)
         })
         .collect();
-    Frames { bodies, active: doc.component_transform(s.active_component) }
+    let sketch_comp = s.active_sketch.and_then(|id| doc.feature(id)).map(|f| f.component).unwrap_or(s.active_component);
+    Frames { bodies, active: doc.component_transform(s.active_component), sketch: doc.component_transform(sketch_comp) }
 }
 
 /// Does any placement move anything (so the world differs from the components' frames)?
@@ -171,12 +181,14 @@ struct Mapper<'a> {
     /// The frame of the command's first pick (its directions turn with it).
     first: Option<Mat>,
     changed: bool,
+    /// Picks go into the sketch's frame (`Here`), not the frame of the body under them.
+    here: bool,
 }
 
 impl Mapper<'_> {
     fn pick(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
         let p = vec3(v)?;
-        let m = frame_at(self.s, &self.f, p, body).unwrap_or(self.f.active);
+        let m = if self.here { self.f.sketch } else { frame_at(self.s, &self.f, p, body).unwrap_or(self.f.active) };
         self.first.get_or_insert(m);
         self.local_point(&m, p)
     }
@@ -325,14 +337,14 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
         return None;
     }
     let obj = params.as_object()?;
-    let mut m = Mapper { s, f: frames(s), first: None, changed: false };
+    let mut m = Mapper { s, f: frames(s), first: None, changed: false, here: false };
     let body = obj.get("body").and_then(Value::as_str).map(str::to_string);
     let mut out: Map<String, Value> = obj.clone();
     // Picks first: their frame turns the directions.
     for pass in [true, false] {
         for (k, kind) in keys {
             let Some(v) = obj.get(*k) else { continue };
-            let is_pick = matches!(kind, Pick | Picks | Plane);
+            let is_pick = matches!(kind, Pick | Picks | Plane | Here | HerePlane);
             if is_pick != pass {
                 continue;
             }
@@ -343,6 +355,19 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
                 Dir => m.dir(v),
                 Plane => m.plane(v),
                 Body => m.body(v),
+                Here | HerePlane => {
+                    // A new sketch or canvas goes into the active component.
+                    let keep = m.f.sketch;
+                    if *kind == HerePlane {
+                        m.f.sketch = m.f.active;
+                    }
+                    m.here = true;
+                    // Body names stay: the sketch's view of the model keeps them.
+                    let r = if *kind == HerePlane { m.plane(v) } else { m.picks(v, None) };
+                    m.here = false;
+                    m.f.sketch = keep;
+                    r
+                }
             };
             if let Some(n) = new {
                 out.insert((*k).to_string(), n);

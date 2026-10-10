@@ -17,8 +17,8 @@ pub struct Plane {
 impl Plane {
     /// Top: sketch x = +X, y = +Y, normal +Z.
     pub const XY: Plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
-    /// Front: sketch x = +X, y = +Z, normal −Y.
-    pub const XZ: Plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+    /// Front: sketch x = +X, y = −Z, normal +Y.
+    pub const XZ: Plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::new(0.0, 0.0, -1.0) };
     /// Right: sketch x = +Y, y = +Z, normal +X.
     pub const YZ: Plane = Plane { origin: Vec3::ZERO, x: Vec3::Y, y: Vec3::Z };
 

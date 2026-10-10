@@ -41,6 +41,10 @@ pub enum Mo {
         tracks: Vec<Track>,
         step: f64,
         playing: bool,
+        /// Playback starts over at the end (else it stops there).
+        looping: bool,
+        /// Playback speed (index into `SPEEDS`).
+        speed: usize,
         /// The step the shown pose is for (and its revision).
         shown: Option<(u64, u64)>,
         saved: Option<BTreeMap<u64, Mat>>,
@@ -101,6 +105,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                 tracks: Vec::new(),
                 step: 0.0,
                 playing: false,
+                looping: true,
+                speed: 2,
                 shown: None,
                 saved: None,
                 error: None,
@@ -115,6 +121,73 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 }
 
 // ---- pure mappings (tested) ----
+
+/// Playback speeds offered (times `STEPS_PER_S`).
+pub const SPEEDS: [f64; 5] = [0.25, 0.5, 1.0, 2.0, 4.0];
+/// Steps played per second at 1×.
+const STEPS_PER_S: f64 = 24.0;
+
+/// The next playback step: `by` steps on; at the end it starts over (looping) or stops there.
+/// Returns the step and whether it still plays.
+pub fn advance(step: f64, by: f64, total: u32, looping: bool) -> (f64, bool) {
+    let last = f64::from(total);
+    let next = step + by.max(0.0);
+    if next <= last {
+        (next, true)
+    } else if looping && last > 0.0 {
+        (next % (last + 1.0), true)
+    } else {
+        (last, false)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Transport {
+    Start,
+    Back,
+    Play,
+    Stop,
+    Forward,
+    End,
+}
+
+/// A media button drawn in code: bars and triangles.
+fn transport(ui: &mut egui::Ui, what: Transport, tip: &str) -> egui::Response {
+    let t = Tokens::get();
+    let (r, resp) = ui.allocate_exact_size(vec2(26.0, 22.0), Sense::click());
+    let fill = if resp.hovered() { t.hover } else { t.field };
+    ui.painter().rect(r, 3.0, fill, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    let c = r.center();
+    let ink = if matches!(what, Transport::Play | Transport::Stop) { t.accent } else { t.icon };
+    let p = ui.painter();
+    let tri = |dir: f32, x: f32| {
+        egui::Shape::convex_polygon(vec![pos2(x - 4.0 * dir, c.y - 5.0), pos2(x + 4.0 * dir, c.y), pos2(x - 4.0 * dir, c.y + 5.0)], ink, Stroke::NONE)
+    };
+    let bar = |x: f32| egui::Shape::rect_filled(egui::Rect::from_center_size(pos2(x, c.y), vec2(2.0, 10.0)), 0.0, ink);
+    match what {
+        Transport::Play => drop(p.add(tri(1.0, c.x + 1.0))),
+        Transport::Stop => drop(p.rect_filled(egui::Rect::from_center_size(c, vec2(9.0, 9.0)), 1.0, ink)),
+        Transport::Back => {
+            p.add(bar(c.x + 4.0));
+            p.add(tri(-1.0, c.x - 1.0));
+        }
+        Transport::Forward => {
+            p.add(bar(c.x - 4.0));
+            p.add(tri(1.0, c.x + 1.0));
+        }
+        Transport::Start => {
+            p.add(bar(c.x - 6.0));
+            p.add(tri(-1.0, c.x - 0.5));
+            p.add(tri(-1.0, c.x + 5.0));
+        }
+        Transport::End => {
+            p.add(tri(1.0, c.x - 5.0));
+            p.add(tri(1.0, c.x + 0.5));
+            p.add(bar(c.x + 6.0));
+        }
+    }
+    resp.on_hover_text(tip)
+}
 
 /// The study command's parameters.
 pub fn study_params(s: &Session, name: &str, study: Option<&str>, steps: &str, tracks: &[Track]) -> Result<Value, String> {
@@ -321,7 +394,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 ui.end_row();
             }
         }
-        Mo::MotionStudy { name, study, steps, tracks, step, playing, shown, saved, error } => {
+        Mo::MotionStudy { name, study, steps, tracks, step, playing, looping, speed, shown, saved, error } => {
             row_label(ui, "Name");
             ui.text_edit_singleline(name);
             ui.end_row();
@@ -336,19 +409,54 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 ui.end_row();
                 return enter;
             }
-            // Playback.
-            row_label(ui, "Step");
+            // Playback: to start, step back, play/stop, step on, to end; loop and speed.
+            row_label(ui, "Playback");
             ui.horizontal(|ui| {
-                if ui.button(if *playing { "■" } else { "▶" }).on_hover_text(if *playing { "Stop" } else { "Play" }).clicked() {
+                let last = f64::from(total);
+                if transport(ui, Transport::Start, "To the start").clicked() {
+                    *step = 0.0;
+                    *playing = false;
+                }
+                if transport(ui, Transport::Back, "Step back").clicked() {
+                    *step = (step.round() - 1.0).max(0.0);
+                    *playing = false;
+                }
+                let (what, tip) = if *playing { (Transport::Stop, "Stop") } else { (Transport::Play, "Play") };
+                if transport(ui, what, tip).clicked() {
+                    // Play from the start again when at the end.
+                    if !*playing && step.round() >= last {
+                        *step = 0.0;
+                    }
                     *playing = !*playing;
                 }
-                ui.spacing_mut().slider_width = 220.0;
-                ui.add(egui::Slider::new(step, 0.0..=f64::from(total)).integer());
+                if transport(ui, Transport::Forward, "Step on").clicked() {
+                    *step = (step.round() + 1.0).min(last);
+                    *playing = false;
+                }
+                if transport(ui, Transport::End, "To the end").clicked() {
+                    *step = last;
+                    *playing = false;
+                }
+                ui.add_space(6.0);
+                ui.checkbox(looping, "Loop");
+                let names: Vec<String> = SPEEDS.iter().map(|x| format!("{x}×")).collect();
+                let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+                combo(ui, "ms_speed", &refs, speed);
+            });
+            ui.end_row();
+            row_label(ui, "Step");
+            ui.horizontal(|ui| {
+                ui.spacing_mut().slider_width = 260.0;
+                if ui.add(egui::Slider::new(step, 0.0..=f64::from(total)).integer().show_value(false)).dragged() {
+                    *playing = false;
+                }
+                ui.label(RichText::new(format!("{} / {total}", step.round() as u32)).color(t.text_dim));
             });
             ui.end_row();
             if *playing {
-                let dt = ui.input(|i| i.stable_dt).min(0.1);
-                *step = (*step + f64::from(dt) * 24.0) % (f64::from(total) + 1.0);
+                let dt = f64::from(ui.input(|i| i.stable_dt).min(0.1));
+                let fps = STEPS_PER_S * SPEEDS.get(*speed).copied().unwrap_or(1.0);
+                (*step, *playing) = advance(*step, dt * fps, total, *looping);
                 ui.ctx().request_repaint();
             }
             // Tracks: a row per keyed joint value, its keys on a strip under the steps.
@@ -667,6 +775,15 @@ pub fn commands(app: &SolveApp, k: &Mo, inputs: &[SelInput]) -> Result<Vec<(Stri
 mod tests {
     use super::*;
 
+    /// Playback runs on, starts over at the end when looping, else stops on the last step.
+    #[test]
+    fn playback_advances_loops_and_stops() {
+        assert_eq!(advance(3.0, 2.0, 10, true), (5.0, true));
+        assert_eq!(advance(9.5, 2.0, 10, true), (0.5, true));
+        assert_eq!(advance(9.5, 2.0, 10, false), (10.0, false));
+        assert_eq!(advance(4.0, -3.0, 10, false), (4.0, true));
+    }
+
     /// What a dialog shows goes away when it closes; an exploded view applied with OK stays.
     #[test]
     fn shown_poses_are_put_back() {
@@ -688,6 +805,8 @@ mod tests {
                     tracks: vec![],
                     step: 0.0,
                     playing: false,
+                    looping: true,
+                    speed: 2,
                     shown: None,
                     saved,
                     error: None,
