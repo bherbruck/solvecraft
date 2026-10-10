@@ -404,6 +404,12 @@ pub fn heal(solid: Solid, size: f64) -> Solid {
 
 /// [`heal`], keeping faces apart along lines they were split along on purpose.
 pub(crate) fn heal_keep(solid: Solid, size: f64, keep: &[Vec<Vec3>]) -> Solid {
+    // Edges a boolean made are intersection curves, which panic where they no longer
+    // evaluate; the solid then stays as it is.
+    crate::guard("heal", || Ok(heal_shells(&solid, size, keep))).ok().flatten().unwrap_or(solid)
+}
+
+fn heal_shells(solid: &Solid, size: f64, keep: &[Vec<Vec3>]) -> Option<Solid> {
     let tol = (size * 1e-7).max(1e-9);
     let mut shells = Vec::new();
     let mut changed = false;
@@ -428,9 +434,9 @@ pub(crate) fn heal_keep(solid: Solid, size: f64, keep: &[Vec<Vec3>]) -> Solid {
         shells.push(cur);
     }
     if !changed {
-        return solid;
+        return None;
     }
-    Solid::try_new(shells).unwrap_or(solid)
+    Solid::try_new(shells).ok()
 }
 
 #[cfg(test)]

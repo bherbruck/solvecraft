@@ -296,7 +296,7 @@ fn boolean_whole(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
                     empty_votes += 1;
                     last = "empty result".into();
                 }
-                Ok(s) => match Body::new(crate::heal::heal_keep(s, size, &keep)) {
+                Ok(s) => match guard("boolean result", || Body::new(crate::heal::heal_keep(s, size, &keep))) {
                     Ok(body) => {
                         let (ok, v) = check(&body);
                         if ok {
