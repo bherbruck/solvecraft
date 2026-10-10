@@ -55,13 +55,13 @@ fn densify(pts: &[Vec3]) -> Vec<Vec3> {
 
 /// The mesh edge a selection means: by index if it still passes through the point, otherwise
 /// the nearest.
-fn edge_points(m: &Mesh, index: usize, point: Vec3) -> Option<Vec<Vec3>> {
+fn edge_index(m: &Mesh, index: usize, point: Vec3) -> Option<usize> {
     let near = |e: &Vec<Vec3>| e.windows(2).map(|w| point.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
     let tol = m.bounds().diagonal().max(1.0) * 1e-6;
-    if let Some(e) = m.edges.get(index).filter(|e| near(e) < tol) {
-        return Some(e.clone());
+    if m.edges.get(index).is_some_and(|e| near(e) < tol) {
+        return Some(index);
     }
-    m.edges.iter().min_by(|a, b| near(a).total_cmp(&near(b))).cloned()
+    m.edges.iter().enumerate().min_by(|(_, a), (_, b)| near(a).total_cmp(&near(b))).map(|(i, _)| i)
 }
 
 fn face_tris(m: &Mesh, f: usize) -> Vec<[Vec3; 3]> {
@@ -75,15 +75,23 @@ fn describe(s: &Session, sel: &Sel) -> Option<(Geo, Option<Vec3>, Value)> {
         Sel::Vertex { point, .. } => (Geo::Points(vec![*point]), None, json!({"type": "vertex", "position": point})),
         Sel::Edge { body, index, point } => {
             let m = st.body(body)?.mesh();
-            let pts = edge_points(&m, *index, *point)?;
+            let index = edge_index(&m, *index, *point)?;
+            let pts = m.edges.get(index)?;
+            let rim = m.circular_rim(index);
+            if rim.len() > 1 {
+                let pieces: Vec<&Vec<Vec3>> = rim.iter().filter_map(|&i| m.edges.get(i)).collect();
+                let len: f64 = pieces.iter().map(|p| polyline_len(p)).sum();
+                let points = pieces.iter().flat_map(|p| densify(p)).collect();
+                return Some((Geo::Points(points), None, json!({"type": "edge", "length_mm": len})));
+            }
             let (a, b) = (*pts.first()?, *pts.last()?);
             let straight = (b - a).normalized().filter(|d| pts.iter().all(|p| (*p - a).cross(*d).len() < 1e-6 * (1.0 + a.dist(b))));
-            let len = polyline_len(&pts);
-            (Geo::Points(densify(&pts)), straight, json!({"type": "edge", "length_mm": len}))
+            let len = polyline_len(pts);
+            (Geo::Points(densify(pts)), straight, json!({"type": "edge", "length_mm": len}))
         }
         Sel::Face { body, index, .. } => {
             let m = st.body(body)?.mesh();
-            let tris = face_tris(&m, *index);
+            let tris = m.surface_patch(*index).into_iter().flat_map(|f| face_tris(&m, f)).collect::<Vec<_>>();
             let area: f64 = tris.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).len() * 0.5).sum();
             let normals: Vec<Vec3> = tris.iter().filter_map(|[a, b, c]| (*b - *a).cross(*c - *a).normalized()).collect();
             let planar = normals.first().copied().filter(|n0| normals.iter().all(|n| n.dot(*n0) > 1.0 - 1e-6));
@@ -150,10 +158,41 @@ fn closest(a: &Geo, b: &Geo) -> Option<(Vec3, Vec3)> {
 pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
     let cmd = "inspect.measure";
     let list = items.as_array().ok_or_else(|| bad(cmd, "`items` must be a list of selections"))?;
-    if list.is_empty() || list.len() > 2 {
+    if list.is_empty() || list.len() > 1000 {
         return Err(bad(cmd, "measure one or two items"));
     }
-    let sels: Vec<Sel> = list.iter().map(|v| serde_json::from_value::<Sel>(v.clone()).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<_>>()?;
+    let st = s.world_state();
+    let mut sels = Vec::new();
+    for value in list {
+        let mut sel = serde_json::from_value::<Sel>(value.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+        // Two kernel halves of one visible item are one measurement target.
+        match &mut sel {
+            Sel::Edge { body, index, point } => {
+                if let Some(b) = st.body(body) {
+                    let m = b.mesh();
+                    let resolved = edge_index(&m, *index, *point).unwrap_or(*index);
+                    *index = m.circular_rim(resolved).first().copied().unwrap_or(resolved);
+                }
+            }
+            Sel::Face { body, index, .. } => {
+                if let Some(b) = st.body(body) {
+                    *index = b.mesh().surface_patch(*index).first().copied().unwrap_or(*index);
+                }
+            }
+            _ => {}
+        }
+        let duplicate = sels.iter().any(|x| match (x, &sel) {
+            (Sel::Edge { body: a, index: i, .. }, Sel::Edge { body: b, index: j, .. })
+            | (Sel::Face { body: a, index: i, .. }, Sel::Face { body: b, index: j, .. }) => a == b && i == j,
+            _ => false,
+        });
+        if !duplicate {
+            sels.push(sel);
+        }
+        if sels.len() > 2 {
+            return Err(bad(cmd, "measure one or two items"));
+        }
+    }
     let mut described = Vec::new();
     for x in &sels {
         described.push(describe(s, x).ok_or_else(|| bad(cmd, "an item can't be measured (pick vertices, edges, faces or bodies)"))?);
