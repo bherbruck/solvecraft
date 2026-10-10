@@ -34,6 +34,12 @@ impl NameCell {
     pub fn new(origin: Option<Arc<NamingOrigin>>) -> Self {
         NameCell { origin, names: Arc::new(OnceLock::new()) }
     }
+    /// Names already known (a moved copy of a body keeps its faces' names).
+    pub fn known(names: Arc<Vec<String>>) -> Self {
+        let cell = OnceLock::new();
+        let _ = cell.set(names);
+        NameCell { origin: None, names: Arc::new(cell) }
+    }
 }
 
 /// Deeper chains than this are named by position only (bounded work and stack).

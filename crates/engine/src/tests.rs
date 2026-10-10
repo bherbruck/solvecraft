@@ -20,6 +20,21 @@ fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-12)
 }
 
+#[test]
+fn join_extrude_from_a_chamfered_top_face() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+    run(&mut s, "solid.extrude", json!({"distance": 20}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[10, 0, 20]], "distance": 2}));
+    let base = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": {"face": [0, 0, 20]}}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "join"}));
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!(rel(volume(&mut s), base + PI * 64.0 * 5.0) < 5e-4);
+}
+
 mod component_frames;
 mod robustness;
 
@@ -650,10 +665,10 @@ fn section_analysis() {
     assert!(s.execute("inspect.section", &json!({"plane": {"normal": [0, 0, 0]}})).is_err());
     run(&mut s, "inspect.section", json!({"clear": true}));
     assert!(s.section.is_none());
-    // XZ's normal is -Y: an offset moves the cut to -Y, `at` places it at a world Y, and the
+    // XZ's normal is +Y: an offset moves the cut to +Y, `at` places it at a world Y, and the
     // result says where the cut landed either way.
     let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 10}));
-    assert_eq!((r["section"]["axis"].as_str(), r["section"]["at"].as_f64()), (Some("Y"), Some(-10.0)), "{r}");
+    assert_eq!((r["section"]["axis"].as_str(), r["section"]["at"].as_f64()), (Some("Y"), Some(10.0)), "{r}");
     for (plane, at, flip) in [("XZ", -282.5, false), ("XZ", 7.0, true), ("XY", 3.0, false), ("YZ", -4.0, true)] {
         let r = run(&mut s, "inspect.section", json!({"plane": plane, "at": at, "flip": flip}));
         assert_eq!(r["section"]["at"].as_f64(), Some(at), "{plane} {r}");

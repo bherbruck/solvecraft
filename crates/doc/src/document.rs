@@ -1115,6 +1115,7 @@ impl FeatureKind {
             FeatureKind::Extrude { extent, .. } => extent.to.iter_mut().chain(extent.from.iter_mut()).collect(),
             FeatureKind::Revolve { to: Some(p), .. } => vec![p],
             FeatureKind::Thread { face, .. } => vec![face],
+            FeatureKind::Boss { position, .. } | FeatureKind::SnapFit { position, .. } | FeatureKind::Rest { position, .. } => vec![position],
             _ => Vec::new(),
         }
     }

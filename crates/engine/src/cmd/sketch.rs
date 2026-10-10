@@ -359,8 +359,10 @@ pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
         }
         Some(v @ Value::Object(o)) => {
             if let Some(fp) = o.get("face").and_then(vec3) {
-                // A planar face of a body at this point.
-                let st = s.model.state();
+                // A planar face of a body at this point, as the active component sees the model
+                // (another component's face where it is placed).
+                let model = s.model.state();
+                let st = solvecraft_doc::state_in_frame(&s.doc, &model, s.active_component);
                 let mut found = None;
                 let mut face_name = None;
                 for b in &st.bodies {
@@ -406,7 +408,10 @@ fn face_contains(m: &solvecraft_geom::Mesh, fi: usize, p: Vec3, tol: f64) -> boo
         let s1 = (b - a).cross(p - a).dot(n);
         let s2 = (c - b).cross(p - b).dot(n);
         let s3 = (a - c).cross(p - c).dot(n);
-        (s1 >= 0.0 && s2 >= 0.0 && s3 >= 0.0) || (s1 <= 0.0 && s2 <= 0.0 && s3 <= 0.0)
+        (s1 >= 0.0 && s2 >= 0.0 && s3 >= 0.0)
+            || (s1 <= 0.0 && s2 <= 0.0 && s3 <= 0.0)
+            // Exact curved boundaries can sit just outside their tessellated chords.
+            || p.dist_to_segment(a, b).min(p.dist_to_segment(b, c)).min(p.dist_to_segment(c, a)) <= tol * 0.1
     })
 }
 

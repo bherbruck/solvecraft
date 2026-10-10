@@ -18,13 +18,15 @@
 //!   ["*"]` (every body), which is what they did, so those designs keep their shape.
 //! - 4: joint origins mate by default (B's z against A's, as Fusion does); `flip` now means
 //!   "don't mate". Older joints keep their placement: their `flip` is inverted.
+//! - 6: XZ origin planes use sketch y = -Z and normal +Y. Older XZ references become
+//!   explicit planes retaining their previous axes, including offset-plane expressions.
 
 use serde_json::Value;
 
 use crate::{DocError, Document, Result};
 
 /// The format this build writes.
-pub const FORMAT: u32 = 5;
+pub const FORMAT: u32 = 6;
 
 pub fn format_string(n: u32) -> String {
     format!("solvecraft/{n}")
@@ -37,7 +39,30 @@ pub fn version_of(s: &str) -> Option<u32> {
 
 /// JSON-level upgrades: entry `i` turns format `i + 1` into `i + 2`.
 type JsonStep = fn(&mut Value) -> Result<()>;
-const JSON_STEPS: [JsonStep; 4] = [|_| Ok(()), v2_to_v3, v3_to_v4, v4_to_v5];
+const JSON_STEPS: [JsonStep; 5] = [|_| Ok(()), v2_to_v3, v3_to_v4, v4_to_v5, v5_to_v6];
+
+/// Old XZ references retain their exact frame, including nested offset and angled planes.
+/// New origin references use +Y; freezing the old frame avoids changing sketch coordinates,
+/// dimensions, profiles, extrude directions or parameter expressions in saved designs.
+fn v5_to_v6(v: &mut Value) -> Result<()> {
+    fn preserve(v: &mut Value) {
+        match v {
+            Value::Object(o) => {
+                let old_xz = o.get("type").and_then(Value::as_str) == Some("origin")
+                    && o.get("name").and_then(Value::as_str).is_some_and(|n| n.eq_ignore_ascii_case("XZ") || n.eq_ignore_ascii_case("FRONT"));
+                if old_xz {
+                    *v = serde_json::json!({"type": "custom", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}});
+                } else {
+                    o.values_mut().for_each(preserve);
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(preserve),
+            _ => {}
+        }
+    }
+    preserve(v);
+    Ok(())
+}
 
 /// Features in designs with components keep reaching every body.
 fn v4_to_v5(v: &mut Value) -> Result<()> {
@@ -196,6 +221,32 @@ mod tests {
         assert_eq!(d.format, format_string(FORMAT));
         let back = read(&d.to_json()).unwrap();
         assert_eq!(back, d);
+    }
+
+    #[test]
+    fn old_xz_and_nested_offsets_keep_their_frame() {
+        let mut doc = Document::new("old XZ");
+        let id = doc
+            .add_feature(
+                crate::FeatureKind::ConstructionPlane {
+                    plane: crate::PlaneRef::Offset { base: Box::new(crate::PlaneRef::Origin { name: "XZ".into() }), distance: "7 mm".into() },
+                },
+                None,
+            )
+            .unwrap();
+        let mut json: Value = serde_json::from_str(&doc.to_json()).unwrap();
+        json["format"] = Value::from("solvecraft/5");
+        let migrated = read(&json.to_string()).unwrap();
+        let crate::FeatureKind::ConstructionPlane { plane } = &migrated.feature(id).unwrap().kind else { panic!("plane") };
+        let (values, errors) = migrated.param_values();
+        assert!(errors.is_empty());
+        let p = migrated.resolve_plane(&values, plane, 0).unwrap();
+        assert_eq!(p.y, solvecraft_geom::Vec3::Z);
+        assert_eq!(p.normal(), -solvecraft_geom::Vec3::Y);
+        assert_eq!(p.origin, solvecraft_geom::Vec3::new(0.0, -7.0, 0.0));
+        assert_eq!(read(&migrated.to_json()).unwrap(), migrated);
+        let fresh = doc.resolve_plane(&values, &crate::PlaneRef::Origin { name: "XZ".into() }, 0).unwrap();
+        assert_eq!(fresh.normal(), solvecraft_geom::Vec3::Y);
     }
 
     #[test]

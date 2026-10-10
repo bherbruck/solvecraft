@@ -1,12 +1,14 @@
 [
  {
-  "note": "A box in a new component, the component moved +100 in x, the root active: a sketch on the box's top face projects the face's edges where the face is (x 100-140), not at the body's own coordinates (x 0-40)."
+  "note": "User bug 1/4 (\"big square\"): with the root active, Create Sketch on a moved component's face puts the sketch on the face where it is shown, its projected loop on the face's edges (not at the component's own coordinates)."
  },
  {
   "call": "engine.execute",
   "params": {
    "command": "component.create",
-   "params": {}
+   "params": {
+    "name": "C"
+   }
   }
  },
  {
@@ -16,12 +18,7 @@
    "params": {
     "length": 40,
     "width": 30,
-    "height": 10,
-    "corner": [
-     0,
-     0,
-     0
-    ]
+    "height": 20
    }
   }
  },
@@ -30,7 +27,7 @@
   "params": {
    "command": "component.activate",
    "params": {
-    "component": 0
+    "component": "root"
    }
   }
  },
@@ -39,7 +36,7 @@
   "params": {
    "command": "occurrence.move",
    "params": {
-    "occurrence": 2,
+    "occurrence": "C:1",
     "translate": [
      100,
      0,
@@ -55,23 +52,6 @@
   }
  },
  {
-  "expect": {
-   "bbox": {
-    "body": "Body1",
-    "min": [
-     100,
-     0,
-     0
-    ],
-    "max": [
-     140,
-     30,
-     10
-    ]
-   }
-  }
- },
- {
   "start": "sketch.create"
  },
  {
@@ -79,7 +59,7 @@
    "world": [
     120,
     15,
-    10
+    20
    ]
   }
  },
@@ -90,20 +70,34 @@
  },
  {
   "expect": {
-   "linked_world_range": {
-    "x": [
-     100,
-     140
-    ],
-    "y": [
+   "sketch_curves": {
+    "linked": 4,
+    "own": 0
+   }
+  }
+ },
+ {
+  "expect": {
+   "sketch_world": {
+    "sketch": "Sketch1",
+    "point": "p1",
+    "at": [
+     140,
      0,
-     30
-    ],
-    "z": [
-     10,
-     10
+     20
     ]
    }
+  }
+ },
+ {
+  "shot": "s43_root_sketch_on_moved_face"
+ },
+ {
+  "start": "sketch.finish"
+ },
+ {
+  "expect": {
+   "errors": 0
   }
  }
 ]

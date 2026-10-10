@@ -495,7 +495,9 @@ mod tests {
         assert!((zmax(&mut s) - 5.0).abs() < 1e-6);
         run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "XZ"}));
         let z = zmax(&mut s);
-        assert!(z > 9.0, "the profile stands up on XZ: {z}");
+        assert!(z.abs() < 1e-6, "positive sketch Y on XZ extends toward -Z: {z}");
+        let ymin = run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"]["min"][2].as_f64().unwrap();
+        assert!((ymin + 20.0).abs() < 1e-6);
         assert!(s.execute("sketch.redefine", &json!({"sketch": sk, "plane": "nope"})).is_err());
         assert!(s.execute("sketch.redefine", &json!({"sketch": 999, "plane": "XY"})).is_err());
     }

@@ -467,6 +467,8 @@ pub struct Sketch {
     /// Links to geometry outside the sketch (projections, intersections, includes).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<crate::link::Link>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offsets: Vec<crate::offset::OffsetChain>,
     /// 3D curves (world coordinates) carried by the sketch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wires: Vec<crate::wire::Wire>,
@@ -495,6 +497,7 @@ impl Sketch {
             curves: Vec::new(),
             constraints: Vec::new(),
             links: Vec::new(),
+            offsets: Vec::new(),
             wires: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),

@@ -232,41 +232,41 @@ const INDENT: f32 = 14.0;
 
 /// One row's look.
 #[derive(Default)]
-struct Row<'a> {
-    depth: usize,
+pub(crate) struct Row<'a> {
+    pub(crate) depth: usize,
     /// Some(open) for rows that fold.
-    fold: Option<bool>,
+    pub(crate) fold: Option<bool>,
     /// Some(visible) for rows with an eye.
-    eye: Option<bool>,
-    icon: &'a str,
-    label: &'a str,
-    selected: bool,
-    dim: bool,
-    color: Option<Color32>,
+    pub(crate) eye: Option<bool>,
+    pub(crate) icon: &'a str,
+    pub(crate) label: &'a str,
+    pub(crate) selected: bool,
+    pub(crate) dim: bool,
+    pub(crate) color: Option<Color32>,
     /// Component rows: is it the active one?
-    radio: Option<bool>,
+    pub(crate) radio: Option<bool>,
     /// Trailing badges: "lock", "pin".
-    badges: &'a [&'a str],
+    pub(crate) badges: &'a [&'a str],
 }
 
 /// What happened on a row.
 #[derive(Default)]
-struct RowResp {
-    rect: Option<Rect>,
-    clicked: bool,
-    double: bool,
-    secondary: Option<Pos2>,
-    fold: bool,
-    eye: bool,
-    radio: bool,
-    hovered: bool,
+pub(crate) struct RowResp {
+    pub(crate) rect: Option<Rect>,
+    pub(crate) clicked: bool,
+    pub(crate) double: bool,
+    pub(crate) secondary: Option<Pos2>,
+    pub(crate) fold: bool,
+    pub(crate) eye: bool,
+    pub(crate) radio: bool,
+    pub(crate) hovered: bool,
     /// The row's response (drag and drop).
-    resp: Option<egui::Response>,
+    pub(crate) resp: Option<egui::Response>,
     /// The press began on the fold arrow, eye or radio (not a drag of the row).
-    on_control: bool,
+    pub(crate) on_control: bool,
 }
 
-fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
+pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let t = Tokens::get();
     // Rows scrolled out of view only take their space: no widgets, no painting.
     let r = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), ROW_H));
@@ -449,11 +449,11 @@ fn sel_of_key(k: &str) -> Option<Sel> {
     None
 }
 
-fn is_open(app: &SolveApp, key: &str, default: bool) -> bool {
+pub(crate) fn is_open(app: &SolveApp, key: &str, default: bool) -> bool {
     if default { !app.tree.collapsed.contains(key) } else { app.tree.expanded.contains(key) }
 }
 
-fn toggle(app: &mut SolveApp, key: &str, default: bool) {
+pub(crate) fn toggle(app: &mut SolveApp, key: &str, default: bool) {
     if default {
         if !app.tree.collapsed.remove(key) {
             app.tree.collapsed.insert(key.to_string());

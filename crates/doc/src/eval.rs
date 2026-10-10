@@ -471,6 +471,22 @@ fn cache_key(f: &Feature, chain_fp: u64, local: u64, ctx: u64, state: &ModelStat
     h.finish()
 }
 
+/// Where components are placed, for a sketch that sees other components' geometry (on a face,
+/// or with projections): it is resolved in its own component's view of them.
+fn placement_digest(doc: &Document, f: &Feature) -> u64 {
+    let FeatureKind::Sketch { plane, sketch } = &f.kind else { return 0 };
+    if doc.occurrences.is_empty() || (!matches!(plane, PlaneRef::Face { .. }) && sketch.links.is_empty()) {
+        return 0;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for o in &doc.occurrences {
+        o.id.hash(&mut h);
+        o.transform.iter().flatten().for_each(|x| x.to_bits().hash(&mut h));
+    }
+    serde_json::to_string(&doc.body_offsets).unwrap_or_default().hash(&mut h);
+    h.finish()
+}
+
 fn now() -> web_time::Instant {
     web_time::Instant::now()
 }
@@ -514,7 +530,7 @@ impl Model {
         let ctx = context_digest(doc, &vals);
         for (i, f) in doc.features.iter().enumerate() {
             let rolled_back = i >= marker;
-            let mut fp = fingerprint(prev_fp, f, &vals, rolled_back);
+            let mut fp = fingerprint(prev_fp, f, &vals, rolled_back) ^ placement_digest(doc, f);
             // Sheet metal features also depend on the rules (and the parameters they use).
             if f.kind.is_sheet() {
                 let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -570,7 +586,7 @@ impl Model {
                 continue;
             }
             // The same feature on the same inputs: its earlier result.
-            let key = cache_key(f, fp, fingerprint(0, f, &vals, false), ctx, &state);
+            let key = cache_key(f, fp, fingerprint(0, f, &vals, false) ^ placement_digest(doc, f), ctx, &state);
             if !self.no_cache
                 && let Some(c) = self.cache.lock().ok().and_then(|mut m| m.get(key))
             {
@@ -1405,6 +1421,20 @@ fn feature_tools(vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -
             }
             let mut tools = Vec::new();
             for r in &regions {
+                if *operation == Operation::Join {
+                    let exact = kernel::extrude(&ss.plane, std::slice::from_ref(r), lo + off, hi + off)?;
+                    if exact.iter().all(|tool| {
+                        st.bodies
+                            .iter()
+                            .filter(|b| targets.is_empty() || targets.contains(&b.name))
+                            .any(|b| kernel::can_join_touching_faces(&b.body, tool))
+                    }) {
+                        // Preserve a whole touching face: extending into a chamfer replaces
+                        // the sewable seam with a coincident curved intersection.
+                        tools.extend(exact);
+                        continue;
+                    }
+                }
                 let (l2, h2) = extend_for_coplanar(st, &ss.plane, r, lo + off, hi + off, *operation, targets);
                 let probe = |p: Vec2| (1..4).map(|k| ss.plane.to_world(p) + n * (lo + off + (hi - lo) * k as f64 / 4.0)).collect::<Vec<_>>();
                 let r = grow_profile_for_coplanar(st, r, *operation, targets, &probe);
@@ -2288,17 +2318,25 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::Align { .. }
         | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st),
         FeatureKind::Sketch { plane, sketch } => {
+            let fst = state_in_frame(doc, st, f.component);
             let (plane, face_warning) = match plane {
-                PlaneRef::Face { plane: picked, at, name } => face_plane(st, picked, *at, name.as_deref()),
-                other => (doc.resolve_plane_in(vals, other, 0, Some(st))?, None),
+                PlaneRef::Face { plane: picked, at, name } => face_plane(&fst, picked, *at, name.as_deref()),
+                other => (doc.resolve_plane_in(vals, other, 0, Some(&fst))?, None),
             };
             let mut sk = sketch.clone();
-            let mut warns = crate::project::refresh_links(doc, vals, st, &plane, &mut sk);
+            let mut warns = crate::project::refresh_links(doc, vals, &fst, &plane, &mut sk);
+            drop(fst);
+            sk.refresh_offsets()?;
             if let Some(w) = face_warning {
                 warns.insert(0, w);
             }
             doc.apply_dimension_values(vals, &mut sk)?;
-            let report = solve(&mut sk);
+            let mut report = solve(&mut sk);
+            if !sk.offsets.is_empty() {
+                // Source dimensions may have moved curves during the solve.
+                sk.refresh_offsets()?;
+                report = solve(&mut sk);
+            }
             if !report.ok() {
                 warns.insert(0, format!("the sketch constraints conflict ({})", report.failing.join(", ")));
             }
@@ -2816,6 +2854,52 @@ fn unique_body_name(st: &ModelState, base: &str) -> String {
         return base.to_string();
     }
     (2..).map(|i| format!("{base} ({i})")).find(|n| st.body(n).is_none()).unwrap_or_else(|| base.to_string())
+}
+
+/// The model as a component sees it: bodies and sketches of components placed differently from
+/// it are moved into its frame (through both placements), so a sketch on another component's
+/// face finds the face where it is shown and projects its edges there. The model itself when
+/// every placement agrees (the usual case).
+pub fn state_in_frame<'a>(doc: &Document, st: &'a ModelState, comp: u64) -> std::borrow::Cow<'a, ModelState> {
+    use std::borrow::Cow;
+    if doc.occurrences.is_empty() && doc.body_offsets.is_empty() {
+        return Cow::Borrowed(st);
+    }
+    let Some(inv) = crate::mat_inverse(&doc.component_transform(comp)) else { return Cow::Borrowed(st) };
+    let comp_of_feature = |id: u64| doc.feature(id).map(|f| f.component).unwrap_or(0);
+    let rel = |c: u64, body: Option<&str>| {
+        let m = crate::mat_mul(&inv, &doc.component_transform(c));
+        match body.and_then(|b| doc.body_offsets.get(b)) {
+            Some(o) => crate::mat_mul(&m, o),
+            None => m,
+        }
+    };
+    let body_m: Vec<Mat> = st.bodies.iter().map(|b| rel(doc.body_component(&b.name, b.feature), Some(&b.name))).collect();
+    let sketch_m: Vec<Mat> = st.sketches.iter().map(|s| rel(comp_of_feature(s.feature), None)).collect();
+    if body_m.iter().chain(&sketch_m).all(crate::is_identity) {
+        return Cow::Borrowed(st);
+    }
+    let mut out = st.clone();
+    for (b, m) in out.bodies.iter_mut().zip(&body_m) {
+        if !crate::is_identity(m)
+            && let Ok(t) = kernel::transform_matrix(&b.body, *m)
+        {
+            // Moving a body keeps its faces (and their order): it keeps their names.
+            let names = crate::naming::face_names(b);
+            let mut nb = ModelBody::new(b.name.clone(), t, b.feature);
+            nb.component = b.component;
+            nb.names = crate::naming::NameCell::known(names);
+            *b = nb;
+        }
+    }
+    for (s, m) in out.sketches.iter_mut().zip(&sketch_m) {
+        if !crate::is_identity(m)
+            && let Some(np) = Plane::new(crate::apply_point(m, s.plane.origin), crate::apply_vector(m, s.plane.x), crate::apply_vector(m, s.plane.y))
+        {
+            s.plane = np;
+        }
+    }
+    Cow::Owned(out)
 }
 
 /// The model placed in the world: each component's bodies, sketches and threads through every

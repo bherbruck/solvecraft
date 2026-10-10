@@ -155,6 +155,7 @@ impl Default for UiState {
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str, &[&str]) -> Option<String>>>,
+    pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
 }
@@ -304,6 +305,7 @@ impl SolveApp {
             "browser_collapsed": self.tree.collapsed,
             "browser_expanded": self.tree.expanded,
             "recent": self.home.recent,
+            "recent_opened_at": self.home.opened_at,
             "shortcut_box": self.sbox.prefs(),
             "shortcuts": self.keymap.prefs(),
             "toolbar": self.toolbar_custom.prefs(),
@@ -319,6 +321,7 @@ impl SolveApp {
     pub fn load_prefs(&mut self, prefs: &str) {
         let Ok(v) = serde_json::from_str::<Value>(prefs) else { return };
         let flag = |k: &str| v.get(k).and_then(Value::as_bool);
+        self.home.opened_at = v.get("recent_opened_at").and_then(|x| serde_json::from_value(x.clone()).ok()).unwrap_or_default();
         if let Some(d) = flag("dark") {
             self.ui.dark = d;
         }
@@ -430,6 +433,12 @@ impl SolveApp {
         }
         self.tool = None;
         self.home.open = false;
+        if matches!(id, "sketch.insert_dxf" | "sketch.insert_svg") {
+            if let Some(path) = self.services.pick_open.as_ref().and_then(|f| f()) {
+                let _ = self.run(id, json!({"path": path}));
+            }
+            return;
+        }
         if matches!(id, "file.insert_step" | "file.insert_mesh") {
             if let Some(p) = self.services.pick_open.as_ref().and_then(|f| f()) {
                 self.insert_path(&p);
@@ -480,7 +489,20 @@ impl SolveApp {
         {
             self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
         }
-        if let Some(t) = tools::Tool::for_command(id) {
+        if let Some(mut t) = tools::Tool::for_command(id) {
+            if id == "sketch.dimension" {
+                t.picks = self
+                    .session
+                    .selection
+                    .iter()
+                    .filter_map(|s| match s {
+                        solvecraft_engine::Sel::SketchCurve { id } | solvecraft_engine::Sel::SketchPoint { id } => Some(id.clone()),
+                        _ => None,
+                    })
+                    .take(2)
+                    .collect();
+                let _ = self.session.execute("select.clear", &json!({}));
+            }
             self.tool = Some(t);
             self.set_status(tools::hint(id), false);
             return;

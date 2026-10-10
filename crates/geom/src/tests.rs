@@ -28,10 +28,10 @@ fn raycast_hits_front_face() {
 #[test]
 fn planes() {
     assert_eq!(Plane::XY.normal(), Vec3::Z);
-    assert_eq!(Plane::XZ.normal(), Vec3::new(0.0, -1.0, 0.0));
+    assert_eq!(Plane::XZ.normal(), Vec3::Y);
     assert_eq!(Plane::YZ.normal(), Vec3::X);
     let p = Plane::XZ.to_world(Vec2::new(3.0, 4.0));
-    assert_eq!(p, Vec3::new(3.0, 0.0, 4.0));
+    assert_eq!(p, Vec3::new(3.0, 0.0, -4.0));
     assert_eq!(Plane::XZ.to_local(p), Vec2::new(3.0, 4.0));
     let hit = Plane::XY.offset(5.0).intersect_ray(Vec3::new(1.0, 2.0, 10.0), Vec3::new(0.0, 0.0, -2.0)).unwrap();
     assert!(hit.dist(Vec3::new(1.0, 2.0, 5.0)) < 1e-12);

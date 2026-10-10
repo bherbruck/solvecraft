@@ -1682,6 +1682,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.viewport.boxsel = None;
     }
     crate::ref_images::show(app, ui, &painter, &proj);
+    crate::dialogs_assembly::origins(app, &painter, &proj);
     overlays(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch3d::show(app, &painter, &proj);
