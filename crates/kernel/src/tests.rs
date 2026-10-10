@@ -1361,8 +1361,12 @@ fn partial_revolve_on_the_axis() {
 /// exactly where the other body cut them).
 #[test]
 fn boolean_identity_on_tangent_primitives() {
-    for seed in [1, 32, 169] {
-        let c = crate::fuzz::boolean_case(seed);
+    // Independent seeds, one thread each.
+    let cases: Vec<_> = std::thread::scope(|scope| {
+        let workers = [1, 32, 169].map(|seed| scope.spawn(move || (seed, crate::fuzz::boolean_case(seed))));
+        workers.into_iter().map(|w| w.join().unwrap()).collect()
+    });
+    for (seed, c) in cases {
         assert_eq!(c.outcome, "ok", "seed {seed}: {} {:?} {:?}", c.detail, c.a, c.b);
     }
 }

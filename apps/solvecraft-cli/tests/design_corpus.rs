@@ -153,7 +153,8 @@ fn try_bytes(bytes: &[u8]) {
 #[test]
 fn damaged_and_hostile_design_files_never_panic() {
     let mut rng = Rng(0x5eed_cafe_f00d_d00d);
-    let mut failures = Vec::new();
+    // The cases come from one seeded sequence; trying them is independent, so threads share it.
+    let mut all_cases: Vec<(String, String, Vec<u8>)> = Vec::new();
     for p in corpus() {
         let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
         let bytes = std::fs::read(&p).unwrap();
@@ -198,14 +199,28 @@ fn damaged_and_hostile_design_files_never_panic() {
         cases.push(("features repeated".into(), v.to_string().into_bytes()));
         cases.push(("deep nesting".into(), format!("{}{}", "[".repeat(100_000), "]".repeat(100_000)).into_bytes()));
         cases.push(("binary".into(), (0..4096u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8).collect()));
-        for (what, b) in cases {
-            if std::env::var_os("CORPUS_TRACE").is_some() {
-                eprintln!("{name}: {what}");
-            }
-            if std::panic::catch_unwind(|| try_bytes(&b)).is_err() {
-                failures.push(format!("{name}: {what}"));
-            }
-        }
+        all_cases.extend(cases.into_iter().map(|(what, b)| (name.clone(), what, b)));
     }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let failures: Vec<String> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut failures = Vec::new();
+                    while let Some((name, what, b)) = all_cases.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                        if std::env::var_os("CORPUS_TRACE").is_some() {
+                            eprintln!("{name}: {what}");
+                        }
+                        if std::panic::catch_unwind(|| try_bytes(b)).is_err() {
+                            failures.push(format!("{name}: {what}"));
+                        }
+                    }
+                    failures
+                })
+            })
+            .collect();
+        workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
+    });
     assert!(failures.is_empty(), "panics:\n{}", failures.join("\n"));
 }

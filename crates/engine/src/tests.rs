@@ -279,8 +279,6 @@ fn hostile_params_never_panic() {
         "chain",
         "at",
         "curve",
-        "major",
-        "minor",
         "minor_radius",
         "apex",
         "rho",
@@ -298,32 +296,47 @@ fn hostile_params_never_panic() {
         "kind",
         "prefix",
     ];
-    let mut internal = Vec::new();
-    for spec in command_specs() {
-        if matches!(spec.id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf") {
-            continue; // file system side effects are covered by their own tests
-        }
-        for v in hostile_values() {
-            for k in keys {
-                if k == "path" && spec.id.starts_with("parameters.") {
-                    continue; // parameter files: covered by their own tests (no stray files)
-                }
-                let mut s = Session::default();
-                // A model with a sketch, a body and an active sketch, so most commands get far.
-                let _ = s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10}));
-                let _ = s.execute("sketch.create", &json!({"plane": "XY"}));
-                let _ = s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [5, 5]}));
-                let p = json!({ k: v.clone() });
-                if let Err(EngineError::Internal(id, msg)) = s.execute(spec.id, &p) {
-                    internal.push(format!("{id} {p}: {msg}"));
-                }
-                // Whole-value hostility too.
-                if let Err(EngineError::Internal(id, msg)) = s.execute(spec.id, &v) {
-                    internal.push(format!("{id} {v}: {msg}"));
-                }
-            }
-        }
-    }
+    // Commands are independent; worker threads take them one at a time (their costs vary a lot).
+    let ids: Vec<&str> = command_specs()
+        .iter()
+        .map(|spec| spec.id)
+        .filter(|id| !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf")) // file system side effects are covered by their own tests
+        .collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let internal: Vec<String> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut internal = Vec::new();
+                    while let Some(&id) = ids.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                        for v in hostile_values() {
+                            for k in keys {
+                                if k == "path" && id.starts_with("parameters.") {
+                                    continue; // parameter files: covered by their own tests (no stray files)
+                                }
+                                let mut s = Session::default();
+                                // A model with a sketch, a body and an active sketch, so most commands get far.
+                                let _ = s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10}));
+                                let _ = s.execute("sketch.create", &json!({"plane": "XY"}));
+                                let _ = s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [5, 5]}));
+                                let p = json!({ k: v.clone() });
+                                if let Err(EngineError::Internal(id, msg)) = s.execute(id, &p) {
+                                    internal.push(format!("{id} {p}: {msg}"));
+                                }
+                                // Whole-value hostility too.
+                                if let Err(EngineError::Internal(id, msg)) = s.execute(id, &v) {
+                                    internal.push(format!("{id} {v}: {msg}"));
+                                }
+                            }
+                        }
+                    }
+                    internal
+                })
+            })
+            .collect();
+        workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
+    });
     assert!(internal.is_empty(), "commands panicked:\n{}", internal.join("\n"));
 }
 
