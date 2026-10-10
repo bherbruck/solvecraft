@@ -121,7 +121,7 @@ pub fn sketch_point_visible(sk: &Sketch, i: usize) -> bool {
 /// The scene for a headless render.
 pub fn scene(s: &Session, cam: &Camera) -> Scene {
     let st = s.world_state();
-    let mut sc = Scene { background: Some((colors::BG_TOP, colors::BG_BOTTOM)), ..Default::default() };
+    let mut sc = Scene { background: Some((colors::BG_TOP, colors::BG_BOTTOM)), clip: s.section.map(|(o, n)| (n, n.dot(o))), ..Default::default() };
     let b = bounds(s);
     sc.radius = (b.diagonal() * 0.5).max(cam.half_height()).max(10.0) + b.center().dist(cam.target);
     // Grid on the ground plane (XY with Z up, XZ with Y up).
@@ -292,5 +292,20 @@ mod tests {
         let img = solvecraft_render::render(&scene(&s, &cam), &cam, 400, 400);
         let dark = img.rgba.chunks(4).filter(|p| p[0] < 70 && p[1] < 70 && p[2] < 75).count();
         assert!(dark > 40, "silhouette pixels: {dark}");
+    }
+
+    /// A section shows in snapshots: the cut part is gone and the cut face is drawn.
+    #[test]
+    fn snapshots_show_the_section() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let cam = home_camera(&s);
+        let whole = solvecraft_render::render(&scene(&s, &cam), &cam, 200, 140).rgba;
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+        let sc = scene(&s, &cam);
+        assert!(sc.clip.is_some());
+        let cut = solvecraft_render::render(&sc, &cam, 200, 140).rgba;
+        let changed = whole.chunks(4).zip(cut.chunks(4)).filter(|(a, b)| a != b).count();
+        assert!(changed > 500, "{changed} pixels changed");
     }
 }

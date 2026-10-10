@@ -40,6 +40,9 @@ pub struct Scene {
     pub background: Option<(Rgb, Rgb)>,
     /// Scene radius for clipping planes.
     pub radius: f64,
+    /// A section cut: (normal, d); what lies where normal·p > d is cut away, and the inside
+    /// shows as a hatched cap.
+    pub clip: Option<(Vec3, f64)>,
 }
 
 /// RGBA pixels plus depth.
@@ -109,6 +112,9 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
         for (ti, t) in m.triangles.iter().enumerate() {
             let face = m.tri_face.get(ti).copied();
             let base = sm.face_colors.iter().find(|(f, _)| Some(*f) == face).map_or(body, |(_, c)| c.f());
+            let wp = t.map(|k| m.positions.get(k as usize).copied().unwrap_or_default());
+            // Seen from inside (only where a section cuts the body open).
+            let inside = (wp[1] - wp[0]).cross(wp[2] - wp[0]).dot(view_dir) < 0.0;
             let (Some(Some(a)), Some(Some(b)), Some(Some(cc))) = (pts.get(t[0] as usize), pts.get(t[1] as usize), pts.get(t[2] as usize)) else {
                 continue;
             };
@@ -134,6 +140,11 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                     if w0 < -1e-9 || w1 < -1e-9 || w2 < -1e-9 {
                         continue;
                     }
+                    if let Some((cn, cd)) = scene.clip
+                        && cn.dot(wp[0] * w0 + wp[1] * w1 + wp[2] * w2) > cd
+                    {
+                        continue;
+                    }
                     let z = (w0 * a[2] + w1 * b[2] + w2 * cc[2]) as f32;
                     let i = y * sw + x;
                     if c.depth.get(i).is_some_and(|d| z < *d) {
@@ -141,6 +152,12 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                             *d = z;
                         }
                         let n = (ns[0] * w0 + ns[1] * w1 + ns[2] * w2).normalized().unwrap_or(Vec3::Z);
+                        if scene.clip.is_some() && inside {
+                            // The cut: the body's colour, hatched at 45 degrees.
+                            let k = if ((x + y) / SS) % 9 < 2 { 0.5 } else { 0.8 };
+                            c.put(x, y, base.map(|v| v * k), 1.0);
+                            continue;
+                        }
                         let mut col = shade(n, view_dir, base);
                         let ndv = n.dot(view_dir).abs();
                         if curved && ndv < 0.14 {
@@ -165,6 +182,11 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             let steps = (len.ceil() as usize).clamp(1, 20_000);
             for k in 0..=steps {
                 let t = k as f64 / steps as f64;
+                if let Some((cn, cd)) = scene.clip
+                    && cn.dot(*p + (*q - *p) * t) > cd + 1e-6
+                {
+                    continue;
+                }
                 let (x, y, z) = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
                 let r = half.ceil() as i64;
                 for dy in -r..=r {
@@ -268,6 +290,7 @@ mod tests {
             lines: vec![],
             background: None,
             radius: 20.0,
+            clip: None,
         };
         let mut cam = Camera { distance: 50.0, ..Default::default() };
         cam.set_view(StandardView::Front);
