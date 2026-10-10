@@ -939,6 +939,66 @@ fn z_axis() -> Vec3 {
 }
 
 impl FeatureKind {
+    /// Sketches the feature is built from (profiles, paths, points): deleting one of them
+    /// deletes the feature. Every kind is listed, so a new one has to say what it uses.
+    pub fn input_sketches(&self) -> Vec<u64> {
+        use FeatureKind as K;
+        match self {
+            K::Extrude { sketch, .. }
+            | K::Revolve { sketch, .. }
+            | K::Emboss { sketch, .. }
+            | K::Rib { sketch, .. }
+            | K::SheetBase { sketch, .. }
+            | K::SheetContour { sketch, .. } => vec![*sketch],
+            K::Sweep { sketch, path_sketch, .. } => vec![*sketch, *path_sketch],
+            K::Pipe { path_sketch, .. } | K::Pattern { pattern: PatternKind::Path { path_sketch, .. }, .. } => vec![*path_sketch],
+            K::Loft { sections, .. } => sections.iter().map(|s| s.sketch).collect(),
+            K::SheetFold { sketch, .. } | K::SplitFace { sketch, .. } | K::Patch { sketch, .. } => sketch.iter().copied().collect(),
+            K::Hole { points, .. } => points.iter().map(|p| p.sketch).collect(),
+            K::Sketch { .. }
+            | K::Pattern { .. }
+            | K::Fillet { .. }
+            | K::Chamfer { .. }
+            | K::Box { .. }
+            | K::Cylinder { .. }
+            | K::Sphere { .. }
+            | K::Torus { .. }
+            | K::Combine { .. }
+            | K::Mirror { .. }
+            | K::Thread { .. }
+            | K::Shell { .. }
+            | K::Draft { .. }
+            | K::ConstructionPlane { .. }
+            | K::Split { .. }
+            | K::ConstructionAxis { .. }
+            | K::ConstructionPoint { .. }
+            | K::Scale { .. }
+            | K::OffsetFace { .. }
+            | K::DeleteFace { .. }
+            | K::BoundingSolid { .. }
+            | K::ReplaceFace { .. }
+            | K::Align { .. }
+            | K::Coil { .. }
+            | K::SheetFlange { .. }
+            | K::SheetHem { .. }
+            | K::SheetUnfold { .. }
+            | K::SheetConvert { .. }
+            | K::Boss { .. }
+            | K::Lip { .. }
+            | K::SnapFit { .. }
+            | K::Rest { .. }
+            | K::BoundaryFill { .. }
+            | K::Remove { .. }
+            | K::Stitch { .. }
+            | K::Thicken { .. }
+            | K::SurfaceExtend { .. }
+            | K::SurfaceTrim { .. }
+            | K::Move { .. }
+            | K::Import { .. }
+            | K::MeshImport { .. } => Vec::new(),
+        }
+    }
+
     /// A sheet metal feature (its result depends on the sheet metal rules).
     pub fn is_plastic(&self) -> bool {
         matches!(self, FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. })
@@ -1620,18 +1680,7 @@ impl Document {
     pub fn delete_feature(&mut self, id: u64) -> Result<Vec<u64>> {
         let idx = self.feature_index(id).ok_or_else(|| DocError::Unknown(format!("feature {id}")))?;
         let mut gone = vec![id];
-        for f in &self.features {
-            match &f.kind {
-                FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } if *sketch == id => gone.push(f.id),
-                FeatureKind::Sweep { sketch, path_sketch, .. } if *sketch == id || *path_sketch == id => gone.push(f.id),
-                FeatureKind::Loft { sections, .. } if sections.iter().any(|s| s.sketch == id) => gone.push(f.id),
-                FeatureKind::Pattern { pattern: PatternKind::Path { path_sketch, .. }, .. } if *path_sketch == id => gone.push(f.id),
-                FeatureKind::Emboss { sketch, .. } | FeatureKind::Rib { sketch, .. } if *sketch == id => gone.push(f.id),
-                FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } if *sketch == id => gone.push(f.id),
-                FeatureKind::SheetFold { sketch: Some(s), .. } | FeatureKind::SplitFace { sketch: Some(s), .. } if *s == id => gone.push(f.id),
-                _ => {}
-            }
-        }
+        gone.extend(self.features.iter().filter(|f| f.kind.input_sketches().contains(&id)).map(|f| f.id));
         self.features.retain(|f| !gone.contains(&f.id));
         // Configuration columns of deleted features go with them.
         let keep: Vec<bool> = self.configs.columns.iter().map(|c| !matches!(c, crate::config::Column::Suppress(id) if gone.contains(id))).collect();

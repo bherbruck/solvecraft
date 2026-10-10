@@ -295,3 +295,53 @@ fn parameter_cycles_are_found() {
     assert!(errs["a"].contains("circular reference: a → b → c → a"), "{}", errs["a"]);
     assert!(vals.contains_key("d") && errs.contains_key("a") && errs.contains_key("e"));
 }
+
+/// Features that use a sketch's points or regions go with it (not only profile and path users).
+#[test]
+fn input_sketches_cover_points_and_patches() {
+    let hole: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "hole", "position": [0, 0, 0], "direction": [0, 0, -1], "diameter": "3",
+        "points": {"sketch": 7, "ids": ["p1"]},
+    }))
+    .unwrap();
+    assert_eq!(hole.input_sketches(), vec![7]);
+    let patch: FeatureKind = serde_json::from_value(serde_json::json!({"type": "patch", "sketch": 9})).unwrap();
+    assert_eq!(patch.input_sketches(), vec![9]);
+    let pipe: FeatureKind = serde_json::from_value(serde_json::json!({"type": "pipe", "path_sketch": 72, "path": ["l1"], "diameter": "4"})).unwrap();
+    assert_eq!(pipe.input_sketches(), vec![72]);
+}
+
+/// Guard for `FeatureKind::input_sketches`: a variant with a field that refers to a sketch
+/// (a field named `*sketch*` holding an id, sketch points or loft sections) must not sit in the
+/// arm that returns no sketches. New variants are caught by the compiler (the match has no
+/// wildcard); this catches a sketch field added to an existing variant.
+#[test]
+fn input_sketches_lists_every_variant_with_a_sketch_field() {
+    let src = include_str!("document.rs");
+    let body = src.split("pub enum FeatureKind {").nth(1).and_then(|s| s.split("\n}\n").next()).unwrap();
+    let mut with_sketch = Vec::new();
+    let mut variant = "";
+    for line in body.lines() {
+        let t = line.trim();
+        if line.starts_with("    ") && !line.starts_with("     ") && t.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+            variant = t.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("");
+            continue;
+        }
+        let Some((name, ty)) = t.strip_prefix("pub ").unwrap_or(t).split_once(':') else { continue };
+        let refers = (name.contains("sketch") && (ty.contains("u64") || ty.contains("SketchPoints")))
+            || ty.contains("SketchPoints")
+            || ty.contains("LoftSection");
+        if refers && !line.trim_start().starts_with("//") && !with_sketch.contains(&variant) {
+            with_sketch.push(variant);
+        }
+    }
+    assert!(with_sketch.len() >= 10, "the FeatureKind parse found too few sketch users: {with_sketch:?}");
+    let f = src.split("pub fn input_sketches(&self)").nth(1).unwrap();
+    let empty_arm = f.split("=> Vec::new()").next().and_then(|s| s.rsplit("=> ").next()).unwrap();
+    for v in with_sketch {
+        assert!(
+            !empty_arm.contains(&format!("K::{v} {{")),
+            "FeatureKind::{v} has a sketch field but input_sketches says it uses no sketch: deleting the sketch would leave it broken"
+        );
+    }
+}
