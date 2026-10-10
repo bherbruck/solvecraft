@@ -282,4 +282,15 @@ mod tests {
         let img = solvecraft_render::render(&sc, &cam, 200, 140);
         assert!(img.rgba.chunks(4).any(|p| p[1] > 120 && p[0] < 90 && p[2] < 110), "no green pixels");
     }
+
+    /// Curved surfaces get a dark silhouette line in snapshots where they turn away.
+    #[test]
+    fn snapshots_draw_silhouettes_on_curved_surfaces() {
+        let mut s = Session::default();
+        s.execute("solid.sphere", &json!({"diameter": 20})).unwrap();
+        let cam = home_camera(&s);
+        let img = solvecraft_render::render(&scene(&s, &cam), &cam, 400, 400);
+        let dark = img.rgba.chunks(4).filter(|p| p[0] < 70 && p[1] < 70 && p[2] < 75).count();
+        assert!(dark > 40, "silhouette pixels: {dark}");
+    }
 }

@@ -113,6 +113,9 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                 continue;
             };
             let ns: Vec<Vec3> = t.iter().map(|k| m.normals.get(*k as usize).copied().unwrap_or(Vec3::Z)).collect();
+            // A curved surface (its normals turn across the triangle) gets a silhouette line
+            // where it turns away from the eye.
+            let curved = ns.iter().any(|n| n.dist(ns[0]) > 1e-6);
             let (x0, x1) = (a[0].min(b[0]).min(cc[0]).floor().max(0.0), a[0].max(b[0]).max(cc[0]).ceil().min(sw as f64 - 1.0));
             let (y0, y1) = (a[1].min(b[1]).min(cc[1]).floor().max(0.0), a[1].max(b[1]).max(cc[1]).ceil().min(sh as f64 - 1.0));
             if !(x0 <= x1 && y0 <= y1) {
@@ -138,7 +141,15 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                             *d = z;
                         }
                         let n = (ns[0] * w0 + ns[1] * w1 + ns[2] * w2).normalized().unwrap_or(Vec3::Z);
-                        c.put(x, y, shade(n, view_dir, base), 1.0);
+                        let mut col = shade(n, view_dir, base);
+                        let ndv = n.dot(view_dir).abs();
+                        if curved && ndv < 0.14 {
+                            let a = 1.0 - ndv / 0.14;
+                            for (k, e) in col.iter_mut().zip([0.07, 0.08, 0.10]) {
+                                *k = *k * (1.0 - a) + e * a;
+                            }
+                        }
+                        c.put(x, y, col, 1.0);
                     }
                 }
             }

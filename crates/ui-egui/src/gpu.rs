@@ -219,8 +219,6 @@ struct Resources {
     line: wgpu::RenderPipeline,
     /// Lines behind the model (depth test >).
     line_hidden: wgpu::RenderPipeline,
-    /// Silhouettes: back faces pushed out a little on screen, drawn dark behind the model.
-    outline: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     bind: wgpu::BindGroup,
@@ -276,7 +274,7 @@ const SHADER: &str = r#"
 struct U {
     vp: mat4x4<f32>,
     back: vec4<f32>,   // xyz = toward the eye, w = 1 for linear output
-    screen: vec4<f32>, // viewport width, height (px), depth bias
+    screen: vec4<f32>, // viewport width, height (px), depth bias, silhouettes on (1)
     clip: vec4<f32>,   // section plane: normal, d (zero normal: no section)
     cap: vec4<f32>,    // colour of the inside of cut bodies
     ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature), parameter
@@ -326,6 +324,8 @@ fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f3
     // Derivatives first, in uniform control flow (browsers' WGSL compilers reject them after
     // a branch that returns; the whole shader module then fails and nothing is drawn).
     let k = curvature(i);
+    let ndv = dot(normalize(i.n), normalize(u.back.xyz));
+    let fw = fwidth(ndv);
     if (clipped(i.wp)) { discard; }
     if (!front && length(u.clip.xyz) > 0.5) {
         return out_color(u.cap);
@@ -333,7 +333,14 @@ fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f3
     if (u.ana.x > 0.5 && length(i.n) > 0.5) {
         return analysis(i, k);
     }
-    return shade(i);
+    let c = shade(i);
+    // Silhouettes (styles with edges): where a curved surface turns away from the eye, a line
+    // about 1.5 px wide, on the visible surface only (depth-correct).
+    if (u.screen.w > 0.5 && length(i.n) > 0.5 && fw > 1e-6) {
+        let a = 1.0 - smoothstep(fw * 0.8, fw * 2.0, abs(ndv));
+        return vec4<f32>(mix(c.rgb, out_color(vec4<f32>(0.07, 0.08, 0.10, 1.0)).rgb, a), c.a);
+    }
+    return c;
 }
 
 /// How fast the normal turns across the pixel (per mm).
@@ -477,28 +484,6 @@ fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(
 fn fs_line(i: LOut) -> @location(0) vec4<f32> {
     if (clipped(i.wp)) { discard; }
     return out_color(i.c);
-}
-
-/// Silhouettes: back faces pushed out along their screen-space normal by about 1.5 px.
-@vertex
-fn vs_outline(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: vec4<f32>) -> TOut {
-    var o: TOut;
-    o.pos = u.vp * vec4<f32>(p, 1.0);
-    let nc = (u.vp * vec4<f32>(n, 0.0)).xy * u.screen.xy;
-    if (length(nc) > 1e-6) {
-        let d = normalize(nc) * 1.5 * 2.0 / u.screen.xy;
-        o.pos = vec4<f32>(o.pos.xy + d * o.pos.w, o.pos.zw);
-    }
-    o.n = vec3<f32>(0.0);
-    o.c = c;
-    o.wp = p;
-    return o;
-}
-
-@fragment
-fn fs_outline(i: TOut) -> @location(0) vec4<f32> {
-    if (clipped(i.wp)) { discard; }
-    return out_color(vec4<f32>(0.07, 0.08, 0.10, 1.0));
 }
 
 struct IOut {
@@ -756,31 +741,6 @@ impl Resources {
             xray: pipeline("sc_xray", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             line: pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             line_hidden: pipeline("sc_lines_hidden", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
-            outline: device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("sc_outline"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &module,
-                    entry_point: Some("vs_outline"),
-                    buffers: &[Some(tri_layout())],
-                    compilation_options: Default::default(),
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    cull_mode: Some(wgpu::Face::Front),
-                    ..Default::default()
-                },
-                depth_stencil: depth(wgpu::CompareFunction::Less, false),
-                multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
-                fragment: Some(wgpu::FragmentState {
-                    module: &module,
-                    entry_point: Some("fs_outline"),
-                    targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
-                    compilation_options: Default::default(),
-                }),
-                multiview_mask: None,
-                cache: None,
-            }),
             overlay: pipeline("sc_overlay", "vs_line", "fs_line_all", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             uniform,
             bind,
@@ -940,9 +900,6 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         tris(pass, &res.tri, &m.tris);
         tris(pass, &res.tri, &pv.tris);
         tris(pass, &res.tri_hl, &h.tris);
-        if self.outline {
-            tris(pass, &res.outline, &m.tris);
-        }
         lines(pass, &res.line, &m.lines);
         lines(pass, &res.line_hidden, &m.hidden);
         lines(pass, &res.line_hidden, &h.hidden);
@@ -971,7 +928,7 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
 pub fn uniform_bytes(cb: &ViewportCallback, w: f32, h: f32, linear: bool) -> Vec<u8> {
     let mut v: Vec<f32> = cb.view_proj.iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
-    v.extend([w.max(1.0), h.max(1.0), 2e-4, 0.0]);
+    v.extend([w.max(1.0), h.max(1.0), 2e-4, if cb.outline { 1.0 } else { 0.0 }]);
     v.extend(cb.clip);
     v.extend(cb.cap);
     v.extend(cb.analysis);
