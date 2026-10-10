@@ -67,6 +67,25 @@ fn width_follows_an_expression() {
     assert!(e.contains("expected a length, got an angle"), "{e}");
 }
 
+/// Setting a parameter back rebuilds nothing (the earlier results are reused) and says so: the
+/// features it restored are reported next to `recomputed`, so `recomputed: 0` is not mistaken
+/// for "nothing changed". timeline.edit reports the same.
+#[test]
+fn setting_a_parameter_back_reports_restored_features() {
+    let mut s = Session::default();
+    block(&mut s);
+    let r = run(&mut s, "parameters.change", json!({"name": "len", "expression": "100 mm"}));
+    assert_eq!((r["recomputed"].as_u64(), r["restored"].as_u64()), (Some(2), Some(0)), "{r}");
+    let r = run(&mut s, "parameters.change", json!({"name": "len", "expression": "60 mm"}));
+    assert_eq!((r["recomputed"].as_u64(), r["restored"].as_u64()), (Some(0), Some(2)), "{r}");
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 10.0) < 1e-9);
+    let r = run(&mut s, "timeline.edit", json!({"feature": "Extrude1", "set": {"extent": {"distance": "20"}}}));
+    assert_eq!((r["recomputed"].as_u64(), r["restored"].as_u64()), (Some(1), Some(0)), "{r}");
+    let r = run(&mut s, "timeline.edit", json!({"feature": "Extrude1", "set": {"extent": {"distance": "10"}}}));
+    assert_eq!((r["recomputed"].as_u64(), r["restored"].as_u64()), (Some(0), Some(1)), "{r}");
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 10.0) < 1e-9);
+}
+
 #[test]
 fn feature_inputs_are_named_and_editable() {
     let mut s = Session::default();

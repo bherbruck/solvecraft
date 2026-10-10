@@ -377,6 +377,10 @@ pub struct Model {
     empty: Arc<ModelState>,
     /// Features recomputed by the last `evaluate`.
     pub last_recomputed: usize,
+    /// Features whose result the last `evaluate` took from the cache instead of recomputing: the
+    /// same feature on the same inputs was evaluated before (an edit set back, undo, redo, a
+    /// configuration row). Their geometry did change since the previous evaluation.
+    pub last_restored: usize,
     /// Results by inputs, shared with this model's copies.
     pub cache: Arc<std::sync::Mutex<EvalCache>>,
     /// Evaluate everything from scratch (no reuse; tests compare the two).
@@ -505,6 +509,7 @@ impl Model {
         let mut out: Vec<FeatureResult> = Vec::with_capacity(doc.features.len());
         let mut reuse = !self.no_cache;
         let mut recomputed = 0;
+        let mut restored = 0;
         let marker = doc.marker.unwrap_or(usize::MAX);
         let ctx = context_digest(doc, &vals);
         for (i, f) in doc.features.iter().enumerate() {
@@ -569,6 +574,7 @@ impl Model {
             if !self.no_cache
                 && let Some(c) = self.cache.lock().ok().and_then(|mut m| m.get(key))
             {
+                restored += 1;
                 if c.error.is_none() {
                     state = c.state.clone();
                 }
@@ -652,6 +658,7 @@ impl Model {
         }
         self.results = out;
         self.last_recomputed = recomputed;
+        self.last_restored = restored;
     }
 }
 

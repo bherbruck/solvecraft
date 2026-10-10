@@ -28,8 +28,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params("feature: id|name → features deleted with it, and features that would fail without it"),
     CommandSpec::new("timeline.suppress", "Suppress Feature", suppress).params("feature: id|name, suppressed?: bool (default toggles)"),
-    CommandSpec::new("timeline.edit", "Edit Feature", edit_feature)
-        .params("feature: id|name, set: {fields to change, e.g. {\"extent\": {\"distance\": \"30\"}}}"),
+    CommandSpec::new("timeline.edit", "Edit Feature", edit_feature).params(
+        "feature: id|name, set: {fields to change, e.g. {\"extent\": {\"distance\": \"30\"}}} → recomputed: features rebuilt, \
+             restored: features whose earlier result for the same inputs was reused",
+    ),
     CommandSpec::new("select.set", "Select", select_set)
         .noundo()
         .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool"),
@@ -204,7 +206,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
-    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed}))
+    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored}))
 }
 
 fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -307,7 +309,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
-    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed}))
+    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored}))
 }
 
 fn dependents(s: &mut Session, p: &Value) -> Result<Value> {

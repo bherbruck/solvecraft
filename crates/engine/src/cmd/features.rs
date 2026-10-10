@@ -581,7 +581,7 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
             let new = format!("({old}) + ({distance})");
             let r = super::find_command("timeline.edit").ok_or_else(|| bad(cmd, "timeline.edit"))?;
             let out = (r.run)(s, &json!({"feature": f.id, "set": {key: new}}))?;
-            return Ok(json!({"feature": f.id, "edited": f.name, key: new, "recomputed": out.get("recomputed")}));
+            return Ok(json!({"feature": f.id, "edited": f.name, key: new, "recomputed": out.get("recomputed"), "restored": out.get("restored")}));
         }
         // Another curved face moves along its normal.
         let r = super::find_command("solid.offset_face").ok_or_else(|| bad(cmd, "solid.offset_face"))?;
