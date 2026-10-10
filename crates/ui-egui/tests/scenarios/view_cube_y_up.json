@@ -1,0 +1,16 @@
+[
+ {"note": "With Y up (#3) the view cube turns with the world: its TOP is world +Y and clicking it looks down −Y in the standard plan orientation; FRONT looks along −Z."},
+ {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}},
+ {"call": "ui.set", "params": {"upAxis": "y"}},
+ {"call": "ui.view", "params": {"view": "home"}},
+ {"move": {"cube": [0, 0, 1]}},
+ {"expect": {"shown_handles": ["cube_hover:top"]}},
+ {"click": {"handle": "cube:top"}},
+ {"expect": {"camera": {"pitch_deg": 90, "yaw_deg": 0, "back": [0, 1, 0]}}},
+ {"call": "ui.view", "params": {"view": "home"}},
+ {"click": {"handle": "cube:front"}},
+ {"expect": {"camera": {"pitch_deg": 0, "yaw_deg": 0, "back": [0, 0, 1]}}},
+ {"call": "ui.view", "params": {"view": "home"}},
+ {"click": {"handle": "cube:top-front-right"}},
+ {"expect": {"camera": {"pitch_deg": 35.26, "yaw_deg": -45, "back": [0.57735, 0.57735, 0.57735]}}}
+]

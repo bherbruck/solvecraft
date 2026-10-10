@@ -1879,7 +1879,7 @@ fn cpu_render(app: &mut SolveApp, ctx: &egui::Context, painter: &egui::Painter, 
 
 /// Where a point in view-cube units (faces at ±1) is drawn.
 pub(crate) fn cube_point(app: &SolveApp, rect: Rect, p: Vec3) -> Pos2 {
-    let (r, u, _) = app.cam.basis();
+    let (r, u, _) = cube_basis(&app.cam);
     pos2(rect.right() - 80.0 + (p.dot(r) * CUBE_SCALE) as f32, rect.top() + 80.0 - (p.dot(u) * CUBE_SCALE) as f32)
 }
 
@@ -1890,20 +1890,29 @@ const CUBE_SCALE: f64 = 32.0;
 /// (orthographic views) and the 8 corner facets (iso views); the edges between them are not
 /// targets. Hover lights the face or facet under the pointer, a click turns the view to it, the
 /// house goes home.
+/// The camera's basis in its up-axis frame (Z up): the cube's TOP is the world's up, X, Y or Z.
+fn cube_basis(cam: &Camera) -> (Vec3, Vec3, Vec3) {
+    let (r, u, b) = cam.basis();
+    (cam.to_frame(r), cam.to_frame(u), cam.to_frame(b))
+}
+
 fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let t = Tokens::get();
     let c = pos2(rect.right() - 80.0, rect.top() + 80.0);
-    let (r, u, b) = app.cam.basis();
+    let (r, u, b) = cube_basis(&app.cam);
+    let (wr, wu, _) = app.cam.basis();
     let painter = ui.painter_at(rect);
     let hover = ui.input(|i| i.pointer.hover_pos());
     let targets = cube_targets();
     let shapes = cube_projected(&targets, (r, u, b), c);
     let hovered = hover.and_then(|h| cube_hit(&shapes, h));
     // Axis triad from the cube's back corner, drawn first: the cube hides what is behind it.
-    let to2 = |p: Vec3| pos2(c.x + (p.dot(r) * CUBE_SCALE) as f32, c.y - (p.dot(u) * CUBE_SCALE) as f32);
+    // The corner is in the cube's frame, the axes are the world's.
     let o = Vec3::new(-1.0, -1.0, -1.0);
+    let at = pos2(c.x + (o.dot(r) * CUBE_SCALE) as f32, c.y - (o.dot(u) * CUBE_SCALE) as f32);
     for (d, col) in [(Vec3::X, colors::AXIS_X), (Vec3::Y, colors::AXIS_Y), (Vec3::Z, colors::AXIS_Z)] {
-        painter.line_segment([to2(o), to2(o + d * 2.6)], Stroke::new(2.0, Color32::from_rgb(col.0, col.1, col.2)));
+        let tip = at + vec2((d.dot(wr) * CUBE_SCALE * 2.6) as f32, -(d.dot(wu) * CUBE_SCALE * 2.6) as f32);
+        painter.line_segment([at, tip], Stroke::new(2.0, Color32::from_rgb(col.0, col.1, col.2)));
     }
     // Back to front: the faces and facets turned toward the camera.
     for (i, pts) in shapes.iter().rev() {
@@ -1934,7 +1943,11 @@ fn view_cube(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         app.animate_view("home");
     }
     if let Some(dir) = clicked {
-        let to = app.cam.looking_from(dir);
+        let mut to = app.cam.looking_from(app.cam.from_frame(dir));
+        // TOP and BOTTOM turn to the standard plan views (front edge at the bottom).
+        if dir.x == 0.0 && dir.y == 0.0 {
+            to.yaw = 0.0;
+        }
         app.animate_to(to);
     }
 }

@@ -577,7 +577,8 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 }
             }
             "camera" => {
-                // {"camera": {"yaw_deg": y, "pitch_deg": p}}: where the camera looks from (±0.5°),
+                // {"camera": {"yaw_deg": y, "pitch_deg": p, "back"?: [x,y,z]}}: where the camera
+                // looks from (yaw and pitch in its up-axis frame, ±0.5°),
                 // once any view animation has finished.
                 for _ in 0..240 {
                     if h.app.cam_anim.is_none() {
@@ -589,6 +590,14 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 let near = |got: f64, want: &Value| want.as_f64().is_none_or(|w| ((got - w + 540.0).rem_euclid(360.0) - 180.0).abs() < 0.5);
                 if !near(yaw, &v["yaw_deg"]) || !near(pitch, &v["pitch_deg"]) {
                     return Err(format!("camera yaw {yaw:.2}°, pitch {pitch:.2}°, want {v}"));
+                }
+                // "back": the world direction from the target to the eye.
+                if let Some(want) = v["back"].as_array() {
+                    let b = h.app.cam.back();
+                    let w = |i: usize| want.get(i).and_then(Value::as_f64).unwrap_or(f64::NAN);
+                    if (b.x - w(0)).abs() > 1e-3 || (b.y - w(1)).abs() > 1e-3 || (b.z - w(2)).abs() > 1e-3 {
+                        return Err(format!("camera looks from {b:?}, want {want:?}"));
+                    }
                 }
             }
             "count" => {
