@@ -1,0 +1,15 @@
+{
+ "description": "A thin 437 mm bar whose profile has a 3 mm concave arc, cut by a long prism whose top is tilted 21 degrees to the bar (an elliptical cut through the arc's cylinder). The check on the result meshed both bodies at a step from the 920 mm prism, which faceted the arc so coarsely that a correct cut failed the membership test. Result: the bar with its end trimmed by the tilted plane, as a split by that plane gives.",
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": "XZ", "offset": -462, "name": "Profile"}},
+  {"command": "sketch.line", "params": {"points": [[147.4407, -849.95], [147.4407, -851.0], [151.3952, -851.0], [151.3952, -847.4709], [150.3952, -847.4709]]}},
+  {"command": "sketch.arc.center_point", "params": {"center": [147.4407, -846.95], "start": "l1.start", "end": "l4.end"}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"sketch": "Profile", "profiles": "all", "direction": "positive", "start_offset": -1, "distance": 437.52, "operation": "new", "body_name": "Tool"}},
+  {"command": "sketch.create", "params": {"plane": "YZ", "name": "Clip"}},
+  {"command": "sketch.line", "params": {"points": [[-472, 853.91], [-432, 838.47], [-432, 820], [-472, 820]], "closed": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"sketch": "Clip", "profiles": "all", "start_offset": -10, "distance": 920, "operation": "new", "body_name": "ClipBody"}},
+  {"command": "solid.combine", "params": {"target": "Tool", "tools": ["ClipBody"], "operation": "cut", "keep_tools": true}}
+ ]
+}
