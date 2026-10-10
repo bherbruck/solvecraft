@@ -225,7 +225,8 @@ pub enum FeatureKind {
         body: Option<String>,
     },
     Box {
-        corner: Vec3,
+        #[serde(with = "point_expr")]
+        corner: PointExpr,
         length: String,
         width: String,
         height: String,
@@ -233,7 +234,8 @@ pub enum FeatureKind {
         operation: Operation,
     },
     Cylinder {
-        base: Vec3,
+        #[serde(with = "point_expr")]
+        base: PointExpr,
         #[serde(default = "z_axis")]
         axis: Vec3,
         radius: String,
@@ -242,13 +244,15 @@ pub enum FeatureKind {
         operation: Operation,
     },
     Sphere {
-        center: Vec3,
+        #[serde(with = "point_expr")]
+        center: PointExpr,
         radius: String,
         #[serde(default)]
         operation: Operation,
     },
     Torus {
-        center: Vec3,
+        #[serde(with = "point_expr")]
+        center: PointExpr,
         major: String,
         minor: String,
         #[serde(default)]
@@ -481,7 +485,8 @@ pub enum FeatureKind {
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
     Coil {
-        base: Vec3,
+        #[serde(with = "point_expr")]
+        base: PointExpr,
         #[serde(default = "z_axis")]
         axis: Vec3,
         diameter: String,
@@ -938,6 +943,45 @@ fn z_axis() -> Vec3 {
     Vec3::Z
 }
 
+/// A point whose coordinates are length expressions (`["basin_width / 2", "10 mm", "0"]`), so
+/// it follows parameter changes. Primitives are placed by one.
+pub type PointExpr = [String; 3];
+
+/// A point as expressions (plain numbers, mm).
+pub fn point_expr(p: Vec3) -> PointExpr {
+    [format!("{}", p.x), format!("{}", p.y), format!("{}", p.z)]
+}
+
+/// Stored as `[x, y, z]`: plain numbers as numbers (as points were before they took
+/// expressions, so such designs read and write the same), anything else as a string.
+mod point_expr {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(untagged)]
+    enum Coord {
+        Num(f64),
+        Expr(String),
+    }
+
+    pub fn serialize<S: Serializer>(p: &super::PointExpr, s: S) -> Result<S::Ok, S::Error> {
+        let c = |e: &String| match e.parse::<f64>() {
+            Ok(v) if v.is_finite() && format!("{v}") == *e => Coord::Num(v),
+            _ => Coord::Expr(e.clone()),
+        };
+        [c(&p[0]), c(&p[1]), c(&p[2])].serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<super::PointExpr, D::Error> {
+        let c = |x: Coord| match x {
+            Coord::Num(v) => format!("{v}"),
+            Coord::Expr(e) => e,
+        };
+        let [x, y, z] = <[Coord; 3]>::deserialize(d)?;
+        Ok([c(x), c(y), c(z)])
+    }
+}
+
 impl FeatureKind {
     /// A sheet metal feature (its result depends on the sheet metal rules).
     pub fn is_plastic(&self) -> bool {
@@ -1166,10 +1210,22 @@ impl FeatureKind {
                 v.extend(distance2.iter().map(String::as_str));
                 v.extend(angle.iter().map(String::as_str));
             }
-            FeatureKind::Box { length, width, height, .. } => v.extend([length.as_str(), width, height]),
-            FeatureKind::Cylinder { radius, height, .. } => v.extend([radius.as_str(), height]),
-            FeatureKind::Sphere { radius, .. } => v.push(radius),
-            FeatureKind::Torus { major, minor, .. } => v.extend([major.as_str(), minor]),
+            FeatureKind::Box { length, width, height, corner, .. } => {
+                v.extend([length.as_str(), width, height]);
+                v.extend(corner.iter().map(String::as_str));
+            }
+            FeatureKind::Cylinder { radius, height, base, .. } => {
+                v.extend([radius.as_str(), height]);
+                v.extend(base.iter().map(String::as_str));
+            }
+            FeatureKind::Sphere { radius, center, .. } => {
+                v.push(radius);
+                v.extend(center.iter().map(String::as_str));
+            }
+            FeatureKind::Torus { major, minor, center, .. } => {
+                v.extend([major.as_str(), minor]);
+                v.extend(center.iter().map(String::as_str));
+            }
             FeatureKind::Combine { .. } => {}
             FeatureKind::Pattern { pattern, .. } => match pattern {
                 PatternKind::Rectangular { count1, spacing1, count2, spacing2, .. } => {
@@ -1246,9 +1302,10 @@ impl FeatureKind {
                 v.extend(gap.iter().map(String::as_str));
             }
             FeatureKind::SheetBase { .. } | FeatureKind::SheetUnfold { .. } | FeatureKind::SheetConvert { .. } => {}
-            FeatureKind::Coil { diameter, pitch, turns, section_size, start_angle, .. } => {
+            FeatureKind::Coil { diameter, pitch, turns, section_size, start_angle, base, .. } => {
                 v.extend([diameter.as_str(), pitch, turns, section_size]);
                 v.extend(start_angle.iter().map(String::as_str));
+                v.extend(base.iter().map(String::as_str));
             }
             FeatureKind::Rib { thickness, depth, .. } => {
                 v.push(thickness);

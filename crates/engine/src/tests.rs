@@ -21,6 +21,7 @@ fn rel(a: f64, b: f64) -> f64 {
 }
 
 mod component_frames;
+mod primitive_points;
 mod robustness;
 
 /// Sketch a 40 x 30 rectangle with dimensions, extrude 20, fillet a vertical edge, cut a hole.

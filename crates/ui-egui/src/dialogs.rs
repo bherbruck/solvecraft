@@ -2753,6 +2753,11 @@ fn pt3(v: Vec3) -> Value {
     json!([v.x, v.y, v.z])
 }
 
+/// A point of expressions: numbers as numbers, expressions as strings.
+fn pt_expr(p: &solvecraft_engine::doc::PointExpr) -> Value {
+    Value::Array(p.iter().map(|e| e.parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| json!(e), |x| json!(x))).collect())
+}
+
 /// A dialog that edits an existing feature, filled from it. The timeline is rolled back to just
 /// before the feature, so its references show on the geometry they refer to.
 pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dialog> {
@@ -2959,7 +2964,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 fields: vec![("length", length.clone()), ("width", width.clone()), ("height", height.clone())],
                 operation: op_index(operation),
             };
-            d.extra.insert("corner".into(), pt3(*corner));
+            d.extra.insert("corner".into(), pt_expr(corner));
             d
         }
         FeatureKind::Cylinder { base, axis, radius, height, operation } => {
@@ -2969,14 +2974,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 fields: vec![("radius", radius.clone()), ("height", height.clone())],
                 operation: op_index(operation),
             };
-            d.extra.insert("base".into(), pt3(*base));
+            d.extra.insert("base".into(), pt_expr(base));
             d.extra.insert("axis".into(), pt3(*axis));
             d
         }
         FeatureKind::Sphere { center, radius, operation } => {
             let mut d = start("solid.sphere")?;
             d.kind = Kind::Primitive { cmd: "solid.sphere", fields: vec![("radius", radius.clone())], operation: op_index(operation) };
-            d.extra.insert("center".into(), pt3(*center));
+            d.extra.insert("center".into(), pt_expr(center));
             d
         }
         FeatureKind::Torus { center, major, minor, operation } => {
@@ -2986,7 +2991,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 fields: vec![("major", major.clone()), ("minor", minor.clone())],
                 operation: op_index(operation),
             };
-            d.extra.insert("center".into(), pt3(*center));
+            d.extra.insert("center".into(), pt_expr(center));
             d
         }
         FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {

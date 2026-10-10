@@ -276,6 +276,32 @@ impl FeatureKind {
         v
     }
 
+    /// A primitive's placement point (length expressions). Its coordinates are not inputs:
+    /// they get no parameter names and keep bare numbers in mm whatever the design's units, as
+    /// every other position does; renames and users still find them.
+    pub fn point_expr_mut(&mut self) -> Option<&mut crate::PointExpr> {
+        match self {
+            FeatureKind::Box { corner: p, .. }
+            | FeatureKind::Cylinder { base: p, .. }
+            | FeatureKind::Sphere { center: p, .. }
+            | FeatureKind::Torus { center: p, .. }
+            | FeatureKind::Coil { base: p, .. } => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Read-only view of [`FeatureKind::point_expr_mut`].
+    pub fn point_expr(&self) -> Option<&crate::PointExpr> {
+        match self {
+            FeatureKind::Box { corner: p, .. }
+            | FeatureKind::Cylinder { base: p, .. }
+            | FeatureKind::Sphere { center: p, .. }
+            | FeatureKind::Torus { center: p, .. }
+            | FeatureKind::Coil { base: p, .. } => Some(p),
+            _ => None,
+        }
+    }
+
     /// Read-only view of [`FeatureKind::inputs_mut`]: (label, expression, kind).
     pub fn inputs(&self) -> Vec<(&'static str, String, Kind)> {
         // Imports have no inputs (and their STEP text is large: don't clone it).
@@ -655,6 +681,9 @@ impl Document {
                     }
                 }
             }
+            if f.kind.point_expr().is_some_and(|p| p.iter().any(|e| expr::references(e).iter().any(|r| r == name))) {
+                out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: "Position".into() });
+            }
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 for c in &sketch.constraints {
                     if c.param.as_deref() == Some(name) {
@@ -716,6 +745,13 @@ impl Document {
             for x in &mut f.param_names {
                 if x == old {
                     *x = new.to_string();
+                }
+            }
+            for e in f.kind.point_expr_mut().into_iter().flatten() {
+                let r = expr::rename_reference(e, old, new);
+                if r != *e {
+                    *e = r;
+                    n += 1;
                 }
             }
             for (_, e, _) in f.kind.inputs_mut() {

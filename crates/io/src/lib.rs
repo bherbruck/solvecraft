@@ -425,13 +425,19 @@ pub const MAX_STL_TRIANGLES: usize = 20_000_000;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solvecraft_doc::{FeatureKind, Model, Operation};
+    use solvecraft_doc::{FeatureKind, Model, Operation, point_expr};
     use solvecraft_geom::Vec3;
 
     fn model() -> (Document, Model) {
         let mut doc = Document::new("t");
         doc.add_feature(
-            FeatureKind::Box { corner: Vec3::ZERO, length: "10".into(), width: "20".into(), height: "30".into(), operation: Operation::NewBody },
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "20".into(),
+                height: "30".into(),
+                operation: Operation::NewBody,
+            },
             None,
         )
         .unwrap();
@@ -558,7 +564,13 @@ mod tests {
     fn threemf_round_trip() {
         let mut doc = Document::new("t");
         doc.add_feature(
-            FeatureKind::Box { corner: Vec3::ZERO, length: "40".into(), width: "30".into(), height: "10".into(), operation: Operation::NewBody },
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "40".into(),
+                width: "30".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+            },
             None,
         )
         .unwrap();
@@ -569,7 +581,7 @@ mod tests {
         .unwrap();
         doc.add_feature(
             FeatureKind::Cylinder {
-                base: Vec3::new(80.0, 0.0, 0.0),
+                base: point_expr(Vec3::new(80.0, 0.0, 0.0)),
                 axis: Vec3::Z,
                 radius: "6".into(),
                 height: "15".into(),
@@ -579,7 +591,12 @@ mod tests {
         )
         .unwrap();
         doc.add_feature(
-            FeatureKind::Torus { center: Vec3::new(0.0, 80.0, 0.0), major: "12".into(), minor: "3".into(), operation: Operation::NewBody },
+            FeatureKind::Torus {
+                center: point_expr(Vec3::new(0.0, 80.0, 0.0)),
+                major: "12".into(),
+                minor: "3".into(),
+                operation: Operation::NewBody,
+            },
             None,
         )
         .unwrap();

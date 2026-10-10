@@ -10,7 +10,7 @@
 //! without moved components).
 
 use serde_json::{Map, Value};
-use solvecraft_doc::{Mat, apply_point, apply_vector, is_identity, mat_inverse};
+use solvecraft_doc::{Mat, apply_point, apply_vector, is_identity, map_point_expr, mat_inverse};
 use solvecraft_geom::Vec3;
 
 use crate::Session;
@@ -191,9 +191,27 @@ impl Mapper<'_> {
     }
 
     fn make(&mut self, v: &Value) -> Option<Value> {
-        let p = vec3(v)?;
         let m = self.f.active;
+        let Some(p) = vec3(v) else { return self.make_expr(&m, v) };
         self.local_point(&m, p)
+    }
+
+    /// A point with expression coordinates (`["w / 2", 0, 0]`): mapped as expressions.
+    fn make_expr(&mut self, m: &Mat, v: &Value) -> Option<Value> {
+        let a = v.as_array().filter(|a| a.len() == 3)?;
+        let c = |i: usize| match a.get(i)? {
+            Value::Number(n) => n.as_f64().filter(|x| x.is_finite()).map(|x| format!("{x}")),
+            Value::String(e) => Some(e.clone()),
+            _ => None,
+        };
+        let mut p = [c(0)?, c(1)?, c(2)?];
+        if is_identity(m) {
+            return None;
+        }
+        let inv = mat_inverse(m)?;
+        map_point_expr(&inv, &mut p);
+        self.changed = true;
+        Some(serde_json::json!(p))
     }
 
     fn dir(&mut self, v: &Value) -> Option<Value> {
