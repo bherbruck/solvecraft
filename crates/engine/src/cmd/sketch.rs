@@ -1462,6 +1462,8 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         place_text(sk, &id, text_at);
         Ok((pname, name, measured(is_angle, cur)))
     })?;
+    // Report what the dimension measures once the sketch is solved, not the geometry before.
+    let current = solved_measure(s, p, cmd).unwrap_or(current);
     if driven {
         return Ok(json!({"param": Value::Null, "driven": true, "type": kind_name, "measured": current.0, "unit": current.1, "sketch": info}));
     }
@@ -1475,6 +1477,13 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
 /// A dimension's measured value as reported, in the unit its expression is written in.
 fn measured(is_angle: bool, v: f64) -> (f64, &'static str) {
     if is_angle { (round6(v.to_degrees()), "deg") } else { (round6(v), "mm") }
+}
+
+/// What the dimension just added (the sketch's last constraint) measures on the solved sketch.
+fn solved_measure(s: &Session, p: &Value, cmd: &str) -> Option<(f64, &'static str)> {
+    let sk = s.doc.sketch(target_sketch(s, p, cmd).ok()?).ok()?;
+    let k = &sk.constraints.last()?.kind;
+    Some(measured(k.is_angle(), solvecraft_sketch::measure_dimension(sk, k)?))
 }
 
 /// Keep a dimension's text where it was placed (`at`, sketch coordinates), relative to the

@@ -48,6 +48,26 @@ fn redundant_constraints_and_dimensions_are_refused_driven_ones_measure() {
     assert_eq!(g["fully_constrained"], true);
 }
 
+/// `measured` is the dimension on the solved sketch: a trough drawn 99.84 long and dimensioned
+/// 100 reports 100, not the length it had before solving.
+#[test]
+fn a_dimension_reports_the_solved_value() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [99.84, 40.2]}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "p1", "b": "origin"}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 100}));
+    assert!((d["measured"].as_f64().unwrap() - 100.0).abs() < 1e-6, "{d}");
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": "40 mm"}));
+    assert!((d["measured"].as_f64().unwrap() - 40.0).abs() < 1e-6, "{d}");
+    // A driven dimension measures the solved geometry too.
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["p1", "p3"], "driven": true}));
+    assert!((d["measured"].as_f64().unwrap() - 100.0_f64.hypot(40.0)).abs() < 1e-6, "{d}");
+    let c = run(&mut s, "sketch.circle.center", json!({"center": [50, 20], "radius": 7.3}));
+    let c = ids(&c["curves"])[0].clone();
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [c], "value": 15}));
+    assert!((d["measured"].as_f64().unwrap() - 15.0).abs() < 1e-6, "{d}");
+}
+
 #[test]
 fn curvature_polygon_arc_length_linear_diameter() {
     let mut s = new_sketch();
@@ -243,7 +263,7 @@ fn an_angle_between_lines_takes_the_reading_nearest_its_value_and_reports_degree
         let d = run(&mut s, "sketch.dimension", json!({"entities": ents, "type": "angle", "value": "30 deg"}));
         assert_eq!(d["sketch"]["dof"], 0, "{d}");
         assert_eq!(d["unit"], "deg", "{d}");
-        assert!((d["measured"].as_f64().unwrap() - 30.3).abs() < 0.1, "{d}");
+        assert!((d["measured"].as_f64().unwrap() - 30.0).abs() < 1e-6, "{d}");
         assert!((line_angle(&s, "l1", "l3") - 30.0).abs() < 1e-6);
     }
     // The other reading still works, and the adjacent top line measures 60° the same way.
@@ -253,7 +273,7 @@ fn an_angle_between_lines_takes_the_reading_nearest_its_value_and_reports_degree
     assert!((line_angle(&s, "l1", "l3") - 30.0).abs() < 1e-6);
     let mut s = spout();
     let d = run(&mut s, "sketch.dimension", json!({"entities": ["l2", "l3"], "value": "60 deg"}));
-    assert!((d["measured"].as_f64().unwrap() - 59.74).abs() < 0.01, "{d}");
+    assert!((d["measured"].as_f64().unwrap() - 60.0).abs() < 1e-6, "{d}");
     // Without a value the acute angle is kept as it is.
     let mut s = spout();
     let d = run(&mut s, "sketch.dimension", json!({"entities": ["l1", "l3"]}));

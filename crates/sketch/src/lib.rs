@@ -29,7 +29,7 @@ pub use model::{Constraint, ConstraintKind, Curve, CurveKind, SPoint, Sketch, Sk
 pub use offset::OffsetChain;
 pub use profiles::{Profile, find_drawn_profiles, find_profiles, merge_regions};
 pub use shape::{Shape, intersections};
-pub use solver::{Hold, SolveReport, SolveStatus, solve, solve_holding};
+pub use solver::{Hold, SolveReport, SolveStatus, measure_dimension, solve, solve_holding};
 pub use text::{MAX_TEXT_CHARS, text_geometry};
 pub use wire::{MAX_FIT_POINTS, MAX_WIRE_POINTS, Wire, fit_polyline};
 

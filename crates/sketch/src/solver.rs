@@ -456,6 +456,13 @@ fn measure(s: &State, k: &ConstraintKind) -> Option<f64> {
     })
 }
 
+/// What a dimension measures on the sketch as it stands (mm, radians for angles); `None` for a
+/// constraint that is not a dimension.
+pub fn measure_dimension(sk: &Sketch, k: &ConstraintKind) -> Option<f64> {
+    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0 };
+    measure(&State { sk, lay: &lay, x: &[] }, k).filter(|v| v.is_finite())
+}
+
 /// One residual block: implicit arc radius equality, a user constraint, or a tangency at a known
 /// touch point (better conditioned than the distance form when an end point is on the curve).
 enum Block<'a> {
