@@ -1,10 +1,11 @@
 # SolveCraft
 
-SolveCraft is an open-source parametric 3D CAD application written in Rust, in the style of
-Autodesk Fusion: sketch on a plane, constrain and dimension the sketch, turn profiles into solids
-with extrude and revolve, round edges, combine bodies, and change a parameter to watch the whole
-timeline rebuild. It is a clean-room implementation (see [CLAUDE.md](CLAUDE.md)) and part of the
-storytold "craft" family.
+**Parametric 3D CAD; an open-source, [clean-room](CLAUDE.md) reimplementation of Autodesk
+Fusion 360, built in pure Rust.**
+
+Sketch, constrain, and build solids with a parametric feature timeline. Change a dimension
+and watch your model rebuild. Run it on your desktop, in your browser, or let AI agents
+model through the built-in MCP server. Part of the storytold "craft" family.
 
 ![An AI agent builds a parametric enclosure in SolveCraft over MCP, then the width is changed in the Parameters dialog and the model rebuilds (3x speed)](docs/screenshots/demo.gif)
 
