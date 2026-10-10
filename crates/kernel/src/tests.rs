@@ -782,6 +782,27 @@ fn shell_non_convex() {
     assert!(rel(v, outer - cavity) < 1e-6, "{v} vs {}", outer - cavity);
 }
 
+/// A basin: a slab with a tapered pocket and a 4 mm front rim, shelled from below. A wall
+/// thicker than the rim (with the pocket's slope) would turn the top face inside out: refused,
+/// not a body with wrong mass properties.
+#[test]
+fn shell_thicker_than_a_rim_is_refused() {
+    let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
+    let rect = |x0: f64, y0: f64, x1: f64, y1: f64| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
+    let at = |z: f64| Plane::new(Vec3::new(0.0, 0.0, z), Vec3::X, Vec3::Y).unwrap();
+    let pocket = loft(&[(at(30.0), rect(20.0, 4.0, 80.0, 50.0)), (at(10.0), rect(30.0, 20.0, 70.0, 40.0))]).unwrap();
+    let basin = boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap();
+    let open = [Vec3::new(50.0, 30.0, 0.0)];
+    let e = shell(&basin, &open, 6.0).unwrap_err().to_string();
+    assert!(e.contains("rim or ledge"), "{e}");
+    let (whole, thin) = (measure(&basin).unwrap(), measure(&shell(&basin, &open, 1.0).unwrap()).unwrap());
+    assert!(thin.volume > 0.0 && thin.volume < whole.volume, "{} vs {}", thin.volume, whole.volume);
+    let (lo, hi) = (thin.bbox.min, thin.bbox.max);
+    let c = thin.centroid;
+    assert!(c.x > lo.x && c.x < hi.x && c.y > lo.y && c.y < hi.y && c.z > lo.z && c.z < hi.z, "{c:?}");
+    assert!((c.x - 50.0).abs() < 1e-3, "{c:?}");
+}
+
 #[test]
 #[ignore]
 fn debug_drilled_hole() {
