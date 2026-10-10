@@ -88,6 +88,8 @@ pub struct PrefsWindow {
     pub section: usize,
     /// Everything as it was when the dialog opened (or at the last Apply), for Cancel.
     snapshot: Option<Snapshot>,
+    /// The up axis preference the view follows now (applied when it changes, and at startup).
+    applied_up: Option<String>,
 }
 
 /// Open the dialog at a page.
@@ -196,6 +198,10 @@ fn defaults(app: &mut SolveApp, page: usize) {
 /// Settings that follow the preferences every frame: the theme when it follows the system, and
 /// the interface scale.
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
+    // The view's up axis follows the preference (set in the dialog, by ui.prefs or loaded).
+    if app.prefs_window.applied_up.as_deref() != Some(app.preferences.up_axis.as_str()) {
+        up_axis_changed(app);
+    }
     if app.preferences.theme == "system"
         && let Some(t) = ctx.system_theme()
     {
@@ -451,7 +457,12 @@ fn close(app: &mut SolveApp, revert: bool) {
 
 /// The default orientation changed: the view turns to match.
 fn up_axis_changed(app: &mut SolveApp) {
-    app.animate_view("home");
+    use solvecraft_engine::render::UpAxis;
+    app.prefs_window.applied_up = Some(app.preferences.up_axis.clone());
+    let up = if app.preferences.up_axis.eq_ignore_ascii_case("y") { UpAxis::Y } else { UpAxis::Z };
+    if app.ui.up_axis != up || app.cam.up != up {
+        app.set_up_axis(up);
+    }
 }
 
 /// One page of the dialog.
@@ -821,5 +832,23 @@ mod tests {
         orbit(&mut app, rect, 40.0, 25.0, Some(at));
         let s = crate::viewport::projection(&app, rect).to_screen(pivot).unwrap();
         assert!(s.distance(at) < 2.0, "{s:?}");
+    }
+
+    /// The Y up preference turns the view: the camera's up axis follows it, startup included.
+    #[test]
+    fn up_axis_preference_turns_the_view() {
+        use solvecraft_engine::render::UpAxis;
+        let mut app = SolveApp::new(solvecraft_engine::Session::default(), crate::Services::default());
+        let ctx = egui::Context::default();
+        apply(&mut app, &ctx);
+        assert_eq!(app.cam.up, UpAxis::Z);
+        app.preferences.up_axis = "y".into();
+        apply(&mut app, &ctx);
+        assert_eq!((app.ui.up_axis, app.cam.up), (UpAxis::Y, UpAxis::Y));
+        // Home looks at the model with Y up: the eye is above the XZ ground.
+        assert!(app.cam.back().y > 0.3, "{:?}", app.cam.back());
+        app.preferences.up_axis = "z".into();
+        apply(&mut app, &ctx);
+        assert_eq!(app.cam.up, UpAxis::Z);
     }
 }
