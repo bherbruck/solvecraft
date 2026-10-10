@@ -1,6 +1,6 @@
 //! The timeline (bottom): features in order, the rollback marker, errors and warnings.
 
-use egui::{Color32, Rect, Sense, Stroke, pos2, vec2};
+use egui::{Color32, Rect, Sense, Stroke, UiBuilder, pos2, vec2};
 use serde_json::json;
 use solvecraft_engine::doc::FeatureKind;
 
@@ -106,195 +106,222 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
             x += 24.0;
         }
         x += 14.0;
-        let feats: Vec<_> = app
-            .session
-            .doc
-            .features
-            .iter()
-            .map(|f| (f.id, f.name.clone(), icon_of(&f.kind), f.suppressed, f.kind.type_name(), f.kind.clone()))
-            .collect();
-        // The feature whose body is under the cursor in the viewport.
-        let st = app.session.world_state();
-        let from_view = match &app.viewport.hover {
-            Some(crate::viewport::Hit::Face { body, .. } | crate::viewport::Hit::Edge { body, .. } | crate::viewport::Hit::Vertex { body, .. }) => {
-                st.body(body).map(|b| b.feature)
-            }
-            _ => None,
-        };
-        let drag_id = ui.id().with("tl_drag");
-        let mut drag: Option<Drag> = ui.data(|d| d.get_temp(drag_id));
-        let pointer = ui.input(|i| i.pointer.hover_pos());
-        let mut xs: Vec<f32> = Vec::new();
-        let mut hovered: Option<u64> = None;
-        let mut edit: Option<u64> = None;
-        let mut marker_rect: Option<Rect> = None;
-        for (i, (id, name, icon, suppressed, ty, kind)) in feats.iter().enumerate() {
-            if i == marker {
-                marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(6.0, r.height() - 10.0)));
-                x += 10.0;
-            }
-            xs.push(x);
-            let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
-            crate::scenario::publish_handle(&format!("timeline:{name}"), br.center());
-            let resp = ui.interact(br, ui.id().with(("feat", *id)), Sense::click_and_drag());
-            let res = app.session.model.result(*id);
-            let err = res.and_then(|r| r.error.clone());
-            let warn = res.and_then(|r| r.warning.clone());
-            let rolled = i >= marker;
-            let is_it = |s: &solvecraft_engine::Sel| matches!(s, solvecraft_engine::Sel::Feature { id: f } if f == id);
-            let sel = app.session.selection.iter().any(is_it) || app.dialog.as_ref().is_some_and(|d| d.items().iter().any(is_it));
-            if resp.hovered() {
-                hovered = Some(*id);
-            }
-            let bg = if err.is_some() {
-                t.timeline_item_error
-            } else if sel {
-                t.accent_soft
-            } else if resp.hovered() || from_view == Some(*id) {
-                t.hover
-            } else {
-                t.timeline_item
-            };
-            let edge = if err.is_some() {
-                t.error
-            } else if from_view == Some(*id) {
-                t.accent
-            } else {
-                t.border
-            };
-            p.rect(br, 3.0, bg, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
-            let ink = if rolled || *suppressed { t.border } else { t.icon };
-            icons::paint(&p, br.shrink(4.0), icon, ink, if rolled { t.panel_header } else { t.icon_fill }, if rolled { t.border } else { t.accent });
-            if *suppressed {
-                p.line_segment([br.left_bottom() + vec2(4.0, -4.0), br.right_top() + vec2(-4.0, 4.0)], Stroke::new(1.5, t.text_dim));
-            }
-            if warn.is_some() && err.is_none() {
-                icons::paint(&p, Rect::from_min_size(br.right_top() - vec2(10.0, 0.0), vec2(10.0, 10.0)), "warning", t.icon, t.warning, t.warning);
-            }
-            let mut tip = format!("{name}  ({ty})");
-            if let Some(e) = &err {
-                tip += &format!("\nError: {e}");
-            }
-            if let Some(w) = &warn {
-                tip += &format!("\nWarning: {w}");
-            }
-            if let Some(r) = res {
-                tip += &format!("\n{:.1} ms", r.ms);
-            }
-            tip += "\nDouble-click to edit · drag to reorder · right-click for more";
-            if resp.drag_started() {
-                drag = Some(Drag::Feature(*id));
-            }
-            let resp = resp.on_hover_text(tip);
-            if resp.clicked() {
-                // A dialog input that takes features (pattern objects) gets the click.
-                let takes = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::FEATURES != 0);
-                if takes {
-                    if let Some(mut d) = app.dialog.take() {
-                        d.pick(&app.session, solvecraft_engine::Sel::Feature { id: *id });
-                        app.dialog = Some(d);
+        // The features scroll horizontally in the space right of the playback controls.
+        let strip = Rect::from_min_max(pos2(x, r.top()), r.right_bottom());
+        ui.scope_builder(UiBuilder::new().max_rect(strip), |ui| {
+            egui::ScrollArea::horizontal().auto_shrink([false, false]).show(ui, |ui| {
+                let p = ui.painter().clone();
+                let mut x = ui.max_rect().left();
+                let origin = x;
+                let feats: Vec<_> = app
+                    .session
+                    .doc
+                    .features
+                    .iter()
+                    .map(|f| (f.id, f.name.clone(), icon_of(&f.kind), f.suppressed, f.kind.type_name(), f.kind.clone()))
+                    .collect();
+                // The feature whose body is under the cursor in the viewport.
+                let st = app.session.world_state();
+                let from_view = match &app.viewport.hover {
+                    Some(
+                        crate::viewport::Hit::Face { body, .. } | crate::viewport::Hit::Edge { body, .. } | crate::viewport::Hit::Vertex { body, .. },
+                    ) => st.body(body).map(|b| b.feature),
+                    _ => None,
+                };
+                let drag_id = ui.id().with("tl_drag");
+                let mut drag: Option<Drag> = ui.data(|d| d.get_temp(drag_id));
+                let pointer = ui.input(|i| i.pointer.hover_pos());
+                let mut xs: Vec<f32> = Vec::new();
+                let mut hovered: Option<u64> = None;
+                let mut edit: Option<u64> = None;
+                let mut marker_rect: Option<Rect> = None;
+                for (i, (id, name, icon, suppressed, ty, kind)) in feats.iter().enumerate() {
+                    if i == marker {
+                        marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(6.0, r.height() - 10.0)));
+                        x += 10.0;
                     }
-                } else {
-                    let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": id}]}));
+                    xs.push(x);
+                    let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
+                    crate::scenario::publish_handle(&format!("timeline:{name}"), br.center());
+                    let resp = ui.interact(br, ui.id().with(("feat", *id)), Sense::click_and_drag());
+                    let res = app.session.model.result(*id);
+                    let err = res.and_then(|r| r.error.clone());
+                    let warn = res.and_then(|r| r.warning.clone());
+                    let rolled = i >= marker;
+                    let is_it = |s: &solvecraft_engine::Sel| matches!(s, solvecraft_engine::Sel::Feature { id: f } if f == id);
+                    let sel = app.session.selection.iter().any(is_it) || app.dialog.as_ref().is_some_and(|d| d.items().iter().any(is_it));
+                    if resp.hovered() {
+                        hovered = Some(*id);
+                    }
+                    let bg = if err.is_some() {
+                        t.timeline_item_error
+                    } else if sel {
+                        t.accent_soft
+                    } else if resp.hovered() || from_view == Some(*id) {
+                        t.hover
+                    } else {
+                        t.timeline_item
+                    };
+                    let edge = if err.is_some() {
+                        t.error
+                    } else if from_view == Some(*id) {
+                        t.accent
+                    } else {
+                        t.border
+                    };
+                    p.rect(br, 3.0, bg, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+                    let ink = if rolled || *suppressed { t.border } else { t.icon };
+                    icons::paint(
+                        &p,
+                        br.shrink(4.0),
+                        icon,
+                        ink,
+                        if rolled { t.panel_header } else { t.icon_fill },
+                        if rolled { t.border } else { t.accent },
+                    );
+                    if *suppressed {
+                        p.line_segment([br.left_bottom() + vec2(4.0, -4.0), br.right_top() + vec2(-4.0, 4.0)], Stroke::new(1.5, t.text_dim));
+                    }
+                    if warn.is_some() && err.is_none() {
+                        icons::paint(
+                            &p,
+                            Rect::from_min_size(br.right_top() - vec2(10.0, 0.0), vec2(10.0, 10.0)),
+                            "warning",
+                            t.icon,
+                            t.warning,
+                            t.warning,
+                        );
+                    }
+                    let mut tip = format!("{name}  ({ty})");
+                    if let Some(e) = &err {
+                        tip += &format!("\nError: {e}");
+                    }
+                    if let Some(w) = &warn {
+                        tip += &format!("\nWarning: {w}");
+                    }
+                    if let Some(r) = res {
+                        tip += &format!("\n{:.1} ms", r.ms);
+                    }
+                    tip += "\nDouble-click to edit · drag to reorder · right-click for more";
+                    if resp.drag_started() {
+                        drag = Some(Drag::Feature(*id));
+                    }
+                    let resp = resp.on_hover_text(tip);
+                    if resp.clicked() {
+                        // A dialog input that takes features (pattern objects) gets the click.
+                        let takes = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::FEATURES != 0);
+                        if takes {
+                            if let Some(mut d) = app.dialog.take() {
+                                d.pick(&app.session, solvecraft_engine::Sel::Feature { id: *id });
+                                app.dialog = Some(d);
+                            }
+                        } else {
+                            let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": id}]}));
+                        }
+                    }
+                    if resp.double_clicked() {
+                        edit = Some(*id);
+                    }
+                    let sketch_of = match kind {
+                        FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::Sweep { sketch, .. } => {
+                            Some(*sketch)
+                        }
+                        _ => None,
+                    };
+                    resp.context_menu(|ui| {
+                        if ui.button("Edit Feature").clicked() {
+                            edit = Some(*id);
+                            ui.close();
+                        }
+                        if let Some(sk) = sketch_of
+                            && ui.button("Edit Profile Sketch").clicked()
+                        {
+                            app.edit_sketch(sk);
+                            ui.close();
+                        }
+                        if ui.button("Rename").clicked() {
+                            app.dialog = Some(crate::dialogs::Dialog::rename(*id, name));
+                            ui.close();
+                        }
+                        if ui.button(if *suppressed { "Unsuppress Features" } else { "Suppress Features" }).clicked() {
+                            let _ = app.run("timeline.suppress", json!({"feature": id}));
+                            ui.close();
+                        }
+                        if ui.button("Roll History Marker Here").clicked() {
+                            let _ = app.run("timeline.roll_to", json!({ "feature": id }));
+                            ui.close();
+                        }
+                        if ui.button("Find in Browser").clicked() {
+                            find_in_browser(app, *id);
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui.button("Delete").clicked() {
+                            delete_feature(app, *id);
+                            ui.close();
+                        }
+                    });
+                    x += 32.0;
                 }
-            }
-            if resp.double_clicked() {
-                edit = Some(*id);
-            }
-            let sketch_of = match kind {
-                FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::Sweep { sketch, .. } => Some(*sketch),
-                _ => None,
-            };
-            resp.context_menu(|ui| {
-                if ui.button("Edit Feature").clicked() {
-                    edit = Some(*id);
-                    ui.close();
+                let end = x;
+                if marker >= feats.len() {
+                    marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(6.0, r.height() - 10.0)));
                 }
-                if let Some(sk) = sketch_of
-                    && ui.button("Edit Profile Sketch").clicked()
+                // The history marker: drag it to roll the model back or forward.
+                if let Some(mr) = marker_rect {
+                    let resp = ui.interact(mr.expand2(vec2(3.0, 0.0)), ui.id().with("tl_marker"), Sense::drag());
+                    if resp.drag_started() {
+                        drag = Some(Drag::Marker);
+                    }
+                    let col = if resp.hovered() || drag == Some(Drag::Marker) { t.accent } else { t.timeline_marker };
+                    p.rect_filled(mr, 1.0, col);
+                    resp.on_hover_text("History marker: drag to roll the model back; new features go here");
+                }
+                let content_end = crate::dialogs_assembly::timeline_joints(app, ui, &p, end + 10.0, r);
+                // The scroll range follows the drawn content (the buttons don't take layout space themselves).
+                ui.allocate_exact_size(vec2((content_end - origin).max(0.0), r.height()), Sense::hover());
+                // Drag feedback, and the drop.
+                if let (Some(dg), Some(pp)) = (drag, pointer) {
+                    let slot = slot_at(&xs, end, pp.x);
+                    let sx = xs.get(slot).copied().unwrap_or(end) - 4.0;
+                    p.line_segment(
+                        [pos2(sx, r.top() + 3.0), pos2(sx, r.bottom() - 3.0)],
+                        Stroke::new(2.0, if dg == Drag::Marker { t.accent } else { t.sketch_accent }),
+                    );
+                }
+                let released = ui.input(|i| i.pointer.any_released());
+                // (Taking the drag ends it even when the pointer has left the window.)
+                if released
+                    && let Some(dg) = drag.take()
+                    && let Some(pp) = pointer
                 {
-                    app.edit_sketch(sk);
-                    ui.close();
+                    let slot = slot_at(&xs, end, pp.x);
+                    match dg {
+                        Drag::Marker => {
+                            let _ = app.run("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
+                        }
+                        Drag::Feature(id) => {
+                            let from = app.session.doc.feature_index(id).unwrap_or(0);
+                            // Dropping after itself means the slot shifts by one.
+                            let to = if slot > from { slot - 1 } else { slot };
+                            if to != from {
+                                let _ = app.run("timeline.reorder", json!({ "feature": id, "position": to }));
+                            }
+                        }
+                    }
                 }
-                if ui.button("Rename").clicked() {
-                    app.dialog = Some(crate::dialogs::Dialog::rename(*id, name));
-                    ui.close();
-                }
-                if ui.button(if *suppressed { "Unsuppress Features" } else { "Suppress Features" }).clicked() {
-                    let _ = app.run("timeline.suppress", json!({"feature": id}));
-                    ui.close();
-                }
-                if ui.button("Roll History Marker Here").clicked() {
-                    let _ = app.run("timeline.roll_to", json!({ "feature": id }));
-                    ui.close();
-                }
-                if ui.button("Find in Browser").clicked() {
-                    find_in_browser(app, *id);
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Delete").clicked() {
-                    delete_feature(app, *id);
-                    ui.close();
+                ui.data_mut(|d| match drag {
+                    Some(dg) => {
+                        d.insert_temp(drag_id, dg);
+                    }
+                    None => d.remove::<Drag>(drag_id),
+                });
+                app.viewport.hover_feature = hovered;
+                if let Some(id) = edit {
+                    app.edit_feature(id);
                 }
             });
-            x += 32.0;
-        }
-        let end = x;
-        if marker >= feats.len() {
-            marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(6.0, r.height() - 10.0)));
-        }
-        // The history marker: drag it to roll the model back or forward.
-        if let Some(mr) = marker_rect {
-            let resp = ui.interact(mr.expand2(vec2(3.0, 0.0)), ui.id().with("tl_marker"), Sense::drag());
-            if resp.drag_started() {
-                drag = Some(Drag::Marker);
-            }
-            let col = if resp.hovered() || drag == Some(Drag::Marker) { t.accent } else { t.timeline_marker };
-            p.rect_filled(mr, 1.0, col);
-            resp.on_hover_text("History marker: drag to roll the model back; new features go here");
-        }
-        crate::dialogs_assembly::timeline_joints(app, ui, &p, end + 10.0, r);
-        // Drag feedback, and the drop.
-        if let (Some(dg), Some(pp)) = (drag, pointer) {
-            let slot = slot_at(&xs, end, pp.x);
-            let sx = xs.get(slot).copied().unwrap_or(end) - 4.0;
-            p.line_segment(
-                [pos2(sx, r.top() + 3.0), pos2(sx, r.bottom() - 3.0)],
-                Stroke::new(2.0, if dg == Drag::Marker { t.accent } else { t.sketch_accent }),
-            );
-        }
-        let released = ui.input(|i| i.pointer.any_released());
-        // (Taking the drag ends it even when the pointer has left the window.)
-        if released
-            && let Some(dg) = drag.take()
-            && let Some(pp) = pointer
-        {
-            let slot = slot_at(&xs, end, pp.x);
-            match dg {
-                Drag::Marker => {
-                    let _ = app.run("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
-                }
-                Drag::Feature(id) => {
-                    let from = app.session.doc.feature_index(id).unwrap_or(0);
-                    // Dropping after itself means the slot shifts by one.
-                    let to = if slot > from { slot - 1 } else { slot };
-                    if to != from {
-                        let _ = app.run("timeline.reorder", json!({ "feature": id, "position": to }));
-                    }
-                }
-            }
-        }
-        ui.data_mut(|d| match drag {
-            Some(dg) => {
-                d.insert_temp(drag_id, dg);
-            }
-            None => d.remove::<Drag>(drag_id),
         });
-        app.viewport.hover_feature = hovered;
-        if let Some(id) = edit {
-            app.edit_feature(id);
-        }
     });
 }
 
