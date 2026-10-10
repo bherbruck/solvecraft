@@ -189,11 +189,28 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     r
 }
 
+/// Smallest side of the box where the bodies' vertex boxes overlap (infinite when they don't).
+fn meeting_size(a: &Body, b: &Body) -> f64 {
+    let bbox = |x: &Body| {
+        let mut bb = solvecraft_geom::Aabb3::EMPTY;
+        for v in x.solid.vertex_iter() {
+            bb.add(from_p3(v.point()));
+        }
+        bb
+    };
+    let (ba, bb) = (bbox(a), bbox(b));
+    let s = solvecraft_geom::Aabb3 { min: ba.min.max(bb.min), max: ba.max.min(bb.max) }.size();
+    if s.x > 0.0 && s.y > 0.0 && s.z > 0.0 { s.x.min(s.y).min(s.z) } else { f64::INFINITY }
+}
+
 fn boolean_whole(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     a.require_brep("a boolean")?;
     b.require_brep("a boolean")?;
     let size = a.size().max(b.size());
-    let tol_m = size * 5e-4;
+    // The checks mesh both bodies; where they meet in a region much thinner than they are (a
+    // thin part trimmed by a long one), a step from their size would facet the small faces
+    // there coarsely enough to fail the membership test on a correct result.
+    let tol_m = (size * 5e-4).min(meeting_size(a, b) * 2e-3).max(size * 1e-5);
     let meshes = (a.tessellate(tol_m).ok(), b.tessellate(tol_m).ok());
     let (va, vb) = match &meshes {
         (Some(ma), Some(mb)) => (ma.measure().volume, mb.measure().volume),

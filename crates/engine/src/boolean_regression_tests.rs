@@ -1,7 +1,7 @@
 //! Booleans that failed, panicked or hung, replayed from the scripts in
 //! `examples/regressions/` (each script's description says what went wrong).
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::Session;
 
@@ -31,4 +31,23 @@ fn shallow_loft_cut_from_the_top_face() {
     let want = 900.0 * 480.0 * 160.0 - loft;
     let got = volume(&s, "Body1");
     assert!((got - want).abs() < 1e-9 * want, "{got} vs {want}");
+}
+
+#[test]
+fn oblique_cut_through_a_small_arc_matches_a_split() {
+    let scripts = [include_str!("../../../examples/regressions/oblique_cut_of_cylinder.json")];
+    // The same bar split by the prism's tilted top: the piece above it is the cut's result.
+    let mut split = Session::default();
+    let script: Value = serde_json::from_str(scripts[0]).unwrap();
+    let steps = script.get("commands").and_then(Value::as_array).unwrap();
+    split.run_script(&Value::Array(steps[..5].to_vec())).unwrap();
+    let whole = volume(&split, "Tool");
+    split.execute("solid.split_body", &json!({"body": "Tool", "plane": {"origin": [0, -472, 853.91], "normal": [0, 15.44, 40]}})).unwrap();
+    let above = volume(&split, "Tool");
+    assert!(above < whole - 10.0, "{above} of {whole}");
+    for script in scripts {
+        let s = replay(script);
+        let got = volume(&s, "Tool");
+        assert!((got - above).abs() < 1e-6 * above, "{got} vs {above}");
+    }
 }
