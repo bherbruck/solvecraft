@@ -1,0 +1,24 @@
+{
+ "description": "A loft cut from a pocket floor beside a round hole it never touches (the hole made first). Slab 900 x 480 x 160, a 557.68 x 100 pocket 120 deep, a 35 mm hole 25 deep 66 mm from the pocket, then a loft cut from a rectangle on the pocket floor (0.5 mm inside its walls) down 4 mm to an 80 x 80 square. The loft's top lies in the pocket floor, and the hole's cylinder kept the exact planar boolean from taking it: the cut failed with a kernel panic. Result: the same body as with the hole made after the loft.",
+ "commands": [
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": 690, "name": "Outline"}},
+  {"command": "sketch.rectangle.two_point", "params": {"p0": [0, -480], "p1": [900, 0]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 160, "name": "Slab"}},
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": 850, "name": "BowlTop"}},
+  {"command": "sketch.rectangle.two_point", "params": {"p0": [171.16, -151.16], "p1": [728.84, -51.16]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": -120, "operation": "cut", "name": "BowlPocket"}},
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": 850, "name": "TapHole"}},
+  {"command": "sketch.circle.center", "params": {"center": [795, -101.16], "radius": 17.5}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": -25, "operation": "cut", "name": "TapCut"}},
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": 730, "name": "TroughInset"}},
+  {"command": "sketch.rectangle.two_point", "params": {"p0": [171.66, -150.66], "p1": [728.34, -51.66]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "sketch.create", "params": {"plane": "XY", "offset": 726, "name": "DrainSeat"}},
+  {"command": "sketch.rectangle.two_point", "params": {"p0": [410, -141.16], "p1": [490, -61.16]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.loft", "params": {"sections": [{"sketch": "TroughInset"}, {"sketch": "DrainSeat"}], "operation": "cut", "name": "TroughFall"}}
+ ]
+}

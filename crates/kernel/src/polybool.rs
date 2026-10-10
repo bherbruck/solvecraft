@@ -306,10 +306,116 @@ pub fn planar_boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     a.require_brep("a boolean")?;
     b.require_brep("a boolean")?;
     let (Some(pa), Some(pb)) = (planar_polys(a), planar_polys(b)) else {
+        if let Some(r) = sliced_planar_boolean(a, b, op) {
+            return r;
+        }
         return Err(KernelError::Failed("not supported yet: coincident faces on curved bodies".into()));
     };
     let size = a.size().max(b.size());
     polys_boolean(pa, pb, size, op, size * 1e-9)
+}
+
+/// [`planar_boolean`] of a body with curved faces and an all-planar one, when a slab between
+/// two parallel planes holds `b` and none of `a`'s curved faces (a pocket cut beside a round
+/// hole): `a` is split across the slab, the middle piece takes the exact boolean, and the
+/// pieces outside are joined back on. `None` when no such slab exists.
+fn sliced_planar_boolean(a: &Body, b: &Body, op: BoolOp) -> Option<Result<Option<Body>>> {
+    let pb = planar_polys(b)?;
+    let size = a.size().max(b.size());
+    let tol = (a.size() * 1e-3).max(1e-3);
+    let infos = a.faces(tol).ok()?;
+    let mesh = a.tessellate(tol).ok()?;
+    let mut curved: HashMap<u32, solvecraft_geom::Aabb3> = HashMap::new();
+    for (t, fi) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        if infos.get(*fi as usize)?.plane_normal.is_some() {
+            continue;
+        }
+        let bx = curved.entry(*fi).or_insert(solvecraft_geom::Aabb3::EMPTY);
+        for p in mesh.tri(t)? {
+            bx.add(p);
+        }
+    }
+    let mut tool = solvecraft_geom::Aabb3::EMPTY;
+    for p in pb.iter().flat_map(|p| &p.v) {
+        tool.add(*p);
+    }
+    let at = |v: Vec3, k: usize| [v.x, v.y, v.z].get(k).copied().unwrap_or(0.0);
+    let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+    // Planar faces of `a` square to an axis: a cut must not land in one of their planes.
+    let flat: Vec<(Vec3, Vec3)> = infos.iter().filter_map(|f| Some((f.plane_normal?, f.centroid))).collect();
+    let gap = size * 1e-4;
+    let place = |k: usize, near: f64, far: f64| -> Option<f64> {
+        let axis = *axes.get(k)?;
+        [0.5, 0.37, 0.63, 0.25, 0.75]
+            .iter()
+            .map(|t| near + (far - near) * t)
+            .find(|x| !flat.iter().any(|(n, c)| n.dot(axis).abs() > 1.0 - 1e-9 && (at(*c, k) - x).abs() < gap))
+    };
+    // An axis along which every curved face lies clear of the tool: the cuts either side.
+    let (k, lo, hi) = (0..3).find_map(|k| {
+        let (t0, t1) = (at(tool.min, k), at(tool.max, k));
+        let (mut below, mut above) = (None::<f64>, None::<f64>);
+        for bx in curved.values() {
+            let (c0, c1) = (at(bx.min, k), at(bx.max, k));
+            if c1 < t0 - gap {
+                below = Some(below.map_or(c1, |x| x.max(c1)));
+            } else if c0 > t1 + gap {
+                above = Some(above.map_or(c0, |x| x.min(c0)));
+            } else {
+                return None;
+            }
+        }
+        let lo = match below {
+            Some(c) => Some(place(k, t0, c)?),
+            None => None,
+        };
+        let hi = match above {
+            Some(c) => Some(place(k, t1, c)?),
+            None => None,
+        };
+        Some((k, lo, hi))
+    })?;
+    let (u, w) = match k {
+        0 => (Vec3::Y, Vec3::Z),
+        1 => (Vec3::Z, Vec3::X),
+        _ => (Vec3::X, Vec3::Y),
+    };
+    let axis = *axes.get(k)?;
+    let run = || -> Result<Option<Body>> {
+        let fail = |m: &str| KernelError::Failed(format!("planar boolean beside curved faces: {m}"));
+        let mut middle = a.clone();
+        let mut outside = Vec::new();
+        for (cut, keep_positive) in [(lo, true), (hi, false)] {
+            let Some(x) = cut else { continue };
+            let plane = solvecraft_geom::Plane::new(axis * x, u, w).ok_or_else(|| fail("plane"))?;
+            outside.extend(crate::ops::half_space(&middle, &plane, !keep_positive)?);
+            middle = crate::ops::half_space(&middle, &plane, keep_positive)?.ok_or_else(|| fail("nothing beside the tool"))?;
+        }
+        let pm = planar_polys(&middle).ok_or_else(|| fail("the middle piece is not planar"))?;
+        let r = polys_boolean(pm, pb, size, op, size * 1e-9)?;
+        if op == BoolOp::Intersect {
+            return Ok(r);
+        }
+        // The rebuild leaves the cut faces' edges split where other polygons were cut; healed,
+        // they match the pieces outside edge for edge.
+        let mut pieces: Vec<Body> = match r {
+            Some(m) => vec![Body::new(crate::heal::heal_keep(m.deep_copy(), size, a.split_keep()))?],
+            None => Vec::new(),
+        };
+        // Each piece outside meets the middle along its cut face (glued one shell to another).
+        if pieces.iter().chain(&outside).any(|x| x.solid.boundaries().len() != 1) {
+            return Err(fail("a piece in several parts"));
+        }
+        for o in outside {
+            let joined = pieces.iter().enumerate().find_map(|(i, m)| Some((i, crate::coplanar::glue(m, &o)?.ok()?)));
+            let (i, j) = joined.ok_or_else(|| fail("a piece does not join back"))?;
+            if let Some(slot) = pieces.get_mut(i) {
+                *slot = j;
+            }
+        }
+        crate::ops::join_pieces(pieces)
+    };
+    Some(run())
 }
 
 fn polys_boolean(pa: Vec<Poly>, pb: Vec<Poly>, size: f64, op: BoolOp, eps: f64) -> Result<Option<Body>> {
