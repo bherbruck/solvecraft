@@ -67,7 +67,7 @@ headline counts in-scope tabs only and lists the deferred ones separately.
   rounds next to earlier rounds of another radius, and smooth corner patches where three rounds
   meet (a sphere for equal radii); straight edges (convex or concave) between planar faces with perpendicular
   planar end faces (equal-distance chamfers also meet sloped planar end faces, including inner
-  basin rims); whole smooth loops of a planar face, picked whole or by one edge (tangent
+  basin rims within the rim width); whole smooth loops of a planar face, picked whole or by one edge (tangent
   chain), including circles and walls at any angle (boss bases and tops, bores, pocket floors,
   plate outlines), loops with sharp corners between straight edges (the blends meet in mitres), runs of
   neighbouring edges along a planar face's loop (two top edges of a box: mitred, ending square;

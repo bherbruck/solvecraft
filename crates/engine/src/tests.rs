@@ -1663,7 +1663,8 @@ fn chamfer_sloped_basin_rim_recomputes() {
     let base = volume(&mut s);
     run(&mut s, "solid.chamfer", json!({"edges": [[50, 4, 30]], "distance": "rim_chamfer"}));
     let expected = |size: f64| {
-        let drop = size / 1.64_f64.sqrt();
+        let wall_slope: f64 = (20.0 - 4.0) / (30.0 - 10.0); // horizontal run / vertical drop
+        let drop = size / (1.0 + wall_slope.powi(2)).sqrt();
         base - 0.5 * size * drop * (60.0 - drop / 3.0)
     };
     assert!(rel(volume(&mut s), expected(1.0)) < 1e-8);

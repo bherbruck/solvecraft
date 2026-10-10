@@ -131,6 +131,60 @@ fn setback(r: f64, phi: f64, shape: Shape) -> f64 {
     }
 }
 
+/// An extended corner edge must stay in the trimmed side face, not just its infinite
+/// supporting plane. Reject crossings and contact with any boundary after the old corner,
+/// including holes. Curved boundaries are sampled more finely than the clearance tolerance.
+fn chamfer_extension_fits(face: &mt::Face, p: Vec3, q: Vec3, tol: f64) -> bool {
+    use mt::{BoundedCurve, ParameterDivision1D};
+    // truck requires a curve sampling tolerance of at least 1e-6. Keep the
+    // boundary clearance four times larger than the chord approximation error.
+    let tol = tol.max(4e-6);
+    let (Some(x), Some(n)) = ((q - p).normalized(), plane_normal(face)) else { return false };
+    let y = n.cross(x);
+    let len = p.dist(q);
+    if !len.is_finite() || len <= tol {
+        return false;
+    }
+    let mut inside = false;
+    for edge in face.edge_iter() {
+        let points = if matches!(edge.curve(), mt::Curve::Line(_)) {
+            vec![edge.front().point(), edge.back().point()]
+        } else {
+            let curve = edge.curve();
+            curve.parameter_division(curve.range_tuple(), tol * 0.25).1
+        };
+        if points.len() < 2 || points.len() > 100_000 {
+            return false;
+        }
+        for pair in points.windows(2) {
+            let [a, b] = pair else { return false };
+            let a = from_p3(*a) - p;
+            let b = from_p3(*b) - p;
+            let (ax, ay, bx, by) = (a.dot(x), a.dot(y), b.dot(x), b.dot(y));
+            if ![ax, ay, bx, by].iter().all(|v| v.is_finite()) {
+                return false;
+            }
+            // Contact/overlap with the extension, except its original endpoint.
+            if (ay.abs() <= tol && by.abs() <= tol && ax.max(bx) > tol && ax.min(bx) <= len + tol)
+                || [(ax, ay), (bx, by)].iter().any(|(u, v)| *u > tol && *u <= len + tol && v.abs() <= tol)
+            {
+                return false;
+            }
+            if (ay > 0.0) != (by > 0.0) {
+                let hit = ax - ay * (bx - ax) / (by - ay);
+                if hit > tol && hit <= len + tol {
+                    return false;
+                }
+                // Even-odd containment of q over all loops (outer boundary and holes).
+                if hit > len {
+                    inside = !inside;
+                }
+            }
+        }
+    }
+    inside
+}
+
 #[allow(clippy::too_many_arguments)]
 fn blend_geometry(
     solid: &Solid,
@@ -184,18 +238,30 @@ fn blend_geometry(
                 .ok_or_else(|| unsupported("unexpected corner topology"))
         };
         let (e1, e2) = (shared(i1)?, shared(i2)?);
-        for (e, q) in [(&e1, a), (&e2, b)] {
+        for (e, q, t, fi) in [(&e1, a, t1, i1), (&e2, b, t2, i2)] {
             if !matches!(e.curve(), mt::Curve::Line(_)) {
                 return Err(unsupported("the edges at the corners must be straight"));
             }
             let other = if e.front() == v { vtx(e.back()) } else { vtx(e.front()) };
             let delta = other - p;
+            if shape == Shape::Round {
+                // Fillets retain the square-end check: the original corner edge
+                // must run in the setback direction and have enough length left.
+                let along = delta.dot(t);
+                if (delta - t * along).len() > tol * 100.0 + 1e-7 || along <= s + tol {
+                    return Err(unsupported("the blend is larger than the neighbouring faces"));
+                }
+                continue;
+            }
             let len = delta.len();
             let dir = delta.normalized().ok_or_else(|| unsupported("zero-length corner edge"))?;
             let along = (q - p).dot(dir);
             // An inner rim extends the neighbouring rim edge away from its other
-            // vertex. This is valid; passing that other vertex is not.
-            if (q - p - dir * along).len() > tol * 100.0 + 1e-7 || along >= len - tol || (shape == Shape::Round && along <= tol) {
+            // vertex. This is valid only within the trimmed side face.
+            if (q - p - dir * along).len() > tol * 100.0 + 1e-7
+                || along >= len - tol
+                || (along < 0.0 && !faces.get(fi).is_some_and(|f| chamfer_extension_fits(f, p, q, tol)))
+            {
                 return Err(unsupported("the blend is larger than the neighbouring faces"));
             }
         }
@@ -886,6 +952,22 @@ fn chamfer_tool_sides(cur: &Body, p: Vec3, s: f64, sides: Option<(ChamferSide, b
 mod tests {
     use super::*;
     use solvecraft_geom::{Loop2, Plane, Region2, Vec2};
+
+    #[test]
+    fn chamfer_extension_cannot_cross_a_hole_and_reenter_the_face() {
+        let rectangle = |a, b, c, d| Loop2::polygon(&[Vec2::new(a, b), Vec2::new(c, b), Vec2::new(c, d), Vec2::new(a, d)]);
+        let region =
+            Region2 { outer: rectangle(0.0, 0.0, 10.0, 10.0), holes: vec![rectangle(4.0, 4.0, 6.0, 6.0), Loop2::circle(Vec2::new(4.0, 1.5), 0.25)] };
+        for plane in [Plane::XY, Plane::XZ] {
+            let face = crate::build::face(&plane, &region).unwrap();
+            let p = plane.to_world(Vec2::new(4.0, 4.0));
+            let fits = |y| chamfer_extension_fits(&face, p, plane.to_world(Vec2::new(4.0, y)), 1e-6);
+            assert!(fits(2.0));
+            assert!(!fits(1.5)); // endpoint in the circular hole
+            assert!(!fits(0.5)); // endpoint in material, but the extension crossed the hole
+            assert!(!fits(-1e8)); // an arbitrarily long slide cannot escape the face
+        }
+    }
 
     #[test]
     fn local_chamfer_intersects_sloped_end_planes() {
