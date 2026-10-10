@@ -2765,10 +2765,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = items.into_iter().map(|index| Sel::Profile { sketch: *sketch, index }).collect();
             }
-            for (k, v) in [("targets", (!targets.is_empty()).then(|| json!(targets)))] {
-                if let Some(v) = v {
-                    d.extra.insert(k.into(), v);
-                }
+            if !targets.is_empty() {
+                d.extra.insert("targets".into(), json!(targets));
             }
             d
         }
