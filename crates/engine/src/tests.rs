@@ -1847,3 +1847,43 @@ fn boundary_fill_cells() {
     assert!(rel(m["total"]["volume_mm3"].as_f64().unwrap_or(0.0), 2.0 * 10.0 * 20.0 * 20.0) < 1e-9, "{m}");
     assert!(s.execute("SurfaceSculpt", &json!({"tools": ["A"], "cells": [[100, 100, 100]]})).is_err());
 }
+
+/// Rectangles name their sides and corners, so they can be dimensioned without inspecting the
+/// sketch first, whichever way round the corners were given.
+#[test]
+fn rectangle_names_sides_and_corners() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 30], "p1": [0, 0]}));
+    let pos = |s: &Session, id: &Value| {
+        let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
+        sk.point(sk.resolve_point(id.as_str().unwrap()).unwrap()).unwrap()
+    };
+    for (corner, at) in [("bottom_left", [0.0, 0.0]), ("bottom_right", [40.0, 0.0]), ("top_right", [40.0, 30.0]), ("top_left", [0.0, 30.0])] {
+        let p = pos(&s, &r["corners"][corner]);
+        assert!((p.x - at[0]).abs() < 1e-9 && (p.y - at[1]).abs() < 1e-9, "{corner}: {p:?} in {r}");
+    }
+    for (side, from, to) in [
+        ("bottom", "bottom_left", "bottom_right"),
+        ("right", "bottom_right", "top_right"),
+        ("top", "top_right", "top_left"),
+        ("left", "top_left", "bottom_left"),
+    ] {
+        let line = r["sides"][side].as_str().unwrap();
+        assert!(r["curves"].as_array().unwrap().iter().any(|c| c == line), "{r}");
+        assert_eq!(pos(&s, &json!(format!("{line}.start"))), pos(&s, &r["corners"][from]), "{side} in {r}");
+        assert_eq!(pos(&s, &json!(format!("{line}.end"))), pos(&s, &r["corners"][to]), "{side} in {r}");
+    }
+    run(&mut s, "sketch.constraint.coincident", json!({"a": r["corners"]["bottom_left"], "b": "origin"}));
+    run(&mut s, "sketch.dimension", json!({"entities": [r["sides"]["bottom"]], "value": 50}));
+    run(&mut s, "sketch.dimension", json!({"entities": [r["sides"]["left"]], "value": 20}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert_eq!(si["dof"], 0, "{si}");
+    let p = pos(&s, &r["corners"]["top_right"]);
+    assert!((p.x - 50.0).abs() < 1e-6 && (p.y - 20.0).abs() < 1e-6, "{p:?}");
+
+    let c = run(&mut s, "sketch.rectangle.center", json!({"center": [100, 0], "corner": [90, 5]}));
+    let p = pos(&s, &c["corners"]["bottom_left"]);
+    assert!((p.x - 90.0).abs() < 1e-9 && (p.y + 5.0).abs() < 1e-9, "{c}");
+    assert_eq!(pos(&s, &json!(format!("{}.start", c["sides"]["top"].as_str().unwrap()))), pos(&s, &c["corners"]["top_right"]), "{c}");
+}
