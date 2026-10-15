@@ -10,10 +10,13 @@
 //!   smaller blend's contact line on the face that ends the larger one;
 //! - three filleted edges: each cylinder stops at a plane section through the points where its
 //!   contact lines meet the others', and a corner patch spans the three sections (a sphere for
-//!   equal radii, else a rational patch through the exact sections).
+//!   equal radii, else a rational patch through the exact sections). Orthogonal
+//!   corners with a unique smallest radius use a single trimmed setback surface,
+//!   with six sides, or four when one radius exceeds the other two combined.
 //!
 //! A fillet that ends on an earlier round (of any radius) takes the round off
-//! ([`crate::delete_faces`]) and blends both edges together.
+//! ([`crate::delete_faces`]) and blends both edges together. Equal-radius concave
+//! rounds can also use this recovery, by retrying the planar-loop blend builder.
 
 use std::collections::{HashMap, HashSet};
 
@@ -23,6 +26,8 @@ use truck_modeling::{self as mt, builder};
 use crate::blend::{plane_normal, too_large, unsupported, vtx};
 use crate::body::{Body, Solid, p3, v3};
 use crate::{KernelError, Result, guard};
+
+pub(crate) mod setback;
 
 /// Fillet each edge nearest a point with its own radius.
 pub fn fillet_radii(body: &Body, edges: &[(Vec3, f64)]) -> Result<Body> {
@@ -39,16 +44,31 @@ pub fn fillet_radii(body: &Body, edges: &[(Vec3, f64)]) -> Result<Body> {
     let mut sel = edges.to_vec();
     let mut first: Option<KernelError> = None;
     // Earlier rounds at the edges' ends come off and are blended again with the new edges.
-    for _ in 0..4 {
+    for attempt in 0..4 {
         let err = match build(&cur, &sel, true) {
             Ok(b) => return Ok(crate::record::after(b, &cur, &counts)),
             Err(e) => e,
         };
+        // Equal-radius concave rounds can meet along a planar face's loop. Once their
+        // earlier rounds are removed, reuse the simultaneous-edge path that handles that
+        // geometry. Do not retry on the original body or change an earlier round's radius.
+        if attempt > 0
+            && let Some((_, r)) = sel.first()
+            && sel.iter().all(|(_, other)| (other - r).abs() <= r * 1e-9)
+        {
+            let points: Vec<Vec3> = sel.iter().map(|(p, _)| *p).collect();
+            if let Ok(b) = crate::blend::fillet_local(&cur, &points, *r) {
+                return Ok(crate::record::after(b, &cur, &counts));
+            }
+        }
         let rounds = rounds_at(&cur, &sel);
         if rounds.is_empty() {
             return Err(first.unwrap_or(err));
         }
         first.get_or_insert(err);
+        if sel.len() + rounds.len() > 1000 {
+            return Err(unsupported("too many connected fillets to rebuild"));
+        }
         let idx: Vec<usize> = rounds.iter().map(|r| r.0).collect();
         cur = crate::record::after(crate::delete_faces(&cur, &idx)?, &cur, &counts);
         sel.extend(rounds.iter().map(|r| (r.1, r.2)));
@@ -407,6 +427,9 @@ fn build(cur: &Body, sel_pts: &[(Vec3, f64)], round: bool) -> Result<Body> {
         }
         let r = radius.get(id).copied().unwrap_or(1.0);
         let s = if round { r / (alpha / 2.0).tan() } else { r };
+        if !(s.is_finite() && s > 0.0 && s < size) {
+            return Err(unsupported("invalid or oversized fillet setback"));
+        }
         let w = (alpha / 2.0).sin();
         // The cylinder, well past both ends (sections on oblique end faces reach beyond them).
         let m = 4.0 * (s + r);
@@ -592,6 +615,48 @@ fn build(cur: &Body, sel_pts: &[(Vec3, f64)], round: bool) -> Result<Body> {
                     }
                     let (s1, s2, s3) = (sel(*e1)?, sel(*e2)?, sel(*e3)?);
                     let (f12, f23, f31) = (face_with(*e1, *e2)?, face_with(*e2, *e3)?, face_with(*e3, *e1)?);
+                    let mut radii = [s1.r, s2.r, s3.r];
+                    radii.sort_by(f64::total_cmp);
+                    if radii[1] - radii[0] > size * 1e-9 && u1.dot(*u2).abs().max(u2.dot(*u3).abs()).max(u3.dot(*u1).abs()) <= 1e-6 {
+                        let patch = setback_corner([s1, s2, s3], [*u1, *u2, *u3], [f12, f23, f31], v, size)?;
+                        let mut vv: Vec<mt::Vertex> = Vec::new();
+                        for p in patch.points {
+                            let vertex = vv.iter().find(|q| vtx(q).dist(p) < size * 1e-9).cloned().unwrap_or_else(|| builder::vertex(p3(p)));
+                            vv.push(vertex);
+                        }
+                        let point = |i| vv.get(i).ok_or_else(|| unsupported("setback vertex"));
+                        // Loop: A's section, plane 31, C's section, plane 23,
+                        // B's section, plane 12. A dominant round merges two pairs of contacts.
+                        for (e, f, i) in [(e1, f12, 0), (e1, f31, 1), (e3, f31, 2), (e3, f23, 3), (e2, f23, 4), (e2, f12, 5)] {
+                            endpt.insert((*e, *vid, Some(f)), point(i)?.clone());
+                        }
+                        let owners = [Owner::Cyl(*e1), Owner::Face(f31), Owner::Cyl(*e3), Owner::Face(f23), Owner::Cyl(*e2), Owner::Face(f12)];
+                        let mut wire = Vec::new();
+                        for (i, curve) in patch.curves.into_iter().enumerate() {
+                            let Some(curve) = curve else { continue };
+                            let c = edge(point(i)?, point((i + 1) % 6)?, curve)?;
+                            let owner = owners.get(i).copied().ok_or_else(|| unsupported("setback owner"))?;
+                            if let Owner::Face(fi) = owner {
+                                let f = faces.get(fi).ok_or_else(|| unsupported("setback side face"))?;
+                                use mt::{BoundedCurve, ParametricCurve};
+                                let curve = c.curve();
+                                let (a, b) = curve.range_tuple();
+                                for k in 0..=32 {
+                                    let p = crate::body::from_p3(curve.subs(a + (b - a) * k as f64 / 32.0));
+                                    if !crate::blend::extension_fits(f, v, p, size * 1e-8) {
+                                        return Err(unsupported("the setback patch crosses a side-face boundary"));
+                                    }
+                                }
+                            }
+                            list.push((c.clone(), vec![owner, Owner::Patch]));
+                            wire.push(c);
+                        }
+                        patches.push((
+                            mt::Face::try_new(vec![wire.into()], patch.surface).map_err(|e| KernelError::Failed(format!("setback patch: {e}")))?,
+                            [*e1, *e2, *e3],
+                        ));
+                        continue;
+                    }
                     let q12 = meet(v, (*u1, s1.t(f12), s1.s), (*u2, s2.t(f12), s2.s))?;
                     let q23 = meet(v, (*u2, s2.t(f23), s2.s), (*u3, s3.t(f23), s3.s))?;
                     let q31 = meet(v, (*u3, s3.t(f31), s3.s), (*u1, s1.t(f31), s1.s))?;
@@ -819,6 +884,37 @@ fn rounds_at(cur: &Body, sel: &[(Vec3, f64)]) -> Vec<(usize, Vec3, f64)> {
             out.push((fi, p, r));
         }
     }
+    // A larger round can hide the smaller one from the selected edge's endpoint.
+    // Remove the connected round group together: Delete Face cannot extend a
+    // surviving curved neighbor to fill the hole left by removing only one round.
+    let mut owners: HashMap<mt::EdgeID, Vec<usize>> = HashMap::new();
+    for (fi, f) in faces.iter().enumerate() {
+        for edge in f.edge_iter() {
+            owners.entry(edge.id()).or_default().push(fi);
+        }
+    }
+    let mut visited: HashSet<usize> = out.iter().map(|r| r.0).collect();
+    let mut cursor = 0;
+    while let Some((fi, _, _)) = out.get(cursor).copied() {
+        cursor += 1;
+        let Some(face) = faces.get(fi) else { continue };
+        for edge in face.edge_iter() {
+            for next in owners.get(&edge.id()).into_iter().flatten() {
+                if !visited.insert(*next) {
+                    continue;
+                }
+                let Some(face) = faces.get(*next) else { continue };
+                if plane_normal(face).is_none()
+                    && let Some((p, r)) = round_of(&faces, face, size)
+                {
+                    if out.len() >= 1000 {
+                        return Vec::new();
+                    }
+                    out.push((*next, p, r));
+                }
+            }
+        }
+    }
     out
 }
 
@@ -826,13 +922,17 @@ fn rounds_at(cur: &Body, sel: &[(Vec3, f64)]) -> Vec<(usize, Vec3, f64)> {
 /// surface a cylinder tangent to both. The sharp edge's midpoint and the radius.
 fn round_of(faces: &[&mt::Face], f: &mt::Face, size: f64) -> Option<(Vec3, f64)> {
     use mt::{ParametricSurface, SearchNearestParameter};
+    if !matches!(crate::offset::surf_of(f, size * 1e-6), Some(crate::offset::Surf::Cylinder { .. })) {
+        return None;
+    }
+
     let mut lines: Vec<(Vec3, Vec3, Vec3)> = Vec::new();
     for e in f.edge_iter() {
         if !matches!(e.curve(), mt::Curve::Line(_)) {
             continue;
         }
         let other = faces.iter().find(|g| !std::ptr::eq(**g, f) && g.edge_iter().any(|x| x.id() == e.id()))?;
-        let n = plane_normal(other)?;
+        let Some(n) = plane_normal(other) else { continue };
         lines.push((vtx(e.absolute_front()), vtx(e.absolute_back()), n));
     }
     for (i, (a0, a1, na)) in lines.iter().enumerate() {
@@ -845,7 +945,12 @@ fn round_of(faces: &[&mt::Face], f: &mt::Face, size: f64) -> Option<(Vec3, f64)>
             let a = (*a0 + *a1) * 0.5;
             let b = *b0 + d * (a - *b0).dot(d);
             let dn = *nb - *na;
-            let r = (b - a).len() / dn.len();
+            // Signed radius: concave rounds offset toward the outward side of the
+            // neighboring planes, while convex rounds offset into the material.
+            let r = (b - a).dot(dn) / dn.dot(dn);
+            if !(r.is_finite() && r.abs() > 1e-6 && r.abs() < 1e6) {
+                continue;
+            }
             if (b - a - dn * r).len() > size * 1e-6 {
                 continue;
             }
@@ -858,7 +963,7 @@ fn round_of(faces: &[&mt::Face], f: &mt::Face, size: f64) -> Option<(Vec3, f64)>
                 continue;
             }
             let p = planes3((*na, a), (*nb, b), (d, a)).ok()?;
-            return Some((p, r));
+            return Some((p, r.abs()));
         }
     }
     None
@@ -868,6 +973,126 @@ struct CornerPatch {
     /// Sections of the first blend (q12 → q31), the second (q12 → q23), the third (q23 → q31).
     sections: [mt::NurbsCurve<mt::Vector4>; 3],
     surf: mt::Surface,
+}
+
+struct SetbackPatch {
+    points: [Vec3; 6],
+    curves: [Option<mt::Curve>; 6],
+    surface: mt::Surface,
+}
+
+fn setback_corner(s: [&Sel; 3], along: [Vec3; 3], f: [usize; 3], v: Vec3, size: f64) -> Result<SetbackPatch> {
+    let [a, b, c] = s;
+    let [ua, ub, uc] = along;
+    let [f12, f23, f31] = f;
+    if ua.dot(ub).abs().max(ub.dot(uc).abs()).max(uc.dot(ua).abs()) > 1e-6 {
+        return Err(unsupported("setback patches at non-orthogonal corners"));
+    }
+    let mut sorted = [(0, a.r), (1, b.r), (2, c.r)];
+    sorted.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let [(small, ra), (middle, rb), (large, rc)] = sorted;
+    let average = (ra + rb + rc) / 3.0;
+    // The linear, scale-invariant interpolation of the four published six-sided
+    // observations. Further oracle triples are needed to establish the rule.
+    let extra = ((rb - ra) + 2.0 * (rc - rb)) / 6.0;
+    let mut setbacks = [0.0; 3];
+    for (i, value) in [(small, rb + rc + extra), (middle, average + rc), (large, average + rb)] {
+        if !value.is_finite() || value <= 0.0 || value >= size {
+            return Err(unsupported("invalid corner setback"));
+        }
+        if let Some(slot) = setbacks.get_mut(i) {
+            *slot = value;
+        }
+    }
+    let dominant = rc > ra + rb + size * 1e-9;
+    if dominant {
+        for i in [small, middle] {
+            if let Some(value) = setbacks.get_mut(i) {
+                *value = rc;
+            }
+        }
+    }
+    let [da, db, dc] = setbacks;
+    let (ma, mb, mc) = (v + ua * da, v + ub * db, v + uc * dc);
+    let contact = |i: usize, s: &Sel, u: Vec3, m: Vec3, f, other: &Sel| {
+        let m = if dominant && i == large { v + u * other.r } else { m };
+        m + s.t(f) * s.s
+    };
+    let points = [
+        contact(0, a, ua, ma, f12, b),
+        contact(0, a, ua, ma, f31, c),
+        contact(2, c, uc, mc, f31, a),
+        contact(2, c, uc, mc, f23, b),
+        contact(1, b, ub, mb, f23, c),
+        contact(1, b, ub, mb, f12, a),
+    ];
+    let [a12, a31, c31, c23, b23, b12] = points;
+    let q12 = meet(v, (ua, a.t(f12), a.s), (ub, b.t(f12), b.s))?;
+    let q23 = meet(v, (ub, b.t(f23), b.s), (uc, c.t(f23), c.s))?;
+    let q31 = meet(v, (uc, c.t(f31), c.s), (ua, a.t(f31), a.s))?;
+    let plane_arc = |a: Vec3, q: Vec3, b: Vec3| -> Result<mt::Curve> {
+        let (Some(x), Some(y)) = ((a - q).normalized(), (b - q).normalized()) else {
+            return Err(unsupported("collapsed setback boundary"));
+        };
+        let w = ((1.0 - x.dot(y).clamp(-1.0, 1.0)) * 0.5).sqrt();
+        if w <= 1e-6 {
+            return Err(unsupported("degenerate setback boundary"));
+        }
+        Ok(mt::Curve::NurbsCurve(conic(a, q, b, w)))
+    };
+    let round = |i: usize, sel: &Sel, u: Vec3, p: Vec3, q: Vec3, m: Vec3| -> Result<Option<mt::Curve>> {
+        let curve = if dominant && i == large { variable_section(sel, u, v, p, q)? } else { mt::Curve::NurbsCurve(conic(p, m, q, sel.w)) };
+        Ok(Some(curve))
+    };
+    let flat = |i: usize, j: usize, p: Vec3, q: Vec3, r: Vec3| -> Result<Option<mt::Curve>> {
+        if dominant && (i == large || j == large) { Ok(None) } else { plane_arc(p, q, r).map(Some) }
+    };
+    let curves = [
+        round(0, a, ua, a12, a31, ma)?,
+        flat(0, 2, a31, q31, c31)?,
+        round(2, c, uc, c31, c23, mc)?,
+        flat(2, 1, c23, q23, b23)?,
+        round(1, b, ub, b23, b12, mb)?,
+        flat(1, 0, b12, q12, a12)?,
+    ];
+    let normal = |s: &Sel, fi| if s.fa == fi { s.na } else { s.nb };
+    let (n12, n23, n31) = (normal(a, f12), normal(b, f23), normal(c, f31));
+    let normals = [
+        setback::Normal::Cylinder { origin: a.axis_point(), axis: a.d },
+        setback::Normal::Plane(n31),
+        setback::Normal::Cylinder { origin: c.axis_point(), axis: c.d },
+        setback::Normal::Plane(n23),
+        setback::Normal::Cylinder { origin: b.axis_point(), axis: b.d },
+        setback::Normal::Plane(n12),
+    ];
+    let boundaries: Vec<_> =
+        curves.iter().cloned().zip(normals).filter_map(|(curve, normal)| curve.map(|curve| setback::Boundary { curve, normal })).collect();
+    let surface = setback::fit(&boundaries, n12 + n23 + n31, size, &[(n12, v), (n23, v), (n31, v)], [a.r, b.r, c.r])?;
+    Ok(SetbackPatch { points, curves, surface })
+}
+
+/// A curve on the dominant cylinder. A rational quadratic supplies its exact
+/// circular projection; cubic Hermite axial motion has zero slope at both ends
+/// so its tangent matches the two smaller rounds at their contact vertices.
+fn variable_section(sel: &Sel, axis: Vec3, vertex: Vec3, a: Vec3, b: Vec3) -> Result<mt::Curve> {
+    let ha = (a - vertex).dot(axis);
+    let hb = (b - vertex).dot(axis);
+    let base = [h(a - axis * ha, 1.0), h(vertex, sel.w), h(b - axis * hb, 1.0)];
+    let axial = [ha, ha, hb, hb];
+    let bin2 = [1.0, 2.0, 1.0];
+    let bin3 = [1.0, 3.0, 3.0, 1.0];
+    let bin5 = [1.0, 5.0, 10.0, 10.0, 5.0, 1.0];
+    let mut controls = Vec::new();
+    for (i, denominator) in bin5.iter().enumerate() {
+        let mut point = mt::Vector4::new(0.0, 0.0, 0.0, 0.0);
+        for (j, p) in base.iter().enumerate() {
+            let Some(k) = i.checked_sub(j) else { continue };
+            let (Some(z), Some(c2), Some(c3)) = (axial.get(k), bin2.get(j), bin3.get(k)) else { continue };
+            point += (*p + mt::Vector4::new(axis.x * z * p.w, axis.y * z * p.w, axis.z * z * p.w, 0.0)) * (c2 * c3 / denominator);
+        }
+        controls.push(point);
+    }
+    Ok(mt::Curve::NurbsCurve(mt::NurbsCurve::new(mt::BSplineCurve::new(mt::KnotVec::bezier_knot(5), controls))))
 }
 
 /// Plane section of a blend's cylinder from `a` to `b` (points on its contact lines): the plane
@@ -1192,6 +1417,53 @@ mod tests {
         measure(b).unwrap().volume
     }
 
+    fn straight_pocket() -> (Body, [Vec3; 2]) {
+        let slab = box_solid(Vec3::ZERO, Vec3::new(90.0, 48.0, 16.0)).unwrap();
+        let cut = box_solid(Vec3::new(17.0, 10.0, 4.0), Vec3::new(73.0, 34.0, 16.0)).unwrap();
+        let pocket = crate::boolean(&slab, &cut, crate::BoolOp::Cut).unwrap().unwrap();
+        (pocket, [Vec3::new(17.0, 22.0, 4.0), Vec3::new(45.0, 34.0, 4.0)])
+    }
+
+    #[test]
+    fn sequential_concave_rounds_match_simultaneous_selection() {
+        let (pocket, picks) = straight_pocket();
+        let together = fillet(&pocket, &picks, 1.5).unwrap();
+        for [a, b] in [picks, [picks[1], picks[0]]] {
+            let first = fillet(&pocket, &[a], 1.5).unwrap();
+            let result = fillet(&first, &[b], 1.5).unwrap();
+            assert!(result.validity().is_empty());
+            assert_eq!(result.unmeshed_faces(), 0);
+            assert_eq!(result.face_count(), together.face_count());
+            assert!((vol(&result) - vol(&together)).abs() < 1e-5);
+            // Rebuilding a round after Delete Face can have no exact history: the
+            // restored sharp edge is new. Never attach an invalid certificate.
+            if let Some(history) = result.history() {
+                history.check(&result, &[&first]).unwrap();
+            }
+            for vertex in together.solid.vertex_iter() {
+                assert!(result.solid.vertex_iter().any(|v| vtx(&v).dist(vtx(&vertex)) < 1e-7));
+            }
+        }
+    }
+
+    #[test]
+    fn sequential_concave_rounds_preserve_distant_rounds_and_refuse_unsupported_sizes() {
+        let (pocket, [a, b]) = straight_pocket();
+        let outer = fillet(&pocket, &[Vec3::new(45.0, 0.0, 16.0)], 0.7).unwrap();
+        let first = fillet(&outer, &[a], 1.5).unwrap();
+        let before = vol(&first);
+        let together = fillet(&outer, &[a, b], 1.5).unwrap();
+        let result = fillet(&first, &[b], 1.5).unwrap();
+        assert_eq!(result.face_count(), together.face_count());
+        assert!((vol(&result) - vol(&together)).abs() < 1e-5);
+        assert!(result.validity().is_empty());
+        // The equal-radius retry must not silently replace an earlier radius.
+        assert!(fillet_radii(&first, &[(b, 2.0)]).is_err());
+        assert!(fillet(&first, &[b], 50.0).is_err());
+        assert_eq!(vol(&first), before);
+        assert!(first.validity().is_empty());
+    }
+
     /// The body minus the material outside each round (the strips between the faces and the
     /// cylinders), for rounds `ra`, `rb`, `rc` on edges a, b, c: the strips integrated exactly
     /// and their overlap at the corner numerically.
@@ -1284,16 +1556,126 @@ mod tests {
         assert_eq!(r.face_count(), 10);
         assert!((vol(&r) - sphere).abs() < 0.05, "{} vs {sphere}", vol(&r));
         assert!(kink(&r) < 0.01);
-        // Different radii: a smooth patch over the corner, slightly more than the strips take.
-        for (rs, sel) in [((2.0, 2.0, 3.0), fillet(&ab, &[c], 3.0)), ((2.0, 3.0, 4.0), fillet_radii(&bx, &[(a, 2.0), (b, 3.0), (c, 4.0)]))] {
-            let r = sel.unwrap();
-            assert_eq!(r.face_count(), 10);
-            assert_eq!(r.unmeshed_faces(), 0);
-            let k = kink(&r);
-            assert!(k < 0.05, "kink {k}°");
-            let (v, s) = (vol(&r), strips(rs.0, rs.1, rs.2));
-            assert!(v < s + 0.05 && v > s - 3.0, "{v} vs {s}");
+        // Two equal smaller radii retain the existing three-sided patch.
+        let r = fillet(&ab, &[c], 3.0).unwrap();
+        assert_eq!(r.face_count(), 10);
+        assert_eq!(r.unmeshed_faces(), 0);
+        assert!(kink(&r) < 0.05);
+        let (v, s) = (vol(&r), strips(2.0, 2.0, 3.0));
+        assert!(v < s + 0.05 && v > s - 3.0, "{v} vs {s}");
+    }
+
+    /// Tangency to every neighbor, including the three original planar faces.
+    fn setback_kink(body: &Body) -> f64 {
+        use mt::{BoundedCurve, InnerSpace, ParametricCurve, ParametricSurface3D, SearchNearestParameter};
+        let patch = body.solid.face_iter().last().unwrap();
+        let mut worst: f64 = 0.0;
+        for edge in patch.edge_iter() {
+            let neighbor = body.solid.face_iter().find(|face| face.id() != patch.id() && face.edge_iter().any(|e| e.id() == edge.id())).unwrap();
+            let curve = edge.curve();
+            let (a, b) = curve.range_tuple();
+            for i in 0..=32 {
+                let p = curve.subs(a + (b - a) * i as f64 / 32.0);
+                let normal = |surface: mt::Surface| {
+                    let (u, v) = surface.search_nearest_parameter(p, None, 100).unwrap();
+                    surface.normal(u, v)
+                };
+                let dot = normal(patch.oriented_surface()).dot(normal(neighbor.oriented_surface()));
+                worst = worst.max(dot.clamp(-1.0, 1.0).acos().to_degrees());
+            }
         }
+        worst
+    }
+
+    fn check_setback_reference(radii: [f64; 3], reference: f64, sides: usize) {
+        let (bx, a, b, c) = setup();
+        // Public measurements in issue #52. The interior is a bounded fair
+        // approximation; neither proprietary surfaces nor oracle files are used.
+        let body = fillet_radii(&bx, &[(a, radii[0]), (b, radii[1]), (c, radii[2])]).unwrap();
+        assert_eq!(body.face_count(), 10);
+        assert!(body.validity().is_empty());
+        assert_eq!(body.unmeshed_faces(), 0);
+        let patch = body.solid.face_iter().last().unwrap();
+        assert_eq!(patch.edge_iter().count(), sides, "{radii:?}");
+        let kink = setback_kink(&body);
+        assert!(kink < 0.02, "{radii:?}: kink {kink} degrees");
+        let measured = measure(&body).unwrap();
+        assert!((measured.volume - reference).abs() < reference * 0.001, "{radii:?}: {} vs {reference}", measured.volume);
+        let tol = bx.size() * 1e-6;
+        assert!(measured.bbox.min.x >= -tol && measured.bbox.min.y >= -tol && measured.bbox.min.z >= -tol);
+        assert!(measured.bbox.max.x <= 20.0 + tol && measured.bbox.max.y <= 20.0 + tol && measured.bbox.max.z <= 20.0 + tol);
+    }
+
+    #[test]
+    fn setback_reference_233() {
+        check_setback_reference([2.0, 3.0, 3.0], 7900.664, 6);
+    }
+    #[test]
+    fn setback_reference_234() {
+        check_setback_reference([2.0, 3.0, 4.0], 7867.820, 6);
+    }
+    #[test]
+    fn setback_reference_123() {
+        check_setback_reference([1.0, 2.0, 3.0], 7937.490, 6);
+    }
+    #[test]
+    fn setback_reference_331() {
+        check_setback_reference([3.0, 3.0, 1.0], 7914.849, 6);
+    }
+    #[test]
+    fn setback_reference_236() {
+        check_setback_reference([2.0, 3.0, 6.0], 7794.490, 4);
+    }
+
+    #[test]
+    fn setback_step_and_mesh_convergence() {
+        let (bx, a, b, c) = setup();
+        let body = fillet_radii(&bx, &[(a, 2.0), (b, 3.0), (c, 4.0)]).unwrap();
+        let coarse = body.tessellate_with(0.001, true).unwrap().measure().volume;
+        let fine = body.tessellate_with(0.0002, true).unwrap().measure().volume;
+        assert!((fine - coarse).abs() < 0.15, "{fine} vs {coarse}");
+        let step = crate::step_export(&[&body], "SolveCraft").unwrap();
+        let imported = crate::step_import(&step).unwrap();
+        assert_eq!(imported.bodies.len(), 1);
+        let restored = &imported.bodies[0].body;
+        assert_eq!(restored.face_count(), 10);
+        assert!(restored.validity().is_empty());
+        assert_eq!(restored.unmeshed_faces(), 0);
+        assert!((vol(restored) - vol(&body)).abs() < 0.15);
+    }
+
+    #[test]
+    fn setback_scales_and_selection_order_do_not_change_geometry() {
+        let scale = 0.1;
+        let body = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0) * scale).unwrap();
+        let (_, a, b, c) = setup();
+        let first = fillet_radii(&body, &[(a * scale, 2.0 * scale), (b * scale, 3.0 * scale), (c * scale, 4.0 * scale)]).unwrap();
+        let second = fillet_radii(&body, &[(c * scale, 4.0 * scale), (a * scale, 2.0 * scale), (b * scale, 3.0 * scale)]).unwrap();
+        assert_eq!(first.face_count(), 10);
+        assert_eq!(second.face_count(), 10);
+        assert!((vol(&first) - 7.867820).abs() < 0.008);
+        assert!((vol(&first) - vol(&second)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn setback_sequential_features() {
+        let (bx, a, b, c) = setup();
+        let first = fillet(&bx, &[a], 2.0).unwrap();
+        let second = fillet(&first, &[b], 3.0).unwrap();
+        let result = fillet(&second, &[c], 4.0).unwrap();
+        assert_eq!(result.face_count(), 10);
+        assert!(result.validity().is_empty());
+        assert!((vol(&result) - 7867.820).abs() < 7.868);
+    }
+
+    #[test]
+    fn setback_refuses_to_cross_the_opposite_wall() {
+        let thin = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 5.0)).unwrap();
+        assert!(
+            fillet_radii(&thin, &[(Vec3::new(20.0, 10.0, 5.0), 2.0), (Vec3::new(10.0, 0.0, 5.0), 3.0), (Vec3::new(20.0, 0.0, 2.5), 4.0)]).is_err()
+        );
+        assert_eq!(thin.face_count(), 6);
+        assert!((vol(&thin) - 2000.0).abs() < 1e-6);
     }
 
     #[test]

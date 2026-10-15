@@ -104,6 +104,12 @@ incremental = false
 [profile.ci.package."*"]
 opt-level = 2
 
+# Endpoint fitting spends most of its time in numeric loops (not just in truck).
+# Give the kernel the same optimization as its dependencies; retain the light
+# profile for the rest of the workspace and all existing safety checks.
+[profile.ci.package.solidcraft-kernel]
+opt-level = 2
+
 [profile.release]
 opt-level = 3
 lto = "thin"

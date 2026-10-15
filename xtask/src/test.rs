@@ -1,5 +1,5 @@
 //! `cargo xtask test`: build the workspace's tests once, then run every test binary at the same
-//! time. `cargo test` runs them one after another, so one slow binary held up all the others;
+//! time, then run performance binaries alone. `cargo test` runs binaries one after another;
 //! the doc tests and any other `side` jobs run alongside on their own thread.
 
 use std::process::{Command, Stdio};
@@ -13,6 +13,7 @@ struct TestBin {
     label: String,
     exe: String,
     dir: String,
+    exclusive: bool,
 }
 
 /// Build the tests with `cargo_args` (e.g. `--locked`), run each binary with `test_args`, and run
@@ -24,7 +25,7 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     let (tx, rx) = mpsc::channel::<(String, Result<String, String>, f64)>();
     let mut failed = Vec::new();
     std::thread::scope(|scope| {
-        for b in &bins {
+        for b in bins.iter().filter(|b| !b.exclusive) {
             let tx = tx.clone();
             scope.spawn(move || {
                 let t0 = Instant::now();
@@ -51,6 +52,19 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
             }
         }
     });
+    // Timing budgets must not compete with the geometry corpus or compiler jobs.
+    for b in bins.iter().filter(|b| b.exclusive) {
+        let t0 = Instant::now();
+        let mut c = Command::new(&b.exe);
+        c.args(test_args).current_dir(&b.dir).env("CARGO_MANIFEST_DIR", &b.dir);
+        match finish(c) {
+            Ok(summary) => println!("ok    {:<44} {:6.1}s  {summary}", b.label, t0.elapsed().as_secs_f64()),
+            Err(output) => {
+                println!("FAIL  {}\n{output}", b.label);
+                failed.push(b.label.clone());
+            }
+        }
+    }
     println!("test: {} binaries in {:.1}s", bins.len(), start.elapsed().as_secs_f64());
     if failed.is_empty() { Ok(()) } else { Err(format!("failed: {}", failed.join(", "))) }
 }
@@ -89,7 +103,8 @@ fn build(cargo_args: &[&str]) -> Result<Vec<TestBin>, String> {
         let pkg = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let kind = m["target"]["kind"][0].as_str().unwrap_or("");
         let label = format!("{pkg} {kind} {}", m["target"]["name"].as_str().unwrap_or(""));
-        bins.push(TestBin { label, exe: exe.to_string(), dir: dir.to_string_lossy().into_owned() });
+        let exclusive = m["target"]["name"].as_str().is_some_and(|name| name.ends_with("_performance"));
+        bins.push(TestBin { label, exe: exe.to_string(), dir: dir.to_string_lossy().into_owned(), exclusive });
     }
     if bins.is_empty() {
         return Err("cargo test --no-run built no test executables".into());

@@ -1,0 +1,5017 @@
+{
+  "format": "solidcraft/11",
+  "name": "HardEdgeBasin",
+  "units": "mm",
+  "params": [
+    {
+      "name": "basin_width",
+      "expr": "room_width - 2 * side_gap",
+      "unit": "mm",
+      "comment": "Derived from room width",
+      "model": false
+    },
+    {
+      "name": "basin_depth",
+      "expr": "480 mm",
+      "unit": "mm",
+      "comment": "Projection from back wall (DIN: 450-500)",
+      "model": false
+    },
+    {
+      "name": "basin_height",
+      "expr": "160 mm",
+      "unit": "mm",
+      "comment": "Outer slab height",
+      "model": false
+    },
+    {
+      "name": "mount_height",
+      "expr": "850 mm",
+      "unit": "mm",
+      "comment": "Top edge above finished floor (DIN 18022: 850-900)",
+      "model": false
+    },
+    {
+      "name": "left_rim",
+      "expr": "150 mm",
+      "unit": "mm",
+      "comment": "Left shelf width (soap dispenser)",
+      "model": false
+    },
+    {
+      "name": "front_rim",
+      "expr": "18 mm",
+      "unit": "mm",
+      "comment": "Front rim width",
+      "model": false
+    },
+    {
+      "name": "back_rim",
+      "expr": "30 mm",
+      "unit": "mm",
+      "comment": "Back rim width (faucet moved to side shelf)",
+      "model": false
+    },
+    {
+      "name": "bowl_depth",
+      "expr": "120 mm",
+      "unit": "mm",
+      "comment": "Bowl depth at walls, from top edge",
+      "model": false
+    },
+    {
+      "name": "floor_drop",
+      "expr": "4 mm",
+      "unit": "mm",
+      "comment": "Fall from trough edges to drain seat",
+      "model": false
+    },
+    {
+      "name": "drain_dia",
+      "expr": "45 mm",
+      "unit": "mm",
+      "comment": "Waste outlet 1 1/4 in",
+      "model": false
+    },
+    {
+      "name": "tap_hole_dia",
+      "expr": "35 mm",
+      "unit": "mm",
+      "comment": "Standard tap hole",
+      "model": false
+    },
+    {
+      "name": "d2",
+      "expr": "basin_width",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d3",
+      "expr": "basin_depth",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "room_width",
+      "expr": "906 mm",
+      "unit": "mm",
+      "comment": "Measured wall-to-wall width",
+      "model": false
+    },
+    {
+      "name": "side_gap",
+      "expr": "3 mm",
+      "unit": "mm",
+      "comment": "Silicone joint per side",
+      "model": false
+    },
+    {
+      "name": "side_wall_angle",
+      "expr": "10 deg",
+      "unit": "deg",
+      "comment": "Side walls, from vertical",
+      "model": false
+    },
+    {
+      "name": "back_wall_angle",
+      "expr": "10 deg",
+      "unit": "deg",
+      "comment": "Back wall, from vertical",
+      "model": false
+    },
+    {
+      "name": "trough_length",
+      "expr": "100 mm",
+      "unit": "mm",
+      "comment": "Flat bottom strip front-to-back",
+      "model": false
+    },
+    {
+      "name": "side_run",
+      "expr": "bowl_depth * tan(side_wall_angle)",
+      "unit": "mm",
+      "comment": "Derived",
+      "model": false
+    },
+    {
+      "name": "back_run",
+      "expr": "bowl_depth * tan(back_wall_angle)",
+      "unit": "mm",
+      "comment": "Derived",
+      "model": false
+    },
+    {
+      "name": "d6",
+      "expr": "left_rim",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d7",
+      "expr": "back_rim",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d8",
+      "expr": "bowl_width",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d9",
+      "expr": "basin_depth - back_rim - front_rim",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d11",
+      "expr": "left_rim + side_run",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d12",
+      "expr": "back_rim + back_run",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d13",
+      "expr": "bowl_width - 2 * side_run",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d14",
+      "expr": "trough_length",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "drain_seat",
+      "expr": "80 mm",
+      "unit": "mm",
+      "comment": "Flat square seat for waste flange (66 mm cap)",
+      "model": false
+    },
+    {
+      "name": "wall_thickness",
+      "expr": "20 mm",
+      "unit": "mm",
+      "comment": "GFRC wall thickness",
+      "model": false
+    },
+    {
+      "name": "drain_x",
+      "expr": "left_rim + bowl_width / 2",
+      "unit": "mm",
+      "comment": "Drain centre X",
+      "model": false
+    },
+    {
+      "name": "drain_y",
+      "expr": "-(back_rim + back_run + trough_length / 2)",
+      "unit": "mm",
+      "comment": "Drain centre Y (wall at 0)",
+      "model": false
+    },
+    {
+      "name": "seat_z",
+      "expr": "mount_height - bowl_depth - floor_drop",
+      "unit": "mm",
+      "comment": "Drain seat height",
+      "model": false
+    },
+    {
+      "name": "d16",
+      "expr": "drain_x - drain_seat / 2",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d17",
+      "expr": "-drain_y - drain_seat / 2",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d18",
+      "expr": "drain_seat",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d19",
+      "expr": "drain_seat",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "fall_inset",
+      "expr": "0 mm",
+      "unit": "mm",
+      "comment": "Fall starts this far inside trough edge (kernel workaround)",
+      "model": false
+    },
+    {
+      "name": "d21",
+      "expr": "left_rim + side_run + fall_inset",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d22",
+      "expr": "back_rim + back_run + fall_inset",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d23",
+      "expr": "bowl_width - 2 * (side_run + fall_inset)",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d24",
+      "expr": "trough_length - 2 * fall_inset",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "drain_boss_dia",
+      "expr": "90 mm",
+      "unit": "mm",
+      "comment": "Thickened pad under drain (must stay < trough_length)",
+      "model": false
+    },
+    {
+      "name": "drain_boss_height",
+      "expr": "12 mm",
+      "unit": "mm",
+      "comment": "Pad height below seat underside",
+      "model": false
+    },
+    {
+      "name": "d27",
+      "expr": "drain_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d28",
+      "expr": "-drain_y",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d29",
+      "expr": "drain_boss_dia",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d32",
+      "expr": "drain_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d33",
+      "expr": "-drain_y",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d34",
+      "expr": "drain_dia",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "waste_len",
+      "expr": "58 mm",
+      "unit": "mm",
+      "comment": "Waste valve body length (product)",
+      "model": false
+    },
+    {
+      "name": "tail_len",
+      "expr": "58 mm",
+      "unit": "mm",
+      "comment": "Waste tailpiece length (product)",
+      "model": false
+    },
+    {
+      "name": "trap_height",
+      "expr": "195 mm",
+      "unit": "mm",
+      "comment": "Bottle trap overall height (150-230), set for wall outlet at 500 mm",
+      "model": false
+    },
+    {
+      "name": "trap_outlet_z",
+      "expr": "seat_z - waste_len - tail_len - trap_height + 85 mm",
+      "unit": "mm",
+      "comment": "Trap outlet centre height = wall waste connection height",
+      "model": false
+    },
+    {
+      "name": "right_rim",
+      "expr": "150 mm",
+      "unit": "mm",
+      "comment": "Right shelf width (faucet)",
+      "model": false
+    },
+    {
+      "name": "bowl_width",
+      "expr": "basin_width - left_rim - right_rim",
+      "unit": "mm",
+      "comment": "Derived: bowl opening width",
+      "model": false
+    },
+    {
+      "name": "d37",
+      "expr": "drain_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d38",
+      "expr": "-drain_y",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d39",
+      "expr": "66 mm",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d43",
+      "expr": "drain_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d44",
+      "expr": "-drain_y",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d45",
+      "expr": "62 mm",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d48",
+      "expr": "drain_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d49",
+      "expr": "-drain_y",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d50",
+      "expr": "42 mm",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d53",
+      "expr": "drain_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d54",
+      "expr": "-drain_y",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d55",
+      "expr": "55 mm",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d59",
+      "expr": "drain_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d60",
+      "expr": "-drain_y",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d61",
+      "expr": "32 mm",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d65",
+      "expr": "drain_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d66",
+      "expr": "-drain_y",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d67",
+      "expr": "50 mm",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d70",
+      "expr": "drain_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d71",
+      "expr": "trap_outlet_z",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d72",
+      "expr": "32 mm",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d74",
+      "expr": "drain_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d75",
+      "expr": "trap_outlet_z",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d76",
+      "expr": "70 mm",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "tap_edge_offset",
+      "expr": "45 mm",
+      "unit": "mm",
+      "comment": "Tap hole centre to bowl edge (right shelf)",
+      "model": false
+    },
+    {
+      "name": "tap_x",
+      "expr": "basin_width - right_rim + tap_edge_offset",
+      "unit": "mm",
+      "comment": "Tap hole centre X",
+      "model": false
+    },
+    {
+      "name": "tap_y",
+      "expr": "drain_y",
+      "unit": "mm",
+      "comment": "Tap hole centre Y (in line with drain)",
+      "model": false
+    },
+    {
+      "name": "faucet_reach",
+      "expr": "134 mm",
+      "unit": "mm",
+      "comment": "Outlet centre to tap axis (option B: 110 + 48/2)",
+      "model": false
+    },
+    {
+      "name": "faucet_outlet_h",
+      "expr": "170 mm",
+      "unit": "mm",
+      "comment": "Outlet height above deck (option B)",
+      "model": false
+    },
+    {
+      "name": "faucet_top_h",
+      "expr": "218 mm",
+      "unit": "mm",
+      "comment": "Spout centreline top above deck (230 to top of Ø24 tube)",
+      "model": false
+    },
+    {
+      "name": "d79",
+      "expr": "tap_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d80",
+      "expr": "-tap_y",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d81",
+      "expr": "tap_hole_dia",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d84",
+      "expr": "tap_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d85",
+      "expr": "-tap_y",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d86",
+      "expr": "48 mm",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "cut_clear",
+      "expr": "1 mm",
+      "unit": "mm",
+      "comment": "Kernel workaround: keeps cut faces off existing faces",
+      "model": false
+    },
+    {
+      "name": "ramp_run",
+      "expr": "basin_depth - front_rim - back_rim - back_run - trough_length",
+      "unit": "mm",
+      "comment": "Derived: horizontal length of front ramp",
+      "model": false
+    },
+    {
+      "name": "ramp_off",
+      "expr": "wall_thickness * sqrt(bowl_depth^2 + ramp_run^2) / bowl_depth",
+      "unit": "mm",
+      "comment": "Derived: horizontal offset of ramp underside",
+      "model": false
+    },
+    {
+      "name": "side_off",
+      "expr": "wall_thickness / cos(side_wall_angle)",
+      "unit": "mm",
+      "comment": "Derived",
+      "model": false
+    },
+    {
+      "name": "back_off",
+      "expr": "wall_thickness / cos(back_wall_angle)",
+      "unit": "mm",
+      "comment": "Derived",
+      "model": false
+    },
+    {
+      "name": "d97",
+      "expr": "left_rim + (bowl_depth + wall_thickness) * tan(side_wall_angle) - side_off",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d98",
+      "expr": "back_rim + (bowl_depth + wall_thickness) * tan(back_wall_angle) - back_off",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d99",
+      "expr": "bowl_width - 2 * ((bowl_depth + wall_thickness) * tan(side_wall_angle) - side_off)",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d100",
+      "expr": "(basin_depth - front_rim) - (bowl_depth + wall_thickness) * ramp_run / bowl_depth + ramp_off - (back_rim + (bowl_depth + wall_thickness) * tan(back_wall_angle) - back_off)",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d102",
+      "expr": "left_rim - side_off",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d103",
+      "expr": "back_rim - back_off",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d104",
+      "expr": "bowl_width + 2 * side_off",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d105",
+      "expr": "basin_depth - front_rim + ramp_off - back_rim + back_off",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d107",
+      "expr": "5 mm",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d108",
+      "expr": "wall_thickness",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d109",
+      "expr": "basin_width + 10 mm",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d110",
+      "expr": "basin_depth - 2 * wall_thickness",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "faucet_body_h",
+      "expr": "105 mm",
+      "unit": "mm",
+      "comment": "Faucet body height (option B)",
+      "model": false
+    },
+    {
+      "name": "ledger_size",
+      "expr": "40 mm",
+      "unit": "mm",
+      "comment": "Steel angle leg length",
+      "model": false
+    },
+    {
+      "name": "ledger_t",
+      "expr": "4 mm",
+      "unit": "mm",
+      "comment": "Steel angle thickness",
+      "model": false
+    },
+    {
+      "name": "ledger_len",
+      "expr": "basin_depth - 2 * wall_thickness - 10 mm",
+      "unit": "mm",
+      "comment": "Fits between front and back skirt",
+      "model": false
+    },
+    {
+      "name": "d113",
+      "expr": "side_gap",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d114",
+      "expr": "mount_height - wall_thickness",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d115",
+      "expr": "ledger_size",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d116",
+      "expr": "ledger_t",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d117",
+      "expr": "ledger_size",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d118",
+      "expr": "ledger_t",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d121",
+      "expr": "basin_width + side_gap",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d122",
+      "expr": "mount_height - wall_thickness",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d123",
+      "expr": "ledger_size",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d124",
+      "expr": "ledger_t",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d125",
+      "expr": "ledger_size",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d126",
+      "expr": "ledger_t",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "spout_tip_angle",
+      "expr": "30 deg",
+      "unit": "deg",
+      "comment": "Outlet tilt from vertical, away from body (estimated from photo)",
+      "model": false
+    },
+    {
+      "name": "spout_bend_r",
+      "expr": "50 mm",
+      "unit": "mm",
+      "comment": "Top bend radius (centreline)",
+      "model": false
+    },
+    {
+      "name": "spout_tip_r",
+      "expr": "35 mm",
+      "unit": "mm",
+      "comment": "Front bend radius (centreline)",
+      "model": false
+    },
+    {
+      "name": "d89",
+      "expr": "spout_bend_r",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d90",
+      "expr": "spout_tip_r",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d91",
+      "expr": "tap_x",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d92",
+      "expr": "mount_height + faucet_body_h",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d93",
+      "expr": "mount_height + faucet_top_h",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d94",
+      "expr": "faucet_reach",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d95",
+      "expr": "mount_height + faucet_outlet_h",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d128",
+      "expr": "90 deg - spout_tip_angle",
+      "unit": "deg",
+      "model": true
+    },
+    {
+      "name": "water_speed",
+      "expr": "800",
+      "unit": "",
+      "comment": "Stream exit speed, mm/s (aerated basin tap ~ 500-1000)",
+      "model": false
+    },
+    {
+      "name": "stream_fall",
+      "expr": "(faucet_outlet_h + bowl_depth) / (1 mm)",
+      "unit": "",
+      "comment": "Derived: fall height to bottom strip, mm (unitless)",
+      "model": false
+    },
+    {
+      "name": "stream_t",
+      "expr": "(-water_speed * cos(spout_tip_angle) + sqrt((water_speed * cos(spout_tip_angle))^2 + 2 * 9810 * stream_fall)) / 9810",
+      "unit": "",
+      "comment": "Derived: fall time, s",
+      "model": false
+    },
+    {
+      "name": "stream_throw",
+      "expr": "water_speed * sin(spout_tip_angle) * stream_t * 1 mm",
+      "unit": "mm",
+      "comment": "Derived: extra horizontal throw from angled outlet",
+      "model": false
+    },
+    {
+      "name": "d130",
+      "expr": "tap_x - faucet_reach - stream_throw",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "d131",
+      "expr": "mount_height - bowl_depth",
+      "unit": "mm",
+      "model": true
+    },
+    {
+      "name": "edge_fillet",
+      "expr": "3 mm",
+      "unit": "mm",
+      "comment": "Radius of the bowl rim and front top/bottom fillets",
+      "model": false
+    },
+    {
+      "name": "bowl_corner_r",
+      "expr": "15 mm",
+      "unit": "mm",
+      "comment": "Inside corners of the bowl: wall-wall and wall-floor (cleaning, mould release)",
+      "model": false
+    },
+    {
+      "name": "drain_edge_r",
+      "expr": "2 mm",
+      "unit": "mm",
+      "comment": "Round on the drain hole rim (seat side)",
+      "model": false
+    }
+  ],
+  "features": [
+    {
+      "id": 1,
+      "name": "Outline",
+      "suppressed": false,
+      "param_names": [
+        "d1"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "mount_height - basin_height"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p1",
+            "pos": [
+              0.0,
+              -480.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p2",
+            "pos": [
+              900.0,
+              -480.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p3",
+            "pos": [
+              900.0,
+              0.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p4",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k3",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "coincident",
+            "p": 4,
+            "q": 0
+          },
+          {
+            "id": "k6",
+            "type": "length",
+            "l": 0,
+            "value": 900.0,
+            "param": "d2"
+          },
+          {
+            "id": "k7",
+            "type": "length",
+            "l": 1,
+            "value": 480.0,
+            "param": "d3"
+          }
+        ],
+        "counters": {
+          "k": 7,
+          "l": 4,
+          "p": 4
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "Slab",
+      "suppressed": false,
+      "body_names": [
+        "Basin"
+      ],
+      "param_names": [
+        "d4"
+      ],
+      "type": "extrude",
+      "sketch": 1,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "basin_height",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 68,
+      "name": "TapHole",
+      "suppressed": false,
+      "param_names": [
+        "d78"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "mount_height"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              795.0,
+              -101.15923768500991
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 17.5,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 795.0,
+            "param": "d79"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 101.1592376850158,
+            "param": "d80"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 35.0,
+            "param": "d81"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 12,
+      "name": "BowlTop",
+      "suppressed": false,
+      "param_names": [
+        "d5"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "mount_height"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p1",
+            "pos": [
+              150.0,
+              -462.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p2",
+            "pos": [
+              750.0,
+              -462.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p3",
+            "pos": [
+              750.0,
+              -100.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p4",
+            "pos": [
+              150.0,
+              -100.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k3",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "distance_x",
+            "p": 0,
+            "q": 4,
+            "value": 150.0,
+            "param": "d6"
+          },
+          {
+            "id": "k6",
+            "type": "distance_y",
+            "p": 0,
+            "q": 4,
+            "value": 100.0,
+            "param": "d7"
+          },
+          {
+            "id": "k7",
+            "type": "length",
+            "l": 0,
+            "value": 600.0,
+            "param": "d8"
+          },
+          {
+            "id": "k8",
+            "type": "length",
+            "l": 1,
+            "value": 362.0,
+            "param": "d9"
+          }
+        ],
+        "counters": {
+          "k": 8,
+          "l": 4,
+          "p": 4
+        }
+      }
+    },
+    {
+      "id": 13,
+      "name": "BowlBottom",
+      "suppressed": false,
+      "param_names": [
+        "d10"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "mount_height - bowl_depth"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p1",
+            "pos": [
+              171.1592376850158,
+              -221.15923768501125
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p2",
+            "pos": [
+              728.8407623149842,
+              -221.1592376850116
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p3",
+            "pos": [
+              728.8407623149842,
+              -121.15923768501258
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p4",
+            "pos": [
+              171.1592376850158,
+              -121.15923768501406
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k3",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "distance_x",
+            "p": 0,
+            "q": 4,
+            "value": 171.1592376850158,
+            "param": "d11"
+          },
+          {
+            "id": "k6",
+            "type": "distance_y",
+            "p": 0,
+            "q": 4,
+            "value": 121.1592376850158,
+            "param": "d12"
+          },
+          {
+            "id": "k7",
+            "type": "length",
+            "l": 0,
+            "value": 557.6815246299684,
+            "param": "d13"
+          },
+          {
+            "id": "k8",
+            "type": "length",
+            "l": 1,
+            "value": 100.0,
+            "param": "d14"
+          }
+        ],
+        "counters": {
+          "k": 8,
+          "l": 4,
+          "p": 4
+        }
+      }
+    },
+    {
+      "id": 14,
+      "name": "BowlLoft",
+      "suppressed": false,
+      "type": "loft",
+      "sections": [
+        {
+          "sketch": 12,
+          "profiles": {
+            "type": "all"
+          }
+        },
+        {
+          "sketch": 13,
+          "profiles": {
+            "type": "all"
+          }
+        }
+      ],
+      "operation": "cut"
+    },
+    {
+      "id": 15,
+      "name": "DrainSeat",
+      "suppressed": false,
+      "param_names": [
+        "d15"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "seat_z"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p1",
+            "pos": [
+              410.0,
+              -211.15923768506056
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p2",
+            "pos": [
+              490.0,
+              -211.15923768505712
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p3",
+            "pos": [
+              490.0,
+              -131.15923768504737
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p4",
+            "pos": [
+              410.0,
+              -131.15923768503285
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k3",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "distance_x",
+            "p": 0,
+            "q": 4,
+            "value": 410.0,
+            "param": "d16"
+          },
+          {
+            "id": "k6",
+            "type": "distance_y",
+            "p": 0,
+            "q": 4,
+            "value": 131.1592376850158,
+            "param": "d17"
+          },
+          {
+            "id": "k7",
+            "type": "length",
+            "l": 0,
+            "value": 80.0,
+            "param": "d18"
+          },
+          {
+            "id": "k8",
+            "type": "length",
+            "l": 1,
+            "value": 80.0,
+            "param": "d19"
+          }
+        ],
+        "counters": {
+          "k": 8,
+          "l": 4,
+          "p": 4
+        }
+      }
+    },
+    {
+      "id": 32,
+      "name": "TroughInset",
+      "suppressed": false,
+      "param_names": [
+        "d20"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "mount_height - bowl_depth"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p1",
+            "pos": [
+              171.6592376850158,
+              -220.65923768506056
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p2",
+            "pos": [
+              728.3407623149842,
+              -220.65923768505712
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p3",
+            "pos": [
+              728.3407623149842,
+              -121.65923768504739
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p4",
+            "pos": [
+              171.6592376850158,
+              -121.65923768503286
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k3",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "distance_x",
+            "p": 0,
+            "q": 4,
+            "value": 171.6592376850158,
+            "param": "d21"
+          },
+          {
+            "id": "k6",
+            "type": "distance_y",
+            "p": 0,
+            "q": 4,
+            "value": 121.6592376850158,
+            "param": "d22"
+          },
+          {
+            "id": "k7",
+            "type": "length",
+            "l": 0,
+            "value": 556.6815246299684,
+            "param": "d23"
+          },
+          {
+            "id": "k8",
+            "type": "length",
+            "l": 1,
+            "value": 99.0,
+            "param": "d24"
+          }
+        ],
+        "counters": {
+          "k": 8,
+          "l": 4,
+          "p": 4
+        }
+      }
+    },
+    {
+      "id": 33,
+      "name": "TroughFall",
+      "suppressed": false,
+      "type": "loft",
+      "sections": [
+        {
+          "sketch": 32,
+          "profiles": {
+            "type": "all"
+          }
+        },
+        {
+          "sketch": 15,
+          "profiles": {
+            "type": "all"
+          }
+        }
+      ],
+      "operation": "cut",
+      "targets": [
+        "Basin"
+      ]
+    },
+    {
+      "id": 69,
+      "name": "TapCut",
+      "suppressed": false,
+      "param_names": [
+        "d82"
+      ],
+      "type": "extrude",
+      "sketch": 68,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "-(wall_thickness + 5 mm)",
+        "direction": "positive"
+      },
+      "operation": "cut",
+      "targets": [
+        "Basin"
+      ]
+    },
+    {
+      "id": 77,
+      "name": "OuterBowlBottom",
+      "suppressed": false,
+      "param_names": [
+        "d25"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "mount_height - bowl_depth - wall_thickness"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p1",
+            "pos": [
+              154.3772450614702,
+              -154.88571215189268
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p2",
+            "pos": [
+              745.6227549385299,
+              -154.88571215191843
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p3",
+            "pos": [
+              745.6227549385299,
+              -34.37724506123353
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p4",
+            "pos": [
+              154.3772450614702,
+              -34.37724506134232
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k3",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "distance_x",
+            "p": 0,
+            "q": 4,
+            "value": 154.3772450614702,
+            "param": "d97"
+          },
+          {
+            "id": "k6",
+            "type": "distance_y",
+            "p": 0,
+            "q": 4,
+            "value": 34.3772450614702,
+            "param": "d98"
+          },
+          {
+            "id": "k7",
+            "type": "length",
+            "l": 0,
+            "value": 591.2455098770596,
+            "param": "d99"
+          },
+          {
+            "id": "k8",
+            "type": "length",
+            "l": 1,
+            "value": 120.50846709075799,
+            "param": "d100"
+          }
+        ],
+        "counters": {
+          "k": 8,
+          "l": 4,
+          "p": 4
+        }
+      }
+    },
+    {
+      "id": 78,
+      "name": "OuterBowlTop",
+      "suppressed": false,
+      "param_names": [
+        "d101"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "mount_height"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p1",
+            "pos": [
+              129.6914677622851,
+              -517.5332681861845
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p2",
+            "pos": [
+              770.3085322377149,
+              -517.5332681861993
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p3",
+            "pos": [
+              770.3085322377149,
+              -9.691467762149694
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p4",
+            "pos": [
+              129.6914677622851,
+              -9.691467762211936
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k3",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "distance_x",
+            "p": 0,
+            "q": 4,
+            "value": 129.6914677622851,
+            "param": "d102"
+          },
+          {
+            "id": "k6",
+            "type": "distance_y",
+            "p": 0,
+            "q": 4,
+            "value": 9.6914677622851,
+            "param": "d103"
+          },
+          {
+            "id": "k7",
+            "type": "length",
+            "l": 0,
+            "value": 640.6170644754297,
+            "param": "d104"
+          },
+          {
+            "id": "k8",
+            "type": "length",
+            "l": 1,
+            "value": 507.8418004240914,
+            "param": "d105"
+          }
+        ],
+        "counters": {
+          "k": 8,
+          "l": 4,
+          "p": 4
+        }
+      }
+    },
+    {
+      "id": 79,
+      "name": "OuterBowlLoft",
+      "suppressed": false,
+      "body_names": [
+        "OuterBowl"
+      ],
+      "type": "loft",
+      "sections": [
+        {
+          "sketch": 77,
+          "profiles": {
+            "type": "all"
+          }
+        },
+        {
+          "sketch": 78,
+          "profiles": {
+            "type": "all"
+          }
+        }
+      ],
+      "operation": "new_body"
+    },
+    {
+      "id": 80,
+      "name": "VoidBox",
+      "suppressed": false,
+      "param_names": [
+        "d106"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "mount_height - basin_height - 10 mm"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p1",
+            "pos": [
+              -5.0,
+              -460.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p2",
+            "pos": [
+              905.0,
+              -460.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p3",
+            "pos": [
+              905.0,
+              -20.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p4",
+            "pos": [
+              -5.0,
+              -20.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k3",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "distance_x",
+            "p": 0,
+            "q": 4,
+            "value": 5.0,
+            "param": "d107"
+          },
+          {
+            "id": "k6",
+            "type": "distance_y",
+            "p": 0,
+            "q": 4,
+            "value": 20.0,
+            "param": "d108"
+          },
+          {
+            "id": "k7",
+            "type": "length",
+            "l": 0,
+            "value": 910.0,
+            "param": "d109"
+          },
+          {
+            "id": "k8",
+            "type": "length",
+            "l": 1,
+            "value": 440.0,
+            "param": "d110"
+          }
+        ],
+        "counters": {
+          "k": 8,
+          "l": 4,
+          "p": 4
+        }
+      }
+    },
+    {
+      "id": 81,
+      "name": "VoidExtrude",
+      "suppressed": false,
+      "body_names": [
+        "Void"
+      ],
+      "param_names": [
+        "d111"
+      ],
+      "type": "extrude",
+      "sketch": 80,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "basin_height - wall_thickness + 10 mm",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 82,
+      "name": "Combine1",
+      "suppressed": false,
+      "type": "combine",
+      "target": "Void",
+      "tools": [
+        "OuterBowl"
+      ],
+      "operation": "cut",
+      "keep_tools": false
+    },
+    {
+      "id": 83,
+      "name": "Combine2",
+      "suppressed": false,
+      "type": "combine",
+      "target": "Basin",
+      "tools": [
+        "Void"
+      ],
+      "operation": "cut",
+      "keep_tools": false
+    },
+    {
+      "id": 35,
+      "name": "DrainBoss",
+      "suppressed": false,
+      "param_names": [
+        "d26"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "mount_height - bowl_depth - wall_thickness + 2 mm"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              450.0,
+              -171.15923768526957
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 45.0,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 450.0,
+            "param": "d27"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 171.1592376850158,
+            "param": "d28"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 90.0,
+            "param": "d29"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 36,
+      "name": "DrainPad",
+      "suppressed": false,
+      "param_names": [
+        "d30"
+      ],
+      "type": "extrude",
+      "sketch": 35,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "-(2 mm + floor_drop + drain_boss_height)",
+        "direction": "positive"
+      },
+      "operation": "join",
+      "targets": [
+        "Basin"
+      ]
+    },
+    {
+      "id": 37,
+      "name": "DrainHole",
+      "suppressed": false,
+      "param_names": [
+        "d31"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "mount_height"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              450.0,
+              -171.15923768526957
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 22.5,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 450.0,
+            "param": "d32"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 171.1592376850158,
+            "param": "d33"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 45.0,
+            "param": "d34"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 38,
+      "name": "DrainCut",
+      "suppressed": false,
+      "param_names": [
+        "d35"
+      ],
+      "type": "extrude",
+      "sketch": 37,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "0",
+        "direction": "negative",
+        "through_all": true
+      },
+      "operation": "cut",
+      "targets": [
+        "Basin"
+      ]
+    },
+    {
+      "id": 50,
+      "name": "Fit_Plug",
+      "suppressed": false,
+      "param_names": [
+        "d36"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "seat_z"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              450.0,
+              -101.15923768500991
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 33.0,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 450.0,
+            "param": "d37"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 101.1592376850158,
+            "param": "d38"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 66.0,
+            "param": "d39"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 51,
+      "name": "WastePlug",
+      "suppressed": false,
+      "body_names": [
+        "Waste_Plug"
+      ],
+      "param_names": [
+        "d40",
+        "d41"
+      ],
+      "type": "extrude",
+      "sketch": 50,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "6 mm",
+        "direction": "positive",
+        "start_offset": "4 mm"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 52,
+      "name": "Fit_Flange",
+      "suppressed": false,
+      "param_names": [
+        "d42"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "seat_z"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              450.0,
+              -101.15923768500991
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 31.0,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 450.0,
+            "param": "d43"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 101.1592376850158,
+            "param": "d44"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 62.0,
+            "param": "d45"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 53,
+      "name": "WasteFlange",
+      "suppressed": false,
+      "body_names": [
+        "Waste_Flange"
+      ],
+      "param_names": [
+        "d46"
+      ],
+      "type": "extrude",
+      "sketch": 52,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "2 mm",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 54,
+      "name": "Fit_Body",
+      "suppressed": false,
+      "param_names": [
+        "d47"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "seat_z"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              450.0,
+              -101.15923768500991
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 21.0,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 450.0,
+            "param": "d48"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 101.1592376850158,
+            "param": "d49"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 42.0,
+            "param": "d50"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 55,
+      "name": "WasteBody",
+      "suppressed": false,
+      "body_names": [
+        "Waste_Body"
+      ],
+      "param_names": [
+        "d51"
+      ],
+      "type": "extrude",
+      "sketch": 54,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "-(waste_len + tail_len)",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 56,
+      "name": "Fit_Nut",
+      "suppressed": false,
+      "param_names": [
+        "d52"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "seat_z"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              450.0,
+              -101.15923768500991
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 27.5,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 450.0,
+            "param": "d53"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 101.1592376850158,
+            "param": "d54"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 55.0,
+            "param": "d55"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 57,
+      "name": "WasteNut",
+      "suppressed": false,
+      "body_names": [
+        "Waste_Nut"
+      ],
+      "param_names": [
+        "d56",
+        "d57"
+      ],
+      "type": "extrude",
+      "sketch": 56,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "-8 mm",
+        "direction": "positive",
+        "start_offset": "-(wall_thickness + drain_boss_height)"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 58,
+      "name": "Fit_TrapTube",
+      "suppressed": false,
+      "param_names": [
+        "d58"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "seat_z"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              450.0,
+              -101.15923768500991
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 16.0,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 450.0,
+            "param": "d59"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 101.1592376850158,
+            "param": "d60"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 32.0,
+            "param": "d61"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 59,
+      "name": "TrapTube",
+      "suppressed": false,
+      "body_names": [
+        "Trap_Tube"
+      ],
+      "param_names": [
+        "d62",
+        "d63"
+      ],
+      "type": "extrude",
+      "sketch": 58,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "-(trap_height - 115 mm)",
+        "direction": "positive",
+        "start_offset": "-(waste_len + tail_len)"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 60,
+      "name": "Fit_Bottle",
+      "suppressed": false,
+      "param_names": [
+        "d64"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "seat_z"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              450.0,
+              -101.15923768500991
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 25.0,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 450.0,
+            "param": "d65"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 101.1592376850158,
+            "param": "d66"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 50.0,
+            "param": "d67"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 61,
+      "name": "TrapBottle",
+      "suppressed": false,
+      "body_names": [
+        "Trap_Bottle"
+      ],
+      "param_names": [
+        "d68",
+        "d69"
+      ],
+      "type": "extrude",
+      "sketch": 60,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "-115 mm",
+        "direction": "positive",
+        "start_offset": "-(waste_len + tail_len + trap_height - 115 mm)"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 62,
+      "name": "Fit_Pipe",
+      "suppressed": false,
+      "type": "sketch",
+      "plane": {
+        "type": "custom",
+        "plane": {
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "x_dir": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "y_dir": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              450.0,
+              515.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 16.0,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 450.0,
+            "param": "d70"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 515.0,
+            "param": "d71"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 32.0,
+            "param": "d72"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 63,
+      "name": "TrapPipe",
+      "suppressed": false,
+      "body_names": [
+        "Trap_Pipe"
+      ],
+      "param_names": [
+        "d73"
+      ],
+      "type": "extrude",
+      "sketch": 62,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "-drain_y",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 64,
+      "name": "Fit_Rosette",
+      "suppressed": false,
+      "type": "sketch",
+      "plane": {
+        "type": "custom",
+        "plane": {
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "x_dir": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "y_dir": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              450.0,
+              515.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 35.0,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 450.0,
+            "param": "d74"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 515.0,
+            "param": "d75"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 70.0,
+            "param": "d76"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 65,
+      "name": "TrapRosette",
+      "suppressed": false,
+      "body_names": [
+        "Trap_Rosette"
+      ],
+      "param_names": [
+        "d77"
+      ],
+      "type": "extrude",
+      "sketch": 64,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "8 mm",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 70,
+      "name": "Fit_FaucetBase",
+      "suppressed": false,
+      "param_names": [
+        "d83"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "origin",
+          "name": "XY"
+        },
+        "distance": "mount_height"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "c1.center",
+            "pos": [
+              795.0,
+              -101.15923768500991
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "c1",
+            "type": "circle",
+            "c": 1,
+            "r": 24.0,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 795.0,
+            "param": "d84"
+          },
+          {
+            "id": "k2",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 101.1592376850158,
+            "param": "d85"
+          },
+          {
+            "id": "k3",
+            "type": "diameter",
+            "c": 0,
+            "value": 48.0,
+            "param": "d86"
+          }
+        ],
+        "counters": {
+          "c": 1,
+          "k": 3
+        }
+      }
+    },
+    {
+      "id": 71,
+      "name": "FaucetBody",
+      "suppressed": false,
+      "body_names": [
+        "Faucet_Body"
+      ],
+      "param_names": [
+        "d87"
+      ],
+      "type": "extrude",
+      "sketch": 70,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "faucet_body_h",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 84,
+      "name": "LedgerProfile",
+      "suppressed": false,
+      "param_names": [
+        "d112"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "custom",
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_dir": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        "distance": "wall_thickness + 5 mm"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "l1.start",
+            "pos": [
+              -3.0,
+              830.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l1.end",
+            "pos": [
+              37.0,
+              830.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l2.end",
+            "pos": [
+              37.0,
+              826.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l3.end",
+            "pos": [
+              1.0,
+              826.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l4.end",
+            "pos": [
+              1.0,
+              790.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l5.end",
+            "pos": [
+              -3.0,
+              790.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 5,
+            "construction": false
+          },
+          {
+            "id": "l5",
+            "type": "line",
+            "a": 5,
+            "b": 6,
+            "construction": false
+          },
+          {
+            "id": "l6",
+            "type": "line",
+            "a": 6,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k3",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "horizontal",
+            "l": 4
+          },
+          {
+            "id": "k6",
+            "type": "vertical",
+            "l": 5
+          },
+          {
+            "id": "k7",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 3.0,
+            "param": "d113"
+          },
+          {
+            "id": "k8",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 830.0,
+            "param": "d114"
+          },
+          {
+            "id": "k9",
+            "type": "length",
+            "l": 0,
+            "value": 40.0,
+            "param": "d115"
+          },
+          {
+            "id": "k10",
+            "type": "length",
+            "l": 1,
+            "value": 4.0,
+            "param": "d116"
+          },
+          {
+            "id": "k11",
+            "type": "length",
+            "l": 5,
+            "value": 40.0,
+            "param": "d117"
+          },
+          {
+            "id": "k12",
+            "type": "length",
+            "l": 4,
+            "value": 4.0,
+            "param": "d118"
+          }
+        ],
+        "counters": {
+          "k": 12,
+          "l": 6
+        }
+      }
+    },
+    {
+      "id": 85,
+      "name": "LedgerLeftExtrude",
+      "suppressed": false,
+      "body_names": [
+        "Ledger_Left"
+      ],
+      "param_names": [
+        "d119"
+      ],
+      "type": "extrude",
+      "sketch": 84,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "ledger_len",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 87,
+      "name": "LedgerProfileR",
+      "suppressed": false,
+      "param_names": [
+        "d120"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "custom",
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_dir": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        "distance": "wall_thickness + 5 mm"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "l1.start",
+            "pos": [
+              903.0,
+              830.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l1.end",
+            "pos": [
+              863.0,
+              830.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l2.end",
+            "pos": [
+              863.0,
+              826.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l3.end",
+            "pos": [
+              899.0,
+              826.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l4.end",
+            "pos": [
+              899.0,
+              790.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l5.end",
+            "pos": [
+              903.0,
+              790.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 5,
+            "construction": false
+          },
+          {
+            "id": "l5",
+            "type": "line",
+            "a": 5,
+            "b": 6,
+            "construction": false
+          },
+          {
+            "id": "l6",
+            "type": "line",
+            "a": 6,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k3",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "horizontal",
+            "l": 4
+          },
+          {
+            "id": "k6",
+            "type": "vertical",
+            "l": 5
+          },
+          {
+            "id": "k7",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 903.0,
+            "param": "d121"
+          },
+          {
+            "id": "k8",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 830.0,
+            "param": "d122"
+          },
+          {
+            "id": "k9",
+            "type": "length",
+            "l": 0,
+            "value": 40.0,
+            "param": "d123"
+          },
+          {
+            "id": "k10",
+            "type": "length",
+            "l": 1,
+            "value": 4.0,
+            "param": "d124"
+          },
+          {
+            "id": "k11",
+            "type": "length",
+            "l": 5,
+            "value": 40.0,
+            "param": "d125"
+          },
+          {
+            "id": "k12",
+            "type": "length",
+            "l": 4,
+            "value": 4.0,
+            "param": "d126"
+          }
+        ],
+        "counters": {
+          "k": 12,
+          "l": 6
+        }
+      }
+    },
+    {
+      "id": 88,
+      "name": "LedgerRightExtrude",
+      "suppressed": false,
+      "body_names": [
+        "Ledger_Right"
+      ],
+      "param_names": [
+        "d127"
+      ],
+      "type": "extrude",
+      "sketch": 87,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "ledger_len",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 89,
+      "name": "Fit_Spout",
+      "suppressed": false,
+      "param_names": [
+        "d88"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "custom",
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_dir": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        "distance": "-tap_y"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "l1.start",
+            "pos": [
+              795.0000000000003,
+              955.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "l3.end",
+            "pos": [
+              661.0000000000006,
+              1019.9999999999999
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p1",
+            "pos": [
+              795.0000000000005,
+              1018.0000000000006
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p2",
+            "pos": [
+              745.0000000000017,
+              1068.0000000000005
+            ],
+            "fixed": false
+          },
+          {
+            "id": "a1.center",
+            "pos": [
+              745.0000000000005,
+              1018.0000000000006
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p3",
+            "pos": [
+              708.9200723427431,
+              1068.0000000000014
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p4",
+            "pos": [
+              678.6091832102873,
+              1050.5000000000027
+            ],
+            "fixed": false
+          },
+          {
+            "id": "a2.center",
+            "pos": [
+              708.9200723427422,
+              1033.0000000000014
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 4,
+            "b": 6,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 7,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "a1",
+            "type": "arc",
+            "c": 5,
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "a2",
+            "type": "arc",
+            "c": 8,
+            "a": 6,
+            "b": 7,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "tangent",
+            "a": 0,
+            "b": 3
+          },
+          {
+            "id": "k2",
+            "type": "tangent",
+            "a": 1,
+            "b": 3
+          },
+          {
+            "id": "k3",
+            "type": "radius",
+            "c": 3,
+            "value": 50.0,
+            "param": "d89"
+          },
+          {
+            "id": "k4",
+            "type": "tangent",
+            "a": 1,
+            "b": 4
+          },
+          {
+            "id": "k5",
+            "type": "tangent",
+            "a": 2,
+            "b": 4
+          },
+          {
+            "id": "k6",
+            "type": "radius",
+            "c": 4,
+            "value": 35.0,
+            "param": "d90"
+          },
+          {
+            "id": "k7",
+            "type": "vertical",
+            "l": 0
+          },
+          {
+            "id": "k8",
+            "type": "horizontal",
+            "l": 1
+          },
+          {
+            "id": "k9",
+            "type": "distance_x",
+            "p": 0,
+            "q": 1,
+            "value": 795.0,
+            "param": "d91"
+          },
+          {
+            "id": "k10",
+            "type": "distance_y",
+            "p": 0,
+            "q": 1,
+            "value": 955.0,
+            "param": "d92"
+          },
+          {
+            "id": "k11",
+            "type": "distance_y",
+            "p": 0,
+            "q": 4,
+            "value": 1068.0,
+            "param": "d93"
+          },
+          {
+            "id": "k12",
+            "type": "distance_x",
+            "p": 2,
+            "q": 1,
+            "value": 134.0,
+            "param": "d94"
+          },
+          {
+            "id": "k13",
+            "type": "distance_y",
+            "p": 0,
+            "q": 2,
+            "value": 1020.0,
+            "param": "d95"
+          },
+          {
+            "id": "k14",
+            "type": "angle",
+            "a": 1,
+            "b": 2,
+            "value": 1.0471975511965979,
+            "param": "d128"
+          }
+        ],
+        "counters": {
+          "a": 2,
+          "k": 14,
+          "l": 3,
+          "p": 4
+        }
+      }
+    },
+    {
+      "id": 90,
+      "name": "FaucetSpout",
+      "suppressed": false,
+      "body_names": [
+        "Faucet_Spout"
+      ],
+      "param_names": [
+        "d96"
+      ],
+      "type": "pipe",
+      "path_sketch": 89,
+      "path": [
+        "l1",
+        "a1",
+        "l2",
+        "a2",
+        "l3"
+      ],
+      "diameter": "24 mm",
+      "operation": "new_body"
+    },
+    {
+      "id": 91,
+      "name": "Fit_Stream",
+      "suppressed": false,
+      "param_names": [
+        "d129"
+      ],
+      "type": "sketch",
+      "plane": {
+        "type": "offset",
+        "base": {
+          "type": "custom",
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_dir": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        "distance": "-tap_y"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p1",
+            "pos": [
+              678.6091832102873,
+              1050.5000000000027
+            ],
+            "fixed": true,
+            "link": "j1"
+          },
+          {
+            "id": "p2",
+            "pos": [
+              661.0000000000006,
+              1019.9999999999999
+            ],
+            "fixed": true,
+            "link": "j1"
+          },
+          {
+            "id": "a1.center",
+            "pos": [
+              1134.692244725472,
+              746.513654994632
+            ],
+            "fixed": false
+          },
+          {
+            "id": "a1.end",
+            "pos": [
+              587.9688934624268,
+              730.0000000000035
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": true,
+            "link": "j1"
+          },
+          {
+            "id": "a1",
+            "type": "arc",
+            "c": 3,
+            "a": 2,
+            "b": 4,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "tangent",
+            "a": 0,
+            "b": 1
+          },
+          {
+            "id": "k2",
+            "type": "distance_x",
+            "p": 4,
+            "q": 0,
+            "value": 587.9688934623066,
+            "param": "d130"
+          },
+          {
+            "id": "k3",
+            "type": "distance_y",
+            "p": 0,
+            "q": 4,
+            "value": 730.0,
+            "param": "d131"
+          }
+        ],
+        "links": [
+          {
+            "id": "j1",
+            "kind": "project",
+            "source": {
+              "type": "sketch_curve",
+              "sketch": 89,
+              "curve": "l3"
+            }
+          }
+        ],
+        "counters": {
+          "a": 1,
+          "j": 1,
+          "k": 3,
+          "l": 1,
+          "p": 2
+        }
+      }
+    },
+    {
+      "id": 92,
+      "name": "WaterStream",
+      "suppressed": false,
+      "body_names": [
+        "Water_Stream"
+      ],
+      "param_names": [
+        "d132"
+      ],
+      "type": "pipe",
+      "path_sketch": 91,
+      "path": [
+        "a1"
+      ],
+      "diameter": "14 mm",
+      "operation": "new_body"
+    },
+    {
+      "id": 101,
+      "name": "DrainFillet",
+      "suppressed": false,
+      "param_names": [
+        "d135"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "min": [
+            0.0,
+            -480.0,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000003
+          ]
+        },
+        {
+          "dir": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "min": [
+            0.0,
+            -480.0,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000003
+          ]
+        }
+      ],
+      "edge_names": [
+        "F33:end|F38:side:c1#1",
+        "F33:end|F38:side:c1#2"
+      ],
+      "type": "fillet",
+      "edges": [
+        [
+          450.0,
+          -123.659,
+          726.0
+        ],
+        [
+          450.0,
+          -78.659,
+          726.0
+        ]
+      ],
+      "radius": "drain_edge_r",
+      "body": "Basin"
+    },
+    {
+      "id": 97,
+      "name": "RimFillet",
+      "suppressed": false,
+      "param_names": [
+        "d133"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            -1.0,
+            -1.9364658025248693e-13,
+            0.0
+          ],
+          "min": [
+            0.0,
+            -480.0,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000003
+          ]
+        },
+        {
+          "dir": [
+            -2.631639762072494e-15,
+            -1.0,
+            0.0
+          ],
+          "min": [
+            0.0,
+            -480.0,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000003
+          ]
+        },
+        {
+          "dir": [
+            1.0,
+            -8.440892429462086e-13,
+            0.0
+          ],
+          "min": [
+            0.0,
+            -480.0,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000003
+          ]
+        },
+        {
+          "dir": [
+            -8.158083262412974e-15,
+            1.0,
+            0.0
+          ],
+          "min": [
+            0.0,
+            -480.0,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000003
+          ]
+        }
+      ],
+      "edge_names": [
+        "F14:side:l1|F2:top",
+        "F14:side:l2|F2:top",
+        "F14:side:l3|F2:top",
+        "F14:side:l4|F2:top"
+      ],
+      "type": "fillet",
+      "edges": [
+        [
+          450.0,
+          -462.0,
+          850.0
+        ],
+        [
+          750.0,
+          -246.0,
+          850.0
+        ],
+        [
+          450.0,
+          -30.0,
+          850.0
+        ],
+        [
+          150.0,
+          -246.0,
+          850.0
+        ]
+      ],
+      "radius": "edge_fillet",
+      "body": "Basin"
+    },
+    {
+      "id": 98,
+      "name": "FrontFillet",
+      "suppressed": false,
+      "param_names": [
+        "d134"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "min": [
+            0.0,
+            -480.0,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000005
+          ]
+        },
+        {
+          "dir": [
+            -1.0,
+            0.0,
+            0.0
+          ],
+          "min": [
+            0.0,
+            -480.0,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000005
+          ]
+        }
+      ],
+      "edge_names": [
+        "F2:side:l1|F2:top",
+        "F2:side:l1|F2:start#1"
+      ],
+      "type": "fillet",
+      "edges": [
+        [
+          450.0,
+          -480.0,
+          850.0
+        ],
+        [
+          450.0,
+          -480.0,
+          690.0
+        ]
+      ],
+      "radius": "edge_fillet",
+      "body": "Basin"
+    },
+    {
+      "id": 102,
+      "name": "BowlFloorLeftFillet",
+      "suppressed": false,
+      "param_names": [
+        "d136"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            0.0,
+            -1.0,
+            2.626165951366261e-13
+          ],
+          "min": [
+            0.0,
+            -480.00000000000006,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000005
+          ]
+        }
+      ],
+      "edge_names": [
+        "F14:side:l4|F33:side:l1#1"
+      ],
+      "type": "fillet",
+      "edges": [
+        [
+          171.1592376850158,
+          -101.15923768495591,
+          729.9999999999923
+        ]
+      ],
+      "radius": "bowl_corner_r",
+      "body": "Basin"
+    },
+    {
+      "id": 103,
+      "name": "BowlFloorRightFillet",
+      "suppressed": false,
+      "param_names": [
+        "d137"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            1.4779288903810365e-14,
+            1.0,
+            -5.5706550483592914e-14
+          ],
+          "min": [
+            0.0,
+            -480.00000000000006,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000005
+          ]
+        }
+      ],
+      "edge_names": [
+        "F14:side:l2|F33:side:l1#3"
+      ],
+      "type": "fillet",
+      "edges": [
+        [
+          728.8407623149849,
+          -101.15923768501524,
+          730.0000000000025
+        ]
+      ],
+      "radius": "bowl_corner_r",
+      "body": "Basin"
+    },
+    {
+      "id": 104,
+      "name": "BowlFloorBackFillet",
+      "suppressed": false,
+      "param_names": [
+        "d138"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            1.0,
+            -2.128869398865787e-13,
+            3.7230755354651945e-14
+          ],
+          "min": [
+            0.0,
+            -480.00000000000006,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000005
+          ]
+        }
+      ],
+      "edge_names": [
+        "F14:side:l3|F33:side:l3"
+      ],
+      "type": "fillet",
+      "edges": [
+        [
+          450.0,
+          -51.159237684956835,
+          729.9999999999894
+        ]
+      ],
+      "radius": "bowl_corner_r",
+      "body": "Basin"
+    },
+    {
+      "id": 105,
+      "name": "BowlFloorFrontFillet",
+      "suppressed": false,
+      "param_names": [
+        "d139"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            -1.0,
+            -1.057691913484433e-16,
+            0.0
+          ],
+          "min": [
+            0.0,
+            -480.00000000000006,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000005
+          ]
+        }
+      ],
+      "edge_names": [
+        "F14:side:l1#2|F33:side:l1#2"
+      ],
+      "type": "fillet",
+      "edges": [
+        [
+          450.0,
+          -151.15923768501432,
+          730.0000000000053
+        ]
+      ],
+      "radius": "bowl_corner_r",
+      "body": "Basin"
+    },
+    {
+      "id": 106,
+      "name": "BowlCornerBackLeftFillet",
+      "suppressed": false,
+      "param_names": [
+        "d140"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            0.17108786974618698,
+            -0.17108786974048248,
+            -0.9702875252487663
+          ],
+          "min": [
+            0.0,
+            -480.00000000000006,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000000000005
+          ]
+        }
+      ],
+      "edge_names": [
+        "F14:side:l3|F14:side:l4"
+      ],
+      "type": "fillet",
+      "edges": [
+        [
+          159.72382340964592,
+          -39.72382340990887,
+          794.8534570796874
+        ]
+      ],
+      "radius": "bowl_corner_r",
+      "body": "Basin"
+    },
+    {
+      "id": 107,
+      "name": "BowlCornerFrontLeftFillet",
+      "suppressed": false,
+      "param_names": [
+        "d141"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            0.06337553154025728,
+            0.9310211846686778,
+            -0.35942049983288576
+          ],
+          "min": [
+            0.0,
+            -480.00000000000006,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000001150426
+          ]
+        }
+      ],
+      "edge_names": [
+        "F14:side:l1#2|F14:side:l4"
+      ],
+      "type": "fillet",
+      "edges": [
+        [
+          159.72382340964688,
+          -319.1517213309805,
+          794.8534570797048
+        ]
+      ],
+      "radius": "bowl_corner_r",
+      "body": "Basin"
+    },
+    {
+      "id": 108,
+      "name": "BowlCornerBackRightFillet",
+      "suppressed": false,
+      "param_names": [
+        "d142"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            -0.17108786974628157,
+            -0.1710878697374677,
+            -0.9702875252492813
+          ],
+          "min": [
+            0.0,
+            -480.00000000000006,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000001150426
+          ]
+        }
+      ],
+      "edge_names": [
+        "F14:side:l2|F14:side:l3"
+      ],
+      "type": "fillet",
+      "edges": [
+        [
+          740.276176590352,
+          -39.72382341023899,
+          794.8534570796863
+        ]
+      ],
+      "radius": "bowl_corner_r",
+      "body": "Basin"
+    },
+    {
+      "id": 109,
+      "name": "BowlCornerFrontRightFillet",
+      "suppressed": false,
+      "param_names": [
+        "d143"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            0.06337553154027985,
+            -0.9310211846686315,
+            0.35942049983300195
+          ],
+          "min": [
+            0.0,
+            -480.00000000000006,
+            690.0
+          ],
+          "max": [
+            900.0,
+            0.0,
+            850.0000001161064
+          ]
+        }
+      ],
+      "edge_names": [
+        "F14:side:l1#4|F14:side:l2"
+      ],
+      "type": "fillet",
+      "edges": [
+        [
+          740.2761765903529,
+          -319.15172133090795,
+          794.853457079701
+        ]
+      ],
+      "radius": "bowl_corner_r",
+      "body": "Basin"
+    }
+  ],
+  "next_id": 110,
+  "appearances": {
+    "bodies": {
+      "Basin": {
+        "name": "Custom",
+        "color": [
+          185,
+          182,
+          174
+        ],
+        "opacity": 1.0
+      },
+      "Faucet_Body": {
+        "name": "Custom",
+        "color": [
+          34,
+          34,
+          34
+        ],
+        "opacity": 1.0
+      },
+      "Faucet_Spout": {
+        "name": "Custom",
+        "color": [
+          34,
+          34,
+          34
+        ],
+        "opacity": 1.0
+      },
+      "Ledger_Left": {
+        "name": "Custom",
+        "color": [
+          85,
+          85,
+          85
+        ],
+        "opacity": 1.0
+      },
+      "Ledger_Right": {
+        "name": "Custom",
+        "color": [
+          85,
+          85,
+          85
+        ],
+        "opacity": 1.0
+      },
+      "Trap_Bottle": {
+        "name": "Custom",
+        "color": [
+          74,
+          144,
+          217
+        ],
+        "opacity": 1.0
+      },
+      "Trap_Pipe": {
+        "name": "Custom",
+        "color": [
+          74,
+          144,
+          217
+        ],
+        "opacity": 1.0
+      },
+      "Trap_Rosette": {
+        "name": "Custom",
+        "color": [
+          74,
+          144,
+          217
+        ],
+        "opacity": 1.0
+      },
+      "Trap_Tube": {
+        "name": "Custom",
+        "color": [
+          74,
+          144,
+          217
+        ],
+        "opacity": 1.0
+      },
+      "Waste_Body": {
+        "name": "Custom",
+        "color": [
+          74,
+          144,
+          217
+        ],
+        "opacity": 1.0
+      },
+      "Waste_Flange": {
+        "name": "Custom",
+        "color": [
+          74,
+          144,
+          217
+        ],
+        "opacity": 1.0
+      },
+      "Waste_Nut": {
+        "name": "Custom",
+        "color": [
+          74,
+          144,
+          217
+        ],
+        "opacity": 1.0
+      },
+      "Waste_Plug": {
+        "name": "Custom",
+        "color": [
+          74,
+          144,
+          217
+        ],
+        "opacity": 1.0
+      },
+      "Water_Stream": {
+        "name": "Custom",
+        "color": [
+          79,
+          195,
+          247
+        ],
+        "opacity": 0.6
+      }
+    }
+  }
+}

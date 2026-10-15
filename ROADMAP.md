@@ -279,11 +279,41 @@ retain their saved two-finger scroll preference; camera motion is available thro
   is an equivalent circular setback. Curved faces/edges, sloped ends and corner junctions remain unsupported.
 - Fillets and chamfers: constant, variable-radius and chord-length fillets; a radius per edge,
   rounds next to earlier rounds of another radius, and smooth corner patches where three rounds
-  meet (a sphere for equal radii); straight edges (convex or concave) between planar faces with perpendicular
+  meet (a sphere for equal radii). At orthogonal corners with a unique smallest radius,
+  a single trimmed setback patch meets all six neighboring faces; a dominant radius uses a
+  four-sided patch. Sequential fillets rebuild connected earlier rounds together; equal-radius
+  concave rounds between planar faces retry the simultaneous-edge path after healing earlier
+  rounds. Features remain separate, and unequal radii are never coerced to match. Exact face
+  history can remain unavailable where healing creates a new sharp edge. Both patch
+  forms preserve ten faces on the reference box, with checked boundary
+  tangency and control-hull containment. The interior is an approximation (reference volumes
+  within 0.1%), not an exact reproduction of another kernel's proprietary surface;
+  straight edges (convex or concave) between planar faces with perpendicular
   planar end faces (equal-distance chamfers also meet sloped planar end faces, including inner
   basin rims within the rim width); convex fillets also meet sloped planar ends and reflex
   corners around pocket rims, with unequal wall slopes and extensions confined to the face;
   connected equal-distance chamfers also trim each other across unequal sloped rim walls;
+  straight fillets can end on oblique planar faces or a fan of planar faces, with exact
+  elliptical sections and checks for crossed boundaries (including holes). Backward seam
+  extensions require a reflex joint; endpoint and section bounds remain conservative.
+  Endpoint sections can also cross planar and cylindrical neighbours, consuming short seams
+  left by earlier blends; this supports adjacent and combined basin-floor fillets. Curved
+  sections use a tolerance-checked cubic fit. Local bounded spline transitions support
+  shallow concave corners and corners meeting earlier cylindrical rim or floor rounds,
+  while keeping the main fillet cylindrical. Exact end curves preserve neighboring
+  faces. Fan patches share one boundary spline and tangent plane along each internal
+  join; isolated singular tips preserve the neighboring faces' distinct limiting normals.
+  Projected-Jacobian and control-hull certificates reject folded or protruding fills.
+  Shared projections also check that transition domains do not overlap; boundary
+  position and tangency are checked before accepting a patch. Transition interiors minimize bending
+  in physical coordinates, avoiding wrinkles near singular parameter corners. Display meshing
+  uses bounded projection, stable tip normals and local detail for these patches, with
+  surface and displayed-normal regressions.
+  Non-cylindrical ends, folded domains and
+  transitions outside these conservative bounds still return an error;
+  transition fitting reuses sparse boundary evaluation and quadrature grids, and
+  skips unused collocation work. A cold-opening regression requires the complete
+  58-feature basin with zero errors and verifies display-cache reuse;
   whole smooth loops of a planar face, picked whole or by one edge (tangent
   chain), including circles and walls at any angle (boss bases and tops, bores, pocket floors,
   plate outlines), loops with sharp corners between straight edges (the blends meet in mitres), runs of

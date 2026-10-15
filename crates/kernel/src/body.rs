@@ -5,6 +5,8 @@ use truck_modeling as mt;
 
 use crate::{KernelError, Result, guard};
 
+pub(crate) mod evaluation;
+mod normal_mesh;
 #[path = "planar_regularize.rs"]
 mod planar_regularize;
 #[path = "planar_sources.rs"]
@@ -230,7 +232,24 @@ fn mesh_shells_within(solid: &Solid, deflection: Deflection) -> Vec<MeshedShell>
         // The robust search tries the exact one first, so exact geometry costs nothing extra; a
         // face can also come back as an empty mesh rather than none (boolean results with
         // approximate intersection curves), so always use it.
-        .map(|sh| sh.robust_triangulation_within(deflection))
+        .map(|sh| {
+            // The bounded spline search is for the new endpoint fills. Keep ordinary
+            // bodies on the established mesher: its results also drive later operations.
+            if !sh.face_iter().any(|f| matches!(f.surface(), mt::Surface::BSplineSurface(s) if s.degrees() == (5, 5))) {
+                return sh.robust_triangulation_within(deflection);
+            }
+            let evaluated: truck_topology::Shell<mt::Point3, mt::Curve, evaluation::Surface> = sh
+                .face_iter()
+                .map(|face| {
+                    let mut f = truck_topology::Face::new_unchecked(face.absolute_boundaries().clone(), evaluation::Surface(face.surface()));
+                    if !face.orientation() {
+                        f.invert();
+                    }
+                    f
+                })
+                .collect();
+            evaluated.robust_triangulation_within(deflection)
+        })
         .collect()
 }
 
@@ -245,8 +264,29 @@ fn refined(pm: &PolygonMesh, surf: &mt::Surface, tol: f64) -> Option<Vec<[(Vec3,
 
 #[allow(clippy::type_complexity)]
 fn refined_with_cache(pm: &PolygonMesh, surf: &mt::Surface, tol: f64, memoize: bool) -> Option<Vec<[(Vec3, Vec3); 3]>> {
+    refined_quality(pm, surf, tol, memoize, false)
+}
+
+#[allow(clippy::type_complexity)]
+fn refined_quality(pm: &PolygonMesh, surf: &mt::Surface, tol: f64, memoize: bool, shading: bool) -> Option<Vec<[(Vec3, Vec3); 3]>> {
     use mt::{ParametricSurface, ParametricSurface3D};
+    let evaluated = evaluation::Surface(surf.clone());
+    // Display-only limiting normals must not change measurement refinement.
+    let subs = |u, v| if shading { evaluated.subs(u, v) } else { surf.subs(u, v) };
+    let normal = |u, v| if shading { evaluated.normal(u, v) } else { surf.normal(u, v) };
     let (pos, uvs, nor) = (pm.positions(), pm.uv_coords(), pm.normals());
+    let direction = if shading {
+        let direction = match surf {
+            mt::Surface::BSplineSurface(s) if matches!(s.degrees(), (3, 3) | (5, 5)) => evaluation::display_projection(s, nor),
+            _ => nor.iter().map(|n| Vec3::new(n.x, n.y, n.z)).fold(Vec3::ZERO, |a, b| a + b).normalized(),
+        }?;
+        if nor.iter().any(|n| Vec3::new(n.x, n.y, n.z).dot(direction) <= 0.0) {
+            return None;
+        }
+        Some(direction)
+    } else {
+        None
+    };
     if uvs.is_empty() {
         return None;
     }
@@ -263,10 +303,10 @@ fn refined_with_cache(pm: &PolygonMesh, surf: &mt::Surface, tol: f64, memoize: b
         tris.push(t);
     }
     // The parameters must be the surface's own.
-    let check = tris.iter().take(8).flat_map(|t| t.iter()).all(|(p, (u, v), _)| from_p3(surf.subs(*u, *v)).dist(*p) < tol * 4.0 + 1e-9);
+    let check = tris.iter().take(8).flat_map(|t| t.iter()).all(|(p, (u, v), _)| from_p3(subs(*u, *v)).dist(*p) < tol * 4.0 + 1e-9);
     // Bounded work: a face may grow to a few times its triangles (wild surfaces sag
     // everywhere and are left as meshed).
-    let cap = (tris.len() * 8).clamp(2_000, 60_000);
+    let cap = (tris.len() * 8).clamp(if shading { 4_000 } else { 2_000 }, 60_000);
     if !check || tris.len() > 50_000 {
         return None;
     }
@@ -283,23 +323,63 @@ fn refined_with_cache(pm: &PolygonMesh, surf: &mt::Surface, tol: f64, memoize: b
     let cache_limit = cap * 3;
     let mut singular_cache = std::collections::HashMap::<(u64, u64), bool>::new();
     let mut changed = false;
-    for _ in 0..4 {
+    let mut edge_cache = std::collections::HashMap::<([u64; 8], [u64; 8]), Option<V>>::new();
+    let mut triangle_cache = std::collections::HashMap::<[[u64; 8]; 3], bool>::new();
+    for _ in 0..if shading { 18 } else { 4 } {
         let mut uses: std::collections::HashMap<((i64, i64), (i64, i64)), u32> = std::collections::HashMap::new();
         for [a, b, c] in &tris {
             for e in [ek(a, b), ek(b, c), ek(c, a)] {
                 *uses.entry(e).or_default() += 1;
             }
         }
-        let mut edge_cache = std::collections::HashMap::<([u64; 8], [u64; 8]), Option<V>>::new();
+        let mut forced = std::collections::HashSet::new();
+        if let Some(direction) = direction {
+            for [a, b, c] in &tris {
+                let key = if memoize { vertex_key(a).zip(vertex_key(b)).zip(vertex_key(c)).map(|((a, b), c)| [a, b, c]) } else { None };
+                // Unchanged triangles keep the same physical samples and
+                // normals across refinement passes. Reuse their result while
+                // continuing to check every newly split triangle.
+                let cached = key.and_then(|k| triangle_cache.get(&k).copied());
+                let bad = cached.unwrap_or_else(|| {
+                    [[1.0 / 3.0; 3], [0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8]].into_iter().any(|[wa, wb, wc]| {
+                        let point = a.0 * wa + b.0 * wb + c.0 * wc;
+                        let seed = (a.1.0 * wa + b.1.0 * wb + c.1.0 * wc, a.1.1 * wa + b.1.1 * wb + c.1.1 * wc);
+                        let Some((u, v)) = evaluation::projected_parameter(&evaluated, p3(point), direction, seed) else {
+                            return false;
+                        };
+                        let normal = normal(u, v);
+                        let normal = Vec3::new(normal.x, normal.y, normal.z);
+                        (a.2 * wa + b.2 * wb + c.2 * wc).normalized().is_some_and(|n| n.dot(normal) < 0.5_f64.to_radians().cos())
+                    })
+                });
+                if cached.is_none()
+                    && triangle_cache.len() < cap * 2
+                    && let Some(key) = key
+                {
+                    triangle_cache.insert(key, bad);
+                }
+                if bad {
+                    // Try every interior edge: the longest one's midpoint can
+                    // fall beyond a curved trim and have no bounded inverse.
+                    // Adjacent triangles share these decisions, preserving conformity.
+                    for (a, b) in [(a, b), (b, c), (c, a)] {
+                        if uses.get(&ek(a, b)).copied().unwrap_or(0) > 1 {
+                            forced.insert(ek(a, b));
+                        }
+                    }
+                }
+            }
+        }
         let mut at = |a: &V, b: &V| -> Option<V> {
             let key = if memoize { vertex_key(a).zip(vertex_key(b)).map(|(a, b)| if a < b { (a, b) } else { (b, a) }) } else { None };
             if let Some(key) = key
                 && let Some(value) = edge_cache.get(&key)
+                && (value.is_some() || !forced.contains(&ek(a, b)))
             {
                 return *value;
             }
             let mut calculate = || -> Option<V> {
-                if uses.get(&ek(a, b)).copied().unwrap_or(0) < 2 {
+                if uses.get(&ek(a, b)).copied().unwrap_or(0) < 2 || (shading && a.0.dist(b.0) <= tol * 0.1) {
                     return None;
                 }
                 // Not at a degenerate point (a cone's apex: its parameters there are arbitrary).
@@ -318,21 +398,39 @@ fn refined_with_cache(pm: &PolygonMesh, surf: &mt::Surface, tol: f64, memoize: b
                     }
                     value
                 };
-                if singular(a) || singular(b) {
+                if !shading && (singular(a) || singular(b)) {
                     return None;
                 }
-                let (u, v) = ((a.1.0 + b.1.0) / 2.0, (a.1.1 + b.1.1) / 2.0);
-                let q = from_p3(surf.subs(u, v));
+                let seed = ((a.1.0 + b.1.0) / 2.0, (a.1.1 + b.1.1) / 2.0);
+                let (u, v) = if let Some(direction) = direction {
+                    evaluation::projected_parameter(&evaluated, p3((a.0 + b.0) * 0.5), direction, seed)?
+                } else {
+                    seed
+                };
+                let q = from_p3(subs(u, v));
                 // Within tolerance, or so far off that the parameters wrapped (a seam).
                 let sag = q.dist((a.0 + b.0) * 0.5);
-                if sag <= tol || sag >= 0.5 * a.0.dist(b.0) {
+                if !sag.is_finite() || (!shading && sag >= 0.5 * a.0.dist(b.0)) {
                     return None;
                 }
-                let n = surf.normal(u, v);
+                let n = normal(u, v);
                 let mut n = Vec3::new(n.x, n.y, n.z);
-                // Keep the mesh's normal side.
-                if n.dot(a.2 + b.2) < 0.0 {
+                // A projected patch has one certified normal side. Widely
+                // separated endpoint normals need not bracket an interior
+                // normal, so their average cannot choose its orientation.
+                if let Some(direction) = direction {
+                    if n.dot(direction) <= 0.0 {
+                        return None;
+                    }
+                } else if n.dot(a.2 + b.2) < 0.0 {
                     n = -n;
+                }
+                let edge = b.0 - a.0;
+                let fraction = ((q - a.0).dot(edge) / edge.len2()).clamp(0.0, 1.0);
+                let interpolated = (a.2 * (1.0 - fraction) + b.2 * fraction).normalized();
+                let bad_normal = shading && interpolated.is_some_and(|old| old.dot(n) < 1.0_f64.to_radians().cos());
+                if !n.is_finite() || (sag <= tol && !bad_normal && !forced.contains(&ek(a, b))) {
+                    return None;
                 }
                 Some((q, (u, v), n))
             };
@@ -1038,6 +1136,10 @@ impl Body {
     /// [`Body::tessellate_with`] in which no facet turns more than `angle` radians either
     /// (infinite: the chord tolerance alone).
     fn tessellate_within(&self, tol: f64, angle: f64, refine: bool) -> Result<Mesh> {
+        self.tessellate_quality(tol, angle, refine, false)
+    }
+
+    fn tessellate_quality(&self, tol: f64, angle: f64, refine: bool, display: bool) -> Result<Mesh> {
         let tol = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
         let tol = tol.max(self.size() * 1e-6);
         if let Some(m) = &self.mesh {
@@ -1060,18 +1162,42 @@ impl Body {
             Deflection { rulings: true, ..Deflection::chord(tol) }
         };
         guard("tessellate", || {
-            let meshed = mesh_shells_within(&self.solid, deflection);
+            let meshed = if display {
+                self.solid.boundaries().iter().map(|s| normal_mesh::shell(s, deflection)).collect()
+            } else {
+                mesh_shells_within(&self.solid, deflection)
+            };
+
             let mut out = Mesh::default();
+            let has_fills = self.solid.face_iter().any(|f| matches!(f.surface(),mt::Surface::BSplineSurface(s) if s.degrees()==(5,5)));
+            let mut projected_faces = std::collections::HashSet::new();
             let solid_faces: Vec<&mt::Face> = self.solid.face_iter().collect();
             for (fi, face) in meshed.iter().flat_map(|s| s.face_iter()).enumerate() {
                 let Some(pm) = face.surface() else { continue };
+                let projected = solid_faces.get(fi).and_then(|f| match f.surface() {
+                    mt::Surface::BSplineSurface(s) if s.degrees() == (5, 5) || (has_fills && s.degrees() == (3, 3)) => {
+                        evaluation::display_projection(&s, pm.normals()).and_then(|n| retriangulate_projected(&pm, mt::Vector3::new(n.x, n.y, n.z)))
+                    }
+                    _ => None,
+                });
+                if projected.is_some() {
+                    projected_faces.insert(fi as u32);
+                }
+                let pm = projected.as_ref().unwrap_or(&pm);
                 let flip = !face.orientation();
                 let base = u32::try_from(out.positions.len()).unwrap_or(u32::MAX);
                 // Curved faces: split triangles that cut through the surface.
-                let refinement = if refine {
+                let shading = display
+                    && has_fills
+                    && solid_faces
+                        .get(fi)
+                        .is_some_and(|f| matches!(f.surface(), mt::Surface::BSplineSurface(s) if matches!(s.degrees(), (3,3) | (5,5))));
+                let refinement = if shading {
+                    solid_faces.get(fi).and_then(|sf| refined_quality(pm, &sf.surface(), tol, true, true))
+                } else if refine {
                     solid_faces.get(fi).and_then(|sf| {
                         let surface = sf.surface();
-                        if matches!(surface, mt::Surface::Plane(_)) { None } else { refined(&pm, &surface, tol) }
+                        if matches!(surface, mt::Surface::Plane(_)) { None } else { refined(pm, &surface, tol) }
                     })
                 } else {
                     None
@@ -1111,8 +1237,11 @@ impl Body {
                 }
                 let _ = base;
             }
-            // Fill missing normals from geometry.
-            for t in &out.triangles {
+            // Curved trim polygons can contain skinny chord triangles whose
+            // plane differs greatly from the surface tangent plane. A projected
+            // face already has consistent orientation: keep its analytic normals.
+            // Other meshing paths retain their winding repair.
+            for (i, t) in out.triangles.iter().enumerate() {
                 let (Some(a), Some(b), Some(c)) =
                     (out.positions.get(t[0] as usize), out.positions.get(t[1] as usize), out.positions.get(t[2] as usize))
                 else {
@@ -1121,7 +1250,7 @@ impl Body {
                 let fnrm = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
                 for k in t {
                     if let Some(n) = out.normals.get_mut(*k as usize)
-                        && (n.dot(fnrm) < -0.2 || n.len() < 0.5)
+                        && ((!projected_faces.contains(&out.tri_face[i]) && n.dot(fnrm) < -0.2) || !n.is_finite() || n.len() < 0.5)
                     {
                         *n = fnrm;
                     }
@@ -1150,6 +1279,12 @@ impl Body {
     fn plan_within(&self, tol: f64, angle: Option<f64>) -> Result<solidcraft_geom::tess::TessPlan> {
         if self.is_mesh() {
             return Err(KernelError::Invalid("a mesh body has no surfaces to tessellate".into()));
+        }
+        // Endpoint fills have singular corner charts and directional limiting
+        // normals. The reference path refines their physical normal field; the
+        // generic plan can succeed while still producing a pinched display.
+        if self.solid.face_iter().any(|f| matches!(f.surface(), mt::Surface::BSplineSurface(s) if s.degrees() == (5, 5))) {
+            return Err(KernelError::Failed("endpoint fills require normal-aware reference tessellation".into()));
         }
         let tol = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
         let tol = tol.max(self.size() * 1e-6);
@@ -1264,10 +1399,41 @@ impl Body {
             Ok(plan) => plan.evaluate(),
             Err(e) => {
                 log::debug!("display mesh: {e}; meshing the reference way");
+                if self.solid.face_iter().any(|f| matches!(f.surface(), mt::Surface::BSplineSurface(s) if s.degrees() == (5, 5))) {
+                    return self.reference_display_mesh_angular(tol, crate::DISPLAY_ANGLE);
+                }
                 self.tessellate(tol)?
             }
         };
         self.flagged(m)
+    }
+
+    fn display_tolerance(&self, tol: f64) -> f64 {
+        // A body's overall size can make a small transition patch only a few
+        // triangles wide. Give cubic and quintic patches local display detail, with a
+        // bounded refinement factor for the shared shell mesh.
+        let tol = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
+        // Ordinary cubic lofts and rounds keep the established display sampling.
+        // Face picks and later modelling operations can depend on those samples.
+        if !self.solid.face_iter().any(|f| matches!(f.surface(), mt::Surface::BSplineSurface(s) if s.degrees() == (5, 5))) {
+            return tol;
+        }
+        let local = self
+            .solid
+            .face_iter()
+            .filter_map(|f| match f.surface() {
+                mt::Surface::BSplineSurface(s) if matches!(s.degrees(), (3, 3) | (5, 5)) => {
+                    let mut bounds = solidcraft_geom::Aabb3::EMPTY;
+                    for p in s.control_points().iter().flatten().take(4096) {
+                        bounds.add(from_p3(*p));
+                    }
+                    let size = bounds.diagonal();
+                    (size.is_finite() && size > 0.0).then_some(size * 5e-4)
+                }
+                _ => None,
+            })
+            .fold(tol, f64::min);
+        local.max(tol / 32.0)
     }
 
     /// Display mesh whose curved faces and edges look curved whatever the body's size: like
@@ -1306,7 +1472,7 @@ impl Body {
         if self.is_mesh() {
             return self.flagged(self.tessellate(tol)?);
         }
-        self.flagged(self.tessellate_within(tol, angle, false)?)
+        self.flagged(self.tessellate_quality(self.display_tolerance(tol), angle, false, true)?)
     }
 
     /// A tessellation with its edges flagged for display (seams, tangent joins, protected creases).

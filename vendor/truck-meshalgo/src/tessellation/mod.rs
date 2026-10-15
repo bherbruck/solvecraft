@@ -24,6 +24,7 @@ pub use parallelizable::*;
 pub fn preview_face<S: RobustMeshableSurface>(surface: &S, loops: &[Vec<Point3>], steps: usize) -> Option<PolygonMesh> {
     triangulation::preview_face(surface, loops, steps)
 }
+pub use triangulation::{bounded_curve_parameters, retriangulate_projected, triangulate_presampled};
 
 /// Gathered the traits used in tessellation.
 pub trait PolylineableCurve:

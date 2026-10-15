@@ -74,6 +74,43 @@ fn change(s: &mut Session, name: &str, expression: &str) {
 }
 
 #[test]
+fn adjacent_pocket_rounds_remain_separate_editable_features() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 90, "width": 48, "height": 16, "body_name": "Pocket"}));
+    run(&mut s, "solid.box", json!({"length": 56, "width": 24, "height": 12, "corner": [17, 10, 4], "operation": "cut", "targets": ["Pocket"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[17, 22, 4]], "radius": 1.5, "name": "First"}));
+    let first = s.doc.find_feature("First").cloned().unwrap();
+    run(&mut s, "solid.fillet", json!({"edges": [[45, 34, 4]], "radius": 1.5, "name": "Second"}));
+    let check = |s: &Session| {
+        assert_eq!(s.doc.features.len(), 4);
+        for name in ["First", "Second"] {
+            assert_eq!(error(s, name), None);
+            assert_eq!(warning(s, name), None);
+        }
+        let state = s.model.state();
+        let body = &state.body("Pocket").unwrap().body;
+        assert_eq!(body.face_count(), 13);
+        assert!(body.validity().is_empty());
+        let retained = s.doc.find_feature("First").unwrap();
+        assert_eq!(retained.id, first.id);
+        assert_eq!(retained.edge_names, first.edge_names);
+    };
+    check(&s);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.find_feature("Second").is_none());
+    assert_eq!(s.model.state().body("Pocket").unwrap().body.face_count(), 12);
+    run(&mut s, "edit.redo", json!({}));
+    check(&s);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened);
+    // Editing the second radius does not rewrite the first feature to match it.
+    let before = s.doc.to_json();
+    assert!(s.execute("timeline.edit", &json!({"feature": "Second", "set": {"radius": "50"}})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+    check(&s);
+}
+
+#[test]
 fn faces_built_from_a_profile_are_named_exactly() {
     let mut s = Session::default();
     block(&mut s);

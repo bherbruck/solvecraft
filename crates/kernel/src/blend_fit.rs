@@ -61,6 +61,9 @@ struct Frame {
     /// The faces (indices in the body's face order) the blend may meet: the two beside the
     /// edge and every face at its ends.
     allowed: Vec<usize>,
+    /// Planar continuations of a cylindrical end face, across its tangent seams.
+    /// A traced round section may continue onto these after consuming a short seam.
+    end_continuations: Vec<usize>,
     ends: [mt::VertexID; 2],
     /// Another edge of the two faces runs on from an end tangentially: the blend runs on along
     /// that chain past this edge.
@@ -252,7 +255,30 @@ fn frame(faces: &[&mt::Face], e: &mt::Edge) -> Option<Frame> {
     if ta.dot(d).abs() > 1e-6 || tb.dot(d).abs() > 1e-6 {
         return None;
     }
-    Some(Frame { p0, p1, ta, tb, na, nb, allowed, ends, chained })
+    let mut end_continuations = Vec::new();
+    for i in &allowed {
+        let f = faces.get(*i)?;
+        if f.edge_iter().any(|x| x.id() == id) || plane_normal(f).is_some() {
+            continue;
+        }
+        let Some(crate::offset::Surf::Cylinder { a: axis, .. }) = crate::offset::surf_of(f, 1e-7) else { continue };
+        for seam in f.edge_iter().filter(|x| matches!(x.curve(), mt::Curve::Line(_))) {
+            let (a, b) = (vtx(seam.front()), vtx(seam.back()));
+            let Some(tangent) = (b - a).normalized() else { continue };
+            if tangent.dot(axis).abs() < 1.0 - 1e-6 {
+                continue;
+            }
+            if !crate::blend::tangent_faces_for_fit(faces, &seam) {
+                continue;
+            }
+            for (j, other) in faces.iter().enumerate() {
+                if !allowed.contains(&j) && plane_normal(other).is_some() && other.edge_iter().any(|x| x.id() == seam.id()) {
+                    end_continuations.push(j);
+                }
+            }
+        }
+    }
+    Some(Frame { p0, p1, ta, tb, na, nb, allowed, end_continuations, ends, chained })
 }
 
 /// The unit tangent of an edge (as used) at its start or end.
@@ -277,10 +303,14 @@ fn first_clash(sel: &Selection, size: Size) -> Option<Clash> {
     let curved = sel.chord * 2.0;
     for (f, w) in sel.frames.iter().zip(&wedges) {
         let (Some(f), Some(w)) = (f, w) else { continue };
-        let hit = sel.tris.iter().filter(|(_, face)| !f.allowed.contains(face)).any(|(t, face)| {
-            let eps = if sel.planar.get(*face).copied().unwrap_or(false) { flat } else { curved };
-            reaches_inside(t, &w.planes, eps)
-        });
+        let hit = sel
+            .tris
+            .iter()
+            .filter(|(_, face)| !f.allowed.contains(face) && !(matches!(size, Size::Round(_)) && f.end_continuations.contains(face)))
+            .any(|(t, face)| {
+                let eps = if sel.planar.get(*face).copied().unwrap_or(false) { flat } else { curved };
+                reaches_inside(t, &w.planes, eps)
+            });
         if hit {
             return Some(Clash::Face);
         }

@@ -36,3 +36,8 @@ path = "junit.xml"
 filter = "binary(action_matrix) & test(=action_matrix_sample)"
 threads-required = "num-cpus"
 
+# The cold-open deadline measures this process, not CPU contention from other geometry tests.
+[[profile.ci.overrides]]
+filter = "binary(open_performance)"
+threads-required = "num-cpus"
+
