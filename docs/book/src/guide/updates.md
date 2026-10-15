@@ -69,6 +69,14 @@ SolidCraft compares the answer with its own version on your computer.
 
 Builds you compile yourself, the Flatpak and the browser app (which updates itself) never check.
 
+## The assistant
+
+The [assistant sidebar](assistant.md) is separate from the update check and does nothing until
+you send it a message. Then your message, a summary of the open design and the results of the
+tools it uses go to the service you chose in its settings (Anthropic, an OpenAI-compatible
+address, or the external program you picked), over HTTPS or to your own computer. The API key is
+stored on your computer in a file only you can read, and is sent only to that service.
+
 ## Which file Download gets
 
 Releases attach the main packages under fixed names (see [releasing](https://github.com/bherbruck/solidcraft/blob/main/docs/releasing.md)),

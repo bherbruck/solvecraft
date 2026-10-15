@@ -24,6 +24,7 @@ solidcraft-io = { path = "crates/io" }
 solidcraft-engine = { path = "crates/engine" }
 solidcraft-ui-egui = { path = "crates/ui-egui" }
 solidcraft-mcp = { path = "crates/mcp" }
+solidcraft-assistant = { path = "crates/assistant" }
 solidcraft-derive = { path = "crates/derive" }
 
 # foundation

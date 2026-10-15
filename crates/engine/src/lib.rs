@@ -762,6 +762,11 @@ impl Session {
         Ok(())
     }
 
+    /// Whether checkpoint `id` can still be restored.
+    pub fn has_checkpoint(&self, id: u64) -> bool {
+        self.checkpoints.iter().any(|c| c.id == id)
+    }
+
     /// Forget checkpoint `id` (and later ones) without going back.
     pub fn drop_checkpoint(&mut self, id: u64) {
         if let Some(i) = self.checkpoints.iter().position(|c| c.id == id) {

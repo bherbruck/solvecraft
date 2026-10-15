@@ -311,7 +311,16 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // the bar's own buttons on the left (File, Undo and Redo, which end before `x`).
         let span = Rect::from_min_max(pos2(x, report.top()), pos2(report.left() - 6.0, report.bottom()));
         let update = crate::update::button(app, ui, span, report_label);
-        let tabs_end = update.map_or(report.left(), |u| u.left()) - 8.0;
+        let mut tabs_end = update.map_or(report.left(), |u| u.left()) - 8.0;
+        // The assistant sidebar's button ends the tab strip, so nothing on the left moves. A
+        // narrow bar leaves it out (Ctrl+Shift+A still toggles the sidebar).
+        if !compact_actions {
+            let assistant_tip = crate::i18n::format("assistant.toggle_tip", &[("key", "Ctrl+Shift+A")]);
+            if click(ui, tabs_end - 13.0, "assistant", &assistant_tip, idle) {
+                app.ui.show_assistant = !app.ui.show_assistant;
+            }
+            tabs_end -= 30.0;
+        }
         // Narrow title bars can fit only part of the tab strip. Its hit regions must not
         // extend into the persistent report and window controls.
         let tabs_rect = Rect::from_min_max(pos2(tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
@@ -1207,6 +1216,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // The Keyboard Shortcuts window is waiting for a key: it is not a shortcut.
     if crate::keymap::capturing(app) {
+        return;
+    }
+    // The assistant sidebar toggles from anywhere, also from inside its text box.
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::A)) {
+        app.ui.show_assistant = !app.ui.show_assistant;
         return;
     }
     // A dimension value that is taking the keyboard: letters belong to it (a parameter name

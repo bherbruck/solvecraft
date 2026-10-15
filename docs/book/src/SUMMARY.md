@@ -16,6 +16,7 @@
 - [Keyboard shortcuts](guide/shortcuts.md)
 - [Updates and privacy](guide/updates.md)
 - [Troubleshooting: SolidCraft won't start](guide/troubleshooting.md)
+- [The assistant sidebar](guide/assistant.md)
 - [Driving SolidCraft with an AI agent (MCP)](guide/mcp.md)
 
 # Developer guide

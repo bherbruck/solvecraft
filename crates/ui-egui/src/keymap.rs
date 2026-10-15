@@ -14,7 +14,7 @@ use crate::theme::Tokens;
 
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] =
-    &["Escape", "S", "V", "F2", "F6", "Delete", "Backspace", "Ctrl+Z", "Ctrl+Y", "Ctrl+S", "Ctrl+N", "Ctrl+O", "Ctrl+Comma"];
+    &["Escape", "S", "V", "F2", "F6", "Delete", "Backspace", "Ctrl+Z", "Ctrl+Y", "Ctrl+S", "Ctrl+N", "Ctrl+O", "Ctrl+Comma", "Ctrl+Shift+A"];
 
 #[derive(Default)]
 pub struct Keymap {

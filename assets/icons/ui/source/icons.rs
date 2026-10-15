@@ -278,6 +278,22 @@ pub(crate) fn paint_with(p: &Painter, r: Rect, name: &str, ink: Color32, fill: C
             pen.line(&[(13.9, 12.0), (12.0, 13.6), (12.0, 15.0)], ink);
             pen.dot(12.0, 17.8, ink);
         }
+        // A clock: earlier conversations.
+        "history" => {
+            pen.circle(12.0, 12.0, 8.5, Color32::TRANSPARENT, ink);
+            pen.line(&[(12.0, 6.5), (12.0, 12.0), (16.0, 14.5)], a);
+        }
+        // A camera: attach the current view.
+        "view_attach" => {
+            pen.poly(&[(3.5, 8.0), (8.0, 8.0), (9.5, 5.5), (14.5, 5.5), (16.0, 8.0), (20.5, 8.0), (20.5, 19.0), (3.5, 19.0)], pen.fill, ink);
+            pen.circle(12.0, 13.2, 3.6, Color32::TRANSPARENT, a);
+        }
+        // The assistant: a speech bubble with a spark.
+        "assistant" => {
+            pen.poly(&[(4.0, 5.0), (20.0, 5.0), (20.0, 16.0), (11.5, 16.0), (7.0, 20.0), (7.0, 16.0), (4.0, 16.0)], pen.fill, ink);
+            pen.line(&[(12.0, 7.5), (12.0, 13.5)], a);
+            pen.line(&[(9.0, 10.5), (15.0, 10.5)], a);
+        }
         "sun" => {
             pen.circle(12.0, 12.0, 4.5, a, ink);
             for i in 0..8 {

@@ -1,0 +1,16 @@
+[package]
+name = "solidcraft-assistant"
+description = "SolidCraft's in-app AI assistant: conversations, provider protocols, tool loop and agent bridge, without any UI toolkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcraft-engine = { workspace = true }
+solidcraft-mcp = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+web-time = { workspace = true }

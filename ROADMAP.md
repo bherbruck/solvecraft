@@ -14,6 +14,16 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 | Gates | `cargo xtask ci`: fmt, clippy -D warnings, tests, asset attribution, layering, wasm32 build — green |
 | Time to a useful alpha (M0–M6) | ≈ **82 agent hours** remain (sum of the M1–M6 estimates below) |
 
+## The assistant sidebar
+
+An AI chat sidebar on the right of the desktop window ([docs/assistant.md](docs/assistant.md)):
+Anthropic, OpenAI-compatible (Ollama, LM Studio) and external agents over ACP or one prompt per
+message. It models through the MCP tool surface in process; file commands wait for a yes, each
+answer is one undo step, conversations are kept per design, tool calls show as cards. Done:
+protocol codecs and the tool loop, the sidebar, agent bridge and endpoint, quick actions,
+screenshot attach. Open: markdown tables and syntax highlighting, token prices, an agent
+`usage_update` display.
+
 ## Scope (owner decision, 2026-10-07)
 
 The issue batch adds preservation of blind pockets in through cuts, associative projected

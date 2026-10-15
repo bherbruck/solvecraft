@@ -298,6 +298,8 @@ pub struct Prefs {
     pub timeline_left_height: f32,
     /// Whether the browser below the left feature history is collapsed.
     pub timeline_left_browser_collapsed: bool,
+    /// Width of the assistant sidebar on the right.
+    pub assistant_width: f32,
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     pub zoom_to_cursor: bool,
     /// Spread discrete wheel input across frames (off: apply each event immediately).
@@ -378,6 +380,7 @@ impl Default for Prefs {
             ui_scale: 1.0,
             timeline_left: false,
             timeline_left_height: 360.0,
+            assistant_width: 360.0,
             timeline_left_browser_collapsed: false,
             zoom_to_cursor: true,
             smooth_wheel_zoom: true,

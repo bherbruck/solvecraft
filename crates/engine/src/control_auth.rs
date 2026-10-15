@@ -51,23 +51,52 @@ pub fn tokens_match(a: &str, b: &str) -> bool {
 /// entry for the user (`icacls`) before the token goes in. A file left by an earlier launch is
 /// replaced.
 pub fn write_token_file(path: &Path, token: &str) -> Result<()> {
+    let mut text = token.as_bytes().to_vec();
+    text.push(b'\n');
+    write_private(path, &text, true)
+}
+
+/// Write `contents` to `path` so only the user can read it (the folder `0700`, the file `0600` on
+/// Unix; one `icacls` entry for the user on Windows), replacing a file that was there. The bytes
+/// go to a sibling file first and are renamed over `path`, so a reader never sees half a file
+/// and the permissions are restricted before anything secret is written. A folder that already
+/// existed keeps its permissions; one made here is `0700`.
+pub fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
+    write_private(path, contents, false)
+}
+
+fn write_private(path: &Path, contents: &[u8], restrict_folder: bool) -> Result<()> {
     let dir = path.parent().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no folder"))?;
+    let restrict_folder = restrict_folder || !dir.exists();
     std::fs::create_dir_all(dir)?;
-    let _ = std::fs::remove_file(path);
+    let name = path.file_name().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no file name"))?;
+    let tmp = dir.join(format!(".{}.{}.tmp", name.to_string_lossy(), std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        if restrict_folder {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        }
         opts.mode(0o600);
     }
-    let mut f = opts.open(path)?;
-    #[cfg(windows)]
-    restrict_to_user(path)?;
-    f.write_all(token.as_bytes())?;
-    f.write_all(b"\n")?;
-    f.sync_all()
+    #[cfg(not(unix))]
+    let _ = restrict_folder;
+    let result = (|| {
+        let mut f = opts.open(&tmp)?;
+        #[cfg(windows)]
+        restrict_to_user(&tmp)?;
+        f.write_all(contents)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 /// Windows: drop inherited entries and grant only the current user full access.
@@ -126,6 +155,30 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "0123456789abcdef0123456789abcdef");
         drop(TokenFile(path.clone()));
         assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A private file replaces the old one whole, is the user's alone, leaves no temporary file
+    /// behind and doesn't change the permissions of a folder that was already there.
+    #[cfg(unix)]
+    #[test]
+    fn a_private_file_replaces_the_old_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("solidcraft-private-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = dir.join("settings.json");
+        write_private_file(&path, b"first").unwrap();
+        write_private_file(&path, b"second").unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(&dir), 0o755);
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let nested = dir.join("made/here.json");
+        write_private_file(&nested, b"x").unwrap();
+        assert_eq!(mode(nested.parent().unwrap()), 0o700);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

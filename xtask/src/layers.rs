@@ -47,6 +47,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("ui-egui", Class::Layer(5)),
     ("gpu", Class::Layer(5)),
     ("mcp", Class::Layer(5)),
+    ("assistant", Class::Layer(5)),
     ("testkit", Class::Testkit),
     // apps and tooling
     ("solidcraft", Class::Exempt),
@@ -56,8 +57,10 @@ pub const TABLE: &[(&str, Class)] = &[
 ];
 
 /// Explicit orderings *within* a layer (earlier may be used by later).
-/// The viewport draws display plans the GPU crate evaluates.
-pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["gpu", "ui-egui"]];
+/// The viewport draws display plans the GPU crate evaluates. The assistant runs the MCP tool
+/// surface in process, and the UI shows the assistant's conversations; the UI still may not use
+/// the MCP crate itself, so these are two pairs and not one chain.
+pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["gpu", "ui-egui"], &["mcp", "assistant"], &["assistant", "ui-egui"]];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));
@@ -259,6 +262,20 @@ mod tests {
     fn sideways_dependency_flagged() {
         let v = check(&[c("solidcraft-kernel", &[("solidcraft-sketch", Normal, true)])]);
         assert!(matches!(v[..], [Violation::Upward { from: 1, to: 1, .. }]));
+    }
+
+    /// The assistant sits between the MCP tools it runs and the UI that shows it; the UI may
+    /// not reach the MCP crate directly, and the MCP crate may not use the assistant.
+    #[test]
+    fn assistant_sits_between_mcp_and_the_ui() {
+        assert!(check(&[c("solidcraft-assistant", &[("solidcraft-mcp", Normal, true), ("solidcraft-engine", Normal, true)])]).is_empty());
+        assert!(check(&[c("solidcraft-ui-egui", &[("solidcraft-assistant", Normal, true)])]).is_empty());
+        let v = check(&[c("solidcraft-ui-egui", &[("solidcraft-mcp", Normal, true)])]);
+        assert!(matches!(v[..], [Violation::Upward { from: 5, to: 5, .. }]));
+        let v = check(&[c("solidcraft-mcp", &[("solidcraft-assistant", Normal, true)])]);
+        assert!(matches!(v[..], [Violation::Upward { from: 5, to: 5, .. }]));
+        let v = check(&[c("solidcraft-assistant", &[("solidcraft-ui-egui", Normal, true)])]);
+        assert!(matches!(v[..], [Violation::Upward { from: 5, to: 5, .. }]));
     }
 
     #[test]

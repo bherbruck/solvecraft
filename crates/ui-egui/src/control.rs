@@ -172,6 +172,70 @@ pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathS
     Ok(Some(vfs::PathScope::new(roots).with_design(app.session.path.as_deref())))
 }
 
+/// `ui.assistant {action}`: drive the assistant sidebar (open, close, toggle, state, send,
+/// stop, confirm, undo_turn, new_chat). The settings (endpoints, keys) are not reachable from
+/// here: a control client must not be able to point the saved key at another server.
+fn assistant(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Outcome {
+    use crate::assistant_ui::{self, Sent};
+    let action = p.get("action").and_then(Value::as_str).unwrap_or("state");
+    match action {
+        "open" | "close" | "toggle" => {
+            app.ui.show_assistant = match action {
+                "open" => true,
+                "close" => false,
+                _ => !app.ui.show_assistant,
+            };
+        }
+        "state" => {}
+        "send" => {
+            let Some(text) = p.get("text").and_then(Value::as_str) else { return err("`text` is required") };
+            match assistant_ui::send(app, ctx, text) {
+                Sent::Started | Sent::Handled => {}
+                Sent::Refused(why) => return err(why),
+            }
+        }
+        "stop" => app.assistant.stop(),
+        "new_chat" => app.assistant.new_chat(),
+        "confirm" => {
+            let Some(allow) = p.get("allow").and_then(Value::as_bool) else { return err("`allow` (true or false) is required") };
+            let index = p.get("index").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok()).unwrap_or(0);
+            if index >= app.assistant.confirms.len() {
+                return err("nothing is waiting for an answer");
+            }
+            app.assistant.answer(index, allow);
+        }
+        "undo_turn" => {
+            let force = p.get("force").and_then(Value::as_bool).unwrap_or(false);
+            if let Err(e) = assistant_ui::undo_turn(app, force) {
+                return err(e);
+            }
+        }
+        other => return err(format!("unknown action `{other}`")),
+    }
+    ok(assistant_ui::summary(app))
+}
+
+/// The model as the window shows it (its camera, theme, colour vision mode and section), rendered
+/// on the CPU as a PNG: what `ui.render` writes and what the assistant attaches to a message.
+/// `grid` and `axes` override the Grid and Origin switches (`None`: as the window shows them).
+pub fn render_model_png(app: &SolveApp, w: usize, h: usize, grid: Option<bool>, axes: Option<bool>) -> Result<Vec<u8>, String> {
+    // Cut by the section the viewport shows (an open Section Analysis dialog's preview, a
+    // sketch's Slice), not only the committed one.
+    let guides = solidcraft_engine::view::Guides {
+        grid: grid.unwrap_or(app.ui.show_grid && !crate::viewport::active_view(app).hide_grid),
+        axes: axes.unwrap_or_else(|| app.origin_visible()),
+    };
+    let scene = solidcraft_engine::view::scene_with_palette_and_guides(
+        &app.session,
+        &app.cam,
+        crate::viewport::section_plane(app),
+        solidcraft_engine::view::world_curve_parts,
+        &crate::viewport::scene_palette(app.ui.dark, app.preferences.color_vision),
+        guides,
+    );
+    render_png(&scene, &app.cam, w, h).ok_or_else(|| "render failed".to_string())
+}
+
 pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
     let scope = match request_scope(app, &req.params) {
         Ok(Some(scope)) => scope,
@@ -207,6 +271,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             wrap(execute(app, id, p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))))
         }
         "engine.batch" => batch(app, p),
+        "ui.assistant" => assistant(app, ctx, p),
         "ui.agent_cursor" => {
             let s = &mut app.ui.agent_cursor;
             if let Some(v) = p.get("show").and_then(Value::as_bool) {
@@ -680,23 +745,12 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.render" => {
             let w = f("width").unwrap_or(1280.0).clamp(16.0, 8192.0) as usize;
             let h = f("height").unwrap_or(800.0).clamp(16.0, 8192.0) as usize;
-            // In the window's theme and colour vision mode, and cut by the section the viewport shows (an open Section
-            // Analysis dialog's preview, a sketch's Slice), not only the committed one.
             // The grid and the axes as the window shows them (the Grid and Origin switches), unless
             // the request says: `grid` and `axes` leave them out of the picture or put them in.
-            let guides = solidcraft_engine::view::Guides {
-                grid: p.get("grid").and_then(Value::as_bool).unwrap_or(app.ui.show_grid && !crate::viewport::active_view(app).hide_grid),
-                axes: p.get("axes").and_then(Value::as_bool).unwrap_or_else(|| app.origin_visible()),
+            let png = match render_model_png(app, w, h, p.get("grid").and_then(Value::as_bool), p.get("axes").and_then(Value::as_bool)) {
+                Ok(png) => png,
+                Err(e) => return err(e),
             };
-            let scene = solidcraft_engine::view::scene_with_palette_and_guides(
-                &app.session,
-                &app.cam,
-                crate::viewport::section_plane(app),
-                solidcraft_engine::view::world_curve_parts,
-                &crate::viewport::scene_palette(app.ui.dark, app.preferences.color_vision),
-                guides,
-            );
-            let Some(png) = render_png(&scene, &app.cam, w, h) else { return err("render failed") };
             match s("path") {
                 Some(path) => match vfs::check(path).and_then(|()| std::fs::write(path, &png)) {
                     Ok(()) => ok(json!({"path": path, "bytes": png.len()})),
