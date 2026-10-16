@@ -1,0 +1,10 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('EL-01 legacy escaped witness'),'3;1');
+FILE_NAME('el01-legacy-escaped.p21','2026-08-16T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg-step','','');
+FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF'));
+ENDSEC;
+DATA;
+#1=PRODUCT('P\X2\00E9\X0\','N\X2\00F8\X0\','',());
+ENDSEC;
+END-ISO-10303-21;

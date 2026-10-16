@@ -1,0 +1,10 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('string escapes'),'2;1');
+FILE_NAME('strings','2026-07-14T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg-step','','');
+FILE_SCHEMA(('AP214'));
+ENDSEC;
+DATA;
+#1=EXAMPLE_STRINGS('it''s','a\\b','\X\E9','\X2\03A9\X0\','\X4\0001F642\X0\','\S\D','\PA\\S\D');
+ENDSEC;
+END-ISO-10303-21;

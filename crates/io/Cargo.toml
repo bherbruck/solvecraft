@@ -22,6 +22,8 @@ sha2 = { workspace = true }
 
 # FreeCAD and Rhino import. Not in the browser build: it compiles the zstd C library.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cadmpeg-codec-f3d = { workspace = true }
+cadmpeg-codec-step = { workspace = true }
 cadmpeg-core = { workspace = true }
 cadmpeg-ir = { workspace = true }
 cadmpeg-registry = { workspace = true }

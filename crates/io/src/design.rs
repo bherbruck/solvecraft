@@ -507,6 +507,9 @@ pub(super) fn read(bytes: &[u8]) -> Result<Document> {
 /// authoritative blob hydration. Desktop keeps one seekable file handle instead
 /// of buffering the complete archive. JSON continues through the normal migrations.
 pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) -> Result<Document> {
+    if crate::is_f3d_path(path) {
+        return Err(crate::fusion_design_refusal());
+    }
     #[cfg(not(target_arch = "wasm32"))]
     let mut source = {
         crate::vfs::check(path).map_err(invalid)?;

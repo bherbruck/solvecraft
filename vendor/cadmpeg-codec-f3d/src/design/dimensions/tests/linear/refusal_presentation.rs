@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: Apache-2.0
+use super::{
+    parameter_record, parse_design_parameter_record, Point2, SketchEntity, SketchEntityId,
+    SketchGeometry, SketchGeometryDefinition, SketchId,
+};
+use cadmpeg_core::decode::ResourceDimension;
+const EPS_REFUSAL_LINEAR: f64 = 1.0e-6;
+
+fn fixture(operation: &'static str, dimension: ResourceDimension) {
+    let sketch = SketchId::mint("generated:test:sketch#presentation").unwrap();
+    let entity = |record_index: u32, geometry: SketchGeometry| {
+        SketchEntity::new(
+            SketchEntityId::mint(format!("generated:test:entity#{record_index}")).unwrap(),
+            sketch.clone(),
+            geometry,
+        )
+        .with_native_ref(Some(format!("stream:geometry#{record_index}")))
+    };
+    let line = entity(
+        306,
+        SketchGeometry::try_from(SketchGeometryDefinition::Line {
+            start: Point2::new(90.4875, -17.78),
+            end: Point2::new(90.4875, 17.78),
+        })
+        .unwrap(),
+    );
+    let circle = entity(
+        331,
+        SketchGeometry::try_from(SketchGeometryDefinition::Circle {
+            center: Point2::new(0.0, 0.0),
+            radius: cadmpeg_ir::scalar::Length::new(11.1125).unwrap(),
+        })
+        .unwrap(),
+    );
+    let arc = entity(
+        796,
+        SketchGeometry::try_from(SketchGeometryDefinition::Arc {
+            center: Point2::new(60.344_057_626_1, -19.05),
+            radius: cadmpeg_ir::scalar::Length::new(12.7).unwrap(),
+            start_angle: cadmpeg_ir::scalar::Angle::new(0.0).unwrap(),
+            end_angle: cadmpeg_ir::scalar::Angle::new(0.975_682_713_4).unwrap(),
+        })
+        .unwrap(),
+    );
+    let outer_arc = entity(
+        782,
+        SketchGeometry::try_from(SketchGeometryDefinition::Arc {
+            center: Point2::new(60.344_057_626_1, 19.05),
+            radius: cadmpeg_ir::scalar::Length::new(12.7).unwrap(),
+            start_angle: cadmpeg_ir::scalar::Angle::new(0.0).unwrap(),
+            end_angle: cadmpeg_ir::scalar::Angle::new(0.975_682_713_4).unwrap(),
+        })
+        .unwrap(),
+    );
+    let first_point = entity(
+        1061,
+        SketchGeometry::try_from(SketchGeometryDefinition::Point {
+            position: Point2::new(11.1125, -11.1125),
+        })
+        .unwrap(),
+    );
+    let second_point = entity(
+        1075,
+        SketchGeometry::try_from(SketchGeometryDefinition::Point {
+            position: Point2::new(11.1125, -7.3025),
+        })
+        .unwrap(),
+    );
+    let entities = [line, circle, arc, outer_arc, first_point, second_point];
+    let projected = entities
+        .iter()
+        .map(|entity| {
+            let record_index = entity
+                .native_ref
+                .as_deref()
+                .and_then(|native_ref| native_ref.rsplit_once('#'))
+                .and_then(|(_, index)| index.parse::<u32>().ok())
+                .expect("synthetic native geometry record");
+            (("stream", record_index), entity)
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let frame = |operands| crate::records::dimensions::DesignDimensionPresentationFrame {
+        id: "stream:presentation#0".into(),
+        byte_offset: 0,
+        class_tag: crate::records::references::DesignClassTag::try_from("314".to_owned()).unwrap(),
+        record_index: 0,
+        frame_length: 0,
+        operands,
+        presentation_bytes: Vec::new().into(),
+        presentation_byte_offset: 0,
+        paired_class_tag: crate::records::references::DesignClassTag::try_from("281".to_owned())
+            .unwrap(),
+        paired_byte_offset: 0,
+        owner_reference: 0,
+        owner_reference_offset: 0,
+        governing_owner_record_index: 0,
+        governing_parameter_record_index: 0,
+        governing_companion_record_index: 0,
+    };
+    let operand = |record_index| crate::records::dimensions::DesignDimensionPresentationOperand {
+        geometry_record_index: std::num::NonZeroU32::new(record_index).unwrap(),
+        geometry_reference_offset: 0,
+        role: 0,
+        role_offset: 0,
+    };
+    let (source_kind, value, records) = if matches!(
+        operation,
+        "f3d presentation first id" | "f3d presentation second id"
+    ) {
+        (
+            "Angular Dimension-2",
+            std::f64::consts::FRAC_PI_2,
+            vec![306, 400],
+        )
+    } else {
+        ("Linear Dimension-2", 3.556, vec![306])
+    };
+    let horizontal = entity(
+        400,
+        SketchGeometry::try_from(SketchGeometryDefinition::Line {
+            start: Point2::new(0.0, 0.0),
+            end: Point2::new(1.0, 0.0),
+        })
+        .unwrap(),
+    );
+    let mut projected = projected;
+    projected.insert(("stream", 400), &horizontal);
+    let parameter = parse_design_parameter_record(&parameter_record(
+        Some(44),
+        "3.556",
+        source_kind,
+        Some(if source_kind.starts_with("Angular") {
+            "rad"
+        } else {
+            "cm"
+        }),
+        "d4",
+        value,
+    ))
+    .unwrap();
+    let frame = frame(records.into_iter().map(operand).collect());
+    let parameter_id =
+        cadmpeg_ir::features::ParameterId::mint("synthetic:test:id#parameter:d4").unwrap();
+    super::super::assert_dimension_refusal(operation, dimension, |ctx| {
+        crate::design::dimensions::presentation_dimension_definition(
+            ctx,
+            "stream",
+            &frame,
+            &projected,
+            &parameter,
+            &parameter_id,
+            EPS_REFUSAL_LINEAR,
+        )
+        .transpose()
+        .map(|_| ())
+    });
+}
+
+#[test]
+fn presentation_dimension_entity_refuses_collection_limit() {
+    fixture(
+        "f3d presentation dimension entity",
+        ResourceDimension::CollectionItems,
+    );
+}
+
+#[test]
+fn presentation_parameter_id_refuses_retained_limit() {
+    fixture(
+        "f3d presentation parameter id",
+        ResourceDimension::RetainedBytes,
+    );
+}
+
+#[test]
+fn presentation_entity_id_refuses_retained_limit() {
+    fixture(
+        "f3d presentation entity id",
+        ResourceDimension::RetainedBytes,
+    );
+}
+
+#[test]
+fn presentation_first_id_refuses_retained_limit() {
+    fixture(
+        "f3d presentation first id",
+        ResourceDimension::RetainedBytes,
+    );
+}
+
+#[test]
+fn presentation_second_id_refuses_retained_limit() {
+    fixture(
+        "f3d presentation second id",
+        ResourceDimension::RetainedBytes,
+    );
+}

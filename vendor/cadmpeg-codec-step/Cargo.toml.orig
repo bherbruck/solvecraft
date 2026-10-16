@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "cadmpeg-codec-step"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Read and write ISO 10303-21 STEP Part 21 files for AP203, AP214, and AP242."
+readme = "README.md"
+documentation = "https://docs.rs/cadmpeg-codec-step"
+keywords = ["cad", "step", "iso-10303", "ap242", "brep"]
+categories = ["encoding", "graphics"]
+exclude = ["tests/golden/**"]
+
+[dependencies]
+base64.workspace = true
+cadmpeg-container.workspace = true
+cadmpeg-core.workspace = true
+cadmpeg-ir = { workspace = true }
+thiserror = { workspace = true }
+encoding_rs = { workspace = true }
+serde_json.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+# Tests and the doctest build `cadmpeg_ir::examples`; the feature keeps those
+# fixtures out of the normal library build.
+cadmpeg-ir = { workspace = true, features = ["examples"] }
+cadmpeg-test-support = { workspace = true }
+serde_json.workspace = true
+roxmltree.workspace = true
+hdf5-reader.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "step_pipeline"
+harness = false

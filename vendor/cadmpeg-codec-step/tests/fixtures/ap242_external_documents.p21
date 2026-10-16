@@ -1,0 +1,16 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('external document dependencies'),'2;1');
+FILE_NAME('dependencies','2026-07-14T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg-step','','');
+FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF'));
+ENDSEC;
+DATA;
+#1=DOCUMENT_TYPE('configuration controlled document version');
+#2=DOCUMENT('SPEC-42','Interface control drawing','',#1);
+#3=APPLIED_DOCUMENT_REFERENCE(#2,'supplier vault',(#6));
+#4=EXTERNAL_SOURCE('https://example.invalid/library');
+#5=EXTERNALLY_DEFINED_ITEM('fastener-table',#4);
+#6=PRODUCT_DEFINITION_CONTEXT('part definition',#7,'design');
+#7=APPLICATION_CONTEXT('managed model based engineering');
+ENDSEC;
+END-ISO-10303-21;

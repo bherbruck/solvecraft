@@ -1,0 +1,15 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ER-04 resource cache identity witness'),'4;2');
+FILE_NAME('er04-cache-identity.p21','2026-08-16T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg','cadmpeg','');
+FILE_SCHEMA(('AP242'));
+SCHEMA_POPULATION((('https://example.invalid/model.p21','2026-08-16T00:00:00',$),('https://example.invalid/model.p21','2026-08-17T00:00:00',$)));
+ENDSEC;
+REFERENCE;
+#10=<https://example.invalid/model.p21#shape>;
+#11=<https://example.invalid/./model.p21#shape>;
+ENDSEC;
+DATA;
+#1=ITEM(#10,#11);
+ENDSEC;
+END-ISO-10303-21;

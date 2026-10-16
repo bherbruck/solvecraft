@@ -64,6 +64,9 @@ gltf = { version = "1.4", default-features = false, features = ["names"] }
 cadmpeg-core = "=0.6.1"
 cadmpeg-ir = "=0.6.1"
 cadmpeg-registry = { version = "=0.6.1", default-features = false, features = ["fcstd", "rhino", "step"] }
+# Fusion archive codec (commercial format). Not enabled via cadmpeg-registry; crates/io/f3d calls it directly.
+cadmpeg-codec-f3d = "=0.6.1"
+cadmpeg-codec-step = "=0.6.1"
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
@@ -136,3 +139,8 @@ matext4cgmath = { path = "vendor/matext4cgmath" }
 
 # Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
 egui-wgpu = { path = "vendor/egui-wgpu" }
+
+# Fusion import: higher arrangement/retained budgets + cone semi-angle 0 → cylinder (see vendor/README.md).
+cadmpeg-codec-f3d = { path = "vendor/cadmpeg-codec-f3d" }
+cadmpeg-codec-step = { path = "vendor/cadmpeg-codec-step" }
+cadmpeg-core = { path = "vendor/cadmpeg-core" }

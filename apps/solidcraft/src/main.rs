@@ -118,46 +118,13 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
     let program_parent = parent.clone();
     Services {
         pick_open: Some(Box::new(move || {
-            let future = open_parent
-                .clone()
-                .add_filter(
-                    "Designs, CAD files and meshes",
-                    &[
-                        io::DESIGN_EXT,
-                        io::LEGACY_DESIGN_EXT,
-                        "json",
-                        "step",
-                        "stp",
-                        "STEP",
-                        "STP",
-                        "igs",
-                        "iges",
-                        "IGS",
-                        "IGES",
-                        "FCStd",
-                        "fcstd",
-                        "3dm",
-                        "3DM",
-                        "3mf",
-                        "3MF",
-                        "stl",
-                        "STL",
-                        "obj",
-                        "OBJ",
-                        "glb",
-                        "GLB",
-                        "gltf",
-                        "GLTF",
-                    ],
-                )
-                .add_filter("SolidCraft design (container or JSON)", &[io::DESIGN_EXT, io::LEGACY_DESIGN_EXT, "json"])
-                .add_filter("STEP", &["step", "stp", "STEP", "STP"])
-                .add_filter("IGES", &["igs", "iges", "IGS", "IGES"])
-                .add_filter("FreeCAD and Rhino", &["FCStd", "fcstd", "3dm", "3DM"])
-                .add_filter("Mesh (3MF, STL, OBJ, glTF)", &["3mf", "3MF", "stl", "STL", "obj", "OBJ", "glb", "GLB", "gltf", "GLTF"])
-                .add_filter("Sketch drawings (DXF, SVG)", &["dxf", "DXF", "svg", "SVG"])
-                .add_filter("All files", &["*"])
-                .pick_file();
+            let combined = io::exchange::open_dialog_combined_extensions();
+            let mut dialog = open_parent.clone().add_filter("Designs, CAD files and meshes", combined.as_slice());
+            dialog = dialog.add_filter("SolidCraft design (container or JSON)", &[io::DESIGN_EXT, io::LEGACY_DESIGN_EXT, "json"]);
+            for (label, exts) in io::exchange::dialog_filters() {
+                dialog = dialog.add_filter(label, exts);
+            }
+            let future = dialog.add_filter("Sketch drawings (DXF, SVG)", &["dxf", "DXF", "svg", "SVG"]).add_filter("All files", &["*"]).pick_file();
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
         pick_program: Some(Box::new(move || {

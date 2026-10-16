@@ -4,6 +4,32 @@ Copies of third-party crates that SolidCraft builds with local fixes, wired in w
 `[patch.crates-io]` in the workspace `Cargo.toml`. They keep their own licence; changed lines
 are marked `SolidCraft:` in the source.
 
+## cadmpeg-codec-f3d 0.6.1 (Apache-2.0, https://github.com/cadmpeg/cadmpeg)
+
+Changes:
+
+- `src/design/geometry.rs`: raise `MAX_ARRANGEMENT_WALK_WORK` from 1_000_000 to 64_000_000 so
+  Fusion `.f3d` files with heavy sketch arrangement data decode instead of hitting the codec
+  work cap.
+- `src/design/decode/sketch.rs`: skip individual sketch points whose version-11 (or companion)
+  records do not parse, so B-rep import can proceed when sketch metadata is non-fatal.
+
+## cadmpeg-codec-step 0.6.1 (Apache-2.0, https://github.com/cadmpeg/cadmpeg)
+
+Changes:
+
+- `src/geometry.rs` / `src/export.rs`: map conical surfaces with semi-angle 0 to
+  `CYLINDRICAL_SURFACE` (ISO 10303-42 forbids semi-angle 0 on cones), so Fusion bodies that
+  use degenerate cones export to STEP instead of failing the whole open.
+
+## cadmpeg-core 0.6.1 (Apache-2.0, https://github.com/cadmpeg/cadmpeg)
+
+Changes:
+
+- `src/decode/policy.rs`: raise `RETAINED_PER_INPUT_BYTE` and `MATERIALIZED_PER_INPUT_BYTE` from
+  1000 to 8000 so typical Fusion archives are not capped at ~600 MB of retained decode state
+  before B-rep transfer finishes.
+
 ## truck-shapeops 0.4.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
 
 Changes:

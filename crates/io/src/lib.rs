@@ -1,8 +1,9 @@
 //! File formats. Designs use JSON or versioned containers (`.solidcraft`); the authoritative
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
-//! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
-//! STL files as mesh bodies (see [`mesh_import_feature`]).
+//! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), Fusion
+//! `.f3d`/`.f3z` via [`exchange`] / [`f3d_open_feature`], and 3MF/STL/OBJ/glTF as mesh bodies
+//! (see [`mesh_import_feature`]).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
@@ -11,6 +12,9 @@ mod design;
 mod design_metadata;
 mod dxf;
 mod dxf_out;
+pub mod exchange;
+#[cfg(not(target_arch = "wasm32"))]
+mod f3d;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignGeometry, DesignPreview, THUMBNAIL_SIZE, is_design_container, read_design_file,
     read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, write_design_container,
@@ -36,8 +40,40 @@ pub use svg::read_svg;
 mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod obj;
+#[cfg(not(target_arch = "wasm32"))]
+pub use f3d::{MAX_F3D_BYTES, looks_like_fusion_archive};
 pub use obj::read_obj;
 pub use threemf::{MAX_3MF_BYTES, MeshObject, model_xml, model_xml_with, read_3mf, weld, write_3mf, write_3mf_with};
+#[cfg(target_arch = "wasm32")]
+pub const MAX_F3D_BYTES: usize = 512 << 20;
+/// Browser builds cannot decode Fusion B-rep; still sniff ZIP contents so opening an
+/// `.f3d`/`.f3z` as a native design fails with [`fusion_design_refusal`] instead of a
+/// cryptic container/JSON error.
+#[cfg(target_arch = "wasm32")]
+pub fn looks_like_fusion_archive(bytes: &[u8]) -> bool {
+    use std::io::Cursor;
+    if !bytes.starts_with(b"PK\x03\x04") {
+        return false;
+    }
+    let Ok(zip) = zip::ZipArchive::new(Cursor::new(bytes)) else {
+        return false;
+    };
+    let mut manifest = false;
+    let mut design = false;
+    for name in zip.file_names() {
+        if name == "Manifest.dat" || name.ends_with("/Manifest.dat") {
+            manifest = true;
+        }
+        if name.contains("FusionDesignSegmentType") || name.contains("Breps.BlobParts") {
+            design = true;
+        }
+        if manifest && design {
+            return true;
+        }
+    }
+    manifest && design
+}
+pub use exchange::{ExchangeCapabilities, ExchangeFileType, ExchangeImport, ExchangeProviderId};
 pub use urdf::{UrdfOptions, UrdfPackage, urdf};
 
 use solidcraft_doc::{Document, Metadata, ModelState};
@@ -63,7 +99,7 @@ pub const MAX_DESIGN_BYTES: usize = 256 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
-    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, urdf or solidcraft)")]
+    #[error("unsupported format `{0}` (use stl, obj, step, f3d, 3mf, urdf or solidcraft)")]
     Format(String),
     #[error("nothing to export: the design has no bodies")]
     Empty,
@@ -79,6 +115,11 @@ pub type Result<T> = std::result::Result<T, IoError>;
 
 /// Largest STEP file we read.
 pub const MAX_STEP_BYTES: usize = 512 << 20;
+
+/// Is this a Fusion design archive (`.f3d` / `.f3z`), any case?
+pub fn is_f3d_path(path: &str) -> bool {
+    exchange::is_fusion_path(path)
+}
 
 /// Is this a CAD file read as an Import base feature: STEP (`.step` / `.stp`), IGES
 /// (`.igs` / `.iges`) or a format read through cadmpeg ([`is_native_cad_path`]), any case?
@@ -152,6 +193,72 @@ pub struct StepFeature {
     /// The file as read. Hold it until the feature has been evaluated: the timeline then reuses
     /// it instead of reading the file again (it is freed with the last holder).
     pub import: std::sync::Arc<solidcraft_kernel::StepImport>,
+}
+
+/// Solid B-rep or mesh bodies from a Fusion file.
+#[cfg(not(target_arch = "wasm32"))]
+pub enum F3dOpenFeature {
+    Solid(StepFeature),
+    Mesh(MeshFeature),
+}
+
+/// Open a Fusion `.f3d` / `.f3z` (B-rep Import feature, or mesh bodies when B-rep is unavailable).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn f3d_open_feature(bytes: &[u8], file: &str) -> Result<F3dOpenFeature> {
+    match f3d::open(bytes, file)? {
+        f3d::F3dOpen::Brep { step, mut warnings } => {
+            // Name the import after the Fusion file; the bytes are STEP Part 21 text.
+            let step_name = format!("{}.step", std::path::Path::new(file).file_stem().and_then(|s| s.to_str()).unwrap_or("fusion"));
+            let mut sf = step_import_feature(&step, &step_name)?;
+            if let solidcraft_doc::FeatureKind::Import { file: ref mut stored, .. } = sf.kind {
+                *stored = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| file.to_string());
+            }
+            sf.warnings.append(&mut warnings);
+            Ok(F3dOpenFeature::Solid(sf))
+        }
+        f3d::F3dOpen::Mesh { objects, warnings } => Ok(F3dOpenFeature::Mesh(mesh_objects_feature(&objects, file, warnings)?)),
+    }
+}
+
+/// Read a Fusion `.f3d` / `.f3z` as an Import base feature (B-rep only).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn f3d_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
+    match f3d_open_feature(bytes, file)? {
+        F3dOpenFeature::Solid(sf) => Ok(sf),
+        F3dOpenFeature::Mesh(_) => Err(IoError::Invalid(format!("{file}: Fusion file has no transferable B-rep (only mesh preview data)"))),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn mesh_objects_feature(objects: &[threemf::MeshObject], file: &str, warnings: Vec<String>) -> Result<MeshFeature> {
+    let path = std::path::Path::new(file);
+    let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Fusion".into());
+    let mut meshes = Vec::with_capacity(objects.len());
+    for o in objects {
+        solidcraft_kernel::mesh_body(&o.positions, &o.triangles).map_err(|e| IoError::Invalid(format!("mesh `{}`: {e}", o.name)))?;
+        meshes.push(solidcraft_doc::MeshData {
+            name: o.name.clone(),
+            positions: o.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+            triangles: o.triangles.iter().flatten().copied().collect(),
+            color: o.color,
+        });
+    }
+    let name = match objects {
+        [only] if !only.name.trim().is_empty() => only.name.clone(),
+        _ => stem,
+    };
+    let file_name = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    Ok(MeshFeature {
+        name,
+        body_names: objects.iter().map(|o| o.name.clone()).collect(),
+        kind: solidcraft_doc::FeatureKind::MeshImport { file: file_name, meshes },
+        warnings,
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn f3d_import_feature(_bytes: &[u8], file: &str) -> Result<StepFeature> {
+    Err(IoError::Invalid(format!("{file}: Fusion import is not available in the browser build; use STEP or open the desktop app")))
 }
 
 /// Read STEP bytes (`file` is the source file name) into an Import base feature. The file is
@@ -512,10 +619,20 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
     Ok(solidcraft_kernel::step_export_products(&products, 0, &step_header(format!("{name}.step"), &doc.metadata))?.into_bytes())
 }
 
+/// Shown when a Fusion archive is opened as a native design (browser or older callers).
+pub(crate) fn fusion_design_refusal() -> IoError {
+    IoError::Invalid(
+        "Fusion .f3d/.f3z is not a SolidCraft design file; on desktop, File → Open loads its solid bodies into a new design (Fusion history is not editable). In the browser, export STEP from Fusion.".into(),
+    )
+}
+
 /// Read a design file's bytes.
 pub fn read_design(bytes: &[u8]) -> Result<Document> {
     if bytes.len() > MAX_DESIGN_BYTES {
         return Err(IoError::Invalid("design file too large".into()));
+    }
+    if let Some(err) = exchange::refuse_native_design(bytes) {
+        return Err(err);
     }
     if is_design_container(bytes) {
         return design::read(bytes);
@@ -1000,5 +1117,63 @@ mod tests {
         let mut xml = String::new();
         zip.by_name("3D/3dmodel.model").unwrap().read_to_string(&mut xml).unwrap();
         assert!(!xml.contains("ft:"));
+    }
+
+    #[test]
+    fn is_f3d_path_extensions() {
+        assert!(is_f3d_path("a.f3d") && is_f3d_path("b.F3Z"));
+        assert!(!is_f3d_path("c.step") && !is_f3d_path("f3d"));
+    }
+
+    /// Minimal ZIP whose central-directory names look like Fusion (no real B-rep payload).
+    fn fake_fusion_zip() -> Vec<u8> {
+        use std::io::Write;
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut cursor);
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file("Manifest.dat", opts).unwrap();
+            zip.write_all(b"fake").unwrap();
+            zip.start_file("FusionDesignSegmentType/x.bin", opts).unwrap();
+            zip.write_all(b"fake").unwrap();
+            zip.finish().unwrap();
+        }
+        cursor.into_inner()
+    }
+
+    #[test]
+    fn fusion_archive_is_not_a_solidcraft_design_container() {
+        let bytes = fake_fusion_zip();
+        assert!(looks_like_fusion_archive(&bytes));
+        // ZIP magic alone can look like a container prefix; exchange refusal must win first.
+        let err = read_design(&bytes).unwrap_err().to_string();
+        assert!(err.contains("Fusion"), "{err}");
+        assert!(err.contains("not a SolidCraft design"), "{err}");
+    }
+
+    #[test]
+    fn fusion_f3d_path_refused_by_read_design_file() {
+        let err = read_design_file("part.f3d", Option::<fn(DesignPreview)>::None).unwrap_err().to_string();
+        assert!(err.contains("Fusion"), "{err}");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn fusion_open_one_file() {
+        let Ok(path) = std::env::var("F3D_ONE") else {
+            return;
+        };
+        let path = std::path::PathBuf::from(&path);
+        if !path.is_file() {
+            return;
+        }
+        let label = path.file_name().unwrap().to_string_lossy();
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{label}: {e}"));
+        let file = path.to_string_lossy();
+        match f3d_open_feature(&bytes, &file) {
+            Ok(F3dOpenFeature::Solid(sf)) => eprintln!("RESULT OK solid {label} bodies={}", sf.body_names.len()),
+            Ok(F3dOpenFeature::Mesh(mf)) => eprintln!("RESULT OK mesh {label} meshes={}", mf.body_names.len()),
+            Err(e) => eprintln!("RESULT FAIL {label}: {e}"),
+        }
     }
 }

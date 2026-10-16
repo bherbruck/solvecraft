@@ -1,0 +1,13 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ER-03 beta subsidiary identity witness'),'4;2');
+FILE_NAME('er03-subsidiary-beta.p21','2026-08-17T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg','cadmpeg','');
+FILE_SCHEMA(('AP242'));
+ENDSEC;
+ANCHOR;
+<remote_item>=#1;
+ENDSEC;
+DATA;
+#1=ITEM('beta');
+ENDSEC;
+END-ISO-10303-21;

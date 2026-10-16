@@ -1,0 +1,23 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('edition 3 sections'),'4;2');
+FILE_NAME('sections','2026-07-14T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg-step','','');
+FILE_SCHEMA(('AP242'));
+ENDSEC;
+ANCHOR;
+<root>=#1;
+<alias>=<#root>;
+ENDSEC;
+REFERENCE;
+#100=<https://example.invalid/external-part>;
+ENDSEC;
+DATA('section-1',('AP242'));
+#1=PRODUCT('P1','Part','',());
+ENDSEC;
+DATA('section-2',('AP242'));
+#2=EXAMPLE_RECORD(<#alias>);
+ENDSEC;
+END-ISO-10303-21;
+SIGNATURE;
+MFoGCSqGSIb3DQEHAqBNMEsCAQExDTALBglghkgBZQMEAgEwCwYJKoZIhvcNAQcBMSowKAIBATAFMAACAQEwCwYJYIZIAWUDBAIBMA0GCSqGSIb3DQEBAQUABAA=
+ENDSEC;

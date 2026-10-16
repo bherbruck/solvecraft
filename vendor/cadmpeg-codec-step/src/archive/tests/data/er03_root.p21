@@ -1,0 +1,14 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ER-03 resource composition root witness'),'4;2');
+FILE_NAME('er03-root.p21','2026-08-16T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg','cadmpeg','');
+FILE_SCHEMA(('AP242'));
+SCHEMA_POPULATION((('parts/er03_subsidiary.p21',$,$)));
+ENDSEC;
+REFERENCE;
+#10=<parts/er03_subsidiary.p21#remote_item>;
+ENDSEC;
+DATA;
+#1=ITEM(#10);
+ENDSEC;
+END-ISO-10303-21;

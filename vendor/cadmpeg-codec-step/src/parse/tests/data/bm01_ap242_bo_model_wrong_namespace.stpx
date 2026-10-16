@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<n0:Uos
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xmlns:n0="urn:example:wrong-ap242-namespace"
+ xsi:schemaLocation="urn:example:wrong-ap242-namespace urn:example:wrong-ap242-namespace.xsd">
+ <Header>
+  <Name>bm01-lookalike.stpx</Name>
+ </Header>
+ <DataContainer xsi:type="n0:AP242DataContainer"/>
+</n0:Uos>

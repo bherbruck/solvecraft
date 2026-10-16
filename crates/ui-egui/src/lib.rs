@@ -990,7 +990,9 @@ impl SolveApp {
     /// Insert a STEP file's bodies (an Import base feature) or a mesh file's meshes into the
     /// current design.
     pub fn insert_path(&mut self, path: &str) {
-        let cmd = if solidcraft_engine::io::is_mesh_path(path) { "file.insert_mesh" } else { "file.insert_step" };
+        let cmd = solidcraft_engine::io::exchange::insert_command_name(path)
+            .or_else(|| if solidcraft_engine::io::is_mesh_path(path) { Some("file.insert_mesh") } else { Some("file.insert_step") })
+            .unwrap_or("file.insert_step");
         let before: Vec<String> = self.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
         if let Ok(r) = self.run(cmd, json!({ "path": path })) {
             self.fit_view();
@@ -1004,7 +1006,10 @@ impl SolveApp {
     /// A dropped file: a STEP or mesh file (3MF, STL, OBJ, glTF) joins a design that has features, anything else
     /// opens.
     pub fn drop_path(&mut self, path: &str) {
-        let import = solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path);
+        let import = solidcraft_engine::io::is_step_path(path)
+            || solidcraft_engine::io::is_mesh_path(path)
+            || solidcraft_engine::io::is_f3d_path(path)
+            || solidcraft_engine::io::exchange::can_insert(path);
         if import && !self.session.doc.features.is_empty() {
             self.insert_path_async(path);
         } else {

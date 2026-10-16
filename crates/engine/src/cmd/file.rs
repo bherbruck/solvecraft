@@ -20,7 +20,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .key("Ctrl+O")
         .noundo()
-        .params("path: .solidcraft design, or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step)"),
+        .params("path: .solidcraft design, or a .step/.stp/.igs/.fcstd/.3dm/.f3d/.f3z/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, Fusion, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step)"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
@@ -211,11 +211,41 @@ fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     add_mesh(s, path, str_(p, "name"), up)
 }
 
+/// Add Fusion bodies (B-rep Import or mesh fallback) in a new component named after the file.
+fn add_f3d(s: &mut Session, path: &str, name: Option<&str>) -> Result<Value> {
+    let import = solidcraft_io::exchange::read_path(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    match import {
+        solidcraft_io::ExchangeImport::Solid(sf) => {
+            let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
+            let cname = import::component_name(path, name);
+            let (id, placed) = import::add_in_component(s, sf.kind, &fname, sf.body_names, &cname, import::Tree::Step(&sf.import))?;
+            let created = created_bodies(s, id);
+            let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+            let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": created, "created_bodies": created, "warnings": sf.warnings});
+            placed.report(&mut out);
+            Ok(out)
+        }
+        solidcraft_io::ExchangeImport::Mesh(mf) => {
+            let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&mf.name).to_string();
+            let cname = import::component_name(path, name);
+            let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &cname, import::Tree::Flat)?;
+            let bodies = created_bodies(s, id);
+            let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+            let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": bodies, "created_bodies": bodies, "warnings": mf.warnings});
+            placed.report(&mut out);
+            Ok(out)
+        }
+    }
+}
+
 fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.insert_step";
     let path = path_arg(p, cmd)?;
+    if solidcraft_io::is_f3d_path(path) {
+        return add_f3d(s, path, str_(p, "name"));
+    }
     if !solidcraft_io::is_step_path(path) {
-        return Err(bad(cmd, "only STEP, IGES, FreeCAD and Rhino files (.step, .stp, .igs, .iges, .fcstd, .3dm) can be inserted"));
+        return Err(bad(cmd, "only STEP, IGES, FreeCAD, Rhino or Fusion files (.step, .stp, .igs, .iges, .fcstd, .3dm, .f3d, .f3z) can be inserted"));
     }
     let options = step_options(p, cmd)?;
     add_step(s, path, str_(p, "name"), &options)
@@ -229,11 +259,13 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     if !solidcraft_io::is_step_path(path) && !solidcraft_io::is_gltf_path(path) && p.get("up").is_some_and(|v| !v.is_null()) {
         return Err(bad("doc.open", "`up` applies to STEP, IGES and glTF files only"));
     }
-    if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) {
+    if solidcraft_io::is_f3d_path(path) || solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
-        let r = if solidcraft_io::is_step_path(path) {
+        let r = if solidcraft_io::is_f3d_path(path) {
+            add_f3d(&mut fresh, path, None)?
+        } else if solidcraft_io::is_step_path(path) {
             add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
         } else {
             add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?)?

@@ -40,6 +40,8 @@ Editable drawing code, native projects and shipped exports are collected under `
 | docs/screenshots/class-a-crown.png | SolidCraft contributors | screenshot of SolidCraft itself: a patch crowned with `surface.patch crown=0.3` over a saddle rim (`solidcraft-cli snapshot`) | MIT OR Apache-2.0 |
 | docs/screenshots/class-a-boundary.png | SolidCraft contributors | screenshot of SolidCraft itself: a patch through two sketch lines built by `surface.boundary` with `crown: 0.4` (`solidcraft-cli snapshot`) | MIT OR Apache-2.0 |
 | docs/screenshots/sample-plate.png | SolidCraft contributors | screenshot of SolidCraft itself (`solidcraft --sample`) | MIT OR Apache-2.0 |
+| docs/dev/f3d-screenshots/christmas-f3d-open.png | SolidCraft contributors | desktop screenshot: File → Open of a Fusion `.f3d` (Christmas tree, solid B-rep bodies) | MIT OR Apache-2.0 |
+| docs/dev/f3d-screenshots/cylindrical-holder-f3d-open.png | SolidCraft contributors | desktop screenshot: File → Open of a Fusion `.f3d` (21700 cylindrical holder, solid B-rep bodies) | MIT OR Apache-2.0 |
 | docs/screenshots/demo-0.8.gif | SolidCraft contributors | original screen recording of the actual SolidCraft 0.8 English desktop UI modelling an original Raspberry Pi 4 case (no logos or branding; the engraved text is set in the system's DejaVu Sans Bold), generated with examples/demo/record_ui.sh and its original animated pointer overlay (9× playback) | MIT OR Apache-2.0 |
 | docs/screenshots/demo-0.8.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.8 English desktop UI modelling an original Raspberry Pi 4 case (no logos or branding; the engraved text is set in the system's DejaVu Sans Bold), generated with examples/demo/record_ui.sh and its original animated pointer overlay (9× playback) | MIT OR Apache-2.0 |
 | docs/screenshots/rover-build.gif | 0xlillith (model); SolidCraft contributors (recording) | screen recording of the actual SolidCraft desktop UI replaying the timeline of the SELENE rover (`Rover-recorded.solidcraft` from https://github.com/0xlillith/solidcraft-rover, an original model by 0xlillith built through SolidCraft MCP); the model's lettering follows Ubuntu Light outlines (Canonical Ltd., Ubuntu Font Licence 1.0, as noted in that repository); the emblem is the SolidCraft project icon (2× playback) | MIT OR Apache-2.0 |
@@ -157,15 +159,16 @@ in THIRD-PARTY-LICENSES.txt; no images or artwork from that project are copied.
 The glTF test files are built by the tests themselves (crates/io/src/gltf_in_tests.rs,
 crates/engine/src/tests/gltf_import.rs); no third-party models are committed.
 
-## FreeCAD and Rhino import library
+## FreeCAD, Rhino and Fusion import library
 
 FreeCAD `.FCStd` and Rhino `.3dm` files are read with [cadmpeg](https://github.com/cadmpeg/cadmpeg)
 0.6.1 (Apache-2.0), linked as the crates `cadmpeg-core`, `cadmpeg-ir`, `cadmpeg-registry`,
 `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino` and `cadmpeg-codec-step`
-in native builds (`crates/io/src/native_cad.rs`). Only those open-format codecs are built: no
-default features, so cadmpeg's codecs for commercial CAD formats and its ShapeManager/ACIS
-codec are not compiled in. Its licence text is in THIRD-PARTY-LICENSES.txt; no code from it is
-copied into SolidCraft.
+in native builds (`crates/io/src/native_cad.rs`). Those open-format codecs are enabled through
+cadmpeg-registry without default features (no ShapeManager/ACIS `sat` codec). Autodesk Fusion
+`.f3d`/`.f3z` files are read separately via `cadmpeg-codec-f3d` and a patched
+`cadmpeg-codec-step` / `cadmpeg-core` (`crates/io/src/f3d.rs`, vendored under `vendor/`).
+Its licence text is in THIRD-PARTY-LICENSES.txt.
 
 ## Recovered contributions
 
@@ -182,6 +185,9 @@ copied into SolidCraft.
 | vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; degenerate intersection-curve rejection; face and edge history of booleans; trace macro; corner choice at vertices several intersection curves end on (vendor/README.md) |
 | vendor/truck-geometry | truck-geometry 0.5.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | intersection curves divided from their neighbours' surface parameters (vendor/README.md) |
 | vendor/matext4cgmath | matext4cgmath 0.1.0, https://github.com/ricosjp/matext4cgmath (RICOS Co. Ltd.) | Apache-2.0 | root refinement stops after 100 Newton steps (vendor/README.md) |
+| vendor/cadmpeg-codec-f3d | cadmpeg-codec-f3d 0.6.1, https://github.com/cadmpeg/cadmpeg | Apache-2.0 | arrangement walk budget; skip unparsable sketch points (vendor/README.md) |
+| vendor/cadmpeg-codec-step | cadmpeg-codec-step 0.6.1, https://github.com/cadmpeg/cadmpeg | Apache-2.0 | cone semi-angle 0 exported as cylinder (vendor/README.md) |
+| vendor/cadmpeg-core | cadmpeg-core 0.6.1, https://github.com/cadmpeg/cadmpeg | Apache-2.0 | higher retained/materialized decode multipliers (vendor/README.md) |
 
 ## Vendored renderer compatibility fix
 

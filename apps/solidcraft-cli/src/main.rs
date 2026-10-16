@@ -144,7 +144,7 @@ pub fn read_json(path: &str) -> Result<Value, String> {
 /// A session from a design file, a STEP/3MF/STL file, a command script, or an oracle recipe.
 pub fn load(path: &str) -> Result<Session, String> {
     let mut s = Session::default();
-    if solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path) {
+    if solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path) || solidcraft_engine::io::is_f3d_path(path) {
         s.execute("doc.open", &json!({"path": path})).map_err(|e| e.to_string())?;
         return Ok(s);
     }

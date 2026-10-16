@@ -1,0 +1,10 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('noncanonical unit order'),'2;1');
+FILE_NAME('noncanonical-unit','',(''),(''),'','cadmpeg','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN_CC2'));
+ENDSEC;
+DATA;
+#1=(NAMED_UNIT(*)SOLID_ANGLE_UNIT()SI_UNIT($,.STERADIAN.));
+ENDSEC;
+END-ISO-10303-21;

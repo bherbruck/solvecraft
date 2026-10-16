@@ -62,8 +62,11 @@ impl Request {
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
             Kind::Open => ("doc.open", self.params()),
-            Kind::Insert if solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", json!({"path": self.path})),
-            Kind::Insert => ("file.insert_step", self.params()),
+            Kind::Insert => {
+                let cmd = solidcraft_engine::io::exchange::insert_command_name(&self.path)
+                    .unwrap_or_else(|| if solidcraft_engine::io::is_mesh_path(&self.path) { "file.insert_mesh" } else { "file.insert_step" });
+                if cmd == "file.insert_mesh" { (cmd, json!({"path": self.path})) } else { (cmd, self.params()) }
+            }
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
         }

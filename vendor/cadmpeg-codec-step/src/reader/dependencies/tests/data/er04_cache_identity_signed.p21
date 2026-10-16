@@ -1,0 +1,11 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ER-04 signed resource metadata witness'),'4;2');
+FILE_NAME('er04-cache-identity-signed.p21','2026-08-17T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg','cadmpeg','');
+FILE_SCHEMA(('AP242'));
+SCHEMA_POPULATION((('signature/sg04_openssl_detached.p21','2026-08-16T00:00:00','PVXS8diN1zTOTu9AEL6T+aJH7u5ckF7wVCROqLXlIDA='),('signature/./sg04_openssl_detached.p21','2026-08-17T00:00:00','PVXS8diN1zTOTu9AEL6T+aJH7u5ckF7wVCROqLXlIDA=')));
+ENDSEC;
+DATA;
+#1=ITEM();
+ENDSEC;
+END-ISO-10303-21;

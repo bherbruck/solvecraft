@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<n0:Uos
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xmlns:n0="http://standards.iso.org/iso/ts/10303/-3001/-ed-2/tech/xml-schema/bo_model"
+ xmlns:cmn="http://standards.iso.org/iso/ts/10303/-3000/-ed-2/tech/xml-schema/common"
+ xsi:schemaLocation="http://standards.iso.org/iso/ts/10303/-3001/-ed-2/tech/xml-schema/bo_model http://standards.iso.org/iso/ts/10303/-3001/-ed-2/tech/xml-schema/bo_model/bom.xsd">
+ <Header>
+  <Name>bm01-ap242-bo-model.stpx</Name>
+  <TimeStamp>2026-08-16T00:00:00Z</TimeStamp>
+  <Organization><Name>cadmpeg</Name></Organization>
+  <PreprocessorVersion>cadmpeg witness</PreprocessorVersion>
+  <OriginatingSystem>cadmpeg</OriginatingSystem>
+  <Documentation>CAx-IF Rec.Pracs.---AP242 BO Model XML Assembly Structure---2.1---2019-12-20</Documentation>
+ </Header>
+ <DataContainer xsi:type="n0:AP242DataContainer"/>
+</n0:Uos>

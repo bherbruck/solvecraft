@@ -1,0 +1,12 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('minimal parser fixture'),'2;1');
+FILE_NAME('minimal','2026-07-14T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg-step','','');
+FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 3 1 4 }'));
+ENDSEC;
+DATA;
+#1=EXAMPLE_RECORD('line
+continues',#2,1.,0.E+000,1D-3,.TRUE.,$,*,());
+#2=OPAQUE_TARGET('target');
+ENDSEC;
+END-ISO-10303-21;

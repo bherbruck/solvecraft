@@ -6,6 +6,7 @@
 mod app_icons;
 mod assets;
 mod book;
+mod f3d_corpus;
 mod features;
 mod i18n;
 mod layers;
@@ -64,6 +65,8 @@ commands:
   ci              fmt --check, assets, licences --check, lists, layers, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed
                   (stops at the first failing step)
+  f3d-corpus [DIR] [--timeout SECS]
+                  open every .f3d/.f3z under DIR via solidcraft-io (per-file timeout, default 300s)
 ";
 
 fn main() -> ExitCode {
@@ -86,6 +89,25 @@ fn main() -> ExitCode {
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
             test::run(cargo_args, test_args, vec![test::doc_tests(cargo_args, test_args)])
+        }
+        Some("f3d-corpus") => {
+            let mut timeout = 300u64;
+            let mut dir = None;
+            let mut i = 0;
+            while i < rest.len() {
+                match rest[i] {
+                    "--timeout" => {
+                        timeout = rest.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(300);
+                        i += 2;
+                    }
+                    flag if flag.starts_with('-') => i += 1,
+                    path => {
+                        dir = Some(Path::new(path));
+                        i += 1;
+                    }
+                }
+            }
+            f3d_corpus::run(&root(), dir, timeout)
         }
         Some("ci") => cmd_ci(),
         Some("wasm") => cmd_wasm(),

@@ -1,0 +1,14 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ER-03 subsidiary witness'),'4;2');
+FILE_NAME('er03-subsidiary.p21','2026-08-16T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg','cadmpeg','');
+FILE_SCHEMA(('AP242'));
+ENDSEC;
+ANCHOR;
+<remote_item>=#1;
+ENDSEC;
+DATA;
+#1=TARGET();
+#1=DUPLICATE_TARGET();
+ENDSEC;
+END-ISO-10303-21;

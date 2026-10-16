@@ -1,0 +1,17 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('CE-02 valid root anchor witness'),'4;2');
+FILE_NAME('ce02-root-anchor-valid.p21','2026-08-17T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg','cadmpeg','');
+FILE_SCHEMA(('AP242'));
+SCHEMA_POPULATION((('parts/ce02_subsidiary_valid.p21',$,$)));
+ENDSEC;
+ANCHOR;
+<target>=<parts/ce02_subsidiary_valid.p21#remote_item>;
+ENDSEC;
+REFERENCE;
+#10=<#target>;
+ENDSEC;
+DATA;
+#1=ITEM(#10);
+ENDSEC;
+END-ISO-10303-21;

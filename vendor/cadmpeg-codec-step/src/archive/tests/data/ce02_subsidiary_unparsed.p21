@@ -1,0 +1,2 @@
+This member is intentionally not a Part 21 exchange. The root-only ZIP
+decoder must retain its resource binding without reading this member.

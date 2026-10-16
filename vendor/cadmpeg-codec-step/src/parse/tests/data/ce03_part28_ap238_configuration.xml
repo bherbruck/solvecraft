@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<configuration
+    xmlns="urn:oid:1.0.10303.28.2.1.2"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <schema targetNamespace="urn:oid:1.0.10303.238.2.0.1" />
+  <option exp-attribute="attribute-content" tagless="true" />
+  <uosElement name="iso_10303_28_terse">
+    <add_attribute name="schema" type="xs:NMTOKEN" usage="required" />
+  </uosElement>
+</configuration>

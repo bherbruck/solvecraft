@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<iso_10303_28_terse
+    xmlns="urn:oid:1.0.10303.238.2.0.1"
+    xmlns:exp="urn:oid:1.0.10303.28.2.1.1"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    schema="not_integrated_cnc_schema">
+  <exp:header>
+    <exp:name>dataset</exp:name>
+    <exp:preprocessor_version>stepnc writer</exp:preprocessor_version>
+  </exp:header>
+  <Axis2_placement_3d id="id1" Name="" Location="id2" Axis="id3" Ref_direction="id4"/>
+  <Cartesian_point id="id2" Name="loc" Coordinates="3.5 -3.5 -4.16875"/>
+  <Direction id="id3" Name="Z direction" Direction_ratios="0 0 1"/>
+  <Direction id="id4" Name="X direction" Direction_ratios="1 0 0"/>
+</iso_10303_28_terse>

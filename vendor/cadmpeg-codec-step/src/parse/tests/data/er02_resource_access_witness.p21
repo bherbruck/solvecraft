@@ -1,0 +1,16 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ER-02 resource access witness'),'4;3');
+FILE_NAME('resource-access.step','2026-08-16T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg','cadmpeg','');
+FILE_SCHEMA(('AP242'));
+ENDSEC;
+REFERENCE;
+#10=<https://example.invalid/part.p21#shape>;
+#11=<file:///definitely/not/a/real/part.p21#shape>;
+#12=<urn:uuid:123e4567-e89b-12d3-a456-426614174000#shape>;
+#13=<#123e4567-e89b-12d3-a456-426614174000>;
+ENDSEC;
+DATA;
+#1=ITEM(#10,#11,#12,#13);
+ENDSEC;
+END-ISO-10303-21;

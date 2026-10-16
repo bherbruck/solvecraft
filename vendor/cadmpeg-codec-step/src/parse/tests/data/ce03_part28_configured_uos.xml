@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!-- A configured UOS may use a local name other than the Part 28 marker. -->
+<engineering_uos
+    xmlns="urn:oid:1.0.10303.203.1.0.1"
+    xmlns:exp="urn:oid:1.0.10303.28.2.1.1"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    schema="config_control_design">
+  <exp:header>
+    <exp:name>cadmpeg Part 28 configured-UOS witness</exp:name>
+  </exp:header>
+  <Cartesian_point id="id1" Name="origin" Coordinates="0 0 0"/>
+</engineering_uos>

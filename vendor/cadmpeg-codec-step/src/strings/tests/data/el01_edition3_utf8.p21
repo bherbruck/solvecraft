@@ -1,0 +1,10 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('EL-01 edition-3 UTF-8 witness'),'4;1');
+FILE_NAME('el01-edition3-utf8.p21','2026-08-16T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg-step','','');
+FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF'));
+ENDSEC;
+DATA;
+#1=PRODUCT('Pé','Nø','',());
+ENDSEC;
+END-ISO-10303-21;

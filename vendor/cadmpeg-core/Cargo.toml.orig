@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "cadmpeg-core"
+description = "Bounded byte decoding primitives and codec resource policy for cadmpeg."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[features]
+# Charge probes are enabled only by the unpublished test-support dependency.
+test-support = []
+# `schema` builds the `JsonSchema` derives. It is off by default: the
+# derives are only consumed by `cadmpeg_ir::cadir_json_schema()`, and
+# generating them costs 22% of this crate tree's compile time.
+schema = ["dep:schemars"]
+
+
+[dependencies]
+flate2.workspace = true
+zstd.workspace = true
+memchr.workspace = true
+roxmltree.workspace = true
+serde.workspace = true
+schemars = { workspace = true, optional = true }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+
+[lints]
+workspace = true

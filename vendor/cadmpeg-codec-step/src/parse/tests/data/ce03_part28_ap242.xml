@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<iso_10303_28_terse
+    xmlns="urn:oid:1.0.10303.442.1.0.1"
+    xmlns:exp="urn:oid:1.0.10303.28.2.1.1"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    schema="ap242_managed_model_based_3d_engineering_mim_lf">
+  <exp:header>
+    <exp:name>cadmpeg Part 28 witness</exp:name>
+  </exp:header>
+  <Cartesian_point id="id1" Name="origin" Coordinates="0 0 0"/>
+</iso_10303_28_terse>

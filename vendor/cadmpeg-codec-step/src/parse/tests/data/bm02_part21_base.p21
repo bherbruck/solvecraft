@@ -1,0 +1,12 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('BM-02 paired Part 21 graph witness'),'4;1');
+FILE_NAME('bm02-model.p21','2026-08-16T00:00:00Z',('cadmpeg'),('cadmpeg'),'cadmpeg','cadmpeg','');
+FILE_SCHEMA(('AP242'));
+ENDSEC;
+DATA;
+#1=PRODUCT('P21_PRODUCT','P21 value','',(#2));
+#2=PRODUCT_CONTEXT('',#3,'mechanical');
+#3=APPLICATION_CONTEXT('mechanical design');
+ENDSEC;
+END-ISO-10303-21;

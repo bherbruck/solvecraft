@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<n0:Uos
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xmlns:n0="http://standards.iso.org/iso/ts/10303/-3001/-ed-2/tech/xml-schema/bo_model"
+ xmlns:cmn="http://standards.iso.org/iso/ts/10303/-3000/-ed-2/tech/xml-schema/common"
+ xsi:schemaLocation="http://standards.iso.org/iso/ts/10303/-3001/-ed-2/tech/xml-schema/bo_model http://standards.iso.org/iso/ts/10303/-3001/-ed-2/tech/xml-schema/bo_model/bom.xsd">
+ <Header>
+  <Name>bm02-model-conflict.stpx</Name>
+  <TimeStamp>2026-08-17T00:00:00Z</TimeStamp>
+  <Organization><Name>cadmpeg</Name></Organization>
+  <PreprocessorVersion>cadmpeg witness</PreprocessorVersion>
+  <OriginatingSystem>cadmpeg</OriginatingSystem>
+  <Documentation>BM-02 explicit file pairing conflict witness</Documentation>
+ </Header>
+ <DataContainer xsi:type="n0:AP242DataContainer">
+  <Class uid="role-product"><Id id="product-id-role"/></Class>
+  <Class uid="role-version"><Id id="version-id-role"/></Class>
+  <Part uid="bo-part-2">
+   <Id><Identifier uid="bo-part-id-2" id="P21_PRODUCT" idRoleRef="role-product"/></Id>
+   <Name><CharacterString>XML override</CharacterString></Name>
+   <PartTypes><ClassString>part</ClassString></PartTypes>
+   <Versions>
+    <PartVersion uid="bo-part-version-2">
+     <Id><Identifier uid="bo-part-version-id-2" id="P21_VERSION" idRoleRef="role-version"/></Id>
+    </PartVersion>
+   </Versions>
+  </Part>
+  <File xsi:type="n0:DigitalFile" uid="xml-file-2">
+   <Id id="bm02-model.p21"/>
+   <Locations>
+    <ExternalItem uid="xml-external-item-2">
+     <Id id="bm02-model.p21"/>
+    </ExternalItem>
+   </Locations>
+  </File>
+ </DataContainer>
+</n0:Uos>

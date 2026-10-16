@@ -1,0 +1,18 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('TS-01 repositioned tessellation unresolved placement'),'2;1');
+FILE_NAME('ts01-repositioned-unresolved-placement','2026-08-16T00:00:00',('cadmpeg'),('cadmpeg'),'cadmpeg-step','','');
+FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF'));
+ENDSEC;
+DATA;
+#1=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));
+#2=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#1,#10)) REPRESENTATION_CONTEXT('model','3D'));
+#10=(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.));
+#3=COORDINATES_LIST('triangle coordinates',3,((0.,0.,0.),(10.,0.,0.),(0.,10.,0.)));
+#4=TRIANGULATED_FACE('triangle',#3,3,((0.,0.,1.)),$,(),((1,2,3)));
+#5=(GEOMETRIC_REPRESENTATION_ITEM() REPOSITIONED_TESSELLATED_ITEM(#99) REPRESENTATION_ITEM('unresolved placement') TESSELLATED_GEOMETRIC_SET((#4)) TESSELLATED_ITEM());
+#6=TESSELLATED_ANNOTATION_OCCURRENCE('unresolved placement',(),#5);
+#99=AXIS2_PLACEMENT_3D('invalid location',#100,$,$);
+#100=CARTESIAN_POINT('two dimensional location',(0.,0.));
+ENDSEC;
+END-ISO-10303-21;

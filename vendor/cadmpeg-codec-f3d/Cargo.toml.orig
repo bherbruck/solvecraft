@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "cadmpeg-codec-f3d"
+description = "Decode and encode Autodesk Fusion .f3d B-rep, design, and appearance data."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+# Golden decode snapshots are a repository-side regression asset, not part of
+# the published API. They dominate the packaged crate (66MB of 70MB for the
+# FreeCAD codec) and a registry consumer cannot act on them. CI runs the golden
+# tests from the repository checkout.
+exclude = ["tests/golden/**"]
+readme = "README.md"
+documentation = "https://docs.rs/cadmpeg-codec-f3d"
+keywords = ["cad", "fusion-360", "f3d", "brep", "geometry"]
+categories = ["encoding", "parser-implementations", "graphics"]
+
+[dependencies]
+cadmpeg-asm.workspace = true
+cadmpeg-container.workspace = true
+cadmpeg-core.workspace = true
+cadmpeg-ir.workspace = true
+cadmpeg-protein.workspace = true
+zip.workspace = true
+roxmltree.workspace = true
+lzma-rs.workspace = true
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+serde-value.workspace = true
+memchr.workspace = true
+
+[dev-dependencies]
+cadmpeg-asm = { workspace = true, features = ["test-support"] }
+cadmpeg-ir = { workspace = true, features = ["examples"] }
+
+# Test-only golden harness and round-trip helpers.
+cadmpeg-test-support = { workspace = true }
+
+[lints]
+workspace = true
