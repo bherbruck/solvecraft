@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use solidcraft_engine::geom::Vec3;
 
+use crate::tool_modifiers::ModifierCombo;
+
 /// The key the apps keep the preferences under in eframe's storage.
 pub const STORAGE_KEY: &str = "solidcraft.prefs";
 /// The key earlier releases used. Compatibility shim (docs/compatibility.md): read when the
@@ -332,6 +334,19 @@ pub struct Prefs {
     pub check_updates: bool,
     /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
     pub update: crate::update::Memo,
+
+    // ---- Sketch modifier bindings (Fusion-oriented defaults) ---------------
+    /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.
+    /// Fusion: Ctrl/Cmd only.  Alt does NOT suppress snap by default.
+    pub suppress_sketch_snap: ModifierCombo,
+    /// Whether Alt/Option also suppresses snapping on the gizmo / canvas manipulator arrows
+    /// (legacy SolidCraft behaviour; Ctrl always does).  Not a Fusion behaviour.
+    pub manipulator_free_alt: bool,
+
+    // ---- Selection modifier bindings (Fusion-oriented defaults) ------------
+    /// Shift+click adds to the selection without toggling already-selected items off (Fusion).
+    /// When false: Shift behaves like Ctrl/Cmd (toggle-add).
+    pub selection_shift_add_only: bool,
     /// Save as mesh: the last format (`stl` or `3mf`), whether it was sent to a slicer, which one
     /// (an installed slicer's id or a program path), and the programs the user added (newest first).
     pub save_mesh_format: String,
@@ -435,6 +450,10 @@ impl Default for Prefs {
             color_vision: crate::theme::ColorVision::Off,
             check_updates: true,
             update: crate::update::Memo::default(),
+            // Fusion-oriented modifier defaults.
+            suppress_sketch_snap: ModifierCombo::CTRL,
+            manipulator_free_alt: true,
+            selection_shift_add_only: true,
             save_mesh_format: "stl".into(),
             view_dxf_dashed: false,
             view_dxf_tolerance: 0.01,
@@ -653,8 +672,15 @@ fn defaults(app: &mut SolveApp, page: usize) {
                 save_graphics(app);
             }
         }
-        5 => app.session.auto_project = true,
-        _ => app.ui.pick_bodies = false,
+        5 => {
+            app.session.auto_project = true;
+            p.suppress_sketch_snap = d.suppress_sketch_snap;
+            p.manipulator_free_alt = d.manipulator_free_alt;
+        }
+        _ => {
+            app.ui.pick_bodies = false;
+            p.selection_shift_add_only = d.selection_shift_add_only;
+        }
     }
 }
 
@@ -722,6 +748,22 @@ pub fn set_autosave(app: &mut SolveApp) {
 /// Which navigation dragging `button` with `mods` held does under the preset.
 pub fn nav_mode(app: &SolveApp, button: NavButton, mods: Modifiers) -> Option<NavMode> {
     nav_preset(&app.preferences.nav).mode(button, mods)
+}
+
+/// Whether sketch auto-snap is suppressed this frame by the held modifiers.
+///
+/// Fusion: only Ctrl/Cmd suppresses — Alt does **not**.
+pub fn suppress_sketch_snap_held(app: &SolveApp, m: Modifiers) -> bool {
+    app.preferences.suppress_sketch_snap.held(m)
+}
+
+/// Whether the manipulator arrows / gizmo handles should move freely (no snap) this frame.
+///
+/// Ctrl/Cmd always enables free drag.  Whether Alt also does is controlled by the
+/// `manipulator_free_alt` preference (default: true, legacy SolidCraft behaviour).
+pub fn manipulator_free_held(app: &SolveApp, m: Modifiers) -> bool {
+    let ctrl = m.ctrl || m.command;
+    ctrl || (app.preferences.manipulator_free_alt && m.alt)
 }
 
 /// +1, or −1 when the wheel zooms the other way.
@@ -1358,11 +1400,64 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 let _ = app.run("sketch.auto_project", json!({ "value": auto }));
             }
             ui.end_row();
+
+            // ---- Sketch modifier bindings ---------------------------------
+            ui.label("");
+            ui.end_row();
+            ui.label(RichText::new(crate::i18n::tr_label("Sketch modifiers")).strong());
+            ui.label("");
+            ui.end_row();
+
+            ui.label(crate::i18n::tr_label("Suppress auto-snap while drawing / dragging"));
+            modifier_combo_picker(
+                ui,
+                "pref_suppress_sketch_snap",
+                &mut app.preferences.suppress_sketch_snap,
+            );
+            ui.end_row();
+            note(ui, crate::i18n::tr_label(
+                "Fusion: Ctrl/Cmd suppresses sketch snapping. Alt does not suppress snap."
+            ));
+
+            ui.label(crate::i18n::tr_label("Manipulator free drag also on Alt/Option"));
+            ui.checkbox(&mut app.preferences.manipulator_free_alt, "")
+                .on_hover_text(crate::i18n::tr_label(
+                    "Legacy SolidCraft: Alt or Ctrl/Cmd on the extrude / gizmo arrows disables \
+                     value snapping. Uncheck to use Ctrl/Cmd only (closer to Fusion).",
+                ));
+            ui.end_row();
         }
         _ => {
             ui.label(crate::i18n::tr_label("Click selects whole bodies"));
             ui.checkbox(&mut app.ui.pick_bodies, "");
             ui.end_row();
+
+            // ---- Selection modifier bindings ------------------------------
+            ui.label("");
+            ui.end_row();
+            ui.label(RichText::new(crate::i18n::tr_label("Selection modifiers")).strong());
+            ui.label("");
+            ui.end_row();
+
+            ui.label(crate::i18n::tr_label("Shift+click adds without removing (Fusion)"));
+            ui.checkbox(&mut app.preferences.selection_shift_add_only, "")
+                .on_hover_text(crate::i18n::tr_label(
+                    "On: Shift adds items, Ctrl/Cmd toggles (Fusion). \
+                     Off: Shift and Ctrl/Cmd both toggle (legacy).",
+                ));
+            ui.end_row();
+        }
+    });
+}
+
+/// A compact combo-box for picking a single [`ModifierCombo`] from the three single-key options.
+/// Only single-key combos are offered; combinations are stored and round-trip fine but are not
+/// user-selectable in this picker (no current behavior needs them).
+fn modifier_combo_picker(ui: &mut egui::Ui, salt: &str, combo: &mut ModifierCombo) {
+    let label = combo.label();
+    egui::ComboBox::from_id_salt(salt).selected_text(label).show_ui(ui, |ui| {
+        for c in ModifierCombo::SINGLE_KEYS {
+            ui.selectable_value(combo, c, c.label());
         }
     });
 }

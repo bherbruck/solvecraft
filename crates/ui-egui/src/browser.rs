@@ -729,6 +729,11 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     }
     if id == 0 {
         crate::dialogs_assembly::browser_joints(app, ui, d);
+        // Manufacture: Setups folder with each setup's operations (Face, Drill, 3D Contour, …)
+        // nested underneath — same tree the ribbon "steps" add into.
+        if crate::manufacture_workspace::active(app) || !app.session.doc.manufacture.setups.is_empty() {
+            crate::manufacture_workspace::browser_setup_rows(app, ui, d);
+        }
     }
     let children = model_children(app, id);
     for occurrence in children {
@@ -1293,6 +1298,8 @@ struct Entry {
     target: Option<Target>,
     /// Bodies lit when the row is hovered.
     bodies: Vec<String>,
+    /// Dimmed because the selected setup does not machine this body.
+    isolated: bool,
 }
 
 /// What is being dragged in the tree: items of one component folder.
@@ -1326,6 +1333,7 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
                 sel: Some(Sel::Body { name: b.name.clone() }),
                 target: Some(Target::Body { name: b.name.clone() }),
                 bodies: vec![b.name.clone()],
+                isolated: !crate::manufacture_workspace::setup_shows_body(app, &b.name),
             })
             .collect(),
         "sketches" => model_feature_indices(app, comp, true)
@@ -1353,6 +1361,7 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
                     sel: Some(Sel::Feature { id: f.id }),
                     target: Some(Target::Sketch { id: f.id }),
                     bodies: Vec::new(),
+                    isolated: false,
                 }
             })
             .collect(),
@@ -1371,6 +1380,7 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
                 sel: Some(Sel::Plane { name: f.name.clone() }),
                 target: Some(Target::Plane { id: f.id }),
                 bodies: Vec::new(),
+                isolated: false,
             })
             .collect(),
     }
@@ -1468,6 +1478,7 @@ fn folder_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, comp: u64, path: Option
                 e.target = Some(Target::Body { name: body.world.clone() });
                 e.bodies = vec![body.world.clone()];
                 e.visible = app.session.body_visible(&body.world);
+                e.isolated = !crate::manufacture_workspace::setup_shows_body(app, &body.world);
                 e.selected = app.session.selection.contains(&Sel::Body { name: body.world.clone() });
                 e.row_key = format!("b:{}", body.world);
             } else {
@@ -1605,7 +1616,7 @@ fn entry_row(
             label: &e.label,
             name: true,
             selected: e.selected,
-            dim: !e.visible,
+            dim: !e.visible || e.isolated,
             color: e.color,
             badges,
             ..Default::default()
@@ -1868,7 +1879,7 @@ fn triad(app: &mut SolveApp, ui: &mut egui::Ui, m: &mut OccMove) {
     let layer = egui::LayerId::new(egui::Order::Middle, egui::Id::new("sc_occ_triad_layer"));
     let mut gui = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(rect));
     let painter = gui.painter().with_clip_rect(rect);
-    let t = gizmo::Triad { center, translate: true, rotate: true };
+    let t = gizmo::Triad { center, translate: true, rotate: true, ring_axis: None, translate_u: None, translate_v: None };
     let step = crate::canvas::snap_step(app.cam.half_height());
     let Some(g) = gizmo::show(&mut gui, &painter, &proj, egui::Id::new("sc_occ_triad"), &t, step) else { return };
     if g.started || m.drag0.is_none() {
@@ -1882,6 +1893,7 @@ fn triad(app: &mut SolveApp, ui: &mut egui::Ui, m: &mut OccMove) {
                 *slot = a0.get(axis).copied().unwrap_or(0.0) + angle.to_degrees();
             }
         }
+        Change::RotateAbout { .. } => {}
     }
     if g.done {
         m.drag0 = None;

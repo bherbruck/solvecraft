@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 solidcraft-engine = { workspace = true }
+solidcraft-manufacture = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 solidcraft-gpu = { workspace = true }
@@ -25,6 +26,8 @@ semver = { workspace = true }
 sha2 = { workspace = true }
 minisign-verify = "0.3"
 zip = { workspace = true }
+ehttp = { workspace = true }
+url = { workspace = true }
 # Rasterises the icon SVGs (assets/icons/ui/design/svg) at the size they are drawn.
 tiny-skia = { workspace = true }
 

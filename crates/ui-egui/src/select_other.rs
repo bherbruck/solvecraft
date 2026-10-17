@@ -334,7 +334,7 @@ fn apply(app: &mut SolveApp, row: &Row, add: bool) {
     if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
         crate::viewport::dialog_pick(app, &row.hit, row.sel.clone());
     } else {
-        crate::viewport::select(app, Some(row.sel.clone()), add);
+        crate::viewport::select(app, Some(row.sel.clone()), add, add);
     }
 }
 

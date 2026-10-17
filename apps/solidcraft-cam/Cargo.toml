@@ -1,0 +1,36 @@
+[package]
+name = "solidcraft-cam"
+description = "SolidCraft CAM companion: secured loopback HTTP server bridging the manufacture domain to FreeCAD Path / ocp-freecad-cam via a subprocess adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "solidcraft-cam"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "solidcraft-cam"
+path = "src/main.rs"
+
+[dependencies]
+solidcraft-manufacture = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+
+# HTTP server (MIT/Apache-2.0)
+axum = { version = "0.7", features = ["multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "sync", "fs", "io-util"] }
+tower-http = { version = "0.5", features = ["limit"] }
+
+# Utilities already in the workspace lock (reused, no extra copies)
+base64 = { version = "0.22", default-features = false, features = ["std"] }
+uuid = { version = "1", features = ["v4"] }
+rand = { version = "0.8" }
+tempfile = "3"
+
+[dev-dependencies]
+tower = { version = "0.4", features = ["util"] }
+http = "1"

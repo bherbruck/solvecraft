@@ -1534,6 +1534,41 @@ fn section_analysis() {
     assert_eq!(s.undo.len(), undo);
 }
 
+/// Sustainability Insights returns an illustrative CO₂e estimate from body volume (no undo).
+#[test]
+fn sustainability_insights_estimate() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let undo = s.undo.len();
+    let r = run(&mut s, "inspect.sustainability", json!({"process": "subtractive", "material": "Aluminum", "region": "North America"}));
+    assert!(r["illustrative"].as_bool().unwrap_or(false));
+    assert!((r["volume_mm3"].as_f64().unwrap() - 1000.0).abs() < 1e-6);
+    assert!(r["co2e_kg"].as_f64().unwrap() > 0.0);
+    assert!(s.execute("inspect.sustainability", &json!({"process": "laser"})).is_err());
+    assert_eq!(s.undo.len(), undo);
+}
+
+/// Manufacture Inspect ribbon entries are registered (Fusion milling Inspect menu).
+#[test]
+fn manufacture_inspect_commands_registered() {
+    for id in [
+        "inspect.measure",
+        "inspect.section",
+        "inspect.curvature_comb",
+        "inspect.zebra",
+        "inspect.draft",
+        "inspect.isocurve",
+        "inspect.accessibility",
+        "inspect.minimum_radius",
+        "inspect.sustainability",
+    ] {
+        let c = crate::find_command(id).unwrap_or_else(|| panic!("missing {id}"));
+        assert!(!c.label.is_empty(), "{id}");
+    }
+    let sus = crate::find_command("inspect.sustainability").unwrap();
+    assert_eq!((sus.tab, sus.panel), ("MANUFACTURE", "INSPECT"));
+}
+
 /// Press Pull: positive pulls a face out, negative pushes it in (a cut), edges get a fillet.
 #[test]
 fn press_pull() {

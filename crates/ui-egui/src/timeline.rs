@@ -380,7 +380,12 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
                         _ => None,
                     };
                     resp.context_menu(|ui| {
-                        if ui.button(crate::i18n::tr_label("Edit Feature")).clicked() {
+                        if matches!(kind, FeatureKind::Sketch { .. }) {
+                            if ui.button(crate::i18n::tr_label("Edit Sketch")).clicked() {
+                                app.edit_sketch(*id);
+                                ui.close();
+                            }
+                        } else if ui.button(crate::i18n::tr_label("Edit Feature")).clicked() {
                             edit = Some(*id);
                             ui.close();
                         }

@@ -64,6 +64,21 @@ const SHEET_MODIFY: &[&str] = &[
 
 const PLASTIC_SETUP: &[&str] = &["plastic.manage_rules", "plastic.assign_rule"];
 
+/// Fusion Manufacture → INSPECT (Measure + Section pinned; analyses in dropdown).
+/// Order matches the Fusion milling Inspect menu; Measure and Section stay first so the
+/// ribbon promotes those two buttons like Fusion.
+const MFG_INSPECT: &[&str] = &[
+    "inspect.measure",
+    "inspect.section",
+    "inspect.curvature_comb",
+    "inspect.zebra",
+    "inspect.draft",
+    "inspect.isocurve",
+    "inspect.accessibility",
+    "inspect.minimum_radius",
+    "inspect.sustainability",
+];
+
 const PLASTIC_CREATE: &[&str] = &[
     "sketch.create",
     "plastic.boss",
@@ -130,6 +145,7 @@ pub fn layout<'a>(tab: &str, panel: &str, specs: &[&'a CommandSpec]) -> Option<(
         // The solid tab's panels.
         ("PLASTIC", "MODIFY") => (&[], 4, "SOLID"),
         ("SHEET METAL" | "PLASTIC", "CONSTRUCT" | "INSPECT" | "INSERT") => (&[], 2, "SOLID"),
+        ("MANUFACTURE", "INSPECT") => (MFG_INSPECT, 2, tab),
         _ => return None,
     };
     let mut out: Vec<&CommandSpec> = ids.iter().filter_map(|id| specs.iter().find(|c| c.id == *id).copied()).collect();
@@ -219,6 +235,23 @@ mod tests {
         assert!(p.contains(&"plastic.boss") && p.contains(&"solid.rib") && p.contains(&"plastic.lip"));
         assert!(ids("PLASTIC", "MODIFY").contains(&"solid.shell"));
         assert!(panels("PLASTIC").is_some_and(|p| p.first() == Some(&"SETUP")));
+    }
+    #[test]
+    fn manufacture_inspect_matches_fusion_menu() {
+        let i = ids("MANUFACTURE", "INSPECT");
+        assert_eq!(i.first().copied(), Some("inspect.measure"));
+        assert_eq!(i.get(1).copied(), Some("inspect.section"));
+        for id in [
+            "inspect.curvature_comb",
+            "inspect.zebra",
+            "inspect.draft",
+            "inspect.isocurve",
+            "inspect.accessibility",
+            "inspect.minimum_radius",
+            "inspect.sustainability",
+        ] {
+            assert!(i.contains(&id), "missing {id} in {i:?}");
+        }
     }
 
     /// #1240: a saved part reaches an assembly from the ASSEMBLE panel (and the File menu) as a

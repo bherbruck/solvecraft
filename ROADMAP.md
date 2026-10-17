@@ -39,7 +39,14 @@ In scope, in priority order:
 5. A small PLASTIC subset for enclosures, after sheet metal: Boss, Rib, Web, Lip/Groove, Snap Fit.
 
 Deferred until further notice: MESH, FORM (T-splines), SURFACE beyond what solids need (scope proposed in #772), PCB / 3D
-PCB / Package, Render, Animation, Simulation, Manufacture/CAM, Drawings.
+PCB / Package, Animation, Simulation, Drawings.
+
+Manufacture/CAM (3-axis mill/router): vertical slice done — workspace, document format 22 setups,
+local companion (FreeCAD Path), height-field simulation, GRBL/Mach/LinuxCNC/Fanuc posts;
+see [docs/manufacture-jobs.md](docs/manufacture-jobs.md). 3D print remains Design `file.export`
+3MF handoff (OrcaSlicer), not Manufacture. Laser mark (galvo fiber): LightBurn handoff package
+(`laser.exportPackage`, ComMarker 60W MOPA profile) — see [docs/laser-lightburn.md](docs/laser-lightburn.md);
+direct Serial/USB/BLE providers are future.
 
 ## Milestones
 

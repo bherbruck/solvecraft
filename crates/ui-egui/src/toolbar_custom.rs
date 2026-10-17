@@ -62,8 +62,29 @@ pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandS
 
 /// The panels of a tab with their commands and default button counts (what the toolbar draws).
 pub fn panel_lists(tab: &str) -> Vec<(&'static str, Vec<&'static CommandSpec>, usize)> {
+    panel_lists_with(tab, crate::toolbar::panels(tab))
+}
+
+/// Manufacture ribbon follows Milling vs Turning cam mode.
+pub fn panel_lists_for(app: &SolveApp) -> Vec<(&'static str, Vec<&'static CommandSpec>, usize)> {
+    let tab = app.ui.tab.as_str();
+    let panels = if tab == "MANUFACTURE" {
+        match app.manufacture_workspace.cam_mode {
+            crate::manufacture_workspace::CamMode::Milling => crate::toolbar::manufacture_milling_panels(),
+            crate::manufacture_workspace::CamMode::Turning => crate::toolbar::manufacture_turning_panels(),
+            crate::manufacture_workspace::CamMode::Additive => crate::toolbar::manufacture_additive_panels(),
+            crate::manufacture_workspace::CamMode::Inspection => crate::toolbar::manufacture_inspection_panels(),
+            crate::manufacture_workspace::CamMode::Fabrication => crate::toolbar::manufacture_fabrication_panels(),
+        }
+    } else {
+        crate::toolbar::panels(tab)
+    };
+    panel_lists_with(tab, panels)
+}
+
+fn panel_lists_with(tab: &str, panels: &[&'static str]) -> Vec<(&'static str, Vec<&'static CommandSpec>, usize)> {
     let specs = command_specs();
-    crate::toolbar::panels(tab)
+    panels
         .iter()
         .map(|panel| {
             let (cmds, promote) = match crate::workspace::layout(tab, panel, &specs) {
@@ -82,7 +103,7 @@ fn own(app: &mut SolveApp, tab: &str, panel: &str) -> Vec<String> {
     if let Some(v) = app.toolbar_custom.panels.get(&k) {
         return v.clone();
     }
-    let lists = panel_lists(tab);
+    let lists = panel_lists_for(app);
     let ids: Vec<String> =
         lists.iter().find(|(p, ..)| *p == panel).map(|(_, cmds, n)| cmds.iter().take(*n).map(|c| c.id.to_string()).collect()).unwrap_or_default();
     ids
@@ -90,12 +111,12 @@ fn own(app: &mut SolveApp, tab: &str, panel: &str) -> Vec<String> {
 
 /// Where a command is a button on a tab now: its panel.
 pub fn pinned_on(app: &SolveApp, tab: &str, id: &str) -> Option<&'static str> {
-    panel_lists(tab).into_iter().find(|(panel, cmds, n)| buttons(app, tab, panel, cmds, *n).iter().any(|c| c.id == id)).map(|(p, ..)| p)
+    panel_lists_for(app).into_iter().find(|(panel, cmds, n)| buttons(app, tab, panel, cmds, *n).iter().any(|c| c.id == id)).map(|(p, ..)| p)
 }
 
 /// The panel a command belongs to on a tab (its drop-down), or the tab's first panel.
-fn home_panel(tab: &str, id: &str) -> Option<&'static str> {
-    let lists = panel_lists(tab);
+fn home_panel(app: &SolveApp, _tab: &str, id: &str) -> Option<&'static str> {
+    let lists = panel_lists_for(app);
     lists.iter().find(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)).or(lists.first()).map(|(p, ..)| *p)
 }
 
@@ -107,7 +128,7 @@ pub fn pin(app: &mut SolveApp, tab: &str, id: &str) -> Result<(), String> {
     if pinned_on(app, tab, id).is_some() {
         return Ok(());
     }
-    let panel = home_panel(tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
+    let panel = home_panel(app, tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
     let mut ids = own(app, tab, panel);
     ids.push(id.to_string());
     app.toolbar_custom.panels.insert(key(tab, panel), ids);
@@ -242,7 +263,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
             );
             ui.separator();
             egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-                for (panel, cmds, n) in panel_lists(&tab) {
+                for (panel, cmds, n) in panel_lists_for(app) {
                     if cmds.is_empty() {
                         continue;
                     }

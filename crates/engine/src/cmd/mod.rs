@@ -54,6 +54,8 @@ mod section;
 pub(crate) use measure_sel::measure_items;
 #[cfg(test)]
 mod kernel_heal_tests;
+mod laser;
+mod manufacture;
 mod parameters;
 mod plastic;
 mod render;
@@ -277,6 +279,8 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
+    v.extend(laser::COMMANDS.iter());
+    v.extend(manufacture::COMMANDS.iter());
     v
 }
 

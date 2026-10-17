@@ -25,6 +25,8 @@ solidcraft-engine = { path = "crates/engine" }
 solidcraft-ui-egui = { path = "crates/ui-egui" }
 solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
+solidcraft-manufacture = { path = "crates/manufacture" }
+solidcraft-laser = { path = "crates/laser" }
 solidcraft-derive = { path = "crates/derive" }
 
 # foundation
@@ -90,6 +92,8 @@ wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
 naga = { version = "30", default-features = false }
 pollster = "0.4"
 rfd = "0.17"
+ehttp = "0.7"
+url = "2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

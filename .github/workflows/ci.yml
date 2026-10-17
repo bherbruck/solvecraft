@@ -163,6 +163,8 @@ jobs:
     name: Native Linux Clippy
     needs: changes
     if: needs.changes.outputs.native == 'true'
+    # Main and merge-queue runs use the self-hosted runner (warm build cache); pull requests
+    # stay on GitHub's runners, and the runner itself refuses pull-request jobs.
     runs-on: ${{ (github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && 'self-hosted-fast' || 'ubuntu-24.04' }}
     timeout-minutes: 30
     steps:

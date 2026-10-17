@@ -2294,6 +2294,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 if matches!(&d.kind, Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })) {
                     return;
                 }
+                if matches!(&d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. })) {
+                    crate::sketch_move_ui::type_row(&mut d, ui);
+                }
                 placement_row(&mut d, ui);
                 if matches!(&d.kind, Kind::SketchModify(k) if k.previews())
                     || matches!(d.kind, Kind::Mirror | Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. })

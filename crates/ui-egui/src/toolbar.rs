@@ -29,8 +29,35 @@ pub fn panels(tab: &str) -> &'static [&'static str] {
         "SHEET METAL" => &["CREATE", "MODIFY", "ASSEMBLE", "CONSTRUCT", "INSPECT", "INSERT", "SELECT"],
         "PLASTIC" => &["CREATE", "MODIFY", "ASSEMBLE", "CONSTRUCT", "INSPECT", "INSERT", "SELECT"],
         "RENDER" => &["SCENE"],
+        // Default Manufacture ribbon is Milling; Turning swaps panels via cam_mode.
+        "MANUFACTURE" => manufacture_milling_panels(),
         _ => &["MAKE", "ADD-INS", "UTILITY", "INSPECT", "SELECT"],
     }
+}
+
+/// Fusion Manufacture → MILLING ribbon panels.
+pub fn manufacture_milling_panels() -> &'static [&'static str] {
+    &["SETUP", "2D", "3D", "DRILLING", "MULTI-AXIS", "MODIFY", "ACTIONS", "MANAGE", "INSPECT", "SELECT"]
+}
+
+/// Fusion Manufacture → TURNING ribbon panels.
+pub fn manufacture_turning_panels() -> &'static [&'static str] {
+    &["SETUP", "TURNING", "PART HANDLING", "DRILLING", "ACTIONS", "MANAGE", "INSPECT", "SELECT"]
+}
+
+/// Fusion Manufacture → ADDITIVE ribbon panels (G-code setups + simulate).
+pub fn manufacture_additive_panels() -> &'static [&'static str] {
+    &["SETUP", "ADDITIVE", "ACTIONS", "MANAGE", "INSPECT", "SELECT"]
+}
+
+/// Fusion Manufacture → INSPECTION ribbon panels (Probing + Manual).
+pub fn manufacture_inspection_panels() -> &'static [&'static str] {
+    &["SETUP", "PROBING", "MANUAL", "ACTIONS", "MANAGE", "INSPECT", "SELECT"]
+}
+
+/// Fusion Manufacture → FABRICATION ribbon (waterjet / laser / plasma).
+pub fn manufacture_fabrication_panels() -> &'static [&'static str] {
+    &["NEST", "SETUP", "CUTTING", "ACTIONS", "MANAGE", "INSPECT", "SELECT"]
 }
 
 /// How many commands of a panel get a button on a fresh (or reset) toolbar. The user's own
@@ -42,6 +69,13 @@ pub fn promoted(tab: &str, panel: &str) -> usize {
         ("SKETCH", "CONSTRAINTS") => 6,
         ("SKETCH", "PATTERN") => 3,
         (_, "FINISH SKETCH") => 1,
+        ("MANUFACTURE", "2D") => 4,
+        ("MANUFACTURE", "3D") => 4,
+        ("MANUFACTURE", "MULTI-AXIS") => 4,
+        ("MANUFACTURE", "MODIFY") => 3,
+        ("MANUFACTURE", "ACTIONS") => 4,
+        ("MANUFACTURE", "SETUP" | "DRILLING" | "MANAGE" | "INSPECT" | "PART HANDLING" | "ADDITIVE" | "PROBING" | "MANUAL" | "NEST" | "CUTTING") => 2,
+        ("MANUFACTURE", "TURNING") => 4,
         _ => 2,
     }
 }
@@ -456,6 +490,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     export(app, "urdf");
                     close = true;
                 }
+                if item_if(ui, "Export for LightBurn…", "", shown) {
+                    export_lightburn_package(app);
+                    close = true;
+                }
                 if item(ui, "Export Design as JSON…", "") {
                     export(app, "json");
                     close = true;
@@ -549,6 +587,18 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
     });
 }
 
+/// LightBurn handoff: writes `.dxf`, `.svg`, and `.laser-job.json` next to the chosen stem.
+fn export_lightburn_package(app: &mut SolveApp) {
+    let name = format!("{}.dxf", app.session.doc.name);
+    app.pick_save(&name, &["dxf"], move |app, path| {
+        let Some(path) = path else { return };
+        if let Ok(v) = app.run("laser.exportPackage", json!({"path": path, "profile": "commarker-60w-mopa"})) {
+            let dxf = v["paths"]["dxf"].as_str().unwrap_or(&path);
+            app.set_status(format!("LightBurn package written ({dxf} + .svg + .laser-job.json)"), false);
+        }
+    });
+}
+
 pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let sketching = app.session.active_sketch.is_some();
@@ -567,7 +617,13 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let ws = Rect::from_min_max(pos2(r.left() + 6.0, r.top() + 4.0), pos2(r.left() + 104.0, r.bottom() - 5.0));
         let wresp = ui.interact(ws, ui.id().with("workspace_switcher"), Sense::click());
         painter.rect(ws, 4.0, if wresp.hovered() { t.hover } else { t.field }, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-        let workspace_icon = if crate::render_workspace::active(app) { "ws_render" } else { "ws_design" };
+        let workspace_icon = if crate::render_workspace::active(app) {
+            "ws_render"
+        } else if crate::manufacture_workspace::active(app) {
+            "manufacture"
+        } else {
+            "ws_design"
+        };
         icons::paint(
             &painter,
             Rect::from_center_size(pos2(ws.center().x, ws.top() + 24.0), vec2(26.0, 26.0)),
@@ -579,7 +635,13 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         painter.text(
             pos2(ws.center().x - 5.0, ws.top() + 52.0),
             Align2::CENTER_CENTER,
-            app.tr_label(if crate::render_workspace::active(app) { "RENDER" } else { crate::toolbar_custom::WORKSPACE }),
+            app.tr_label(if crate::render_workspace::active(app) {
+                "RENDER"
+            } else if crate::manufacture_workspace::active(app) {
+                "MANUFACTURE"
+            } else {
+                crate::toolbar_custom::WORKSPACE
+            }),
             FontId::proportional(12.0),
             t.text,
         );
@@ -590,6 +652,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         crate::scenario::publish_rect("toolbar", r);
         crate::scenario::publish_rect("workspace_switcher", ws);
+        // Tab row — same chrome for Design (SOLID/…), Render (RENDER), Manufacture (MILLING/…).
+        // Workspace switcher already names the workspace; tabs are the in-workspace modes.
         let mut x = r.left() + 112.0;
         let mut tabs: Vec<&str> = Vec::new();
         if sketching {
@@ -597,6 +661,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if crate::render_workspace::active(app) {
             tabs.push("RENDER");
+        } else if crate::manufacture_workspace::active(app) {
+            tabs.extend(["MILLING", "TURNING", "ADDITIVE", "INSPECTION", "FABRICATION"]);
         } else {
             tabs.extend(TABS.iter());
         }
@@ -605,7 +671,15 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let text_width = painter.layout_no_wrap(display_tab.to_string(), FontId::proportional(12.0), t.text).size().x;
             let w = 12.0 + text_width.max(28.0);
             let tr = Rect::from_min_size(pos2(x, tabs_y), vec2(w, 22.0));
-            let active = app.ui.tab == tab;
+            let mfg_mode = match tab {
+                "MILLING" => Some(crate::manufacture_workspace::CamMode::Milling),
+                "TURNING" => Some(crate::manufacture_workspace::CamMode::Turning),
+                "ADDITIVE" => Some(crate::manufacture_workspace::CamMode::Additive),
+                "INSPECTION" => Some(crate::manufacture_workspace::CamMode::Inspection),
+                "FABRICATION" => Some(crate::manufacture_workspace::CamMode::Fabrication),
+                _ => None,
+            };
+            let active = if let Some(mode) = mfg_mode { app.manufacture_workspace.cam_mode == mode } else { app.ui.tab == tab };
             let resp = ui.interact(tr, ui.id().with(("tab", tab)), Sense::click());
             if active {
                 let c = if tab == "SKETCH" { t.sketch_accent } else { t.accent };
@@ -622,7 +696,12 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             };
             painter.text(tr.center(), Align2::CENTER_CENTER, display_tab, FontId::proportional(12.0), col);
             if resp.clicked() {
-                app.ui.tab = tab.to_string();
+                if let Some(mode) = mfg_mode {
+                    app.manufacture_workspace.cam_mode = mode;
+                    app.ui.tab = "MANUFACTURE".into();
+                } else {
+                    app.ui.tab = tab.to_string();
+                }
             }
             x += w + 4.0;
         }
@@ -647,7 +726,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut overflow = Vec::new();
         // Every panel with all its buttons (the user's pins have no cap); a toolbar too narrow
         // for them collapses panels into their drop-down, then into the » menu.
-        let lists: Vec<_> = crate::toolbar_custom::panel_lists(&tab)
+        let lists: Vec<_> = crate::toolbar_custom::panel_lists_for(app)
             .into_iter()
             .map(|(panel, cmds, promote)| {
                 let shown = crate::toolbar_custom::buttons(app, &tab, panel, &cmds, promote);
@@ -1596,8 +1675,18 @@ mod home_tests {
             let name = if cmd { format!("Ctrl+{key}") } else { key.to_string() };
             actions.push((name, Box::new(move |h| drop(h.call("ui.key", json!({"key": key, "cmd": cmd}))))));
         }
-        for item in ["Insert STEP…", "Insert Mesh…", "Save", "Save As…", "Export STL…", "Export STEP…", "Export 3MF…", "Export OBJ…", "Export URDF…"]
-        {
+        for item in [
+            "Insert STEP…",
+            "Insert Mesh…",
+            "Save",
+            "Save As…",
+            "Export STL…",
+            "Export STEP…",
+            "Export 3MF…",
+            "Export OBJ…",
+            "Export URDF…",
+            "Export for LightBurn…",
+        ] {
             actions.push((
                 format!("File › {item}"),
                 Box::new(move |h| {

@@ -779,7 +779,12 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui) {
             select_only(app, TimelineItem::Feature(*id));
         }
         response.context_menu(|ui| {
-            if ui.button("Edit Feature").clicked() {
+            if matches!(kind, solidcraft_engine::doc::FeatureKind::Sketch { .. }) {
+                if ui.button(crate::i18n::tr_label("Edit Sketch")).clicked() {
+                    app.edit_sketch(*id);
+                    ui.close();
+                }
+            } else if ui.button("Edit Feature").clicked() {
                 edit = Some(*id);
                 ui.close();
             }

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Ws manufacture</title>
+  <!-- Stock block -->
+  <path d="M10 38L32 26L54 38L54 52L32 64L10 52Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M10 38L32 50L54 38" fill="none" stroke="#34465b" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M32 50L32 64" fill="none" stroke="#34465b" stroke-width="2.2"/>
+  <!-- Endmill -->
+  <rect x="28" y="6" width="8" height="22" rx="1.5" fill="#328bd3" stroke="#34465b" stroke-width="2.2"/>
+  <path d="M26 28L38 28L35 36L29 36Z" fill="#236ead" stroke="#34465b" stroke-width="2.2" stroke-linejoin="round"/>
+  <circle cx="32" cy="10" r="2" fill="#b9ddf8"/>
+</svg>

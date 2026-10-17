@@ -15,6 +15,7 @@ use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2}
 use serde::Serialize;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
+use solidcraft_engine::doc::FeatureKind;
 
 use crate::theme::Tokens;
 
@@ -234,6 +235,7 @@ fn sel_bodies(app: &SolveApp) -> Vec<String> {
 fn sel_sketch(app: &SolveApp) -> Option<u64> {
     app.session.selection.iter().find_map(|s| match s {
         Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => Some(*sketch),
+        Sel::Feature { id } => app.session.doc.feature(*id).and_then(|f| matches!(f.kind, FeatureKind::Sketch { .. }).then_some(*id)),
         _ => None,
     })
 }
@@ -341,14 +343,23 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
+            let manufacturing = crate::manufacture_workspace::active(app);
+            let idle = app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy();
             let mut v = vec![
-                act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering { "" } else { "current" }),
+                act("ui.workspace.design", "Design", "ws_design")
+                    .with(json!({"workspace":"design"}))
+                    .key(if !rendering && !manufacturing { "current" } else { "" })
+                    .on(idle),
                 act("ui.workspace.render", "Render", "ws_render")
                     .with(json!({"workspace":"render"}))
                     .key(if rendering { "current" } else { "" })
-                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
+                    .on(idle),
+                act("ui.workspace.manufacture", "Manufacture", "manufacture")
+                    .with(json!({"workspace":"manufacture"}))
+                    .key(if manufacturing { "current" } else { "" })
+                    .on(idle),
             ];
-            for w in ["Animation", "Simulation", "Manufacture", "Drawing"] {
+            for w in ["Animation", "Simulation", "Drawing"] {
                 v.push(act("ui.workspace", w, "").key("coming later").on(false));
             }
             v
@@ -456,6 +467,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     } else if has(|s| matches!(s, Sel::Body { .. })) {
         v.extend(body_items(app, &sel_bodies(app), false));
     } else if has(|s| matches!(s, Sel::Profile { .. })) {
+        if let Some(sketch) = sel.iter().find_map(|s| if let Sel::Profile { sketch, .. } = s { Some(*sketch) } else { None }) {
+            let editing = app.session.active_sketch == Some(sketch);
+            v.push(act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": sketch })).on(!editing));
+            v.push(Item::sep());
+        }
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.revolve", "Revolve"));
     } else {
@@ -1051,11 +1067,28 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.toolbarPin" | "ui.toolbarRemove" | "ui.toolbarReset" | "ui.toolbarCustomize" | "ui.shortcutPin" => {
             crate::toolbar_custom::run(app, &item.id, &p)
         }
-        "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" => {
-            if let Some(workspace) = p.get("workspace").and_then(Value::as_str)
-                && let Err(e) = crate::render_workspace::enter(app, workspace == "render")
-            {
-                app.set_status(e, true);
+        "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.manufacture" => {
+            if let Some(workspace) = p.get("workspace").and_then(Value::as_str) {
+                match workspace {
+                    "render" => {
+                        if let Err(e) = crate::render_workspace::enter(app, true) {
+                            app.set_status(e, true);
+                        }
+                    }
+                    "manufacture" => {
+                        crate::manufacture_workspace::enter(app);
+                    }
+                    "design" => {
+                        if crate::render_workspace::active(app) {
+                            if let Err(e) = crate::render_workspace::enter(app, false) {
+                                app.set_status(e, true);
+                            }
+                        } else if crate::manufacture_workspace::active(app) {
+                            crate::manufacture_workspace::exit(app);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
         "ui.findJoint" => {
