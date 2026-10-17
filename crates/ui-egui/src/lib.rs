@@ -614,8 +614,13 @@ impl SolveApp {
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
-        self.control_rx = Some(rx);
+        self.set_control(rx);
         self
+    }
+
+    /// Attach the control channel once the desktop window has presented its first frame.
+    pub fn set_control(&mut self, rx: Receiver<ControlRequest>) {
+        self.control_rx = Some(rx);
     }
 
     /// Run a command programmatically (JSON parameters, no dialogs).

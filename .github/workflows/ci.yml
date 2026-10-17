@@ -551,12 +551,28 @@ jobs:
           key: windows-startup
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Backend order and probing on Windows
+        env:
+          SOLIDCRAFT_REQUIRE_GPU: "1"
         run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
       - name: Build the app
         run: cargo build -p solidcraft --profile ci --locked
+      - name: Preserve the Windows test build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-startup-build
+          path: target/ci/solidcraft.exe
+          retention-days: 7
       - name: Start the app under different settings
         shell: pwsh
         run: tools/windows-startup-smoke.ps1 -Exe target/ci/solidcraft.exe
+      - name: Preserve startup screenshots for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-startup-screenshots
+          path: ${{ runner.temp }}/smoke-*/shot.png
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Resize border from the first frame
         shell: pwsh
         run: tools/windows-resize-smoke.ps1 -Exe target/ci/solidcraft.exe
