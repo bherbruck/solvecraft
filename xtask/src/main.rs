@@ -60,6 +60,7 @@ commands:
   web-offline [DIR]
                   write the web build's service worker (sw.js: offline use, updates); run by
                   Trunk after release builds of apps/solidcraft-web, or on a built site in DIR
+  web-api-test [--site DIR]  Test the command API in a real browser build (default: dist/web)
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
@@ -96,6 +97,10 @@ fn main() -> ExitCode {
         Some("web-offline-test") => {
             let site = rest.iter().position(|a| *a == "--site").and_then(|i| rest.get(i + 1)).copied();
             web_offline_test::run(&root(), site, true)
+        }
+        Some("web-api-test") => {
+            let site = rest.iter().position(|a| *a == "--site").and_then(|i| rest.get(i + 1)).copied().unwrap_or("dist/web");
+            web_offline_test::run_api(site)
         }
         Some("-h" | "--help" | "help") | None => {
             print!("{USAGE}");

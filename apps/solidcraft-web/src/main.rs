@@ -7,6 +7,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 #[cfg(target_arch = "wasm32")]
+mod api;
+#[cfg(target_arch = "wasm32")]
 mod files;
 #[cfg(target_arch = "wasm32")]
 mod install;
@@ -22,6 +24,7 @@ mod web {
     use solidcraft_ui_egui::{Services, SolveApp};
     use wasm_bindgen::JsCast as _;
 
+    use crate::api::Api;
     use crate::files::{self, Files, Intent};
     use crate::space_mouse::SpaceMouse;
 
@@ -84,6 +87,7 @@ mod web {
 
     struct Shell {
         app: SolveApp,
+        api: Api,
         files: Rc<Files>,
         /// When the last autosave was (seconds), and the revision it holds (none stored: `None`).
         autosaved_at: f64,
@@ -413,6 +417,7 @@ mod web {
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             self.tick_font(ctx);
             self.app.logic(ctx);
+            self.api.poll();
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
             UNSAVED.with(|u| u.set(solidcraft_ui_egui::documents::any_dirty(&self.app)));
@@ -520,7 +525,8 @@ mod web {
                         };
                         // Thumbnails of saves and start-page cards.
                         solidcraft_ui_egui::gpu::install_cpu_picture_renderer();
-                        let mut app = SolveApp::new(Session::default(), services);
+                        let (sender, receiver) = std::sync::mpsc::channel();
+                        let mut app = SolveApp::new(Session::default(), services).with_control(receiver);
                         if let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))) {
                             app.load_prefs(&p);
                         }
@@ -542,8 +548,10 @@ mod web {
                             let rev = app.session.revision;
                             app.home.show(rev);
                         }
+                        let api = Api::install(sender, cc.egui_ctx.clone()).map_err(|e| format!("SolidCraft browser API: {e:?}"))?;
                         Ok(Box::new(Shell {
                             app,
+                            api,
                             files,
                             autosaved_at: f64::NEG_INFINITY,
                             autosaved: None,
