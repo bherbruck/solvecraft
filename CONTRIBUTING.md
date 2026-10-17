@@ -10,7 +10,7 @@ Help is welcome, whether that's a one-line fix or owning a whole area. This page
 build it, how the code is laid out, the few rules that aren't negotiable, and where help is
 needed most.
 
-Questions, ideas or want to say what you're working on? Join the [Discord](https://solidcraft.io/discord).
+Questions, ideas or want to say what you're working on? Join the [Discord](https://discord.gg/FtU4NQNVDH).
 
 ## Get it running (about 10 minutes on a fast machine)
 
@@ -300,7 +300,7 @@ long as the change meets the rules above.
 
 ## Where help is wanted most
 
-**Kernel speed (slow fillets, booleans, STEP):** please don't rewrite the current kernel code for speed; it is being replaced by [solidcore](https://github.com/bherbruck/solidcore) ([progress](https://bherbruck.github.io/solidcore/)). Report slow cases with a file under the `kernel-perf` label, and put kernel effort into solidcore instead. See [#1597](https://github.com/tangency-labs/solidcraft/issues/1597).
+**Kernel speed (slow fillets, booleans, STEP):** please don't rewrite the current kernel code for speed; it is being replaced by [solidcore](https://github.com/bherbruck/solidcore) ([progress](https://tangency-labs.github.io/solidcore/)). Report slow cases with a file under the `kernel-perf` label, and put kernel effort into solidcore instead. See [#1597](https://github.com/tangency-labs/solidcraft/issues/1597).
 
 See the [`help wanted`](https://github.com/tangency-labs/solidcraft/labels/help%20wanted) and
 [`good first issue`](https://github.com/tangency-labs/solidcraft/labels/good%20first%20issue) labels.
