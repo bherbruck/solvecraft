@@ -5,7 +5,7 @@ use solidcraft_geom::{Aabb3, Mesh};
 fn request() -> ImageRequest {
     let mut camera = Camera { distance: 50.0, ..Default::default() };
     camera.set_view(StandardView::Front);
-    ImageRequest { camera, width: 64, height: 64, background: [20, 40, 60], transparent_background: true }
+    ImageRequest { textures: None, environment: None, camera, width: 64, height: 64, background: [20, 40, 60], transparent_background: true }
 }
 
 fn square(name: &str, colour: [u8; 3], opacity: f64, offset: Vec3) -> ProductMesh {
@@ -21,7 +21,7 @@ fn square(name: &str, colour: [u8; 3], opacity: f64, offset: Vec3) -> ProductMes
         tri_face: vec![0, 1],
         ..Default::default()
     };
-    ProductMesh { name: name.into(), mesh: Arc::new(mesh), color: colour, opacity, surface: None, faces: Vec::new() }
+    ProductMesh { name: name.into(), mesh: Arc::new(mesh), color: colour, opacity, surface: None, transmission: None, faces: Vec::new() }
 }
 
 fn scene(meshes: Vec<ProductMesh>) -> ProductScene {
@@ -66,6 +66,17 @@ fn glass_is_sorted_back_to_front_independently_of_body_order() {
     let p = image.get_pixel(32, 32).0;
     assert!((i16::from(p[3]) - 192).abs() <= 1, "two half-transparent layers: {p:?}");
     assert!(p[2] > p[0] + 30, "the near blue layer contributes more: {p:?}");
+}
+
+#[test]
+fn physical_transmission_keeps_the_exact_scalar_cpu_preview() {
+    let original = square("Glass", [80, 180, 140], 0.25, Vec3::ZERO);
+    let mut glass = original.clone();
+    glass.surface = Some(crate::surface::OpaqueSurface::new(Vec3::new(0.2, 0.4, 0.3), 0.0, 0.1, 1.5).unwrap());
+    glass.transmission = Some(crate::transmission::Transmission::new(Vec3::new(-0.7_f64.ln(), -0.9_f64.ln(), 0.0) / 10.0, None).unwrap());
+    let expected = finish(ImageTask::new(scene(vec![original]), request(), CancelToken::default()).unwrap());
+    let actual = finish(ImageTask::new(scene(vec![glass]), request(), CancelToken::default()).unwrap());
+    assert_eq!(actual, expected);
 }
 
 #[test]
@@ -116,7 +127,7 @@ fn invalid_sizes_indices_opacity_and_large_work_lists_fail_without_a_frame() {
         if bad == 0 {
             Arc::make_mut(&mut body.mesh).triangles[0][0] = u32::MAX;
         } else {
-            body.faces.push(FaceAppearance { face: 0, color: [0; 3], opacity: f64::NAN, surface: None });
+            body.faces.push(FaceAppearance { face: 0, color: [0; 3], opacity: f64::NAN, surface: None, transmission: None });
         }
         let mut task = ImageTask::new(scene(vec![body]), request(), CancelToken::default()).unwrap();
         let error = loop {

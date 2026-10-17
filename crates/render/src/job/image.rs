@@ -50,6 +50,18 @@ fn add_bytes(sum: &mut u64, count: usize, size: usize) -> Result<()> {
 /// Conservative admission before allocating pixels or projected-work lists. Source Arcs are
 /// counted even when another owner already holds them. Allocator and codec internals are estimates.
 pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
+    if request.environment.is_some() {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "CPU product does not support environment maps"));
+    }
+    if request.textures.is_some() {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "runtime textures require the progressive GPU executor"));
+    }
+    admit_geometry(scene, request, MAX_TRIANGLES)
+}
+
+/// Common source and camera admission. Executors additionally budget their own preparation
+/// and pixel storage, and validate triangle contents before uploading anything to a device.
+pub fn admit_geometry(scene: &ProductScene, request: &ImageRequest, max_triangles: u64) -> Result<Admission> {
     if !request.camera.is_valid() {
         return Err(JobError::new(ErrorCode::InvalidRequest, "invalid image camera"));
     }
@@ -77,8 +89,8 @@ pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> 
         triangles = triangles.checked_add(m.triangles.len() as u64).ok_or_else(|| limit("triangle count overflow"))?;
         faces = faces.checked_add(body.faces.len() as u64).ok_or_else(|| limit("appearance count overflow"))?;
         polylines = polylines.checked_add(m.edges.len() as u64 + m.edge_faces.len() as u64).ok_or_else(|| limit("edge count overflow"))?;
-        if triangles > MAX_TRIANGLES || faces > MAX_TRIANGLES || polylines > MAX_TRIANGLES {
-            return Err(limit("product image exceeds the 262144 triangle/appearance/polyline admission cap"));
+        if triangles > max_triangles || faces > max_triangles || polylines > max_triangles {
+            return Err(limit("product image exceeds its triangle/appearance/polyline admission cap"));
         }
         add_bytes(&mut geometry, m.positions.capacity(), std::mem::size_of::<Vec3>())?;
         add_bytes(&mut geometry, m.normals.capacity(), std::mem::size_of::<Vec3>())?;
@@ -97,7 +109,7 @@ pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> 
         for count in [m.seams.capacity(), m.smooth_edges.capacity(), m.sharp_edges.capacity()] {
             add_bytes(&mut geometry, count, 1)?;
         }
-        if body.surface.is_some() && body.opacity != 1.0 {
+        if body.surface.is_some() && body.transmission.is_none() && body.opacity != 1.0 {
             return Err(invalid("opaque PBR requires opacity 1"));
         }
         if !body.opacity.is_finite() || !(0.0..=1.0).contains(&body.opacity) {
@@ -380,7 +392,11 @@ impl ImageTask {
             return Err(invalid("non-finite product triangle"));
         }
         let look = self.looks.get(draw.body as usize).and_then(|looks| mesh.tri_face.get(draw.triangle as usize).and_then(|face| looks.get(face)));
-        let (colour, opacity, surface) = look.map_or((body.color, body.opacity, body.surface), |look| (look.color, look.opacity, look.surface));
+        // Transmission is physical optical data, never a request to change CPU preview.
+        // Keep the existing scalar sorted-alpha shading for glass previews.
+        let (colour, opacity, surface) = look.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |look| {
+            (look.color, look.opacity, look.surface.filter(|_| look.transmission.is_none()))
+        });
         if surface.is_some() && opacity != 1.0 {
             return Err(invalid("opaque PBR requires opacity 1"));
         }
