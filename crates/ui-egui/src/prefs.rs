@@ -1221,25 +1221,30 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui.label(crate::i18n::tr_label("3D mouse"));
             ui.checkbox(&mut app.preferences.space_mouse_enabled, crate::i18n::tr_label("Navigate with SpaceNavigator / SpaceMouse"));
             ui.end_row();
-            ui.label(crate::i18n::tr_label("3D mouse speed"));
-            ui.add_enabled(
-                app.preferences.space_mouse_enabled,
-                egui::Slider::new(&mut app.preferences.space_mouse_speed, 0.25..=3.0).step_by(0.05).custom_formatter(|v, _| format!("{v:.2}×")),
-            );
-            ui.end_row();
-            for (axis, name) in SPACE_MOUSE_AXES.iter().enumerate() {
-                ui.label(crate::i18n::tr_label(name));
-                ui.horizontal(|ui| {
-                    ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
-                        if let Some(reverse) = app.preferences.space_mouse_reverse.get_mut(axis) {
-                            ui.checkbox(reverse, crate::i18n::tr_label("Invert"));
-                        }
-                        if let Some(speed) = app.preferences.space_mouse_axis_speed.get_mut(axis) {
-                            ui.add(egui::Slider::new(speed, 0.0..=3.0).step_by(0.05).custom_formatter(|v, _| format!("{v:.2}×")));
-                        }
-                    });
-                });
+            #[cfg(target_os = "macos")]
+            note(ui, crate::i18n::tr_label("Use 3Dconnexion Settings for navigation speed, axes, modes and button assignments."));
+            #[cfg(not(target_os = "macos"))]
+            {
+                ui.label(crate::i18n::tr_label("3D mouse speed"));
+                ui.add_enabled(
+                    app.preferences.space_mouse_enabled,
+                    egui::Slider::new(&mut app.preferences.space_mouse_speed, 0.25..=3.0).step_by(0.05).custom_formatter(|v, _| format!("{v:.2}×")),
+                );
                 ui.end_row();
+                for (axis, name) in SPACE_MOUSE_AXES.iter().enumerate() {
+                    ui.label(crate::i18n::tr_label(name));
+                    ui.horizontal(|ui| {
+                        ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
+                            if let Some(reverse) = app.preferences.space_mouse_reverse.get_mut(axis) {
+                                ui.checkbox(reverse, crate::i18n::tr_label("Invert"));
+                            }
+                            if let Some(speed) = app.preferences.space_mouse_axis_speed.get_mut(axis) {
+                                ui.add(egui::Slider::new(speed, 0.0..=3.0).step_by(0.05).custom_formatter(|v, _| format!("{v:.2}×")));
+                            }
+                        });
+                    });
+                    ui.end_row();
+                }
             }
             note(ui, crate::i18n::tr_label("Move and rotate the view together; sketches use pan and zoom only."));
         }
@@ -1488,6 +1493,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
 /// Fold a setting an older release kept in its own field into the one this version reads.
 /// `orbit_cursor` (`true` = the point under the cursor) became `orbit_around`.
 /// The cap's physical axes, in the order of `Prefs::space_mouse_reverse`.
+#[cfg(not(target_os = "macos"))]
 const SPACE_MOUSE_AXES: [&str; 6] = ["Push left / right", "Push forward / back", "Lift / press", "Tilt forward / back", "Tilt left / right", "Twist"];
 
 pub fn migrate(mut p: Prefs) -> Prefs {
