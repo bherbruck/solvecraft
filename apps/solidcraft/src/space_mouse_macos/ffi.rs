@@ -217,7 +217,9 @@ impl Connection {
         // through the call; command tree storage is owned by self for the connection's lifetime.
         let result = unsafe { (self.write)(self.handle, name.as_ptr(), &value) };
         if result != 0 {
-            log::debug!("3D mouse: writing {} failed ({result:#x})", name.to_string_lossy());
+            eprintln!("3D mouse: writing {} failed ({result:#x})", name.to_string_lossy());
+        } else if std::env::var_os("SOLIDCRAFT_3D_MOUSE_TRACE").is_some() {
+            eprintln!("3D mouse: wrote {}", name.to_string_lossy());
         }
     }
 

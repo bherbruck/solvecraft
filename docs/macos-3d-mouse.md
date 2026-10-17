@@ -17,6 +17,10 @@ require an SDK to build. Without 3DxWare, ordinary pointer navigation continues 
 
 Design and Sketch have separate command banks. Entering or leaving a sketch automatically
 activates the matching bank, so the same programmable button can start different tools.
+When migrating an existing macOS driver profile, retain its native client identity (`SolidCraft`)
+as well as the application bundle identity; a generic application profile can keep using its
+default assignments even after the driver has selected the Sketch command bank. Back up driver
+preferences before migrating assignments.
 
 The driver calculates six-axis camera motion rather than emulating mouse drags or wheel steps.
 It receives the camera, visible model and selection bounds, projection, up-axis and sketch lock.
@@ -56,6 +60,9 @@ used by these tests.
 ### Local verification, 2026-10-17
 
 Pan, zoom and rotation were confirmed on a physical SpaceMouse Enterprise in the macOS preview.
+Assigned Extrude and Sketch Line commands were also confirmed, including the automatic Sketch
+bank change. A migrated local driver profile initially lacked its `clientname` (`SolidCraft`);
+restoring that identity enabled context-specific assignments without changing the app's bank API.
 The initial zoom-only behavior came from selecting
 `column_vectors` while supplying the default native row-vector layout. Keep `NlCreate` options
 at the default matrix convention: right/up/back/eye rows, translation in the final row. The
@@ -67,4 +74,4 @@ command-node sizes. Formatting and asset/icon/list/layer checks pass. The full C
 existing Rust 1.95 Clippy findings in `geom/fill_general.rs`, `ui-egui/canvas.rs`, `dialogs.rs`,
 `issue_report.rs` and `sketch_tools.rs`. Scoped Clippy passes with only those two existing lint
 classes (`nonminimal_bool`, `collapsible_match`) allowed; no new lint allowances are in source.
-The verification included upstream `4a70c03d`.
+The verification included upstream `e347f820`.
