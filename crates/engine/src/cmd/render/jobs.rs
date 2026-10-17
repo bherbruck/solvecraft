@@ -22,6 +22,7 @@ struct Start {
     lens: Option<solidcraft_render::job::ThinLens>,
     lighting: Option<solidcraft_render::job::StudioLighting>,
     tone_map: Option<solidcraft_render::job::ToneMap>,
+    environment: Option<super::environment::Input>,
 }
 
 struct Prepared {
@@ -39,11 +40,22 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
         return Err(bad(command, "choose either setup or settings"));
     }
     let mut scene = crate::product_scene::extract(s)?;
-    if !input.progressive && (!input.raytrace.dielectrics.is_empty() || input.lens.is_some() || input.lighting.is_some() || input.tone_map.is_some())
+    if !input.progressive
+        && (!input.raytrace.dielectrics.is_empty()
+            || !input.raytrace.clear_coats.is_empty()
+            || !input.raytrace.textures.is_empty()
+            || input.lens.is_some()
+            || input.lighting.is_some()
+            || input.tone_map.is_some()
+            || input.environment.is_some())
     {
-        return Err(bad(command, "runtime transmission, lens, lighting and tone-map controls require progressive rendering"));
+        return Err(bad(
+            command,
+            "runtime transmission, clear-coat, texture, lens, environment, lighting and tone-map controls require progressive rendering",
+        ));
     }
     super::transmission::apply(&mut scene, &input.raytrace.dielectrics, command)?;
+    super::clear_coat::apply(&mut scene, &input.raytrace.clear_coats, command)?;
     let settings = if let Some(name) = &input.setup {
         s.doc.render.setups.get(name).cloned().ok_or_else(|| bad(command, "no saved render setup with that name"))?
     } else if let Some(settings) = &input.settings {
@@ -79,7 +91,11 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
     options.lighting = input.lighting;
     options.tone_map = input.tone_map.unwrap_or_default();
     options.validate().map_err(job_error)?;
+    let environment = input.environment.as_ref().map(|source| source.capture(command)).transpose()?;
     let mut features = scene.required_features();
+    if environment.is_some() {
+        features.push(solidcraft_render::RenderFeature::Hdri);
+    }
     if input.progressive {
         features.push(solidcraft_render::RenderFeature::Progressive);
         if scene.has_transmission() {
@@ -105,15 +121,17 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
         return Err(bad(command, "image host is unavailable"));
     }
     let request = ImageRequest {
+        environment,
         camera: settings.camera,
         width: settings.width,
         height: settings.height,
         background: settings.background,
         transparent_background: input.transparent_background,
+        textures: super::textures::capture(&scene, &input.raytrace.textures, command)?,
     };
     let admission = host.admit(&scene, &request, options).map_err(job_error)?;
     let refraction = input.progressive && scene.has_transmission();
-    let reply = json!({"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":if refraction {"physical_transmission"} else if input.progressive {"opaque_only"} else {"sorted_alpha_approximation"},"options":options,"refraction":refraction,"dielectric_boundaries": if resolved.executor.as_str() == "gpu-path" {vec!["thin_sheet","closed_box","closed_mesh"]} else {Vec::<&str>::new()}});
+    let reply = json!({"resolved":resolved,"admission":admission,"request":request,"textures":request.textures.as_ref().map(|resources|resources.summary()),"scene_generation":s.revision,"host":host.kind(),"transparency":if refraction {"physical_transmission"} else if input.progressive {"opaque_only"} else {"sorted_alpha_approximation"},"options":options,"environment":request.environment.as_ref().map(|source|source.info()),"refraction":refraction,"dielectric_boundaries": if resolved.executor.as_str() == "gpu-path" {vec!["thin_sheet","closed_box","closed_mesh"]} else {Vec::<&str>::new()}});
     Ok(Prepared { input, scene, request, reply, executor: resolved.executor, options })
 }
 

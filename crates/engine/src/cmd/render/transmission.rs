@@ -12,6 +12,8 @@ use solidcraft_render::{
 #[serde(default, deny_unknown_fields)]
 pub(super) struct Raytrace {
     pub dielectrics: Vec<Override>,
+    pub clear_coats: Vec<super::clear_coat::Override>,
+    pub textures: Vec<super::textures::Override>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,6 +24,8 @@ pub(super) struct Override {
     absorption_per_mm: [f64; 3],
     boundary: Boundary,
     thickness_mm: f64,
+    #[serde(default)]
+    shadow_transmission: Option<bool>,
 }
 #[derive(Deserialize)]
 #[serde(try_from = "String")]
@@ -62,7 +66,10 @@ pub(super) fn apply(scene: &mut ProductScene, overrides: &[Override], command: &
             return Err(bad(command, "closed dielectric thickness_mm must be zero; distance comes from geometry"));
         }
         let [r, g, b] = input.absorption_per_mm;
-        let transmission = Transmission::new(Vec3::new(r, g, b), thickness).map_err(|e| bad(command, e.to_string()))?;
+        let mut transmission = Transmission::new(Vec3::new(r, g, b), thickness).map_err(|e| bad(command, e.to_string()))?;
+        if let Some(enabled) = input.shadow_transmission {
+            transmission = transmission.with_shadow_transmission(enabled);
+        }
         OpaqueSurface::new(Vec3::ZERO, 0.0, 0.5, input.ior).map_err(|e| bad(command, e.to_string()))?;
         let body = scene
             .meshes
@@ -189,5 +196,28 @@ mod tests {
         let mut value = input();
         value["boundary"] = json!("closed_mesh");
         assert!(apply(&mut scene, &[serde_json::from_value(value).unwrap()], "render.start").is_ok());
+    }
+    #[test]
+    fn shadow_flags_follow_boundary_defaults_and_explicit_runtime_overrides() {
+        let s = fixture();
+        let saved = s.doc.to_json();
+        for thin in [false, true] {
+            for flag in [None, Some(false), Some(true)] {
+                let mut value = input();
+                if thin {
+                    value["boundary"] = json!("thin_sheet");
+                }
+                if let Some(flag) = flag {
+                    value["shadow_transmission"] = json!(flag);
+                }
+                let mut scene = crate::product_scene::extract(&s).unwrap();
+                apply(&mut scene, &[serde_json::from_value(value).unwrap()], "render.start").unwrap();
+                assert_eq!(scene.meshes[0].transmission.unwrap().shadow_transmission(), flag.unwrap_or(thin));
+                assert_eq!(s.doc.to_json(), saved);
+            }
+        }
+        let mut malformed = input();
+        malformed["shadow_transmission"] = json!(0.5);
+        assert!(serde_json::from_value::<Override>(malformed).is_err());
     }
 }

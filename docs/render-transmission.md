@@ -40,8 +40,12 @@ Boundary is one of:
 - `"closed_mesh"` with `"thickness_mm":0`: **GPU-only** extension for general closed sphere/lens meshes.
   This is not a claim that the current CPU certificate admits those shapes.
 
-Preparation welds topology keys at 1e-6 mm for edge checks without altering uploaded
-geometry, requires paired opposite edges, exactly one edge-connected shell, positive outward volume, and requires
+Preparation matches topology representatives within 1e-6 mm Euclidean distance,
+searching neighboring spatial cells so a rounding boundary cannot split a valid
+CAD seam. It does not alter uploaded geometry or join chains beyond a representative's
+tolerance. Weld scratch is bounded and budgeted for the largest closed dielectric
+body being validated; opaque and thin-sheet bodies allocate none of it.
+Preparation requires paired opposite edges, exactly one edge-connected shell, positive outward volume, and requires
 one homogeneous IOR/medium over a closed body's faces. Nested or overlapping
 closed media are refused conservatively: dielectric body AABBs must be disjoint
 when either body is closed. This can reject disjoint curved shapes whose boxes
@@ -66,8 +70,9 @@ nonfinite inputs, invalid ordinals and out-of-range values are errors.
 GPU transport uses geometric winding for entering/leaving media, exact s/p Fresnel
 including total internal reflection, Snell refraction and Beer attenuation. It
 includes the squared IOR ratio for radiance transport. Glass is smooth; rough
-transmission and fractional mixtures are absent. Direct shadow rays remain blocked
-by glass, so sampled caustics converge slowly. The maximum path depth remains 16.
+transmission and fractional mixtures are absent. Runtime [glass shadow connections](render-glass-shadows.md)
+are enabled by default for thin sheets and opt-in for solids; the latter are explicitly
+straight-through NEE-only approximations, not caustics. The maximum path depth remains 16.
 The existing per-path stack storage is retained, but nested-entry events are errors.
 
 `crates/render/src/dielectric_oracle_tests.rs` is an original self-contained f64

@@ -16,10 +16,11 @@ mod image;
 mod lens;
 mod lighting;
 mod png;
+pub mod textures;
 pub use host::{CpuHost, HostKind, ImageHost, JobHandle, JobStatus, RenderFrame};
 pub use image::{Admission, ImageTask, TaskPoll, admit, admit_geometry};
 pub use lens::ThinLens;
-pub use lighting::{AreaLight, AreaLights, MAX_AREA_LIGHTS, StudioLighting, ToneMap};
+pub use lighting::{AreaLight, AreaLights, MAX_AREA_LIGHTS, StudioLighting, Sun, ToneMap};
 pub use png::PngTask;
 
 /// Runtime sampling intent, separate from saved documents and device resources.
@@ -170,11 +171,16 @@ impl CancelToken {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImageRequest {
+    /// Captured runtime resources; never persisted or accepted as serialized pixel arrays.
+    #[serde(skip)]
+    pub environment: Option<Arc<crate::lighting::environment::EnvironmentSource>>,
     pub camera: Camera,
     pub width: u32,
     pub height: u32,
     pub background: [u8; 3],
     pub transparent_background: bool,
+    #[serde(skip)]
+    pub textures: Option<Arc<textures::RuntimeTextures>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

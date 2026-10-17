@@ -32,7 +32,15 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
         let eye = camera.eye().to_f32();
         let mut task = ImageTask::new(
             scene,
-            ImageRequest { camera, width: SIZE, height: SIZE, background: [255; 3], transparent_background: false },
+            ImageRequest {
+                textures: None,
+                environment: None,
+                camera,
+                width: SIZE,
+                height: SIZE,
+                background: [255; 3],
+                transparent_background: false,
+            },
             CancelToken::default(),
         )
         .unwrap();

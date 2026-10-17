@@ -33,6 +33,7 @@ fn additional_executor_routes_by_capability_and_survives_document_adoption() {
             let mut descriptor = CpuHost::cooperative().descriptor()?;
             descriptor.id = solidcraft_render::ExecutorId::new("test-progressive").unwrap();
             descriptor.profiles[0].features.push(solidcraft_render::RenderFeature::Progressive);
+            descriptor.profiles[0].features.push(solidcraft_render::RenderFeature::Hdri);
             Ok(descriptor)
         }
         fn admit(
@@ -42,7 +43,7 @@ fn additional_executor_routes_by_capability_and_survives_document_adoption() {
             options: JobOptions,
         ) -> solidcraft_render::job::Result<Admission> {
             options.validate()?;
-            solidcraft_render::job::admit(scene, request)
+            solidcraft_render::job::admit_geometry(scene, request, 262_144)
         }
         fn begin(
             &self,
@@ -73,6 +74,13 @@ fn additional_executor_routes_by_capability_and_survives_document_adoption() {
     let studio_reply = session.execute("render.preflight", &studio).unwrap();
     assert_eq!(studio_reply["options"]["lighting"]["environment"], json!([1.0, 1.0, 1.0]));
     assert_eq!(studio_reply["options"]["tone_map"], "aces_fitted");
+    assert!(Arc::ptr_eq(&document, &session.doc));
+    studio["environment"] = json!({"kind":"sky","intensity":0.5,"rotation_rad":0.3});
+    let env_reply = session.execute("render.preflight", &studio).unwrap();
+    assert_eq!(env_reply["environment"]["kind"], "original_gradient_sky");
+    assert_eq!(env_reply["environment"]["width"], 512);
+    assert_eq!(env_reply["environment"]["source_sha256"].as_str().unwrap().len(), 64);
+    assert!(env_reply["request"].get("environment").is_none());
     assert!(Arc::ptr_eq(&document, &session.doc));
     studio["progressive"] = json!(false);
     assert!(session.execute("render.preflight", &studio).unwrap_err().to_string().contains("require progressive"));
@@ -293,4 +301,14 @@ fn native_start_and_cancel_measure_cached_capture_without_timing_assertions() {
         status.progress.phase
     );
     assert!(status.progress.phase.terminal());
+}
+
+#[test]
+fn runtime_texture_controls_require_progressive_and_leave_document_unchanged() {
+    let (mut s, _) = session();
+    let doc = s.doc.clone();
+    let input = json!({"raytrace":{"textures":[{"body_index":0,"body_name":"No body","frame":{"origin":[0,0,0],"u":[1,0,0],"v":[0,1,0]},"normal_opengl":"not-opened.png"}]}});
+    let error = s.execute("render.preflight", &input).unwrap_err().to_string();
+    assert!(error.contains("require progressive"), "{error}");
+    assert!(Arc::ptr_eq(&doc, &s.doc));
 }

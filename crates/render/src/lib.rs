@@ -7,6 +7,7 @@
 mod analysis;
 mod backend;
 mod camera;
+pub mod clear_coat;
 mod curve_display;
 mod gif;
 pub mod job;

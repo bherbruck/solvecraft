@@ -7,6 +7,7 @@ use crate::surface::{SurfaceError, unit_direction};
 pub struct Transmission {
     absorption_per_mm: Vec3,
     thin_wall_thickness_mm: Option<f64>,
+    shadow_transmission: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,7 +43,15 @@ impl Transmission {
         if thin_wall_thickness_mm.is_some_and(|v| !v.is_finite() || !(0.0..=10000.0).contains(&v)) {
             return Err(TransmissionError::Thickness);
         }
-        Ok(Self { absorption_per_mm, thin_wall_thickness_mm })
+        Ok(Self { absorption_per_mm, thin_wall_thickness_mm, shadow_transmission: thin_wall_thickness_mm.is_some() })
+    }
+    /// Thin sheets enable straight shadow transmission by default; solids opt in.
+    pub fn with_shadow_transmission(mut self, enabled: bool) -> Self {
+        self.shadow_transmission = enabled;
+        self
+    }
+    pub fn shadow_transmission(self) -> bool {
+        self.shadow_transmission
     }
     pub fn thin_wall_thickness_mm(self) -> Option<f64> {
         self.thin_wall_thickness_mm
@@ -145,6 +154,39 @@ pub fn slab(
     let (ry, ty) = average(a.y);
     let (rz, tz) = average(a.z);
     Ok((Vec3::new(rx, ry, rz), Vec3::new(tx, ty, tz)))
+}
+
+/// Explicit straight-through solid shadow approximation. Both interface losses
+/// use reciprocal external-angle Fresnel; `distance_mm` is the actual geometric
+/// entry/exit interval. This omits refraction and repeated internal reflections.
+pub fn solid_shadow(transmission: Transmission, distance_mm: f64, entry_cosine: f64, exit_cosine: f64, ior: f64) -> Result<Vec3, TransmissionError> {
+    let entry = fresnel(entry_cosine, 1.0, ior)?.reflectance();
+    let exit = fresnel(exit_cosine, 1.0, ior)?.reflectance();
+    Ok(transmission.attenuation(distance_mm)? * ((1.0 - entry) * (1.0 - exit)))
+}
+
+#[cfg(test)]
+mod shadow_tests {
+    use super::*;
+    #[test]
+    fn defaults_and_reciprocal_solid_shadow_match_analytic_beer() {
+        let sigma = Vec3::new(-0.5_f64.ln(), -0.8_f64.ln(), 0.0);
+        let solid = Transmission::new(sigma, None).unwrap();
+        let sheet = Transmission::new(sigma, Some(1.0)).unwrap();
+        assert!(!solid.shadow_transmission());
+        assert!(sheet.shadow_transmission());
+        assert!(solid.with_shadow_transmission(true).shadow_transmission());
+        assert!(!sheet.with_shadow_transmission(false).shadow_transmission());
+        assert!((solid_shadow(solid, 1.0, 1.0, 1.0, 1.5).unwrap() - Vec3::new(0.5, 0.8, 1.0) * 0.96 * 0.96).len() < 1e-14);
+        assert_eq!(solid_shadow(solid, 1.0, 0.2, 0.8, 1.5).unwrap(), solid_shadow(solid, 1.0, 0.8, 0.2, 1.5).unwrap());
+        for ior in [1.0, 1.5, 3.0] {
+            for cosine in [0.0, 0.02, 0.5, 1.0] {
+                let shadow = solid_shadow(solid, 1.0, cosine, cosine, ior).unwrap();
+                assert!(shadow.is_finite() && shadow.x >= 0.0 && shadow.z <= 1.0);
+            }
+        }
+        assert!(solid_shadow(solid, f64::NAN, 1.0, 1.0, 1.5).is_err());
+    }
 }
 
 #[cfg(test)]

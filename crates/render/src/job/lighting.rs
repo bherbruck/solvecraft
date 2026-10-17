@@ -48,6 +48,38 @@ impl AreaLight {
     }
 }
 
+/// Uniform-radiance finite angular disk at infinity. Direction points toward the sun.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sun {
+    pub direction: [f64; 3],
+    pub angular_radius_rad: f64,
+    pub radiance: [f64; 3],
+}
+impl Sun {
+    pub fn validate(self) -> Result<()> {
+        if self.direction.iter().any(|x| !x.is_finite())
+            || !(1e-8..=1e8).contains(&vector(self.direction).len())
+            || !self.angular_radius_rad.is_finite()
+            || !(0.001..=std::f64::consts::FRAC_PI_2).contains(&self.angular_radius_rad)
+            || self.radiance.iter().any(|x| !x.is_finite() || !(0.0..=1e8).contains(x))
+        {
+            return Err(JobError::new(
+                ErrorCode::InvalidRequest,
+                "sun requires finite nonzero direction, radius 0.001..pi/2 radians and radiance 0..100000000",
+            ));
+        }
+        Ok(())
+    }
+    pub fn solid_angle(self) -> f64 {
+        4.0 * std::f64::consts::PI * (0.5 * self.angular_radius_rad).sin().powi(2)
+    }
+    pub fn direction(self) -> Vec3 {
+        let d = vector(self.direction);
+        d / d.len()
+    }
+}
+
 /// A small copyable light list, serialized as an ordinary bounded JSON array.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct AreaLights {
@@ -107,12 +139,16 @@ impl<'de> Deserialize<'de> for AreaLights {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StudioLighting {
+    pub sun: Option<Sun>,
     pub environment: [f64; 3],
     pub area_lights: AreaLights,
 }
 
 impl StudioLighting {
     pub fn validate(self) -> Result<()> {
+        if let Some(sun) = self.sun {
+            sun.validate()?;
+        }
         if self.environment.into_iter().any(|x| !x.is_finite() || !(0.0..=1e6).contains(&x)) {
             return Err(JobError::new(ErrorCode::InvalidRequest, "environment radiance must be finite and 0..1000000"));
         }
@@ -169,6 +205,18 @@ mod tests {
             assert!(bad.validate().is_err());
         }
         assert!(StudioLighting { environment: [f64::INFINITY; 3], ..Default::default() }.validate().is_err());
+    }
+
+    #[test]
+    fn finite_sun_validates_and_integrates_its_solid_angle() {
+        let sun = Sun { direction: [0.0, 0.0, 2.0], angular_radius_rad: 0.2, radiance: [3.0; 3] };
+        sun.validate().unwrap();
+        assert_eq!(sun.direction(), Vec3::Z);
+        assert!((sun.solid_angle() - 2.0 * std::f64::consts::PI * (1.0 - 0.2_f64.cos())).abs() < 1e-14);
+        for radius in [0.0, 0.00001, f64::NAN, 2.0] {
+            assert!(Sun { angular_radius_rad: radius, ..sun }.validate().is_err());
+        }
+        assert!(Sun { direction: [0.0; 3], ..sun }.validate().is_err());
     }
 
     #[test]

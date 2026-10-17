@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 use solidcraft_engine::{
     Session,
-    render::job::{CpuHost, JobId, Phase},
+    render::job::{CpuHost, ErrorCode, JobId, Phase},
 };
 use std::{
     io::Read,
@@ -59,11 +59,23 @@ fn run() -> Result<(), String> {
     let id: JobId = serde_json::from_value(started.get("job").cloned().ok_or("missing job id")?).map_err(|e| e.to_string())?;
     let handle = session.render_job_handle(id).map_err(|e| e.to_string())?;
     eprintln!("Rendering through production gpu-path host: {adapter_report:?}");
-    let status = match handle.wait_timeout(Duration::from_secs(3600)) {
-        Ok(status) => status,
-        Err(error) => {
-            let _ = handle.cancel();
-            return Err(error.to_string());
+    let status = loop {
+        match handle.wait_timeout(Duration::from_secs(10)) {
+            Ok(status) => break status,
+            Err(error) if error.code == ErrorCode::TimedOut && start.elapsed() < Duration::from_secs(3600) => {
+                let status = handle.status().map_err(|e| e.to_string())?;
+                eprintln!(
+                    "Render progress: {:?} {}/{} after {:.1}s",
+                    status.progress.phase,
+                    status.progress.done,
+                    status.progress.total,
+                    start.elapsed().as_secs_f64()
+                );
+            }
+            Err(error) => {
+                let _ = handle.cancel();
+                return Err(error.to_string());
+            }
         }
     };
     let render_and_encode_seconds = start.elapsed().as_secs_f64();

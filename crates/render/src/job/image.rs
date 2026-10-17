@@ -50,6 +50,12 @@ fn add_bytes(sum: &mut u64, count: usize, size: usize) -> Result<()> {
 /// Conservative admission before allocating pixels or projected-work lists. Source Arcs are
 /// counted even when another owner already holds them. Allocator and codec internals are estimates.
 pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
+    if request.environment.is_some() {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "CPU product does not support environment maps"));
+    }
+    if request.textures.is_some() {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "runtime textures require the progressive GPU executor"));
+    }
     admit_geometry(scene, request, MAX_TRIANGLES)
 }
 

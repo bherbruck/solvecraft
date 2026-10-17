@@ -18,9 +18,10 @@ use wgpu::util::DeviceExt;
 mod scene;
 #[cfg(test)]
 mod tests;
-const SHADER: &str = include_str!("path.wgsl");
+mod textures;
+const SHADER: &str = concat!(include_str!("path.wgsl"), "\n", include_str!("shadows.wgsl"), "\n", include_str!("textures.wgsl"));
 const MAX_TRIANGLES: u64 = 1_048_576;
-const PARAMETER_BYTES: usize = 400;
+const PARAMETER_BYTES: usize = 448;
 const TILE: u32 = 262_144;
 const TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -44,7 +45,7 @@ fn checked(scopes: [wgpu::ErrorScopeGuard; 3]) -> Result<()> {
 /// Open and validate a native device before advertising the executor. Failure leaves the
 /// caller's CPU host usable. Respects SOLIDCRAFT_GPU, including the software adapter policy.
 pub fn host() -> Result<ImageHost> {
-    let (adapter, device, queue) = crate::open_headless().map_err(gpu)?;
+    let (adapter, device, queue) = open_headless()?;
     log::info!("gpu-path adapter: {} ({:?})", adapter.get_info().name, adapter.get_info().device_type);
     ImageHost::with_executor(Arc::new(Executor::new(device, queue)?))
 }
@@ -58,9 +59,38 @@ pub fn host_on_adapter(adapter: &wgpu::Adapter) -> Result<ImageHost> {
     if !policy.admits(crate::select::tier_of(info.device_type)) {
         return Err(gpu(format!("viewport adapter does not satisfy SOLIDCRAFT_GPU={}", policy.name())));
     }
-    let (device, queue) = crate::open_device(adapter).map_err(gpu)?;
+    let (device, queue) = open_device(adapter)?;
     log::info!("gpu-path viewport adapter: {} ({:?})", info.name, info.device_type);
     ImageHost::with_executor(Arc::new(Executor::new(device, queue)?))
+}
+
+// Path resources need five storage buffers (geometry, BVH, accumulation, HDRI,
+// textures). Request that limit only on this independent path device: raster and
+// tessellation keep their existing four-buffer downlevel requirement.
+const PATH_STORAGE_BUFFERS: u32 = 5;
+fn device_limits(supported: wgpu::Limits) -> Result<wgpu::Limits> {
+    if supported.max_storage_buffers_per_shader_stage < PATH_STORAGE_BUFFERS {
+        return Err(gpu("gpu-path requires five storage buffers per shader stage"));
+    }
+    let mut limits = wgpu::Limits::downlevel_defaults().using_resolution(supported);
+    limits.max_storage_buffers_per_shader_stage = PATH_STORAGE_BUFFERS;
+    Ok(limits)
+}
+fn open_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue)> {
+    let required_limits = device_limits(adapter.limits())?;
+    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("solidcraft progressive path"),
+        required_features: crate::depth_features(adapter),
+        required_limits,
+        ..Default::default()
+    }))
+    .map_err(gpu)
+}
+fn open_headless() -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    let policy = crate::select::Policy::from_env().map_err(gpu)?;
+    let (adapter, _) = crate::select::pick(policy).ok_or_else(|| gpu(format!("no gpu-path adapter satisfies {}", policy.name())))?;
+    let (device, queue) = open_device(&adapter)?;
+    Ok((adapter, device, queue))
 }
 
 struct Context {
@@ -74,11 +104,12 @@ struct Executor {
 }
 impl Executor {
     fn new(device: wgpu::Device, queue: wgpu::Queue) -> Result<Self> {
+        device_limits(device.limits())?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("gpu-path: {e}")));
         let scopes = scopes(&device);
         let shader =
             device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("gpu-path"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
-        let entries: Vec<_> = (0..4)
+        let entries: Vec<_> = (0..6)
             .map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -117,7 +148,7 @@ fn descriptor() -> Result<ExecutorDescriptor> {
             mode: RenderMode::Preview,
             operation: RenderOperation::Image,
             formats: vec![RenderFormat::Png],
-            features: vec![RenderFeature::Pbr, RenderFeature::Progressive, RenderFeature::Refraction],
+            features: vec![RenderFeature::Pbr, RenderFeature::Progressive, RenderFeature::Refraction, RenderFeature::Hdri],
         }],
         limits: RenderLimits::default(),
         scratch: ScratchLayout { sample_scale: 1, sample_bytes_per_pixel: 16, output_bytes_per_pixel: 16, encoding_bytes_per_pixel: 16 },
@@ -126,6 +157,9 @@ fn descriptor() -> Result<ExecutorDescriptor> {
 
 fn admission(scene: &ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission> {
     options.validate()?;
+    if let Some(environment) = &request.environment {
+        environment.validate()?;
+    }
     let camera = request.camera;
     if options.lens.is_some_and(|lens| lens.aperture_radius_mm > 0.0)
         && (camera.distance < 1e-6 || !(1e-6..=1e6).contains(&(camera.half_height() / camera.distance)) || camera.fov == 0.0)
@@ -156,11 +190,17 @@ fn admission(scene: &ProductScene, request: &ImageRequest, options: JobOptions) 
     let pixels = u64::from(request.width) * u64::from(request.height);
     admission.pixel_scratch_bytes = pixels * 64;
     let vertex_bytes = scene.meshes.iter().map(|m| m.mesh.positions.len() as u64 * 32).sum::<u64>();
-    let triangle_preparation = 400_u64.max(scene::medium_preparation_bytes_per_triangle() as u64);
-    admission.preparation_bytes = (admission.triangles * triangle_preparation + vertex_bytes * 2 + admission.face_appearances * 8)
-        .max(admission.triangles * 192 + vertex_bytes * 2 + pixels * 32)
-        .max(admission.triangles * 96 + vertex_bytes + admission.pixel_scratch_bytes)
+    let triangle_preparation =
+        (admission.triangles * 400_u64.max(scene::planar_preparation_bytes_per_triangle() as u64)).max(scene::medium_preparation_bytes(scene));
+    admission.preparation_bytes = (triangle_preparation + vertex_bytes * 2 + admission.face_appearances * 8)
+        .max(admission.triangles * 232 + vertex_bytes * 2 + pixels * 32)
+        .max(admission.triangles * 116 + vertex_bytes + admission.pixel_scratch_bytes)
         + 1_048_576;
+    admission.preparation_bytes += request.environment.as_ref().map_or(0, |source| source.admitted_bytes());
+    if let Some(textures) = &request.textures {
+        textures.validate_scene(scene)?;
+        admission.preparation_bytes += textures.working_bytes();
+    }
     admission.estimated_total_bytes = admission.geometry_bytes + admission.preparation_bytes;
     if admission.estimated_total_bytes > 512 * 1024 * 1024 {
         return Err(JobError::new(ErrorCode::LimitExceeded, "gpu-path job exceeds its 512 MiB admission estimate"));
@@ -175,8 +215,18 @@ impl ImageExecutor for Executor {
     fn admit(&self, scene: &ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission> {
         let a = admission(scene, request, options)?;
         let limit = self.context.device.limits().max_storage_buffer_binding_size;
-        let geometry_bytes = 16 + a.triangles.max(1) * 64 + scene.meshes.iter().map(|m| m.mesh.positions.len() as u64 * 32).sum::<u64>();
-        if geometry_bytes > limit || u64::from(request.width) * u64::from(request.height) * 16 > limit {
+        let geometry_bytes = 16 + a.triangles.max(1) * 84 + scene.meshes.iter().map(|m| m.mesh.positions.len() as u64 * 32).sum::<u64>();
+        let texture_bytes = request
+            .textures
+            .as_ref()
+            .map_or(16, |t| t.summary().linear_pixel_bytes + 4 * (5 + scene.meshes.len() as u64 + t.bindings().len() as u64 * 16));
+        let environment_bytes =
+            request.environment.as_ref().map_or(48, |source| 16 + u64::from(source.info().width) * u64::from(source.info().height) * 32);
+        if texture_bytes > limit
+            || environment_bytes > limit
+            || geometry_bytes > limit
+            || u64::from(request.width) * u64::from(request.height) * 16 > limit
+        {
             return Err(JobError::new(ErrorCode::LimitExceeded, "gpu-path storage buffer exceeds this device's limit"));
         }
         Ok(a)
@@ -209,20 +259,50 @@ struct Task {
     metrics: (f64, u64, f64),
 }
 impl Task {
-    fn new(context: Arc<Context>, scene: ProductScene, request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Self> {
+    fn new(context: Arc<Context>, scene: ProductScene, mut request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Self> {
         cancel.check()?;
         let start = Instant::now();
+        if let Some(resources) = &request.textures {
+            resources.validate_scene(&scene)?;
+        }
+        let texture_upload = textures::flatten(request.textures.as_deref(), scene.meshes.len(), request.camera.target, &cancel)?;
+        request.textures = None; // GPU upload owns decoded pixels; release captured source bytes.
         let upload = scene::flatten(&scene, request.camera.target, &cancel)?;
         let bvh_ms = start.elapsed().as_secs_f64() * 1000.0;
-        let upload_bytes = (upload.geometry.len() + upload.nodes.len()) as u64;
+        let mut upload_bytes = (upload.geometry.len() + upload.nodes.len() + texture_upload.len()) as u64;
         let uploading = Instant::now();
         drop(scene);
         let device = &context.device;
         let scopes = [wgpu::ErrorFilter::Validation, wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal].map(|f| device.push_error_scope(f));
         let make =
             |label, bytes: &[u8], usage| device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytes, usage });
+        let mut environment_bytes = Vec::new();
+        if let Some(source) = &request.environment {
+            let prepared = source.prepare(&cancel)?;
+            environment_bytes = scene::reserved(16 + prepared.texels().len() * 32)?;
+            let [width, height] = prepared.dimensions();
+            for x in [width, height, width * height, 0] {
+                environment_bytes.extend_from_slice(&x.to_le_bytes());
+            }
+            for (index, texel) in prepared.texels().iter().enumerate() {
+                if index % 1024 == 0 {
+                    cancel.check()?;
+                }
+                for x in texel.rgb.into_iter().chain([texel.pdf, texel.threshold]) {
+                    environment_bytes.extend_from_slice(&x.to_le_bytes());
+                }
+                environment_bytes.extend_from_slice(&texel.alias.to_le_bytes());
+                environment_bytes.extend_from_slice(&[0; 8]);
+            }
+        } else {
+            environment_bytes.resize(48, 0);
+        }
+        upload_bytes += environment_bytes.len() as u64;
+        let environment = make("path environment", &environment_bytes, wgpu::BufferUsages::STORAGE);
+        drop(environment_bytes);
         let triangles = make("path triangles", &upload.geometry, wgpu::BufferUsages::STORAGE);
         let nodes = make("path BVH", &upload.nodes, wgpu::BufferUsages::STORAGE);
+        let texture_buffer = make("path opaque textures", &texture_upload, wgpu::BufferUsages::STORAGE);
         let uniform = make("path parameters", &[0; PARAMETER_BYTES], wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST);
         let size = u64::from(request.width) * u64::from(request.height) * 16;
         let accumulation = device.create_buffer(&wgpu::BufferDescriptor {
@@ -237,11 +317,12 @@ impl Task {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let entries: Vec<_> = [&uniform, &triangles, &nodes, &accumulation]
+        let mut entries: Vec<_> = [&uniform, &triangles, &nodes, &accumulation, &environment]
             .iter()
             .enumerate()
             .map(|(binding, buffer)| wgpu::BindGroupEntry { binding: binding as u32, resource: buffer.as_entire_binding() })
             .collect();
+        entries.push(wgpu::BindGroupEntry { binding: 5, resource: texture_buffer.as_entire_binding() });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("gpu-path"), layout: &context.layout, entries: &entries });
         let mut error = None;
         for scope in scopes.into_iter().rev() {
@@ -309,7 +390,7 @@ impl Task {
         scene::vector(
             &mut bytes,
             Vec3::new(lighting.environment[0], lighting.environment[1], lighting.environment[2]),
-            if self.options.lighting.is_some() { 1.0 } else { 0.0 },
+            if self.options.lighting.is_some() || self.request.environment.is_some() { 1.0 } else { 0.0 },
         );
         scene::vector(&mut bytes, Vec3::ZERO, lighting.area_lights.iter().count() as f32);
         for light in lighting.area_lights.iter() {
@@ -319,7 +400,21 @@ impl Task {
             scene::vector(&mut bytes, vector(light.v), 0.0);
             scene::vector(&mut bytes, vector(light.radiance), 0.0);
         }
-        bytes.resize(PARAMETER_BYTES, 0);
+        bytes.resize(400, 0);
+        if let Some(source) = &self.request.environment {
+            let info = source.info();
+            scene::vector(&mut bytes, Vec3::new(info.rotation_rad.cos(), info.rotation_rad.sin(), info.intensity), 1.0);
+        } else {
+            scene::vector(&mut bytes, Vec3::ZERO, 0.0);
+        }
+        if let Some(sun) = lighting.sun {
+            scene::vector(&mut bytes, sun.direction(), sun.angular_radius_rad.cos() as f32);
+            let [r, g, b] = sun.radiance;
+            scene::vector(&mut bytes, Vec3::new(r, g, b), (1.0 / sun.solid_angle()) as f32);
+        } else {
+            bytes.resize(PARAMETER_BYTES, 0);
+        }
+
         bytes
     }
     fn dispatch(&mut self) -> Result<()> {

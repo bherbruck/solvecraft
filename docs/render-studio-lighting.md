@@ -47,8 +47,8 @@ there is no light-selection probability. The actual opaque sampling density
 includes its (1 - transmission) branch probability. Delta events receive emission
 weight one. At the final allowed surface bounce, direct samples have weight one
 because there is no continuing BSDF sample. Shadow intersections stop at the
-sampled emitter; geometry beyond it cannot shadow it. Glass shadow caustics remain
-outside this estimator; delta transmission paths may see emitters directly.
+sampled emitter; geometry beyond it cannot shadow it. See [glass shadow connections](render-glass-shadows.md) for thin-sheet MIS and
+the opt-in solid straight-through direct-light approximation.
 
 Accumulation stays linear. Only final output divides by coverage, applies exposure,
 then one selected tone map and sRGB encoding. `aces_fitted` uses Narkowicz's published

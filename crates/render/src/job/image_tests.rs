@@ -5,7 +5,7 @@ use solidcraft_geom::{Aabb3, Mesh};
 fn request() -> ImageRequest {
     let mut camera = Camera { distance: 50.0, ..Default::default() };
     camera.set_view(StandardView::Front);
-    ImageRequest { camera, width: 64, height: 64, background: [20, 40, 60], transparent_background: true }
+    ImageRequest { textures: None, environment: None, camera, width: 64, height: 64, background: [20, 40, 60], transparent_background: true }
 }
 
 fn square(name: &str, colour: [u8; 3], opacity: f64, offset: Vec3) -> ProductMesh {

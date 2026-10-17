@@ -90,8 +90,10 @@ pub struct JobStatus {
     pub job: JobId,
     pub scene_generation: u64,
     pub request: ImageRequest,
+    pub environment: Option<crate::lighting::environment::EnvironmentInfo>,
     pub resolved: crate::ResolvedRequest,
     pub options: JobOptions,
+    pub textures: Option<super::textures::TextureSummary>,
     pub progress: Progress,
     pub error: Option<JobError>,
     pub frame: Option<FrameInfo>,
@@ -103,9 +105,11 @@ struct Data {
     frame: Option<Arc<RenderFrame>>,
 }
 struct Record {
+    textures: Option<super::textures::TextureSummary>,
     id: JobId,
     scene_generation: u64,
     request: ImageRequest,
+    environment: Option<crate::lighting::environment::EnvironmentInfo>,
     resolved: crate::ResolvedRequest,
     cancel: CancelToken,
     options: JobOptions,
@@ -134,8 +138,10 @@ impl JobHandle {
             job: self.0.id,
             scene_generation: self.0.scene_generation,
             request: self.0.request.clone(),
+            environment: self.0.environment.clone(),
             resolved: self.0.resolved.clone(),
             options: self.0.options,
+            textures: self.0.textures.clone(),
             progress: data.progress,
             error: data.error.clone(),
             frame: data.frame.as_ref().map(|f| f.info.clone()),
@@ -179,6 +185,7 @@ impl JobHandle {
 }
 
 struct Work {
+    request: ImageRequest,
     executor: Arc<dyn ImageExecutor>,
     scene: ProductScene,
     handle: JobHandle,
@@ -221,7 +228,7 @@ impl Running {
             data.progress.phase = Phase::Preparing;
         }
         let task = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            work.executor.begin(work.scene, work.handle.0.request.clone(), work.handle.0.options, work.handle.0.cancel.clone())
+            work.executor.begin(work.scene, work.request, work.handle.0.options, work.handle.0.cancel.clone())
         }))
         .unwrap_or_else(|_| Err(JobError::new(ErrorCode::Internal, "image executor failed while preparing the job")));
         match task {
@@ -471,10 +478,17 @@ impl ImageHost {
             return Err(JobError::new(ErrorCode::QueueFull, "image queue is full"));
         }
         let reservation = self.0.shared.budget.reserve(estimated_total_bytes)?;
+        // Keep large captured sources in admitted work only. Status/retained frames
+        // must not keep resource bytes alive after the reservation is shrunk.
+        let environment = request.environment.as_ref().map(|source| source.info().clone());
+        let public_request = ImageRequest { textures: None, environment: None, ..request.clone() };
+        let textures = request.textures.as_ref().map(|t| t.summary());
         let handle = JobHandle(Arc::new(Record {
+            textures,
             id,
             scene_generation,
-            request,
+            request: public_request,
+            environment,
             resolved,
             cancel: CancelToken::default(),
             options,
@@ -482,7 +496,7 @@ impl ImageHost {
             #[cfg(not(target_arch = "wasm32"))]
             done: Condvar::new(),
         }));
-        queue.push_back(Work { executor: self.0.executor.clone(), scene, handle: handle.clone(), reservation });
+        queue.push_back(Work { request, executor: self.0.executor.clone(), scene, handle: handle.clone(), reservation });
         drop(queue);
         #[cfg(not(target_arch = "wasm32"))]
         self.0.shared.wake.notify_one();

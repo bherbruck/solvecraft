@@ -18,6 +18,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let mut exposure = None;
     let mut lighting = None;
     let mut tone_map = None;
+    let mut environment = None;
     let mut transparent = false;
     let mut overwrite = false;
     let mut timeout = 120u64;
@@ -28,7 +29,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             "--transparent" => transparent = true,
             "--overwrite" => overwrite = true,
             "--out" | "--setup" | "--width" | "--height" | "--timeout" | "--samples" | "--max-depth" | "--seed" | "--exposure" | "--lighting"
-            | "--tone-map" => {
+            | "--tone-map" | "--environment" => {
                 i += 1;
                 let value = args.get(i).ok_or_else(|| format!("missing value for {arg}"))?;
                 match arg.as_str() {
@@ -40,12 +41,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
                     "--max-depth" => max_depth = Some(value.parse::<u32>().map_err(|_| "invalid depth")?),
                     "--seed" => seed = Some(value.parse::<u32>().map_err(|_| "invalid seed")?),
                     "--exposure" => exposure = Some(value.parse::<f64>().map_err(|_| "invalid exposure")?),
+                    "--environment" => {
+                        let text =
+                            solidcraft_engine::io::vfs::read_to_string(value, 65536).map_err(|e| format!("could not read environment: {e}"))?;
+                        environment = Some(serde_json::from_str::<serde_json::Value>(&text).map_err(|e| e.to_string())?);
+                    }
                     "--lighting" => {
-                        let size = std::fs::metadata(value).map_err(|e| format!("could not inspect lighting: {e}"))?.len();
-                        if size > 65536 {
-                            return Err("lighting JSON exceeds 64 KiB".into());
-                        }
-                        let text = std::fs::read_to_string(value).map_err(|e| format!("could not read lighting: {e}"))?;
+                        let text = solidcraft_engine::io::vfs::read_to_string(value, 65536).map_err(|e| format!("could not read lighting: {e}"))?;
                         lighting = Some(serde_json::from_str::<solidcraft_engine::render::job::StudioLighting>(&text).map_err(|e| e.to_string())?);
                     }
                     "--tone-map" => {
@@ -92,7 +94,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if let Some(exposure) = exposure {
         settings.exposure_ev = exposure;
     }
-    let params = json!({"settings":settings,"transparent_background":transparent,"progressive":progressive,"samples":samples,"max_depth":max_depth,"seed":seed,"lighting":lighting,"tone_map":tone_map});
+    let params = json!({"settings":settings,"transparent_background":transparent,"progressive":progressive,"samples":samples,"max_depth":max_depth,"seed":seed,"lighting":lighting,"tone_map":tone_map,"environment":environment});
     let preflight = session.execute("render.preflight", &params).map_err(|e| e.to_string())?;
     let started = session.execute("render.start", &params).map_err(|e| e.to_string())?;
     let id: JobId = serde_json::from_value(started["job"].clone()).map_err(|e| e.to_string())?;

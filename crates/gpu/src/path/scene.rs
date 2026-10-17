@@ -1,4 +1,8 @@
 //! Original median-split BVH. World geometry is rebased around the camera target for f32.
+#[path = "planar_patches.rs"]
+mod planar_patches;
+use std::collections::HashMap;
+
 use solidcraft_geom::Vec3;
 use solidcraft_render::{
     ProductScene,
@@ -14,9 +18,29 @@ pub(super) struct Triangle {
     pub transmission: Option<Transmission>,
     pub medium: u32,
 }
-type MediumEdge = ([i64; 3], [i64; 3], i32);
-pub(super) fn medium_preparation_bytes_per_triangle() -> usize {
-    std::mem::size_of::<Triangle>() + 3 * std::mem::size_of::<MediumEdge>() + std::mem::size_of::<usize>()
+type MediumEdge = (usize, usize, i32);
+pub(super) fn medium_preparation_bytes(scene: &ProductScene) -> u64 {
+    // Validation consumes one body's scratch at a time. Opaque/thin-sheet bodies
+    // allocate none of the weld table: do not charge their triangles for it.
+    let closed = |t: Option<Transmission>| t.is_some_and(|v| v.thin_wall_thickness_mm().is_none());
+    let mut total = 0u64;
+    let mut largest_medium = 0u64;
+    for body in &scene.meshes {
+        let triangles = body.mesh.triangles.len() as u64;
+        total = total.saturating_add(triangles);
+        if closed(body.transmission) || body.faces.iter().any(|face| closed(face.transmission)) {
+            largest_medium = largest_medium.max(triangles);
+        }
+    }
+    // Three representatives per triangle at most. The 320 includes positions,
+    // full eight-slot hash entries, control bytes and worst-case table rounding.
+    let scratch = 3 * (std::mem::size_of::<MediumEdge>() + 320) + std::mem::size_of::<usize>();
+    total.saturating_mul(std::mem::size_of::<Triangle>() as u64).saturating_add(largest_medium.saturating_mul(scratch as u64))
+}
+
+pub(super) fn planar_preparation_bytes_per_triangle() -> usize {
+    let common = std::mem::size_of::<Triangle>() + 2 * std::mem::size_of::<Node>();
+    (common + planar_patches::temporary_bytes_per_triangle()).max(common + 84 + 64 + 4)
 }
 
 impl Triangle {
@@ -116,6 +140,9 @@ pub(super) fn flatten(scene: &ProductScene, origin: Vec3, cancel: &CancelToken) 
             if (p[1] - p[0]).cross(p[2] - p[0]).len() <= 1e-12 {
                 continue;
             }
+            if transmission.is_some() && surface.clear_coat().is_some() {
+                return Err(invalid("clear coat and transmission cannot share a surface"));
+            }
             if transmission.is_some() && surface.metallic() != 0.0 {
                 return Err(invalid("transmission requires a nonmetallic surface"));
             }
@@ -150,12 +177,14 @@ pub(super) fn flatten(scene: &ProductScene, origin: Vec3, cancel: &CancelToken) 
     let mut nodes = reserved(triangles.len().saturating_mul(2).max(1))?;
     nodes.push(Node::default());
     build(&mut triangles, 0, &mut nodes, 0, cancel)?;
+    let patches = planar_patches::ids(&triangles, cancel)?;
     let extent = nodes.first().map_or(1.0, |n| n.lo.iter().zip(n.hi).map(|(a, b)| b - a).fold(0.0f32, f32::max));
-    let mut geometry = reserved(16 + triangles.len().max(1) * 64 + vertices.len())?;
-    let mut materials = reserved(triangles.len().max(1) * 48)?;
+    let mut geometry = reserved(16 + triangles.len().max(1) * 84 + vertices.len())?;
+    let mut materials = reserved(triangles.len().max(1) * 64)?;
     let vertex_word = 4 + triangles.len().max(1) * 4;
     let material_word = vertex_word + vertices.len() / 4;
-    for word in [triangles.len() as u32, vertex_word as u32, material_word as u32, vertex_count as u32] {
+    let patch_word = material_word + triangles.len().max(1) * 16;
+    for word in [triangles.len() as u32, vertex_word as u32, material_word as u32, patch_word as u32] {
         geometry.extend_from_slice(&word.to_le_bytes());
     }
     for (material, t) in triangles.into_iter().enumerate() {
@@ -173,15 +202,27 @@ pub(super) fn flatten(scene: &ProductScene, origin: Vec3, cancel: &CancelToken) 
             t.transmission.and_then(|t| t.thin_wall_thickness_mm()).unwrap_or(-1.0) as f32,
         );
         vector(&mut materials, t.transmission.map_or(Vec3::ZERO, |t| t.extinction()), t.medium as f32);
+        let coat = t.surface.clear_coat().map_or(Vec3::new(0.0, 0.5, 1.5), |c| Vec3::new(c.weight(), c.roughness(), c.ior()));
+        vector(&mut materials, coat, if t.transmission.is_some_and(|t| t.shadow_transmission()) { 1.0 } else { 0.0 });
     }
     if geometry.len() == 16 {
         geometry.resize(32, 0);
-        materials.resize(48, 0);
+        materials.resize(64, 0);
     }
     geometry.extend_from_slice(&vertices);
     drop(vertices);
     geometry.extend_from_slice(&materials);
     drop(materials);
+    if patches.is_empty() {
+        geometry.extend_from_slice(&0u32.to_le_bytes());
+    } else {
+        for (index, patch) in patches.into_iter().enumerate() {
+            if index % 1024 == 0 {
+                cancel.check()?;
+            }
+            geometry.extend_from_slice(&patch.to_le_bytes());
+        }
+    }
     let mut node_bytes = reserved(nodes.len() * 32)?;
     for node in nodes {
         for x in node.lo {
@@ -196,15 +237,84 @@ pub(super) fn flatten(scene: &ProductScene, origin: Vec3, cancel: &CancelToken) 
     Ok(Upload { geometry, nodes: node_bytes, epsilon: (extent * 1e-7).max(1e-5) })
 }
 
-// Volume transmission needs a consistently oriented closed two-manifold. Tessellation
-// often duplicates vertices at face seams; weld position keys at one nanometre in mm
-// units for this topology check only. The uploaded geometry itself is unchanged.
+const MEDIUM_WELD_MM: f64 = 1e-6;
+
+#[derive(Default)]
+struct MediumBucket {
+    representatives: [usize; 8],
+    len: usize,
+}
+
+/// Only topology uses these representatives; every uploaded vertex stays unchanged.
+/// Checking neighboring cells avoids rounding-boundary cracks in curved CAD seams.
+struct MediumWeld {
+    cells: HashMap<[i64; 3], MediumBucket>,
+    positions: Vec<Vec3>,
+    limit: usize,
+}
+
+impl MediumWeld {
+    fn new(limit: usize) -> Result<Self> {
+        let mut cells = HashMap::new();
+        cells.try_reserve(limit).map_err(|_| JobError::new(ErrorCode::AllocationFailed, "glass topology allocation failed"))?;
+        Ok(Self { cells, positions: reserved(limit)?, limit })
+    }
+
+    fn key(&mut self, point: Vec3) -> Result<usize> {
+        let xyz = [point.x, point.y, point.z];
+        // Leave room for neighboring cells and refuse saturated integer casts.
+        if !xyz.into_iter().all(|v| v.is_finite() && v.abs() <= 1e9) {
+            return Err(invalid("glass topology position exceeds finite coordinate bounds"));
+        }
+        let cell = xyz.map(|v| (v / MEDIUM_WELD_MM).floor() as i64);
+        let mut found: Option<usize> = None;
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    let neighbor = [cell[0] + dx, cell[1] + dy, cell[2] + dz];
+                    let Some(bucket) = self.cells.get(&neighbor) else { continue };
+                    for &index in bucket.representatives.iter().take(bucket.len) {
+                        let other = self.positions.get(index).ok_or_else(|| invalid("missing glass topology representative"))?;
+                        let delta = point - *other;
+                        if delta.dot(delta) <= MEDIUM_WELD_MM * MEDIUM_WELD_MM && found.is_none_or(|old| index < old) {
+                            found = Some(index);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(index) = found {
+            return Ok(index);
+        }
+        if self.positions.len() >= self.limit {
+            return Err(invalid("glass topology representative budget exceeded"));
+        }
+        let index = self.positions.len();
+        let bucket = self.cells.entry(cell).or_default();
+        // Split a unit cell into eight half-size cubes: points sharing one are
+        // at most sqrt(3)/2 tolerances apart, so a cell has at most eight reps.
+        let slot = bucket.representatives.get_mut(bucket.len).ok_or_else(|| invalid("glass topology cell budget exceeded"))?;
+        *slot = index;
+        bucket.len += 1;
+        self.positions.push(point);
+        Ok(index)
+    }
+}
+
+// Volume transmission needs a consistently oriented closed two-manifold. CAD
+// tessellation duplicates face-seam vertices; compare their actual Euclidean
+// separation at the existing one-nanometre-in-mm tolerance, without modifying
+// uploaded geometry or merging chains beyond a representative's tolerance.
 fn validate_medium(triangles: &[Triangle], cancel: &CancelToken) -> Result<()> {
-    let Some(first) = triangles.iter().find(|t| t.transmission.is_some_and(|v| v.thin_wall_thickness_mm().is_none())) else { return Ok(()) };
+    let Some(first) = triangles.iter().find(|t| t.transmission.is_some_and(|v| v.thin_wall_thickness_mm().is_none())) else {
+        return Ok(());
+    };
     if triangles.iter().any(|t| t.transmission != first.transmission || t.surface.dielectric_ior() != first.surface.dielectric_ior()) {
         return Err(invalid("a closed glass body must use one homogeneous transmission medium; use separate bodies or thin walls"));
     }
-    let mut edges = reserved::<MediumEdge>(triangles.len() * 3)?;
+    let vertex_count = triangles.len().checked_mul(3).ok_or_else(|| invalid("glass topology vertex count overflow"))?;
+    let mut edges = reserved::<MediumEdge>(vertex_count)?;
+    let mut weld = MediumWeld::new(vertex_count)?;
     let mut parents = reserved::<usize>(triangles.len())?;
     parents.extend(0..triangles.len());
     let origin = first.p[0];
@@ -213,7 +323,7 @@ fn validate_medium(triangles: &[Triangle], cancel: &CancelToken) -> Result<()> {
         if index % 1024 == 0 {
             cancel.check()?;
         }
-        let keys = triangle.p.map(|p| [p.x, p.y, p.z].map(|v| (v * 1e6).round() as i64));
+        let keys = [weld.key(triangle.p[0])?, weld.key(triangle.p[1])?, weld.key(triangle.p[2])?];
         for (a, b) in [(0, 1), (1, 2), (2, 0)] {
             if keys[a] == keys[b] {
                 return Err(invalid("glass triangle collapses at the 1e-6 mm topology tolerance"));
@@ -304,3 +414,7 @@ pub(super) fn vector(bytes: &mut Vec<u8>, v: Vec3, w: f32) {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
 }
+
+#[cfg(test)]
+#[path = "scene_weld_tests.rs"]
+mod weld_tests;
