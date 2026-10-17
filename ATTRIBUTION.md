@@ -466,3 +466,5 @@ and shares that effective count with the surface attachments and CAD callbacks.
 Vulkan, DirectX 12, Metal and WebGPU retain their requested multisampling.
 A frame whose meshes the GPU refuses to stage (device lost or out of memory) is
 skipped with a warning instead of panicking (#1469).
+Paint callbacks are prepared only after a drawable is acquired, so a skipped
+surface frame cannot strand cached meshes without their GPU initialization.

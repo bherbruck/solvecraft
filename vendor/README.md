@@ -210,3 +210,5 @@ SolidCraft changes:
   clamped to it (`clamp_surface_extent`, aspect ratio kept) and egui is drawn at the matching
   smaller scale, instead of a `Surface::configure` validation panic (#869). The resize path and
   an unsupported surface no longer unwrap.
+- `src/winit.rs`: acquire a drawable before preparing paint callbacks, so a skipped
+  surface frame cannot discard initialization commands for cached viewport meshes.
