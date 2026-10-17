@@ -7,6 +7,117 @@ fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-9)
 }
 
+/// A single spherical face bounded by one meridian edge used in both directions.
+/// `end_angle` is measured from the north pole toward the seam; PI is the south pole.
+fn seam_sphere_step(center: Vec3, radius: f64, axis: Vec3, reference: Vec3, azimuth: f64, reverse_edge: bool, end_angle: f64) -> String {
+    let seam = reference * azimuth.cos() + axis.cross(reference) * azimuth.sin();
+    let end = center + (axis * end_angle.cos() + seam * end_angle.sin()) * radius;
+    let north = center + axis * radius;
+    let circle_axis = axis.cross(seam);
+    let point = |p: Vec3| format!("({:.16},{:.16},{:.16})", p.x, p.y, p.z);
+    let (start, finish, sense, first, second) = if reverse_edge { (9, 7, "F", 15, 14) } else { (7, 9, "T", 14, 15) };
+    format!(
+        "{HEAD}#1=CARTESIAN_POINT('',{});\n#2=DIRECTION('',{});\n#3=DIRECTION('',{});\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n#5=SPHERICAL_SURFACE('',#4,{radius:.16});\n#6=CARTESIAN_POINT('',{});\n#7=VERTEX_POINT('',#6);\n#8=CARTESIAN_POINT('',{});\n#9=VERTEX_POINT('',#8);\n#10=DIRECTION('',{});\n#11=AXIS2_PLACEMENT_3D('',#1,#10,#12);\n#12=DIRECTION('',{});\n#13=CIRCLE('',#11,{radius:.16});\n#16=EDGE_CURVE('',#{start},#{finish},#13,.{sense}.);\n#14=ORIENTED_EDGE('',*,*,#16,.T.);\n#15=ORIENTED_EDGE('',*,*,#16,.F.);\n#17=EDGE_LOOP('',(#{first},#{second}));\n#18=FACE_OUTER_BOUND('',#17,.T.);\n#19=ADVANCED_FACE('',(#18),#5,.T.);\n#20=CLOSED_SHELL('',(#19));\n#21=MANIFOLD_SOLID_BREP('Ball',#20);\n#22=SHAPE_REPRESENTATION('',(#21),$);\n{TAIL}",
+        point(center),
+        point(axis),
+        point(reference),
+        point(north),
+        point(end),
+        point(circle_axis),
+        point(seam),
+    )
+}
+
+fn assert_seam_sphere(text: &str, radius: f64) {
+    let imp = step_import(text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    let body = &imp.bodies[0];
+    assert!(body.closed);
+    let m = measure(&body.body).unwrap();
+    let want_volume = 4.0 / 3.0 * std::f64::consts::PI * radius.powi(3);
+    let want_area = 4.0 * std::f64::consts::PI * radius.powi(2);
+    assert!(rel(m.volume, want_volume) < 1e-3, "volume {} vs {want_volume}", m.volume);
+    assert!(rel(m.area, want_area) < 1e-3, "area {} vs {want_area}", m.area);
+    let mesh = body.body.display_mesh(radius * 1e-3).unwrap();
+    assert!(!mesh.positions.is_empty() && !mesh.triangles.is_empty());
+}
+
+#[test]
+fn seam_only_sphere_imports_as_a_whole_ball() {
+    let text = seam_sphere_step(Vec3::ZERO, 2.0, Vec3::Z, Vec3::X, 0.0, false, std::f64::consts::PI);
+    assert_seam_sphere(&text, 2.0);
+}
+
+#[test]
+fn tilted_seam_only_sphere_imports_as_a_whole_ball() {
+    let axis = Vec3::new(0.0, std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2);
+    let text = seam_sphere_step(Vec3::new(30.0, -12.0, 7.0), 1.9845, axis, Vec3::X, 0.7, false, std::f64::consts::PI);
+    assert_seam_sphere(&text, 1.9845);
+}
+
+#[test]
+fn reversed_seam_only_sphere_imports_as_a_whole_ball() {
+    let text = seam_sphere_step(Vec3::ZERO, 2.0, Vec3::Z, Vec3::X, 0.0, true, std::f64::consts::PI);
+    assert_seam_sphere(&text, 2.0);
+}
+
+#[test]
+fn seam_only_sphere_whose_placement_axis_misses_its_poles_imports_as_a_whole_ball() {
+    // The seam runs between poles on the X axis, while the surface's placement points along Z.
+    let text = seam_sphere_step(Vec3::new(5.0, 6.0, 7.0), 3.0, Vec3::X, Vec3::Y, 0.4, false, std::f64::consts::PI);
+    let placement = |axis: &str, reference: &str| format!("#2=DIRECTION('',{axis});\n#3=DIRECTION('',{reference});\n");
+    let (one, zero) = ("1.0000000000000000", "0.0000000000000000");
+    let (x, y, z) = (format!("({one},{zero},{zero})"), format!("({zero},{one},{zero})"), format!("({zero},{zero},{one})"));
+    let text = text.replacen(&placement(&x, &y), &placement(&z, &x), 1);
+    assert!(text.contains(&placement(&z, &x)), "the placement was not replaced");
+    assert_seam_sphere(&text, 3.0);
+}
+
+#[test]
+fn seam_only_sphere_void_is_turned_inside_out() {
+    // A 5 mm ball with a 2 mm ball-shaped void, written as voids are: the void's closed shell
+    // (faces facing out of it) used through an ORIENTED_CLOSED_SHELL with orientation .F.
+    let renumber = |text: &str, by: u64| {
+        let mut out = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            out.push(c);
+            if c == '#' {
+                let mut n = String::new();
+                while let Some(d) = chars.next_if(char::is_ascii_digit) {
+                    n.push(d);
+                }
+                out += &(n.parse::<u64>().unwrap() + by).to_string();
+            }
+        }
+        out
+    };
+    let inner = seam_sphere_step(Vec3::ZERO, 2.0, Vec3::Z, Vec3::X, 0.0, false, std::f64::consts::PI);
+    let inner = &inner[inner.find("#1=").unwrap()..inner.find("#21=").unwrap()];
+    let outer = seam_sphere_step(Vec3::ZERO, 5.0, Vec3::Z, Vec3::X, 1.0, false, std::f64::consts::PI);
+    let brep = "#21=MANIFOLD_SOLID_BREP('Ball',#20);\n";
+    assert!(outer.contains(brep));
+    let void = format!("{}#200=ORIENTED_CLOSED_SHELL('',*,#120,.F.);\n#21=BREP_WITH_VOIDS('Hollow',#20,(#200));\n", renumber(inner, 100));
+    let text = outer.replacen(brep, &void, 1);
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    let want = 4.0 / 3.0 * std::f64::consts::PI * (125.0 - 8.0);
+    assert!(rel(m.volume, want) < 1e-3, "volume {} vs {want}", m.volume);
+    let area = 4.0 * std::f64::consts::PI * (25.0 + 4.0);
+    assert!(rel(m.area, area) < 1e-3, "area {} vs {area}", m.area);
+}
+
+#[test]
+fn non_antipodal_seam_sphere_does_not_panic() {
+    let text = seam_sphere_step(Vec3::ZERO, 2.0, Vec3::Z, Vec3::X, 0.0, false, 2.5);
+    let result = std::panic::catch_unwind(|| step_import(&text));
+    assert!(result.is_ok());
+}
+
 #[test]
 #[ignore = "manual STEP import timing; run without concurrent builds"]
 fn benchmark_independent_step_solids() {

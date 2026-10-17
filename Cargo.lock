@@ -4078,6 +4078,7 @@ dependencies = [
  "rustls",
  "serde_json",
  "solidcraft-engine",
+ "solidcraft-space-mouse",
  "solidcraft-ui-egui",
  "ureq",
  "windows-sys 0.61.2",
@@ -4235,6 +4236,10 @@ dependencies = [
  "thiserror 2.0.21",
  "ttf-parser",
 ]
+
+[[package]]
+name = "solidcraft-space-mouse"
+version = "0.14.0"
 
 [[package]]
 name = "solidcraft-ui-egui"

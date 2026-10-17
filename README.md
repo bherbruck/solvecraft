@@ -218,8 +218,9 @@ unaccepted artwork Open; run `cargo xtask icons` to check the collection.
 
 Windows builds: `cargo xwin build --release --target x86_64-pc-windows-msvc -p solidcraft`.
 
-On Windows and Linux, SolidCraft detects a connected 3Dconnexion SpaceNavigator or SpaceMouse through its
-multi-axis HID interface. Move the cap to pan and zoom, and tilt or twist it to rotate the 3D view.
+On Windows and Linux, SolidCraft detects a connected 3D mouse through its HID multi-axis
+controller interface: a 3Dconnexion SpaceNavigator or SpaceMouse, or a homemade device that
+declares itself one. Move the cap to pan and zoom, and tilt or twist it to rotate the 3D view.
 While editing a sketch, the cap pans and zooms without changing the sketch view. The Navigation
 page in Preferences has an on/off switch, a speed control and, for each of the cap's six axes, an
 invert switch and a speed for the 3D mouse. The web app reads
@@ -236,17 +237,24 @@ zones) applies as it does in other programs, and no udev rule is needed. With no
 the motion is the same as without the daemon. Without `spacenavd`, SolidCraft reads `/dev/hidrawN`
 directly, so the logged-in user needs access to the device. A udev rule that adds the `uaccess`
 tag does that, for example
-`/etc/udev/rules.d/70-3d-mouse.rules` for devices with 3Dconnexion's vendor id:
+`/etc/udev/rules.d/70-3d-mouse.rules` for USB devices with 3Dconnexion's vendor id, and for its
+Bluetooth ones (where `idVendor` isn't set, so the HID id is matched instead):
 
 ```
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="256f", TAG+="uaccess"
+SUBSYSTEM=="hidraw", KERNELS=="0005:256F:*", TAG+="uaccess"
 ```
 
-Older SpaceNavigators use Logitech's vendor id `046d`; add a rule with their product id (see `lsusb`)
-instead of matching every Logitech device. Reload with `sudo udevadm control --reload && sudo udevadm trigger`, then replug the device. The Flatpak
-sandbox does not expose hidraw devices, so the 3D mouse only works with native builds there for now.
-Devices that send all six axes in HID report 1 (some homemade ones do) are recognised from their
-report descriptor, so they work as well.
+Older SpaceNavigators use Logitech's vendor id `046d`, so add a rule with their product id (see
+`lsusb`) instead of matching every Logitech device. A homemade device needs a rule with its own
+vendor and product id. Reload with `sudo udevadm control --reload && sudo udevadm trigger`, then
+replug the device. The Flatpak sandbox does not expose hidraw devices, so the 3D mouse only works
+with native builds there for now.
+
+SolidCraft finds the axes from the device's report descriptor, so it doesn't matter how a device
+lays them out: translation and rotation in separate reports (3Dconnexion's wired devices), all six
+in one (its wireless ones and most homemade devices), after the buttons, or narrower than 16 bits.
+Each axis is scaled from the range the descriptor declares.
 
 In the browser: `cd apps/solidcraft-web && trunk build --release --public-url ./` (WebGPU, or
 WebGL2 with `?webgl`; `?sample` opens the sample part).

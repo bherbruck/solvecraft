@@ -267,7 +267,7 @@ pub fn scene_radius(app: &SolveApp) -> f64 {
 
 pub fn projection(app: &SolveApp, rect: Rect) -> Proj {
     let mut cam = app.cam;
-    cam.fov = if app.ui.perspective { 0.6 } else { 0.0 };
+    cam.fov = if app.perspective_view() { 0.6 } else { 0.0 };
     let aspect = rect.width() as f64 / rect.height().max(1.0) as f64;
     Proj { cam, vp: cam.view_proj(aspect, scene_radius(app)), rect }
 }
@@ -1102,7 +1102,7 @@ pub(crate) fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit
     app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
-    app.ui.perspective.hash(&mut h);
+    app.perspective_view().hash(&mut h);
     (proj.rect.width().to_bits(), proj.rect.height().to_bits()).hash(&mut h);
     crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
     let key = h.finish();
@@ -5948,6 +5948,22 @@ mod grid_plane_tests {
                 assert!((n.dot(back).abs() - 1.0).abs() < 1e-9, "{view:?} {up:?}: facing the view");
             }
         }
+    }
+
+    /// A sketch is drawn in a parallel view even when the preference asks for perspective; the
+    /// preference comes back when the sketch is finished.
+    #[test]
+    fn an_open_sketch_is_drawn_orthographic() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.perspective = true;
+        assert!(projection(&app, rect).cam.fov > 0.0);
+        app.run("sketch.create", json!({"plane": "XZ"})).unwrap();
+        assert!(!app.perspective_view());
+        assert_eq!(projection(&app, rect).cam.fov, 0.0);
+        app.finish_sketch();
+        assert!(app.ui.perspective, "the preference is left alone");
+        assert!(projection(&app, rect).cam.fov > 0.0);
     }
 
     /// Create Sketch shows the Origin even when the browser hides it, and draws its planes
