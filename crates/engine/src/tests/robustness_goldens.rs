@@ -105,7 +105,11 @@ fn check(seed: u64) {
         if changed.is_empty() {
             return;
         }
-        assert!(cfg!(target_os = "linux"), "record the shared robustness baseline on Linux; review target-specific measurement variants separately");
+        assert_eq!(
+            std::env::consts::OS,
+            "linux",
+            "record the shared robustness baseline on Linux; review target-specific measurement variants separately"
+        );
         if file.get("about").is_none() {
             file["about"] = json!(
                 "What each robustness seed builds (crates/engine/src/tests/robustness_goldens.rs, docs/robustness.md). Record changes with ROBUSTNESS_GOLDENS_BLESS=\"why\"."
