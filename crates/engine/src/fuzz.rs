@@ -146,25 +146,11 @@ fn snap(x: f64) -> f64 {
     (x / G).round() * G
 }
 
-/// Keep intended grid contacts exact when a mesh bound or pick acquired only
-/// floating-point roundoff. Otherwise a seed generates different commands on
-/// different math libraries (for example 20 versus 20.000000000000007).
-fn grid_roundoff(x: f64, scale: f64) -> f64 {
-    let grid = snap(x);
-    let grid = if grid == 0.0 { 0.0 } else { grid };
-    if (x - grid).abs() <= 32.0 * f64::EPSILON * scale.max(x.abs()).max(G) { grid } else { x }
-}
-
-fn picked_point(p: Vec3, scale: f64) -> [f64; 3] {
-    [p.x, p.y, p.z].map(|x| grid_roundoff(x, scale))
-}
-
 /// A coordinate in the bounds: often exactly on a side (coincident faces), else on the grid.
 fn coord(r: &mut Rng, lo: f64, hi: f64) -> f64 {
-    let scale = lo.abs().max(hi.abs());
     match r.below(4) {
-        0 => grid_roundoff(lo, scale),
-        1 => grid_roundoff(hi, scale),
+        0 => lo,
+        1 => hi,
         _ => snap(lo + (hi - lo) * r.unit()),
     }
 }
@@ -228,8 +214,7 @@ fn next_step(r: &mut Rng, s: &Session, last_feature: &Option<String>) -> Option<
     let (lo, hi) = bounds(s)?;
     let st = s.model.state();
     let body = st.bodies.get(r.below(st.bodies.len()))?;
-    let size = body.body.size();
-    let tol = (size * 1e-3).max(1e-3);
+    let tol = (body.body.size() * 1e-3).max(1e-3);
     Some(match r.below(12) {
         0 | 1 => {
             let a = random_point(r, lo, hi);
@@ -253,26 +238,26 @@ fn next_step(r: &mut Rng, s: &Session, last_feature: &Option<String>) -> Option<
         5 | 6 => {
             let edges = body.body.edges(tol).ok()?;
             let n = 1 + r.below(3);
-            let picks: Vec<[f64; 3]> = (0..n).filter_map(|_| edges.get(r.below(edges.len()))).map(|e| picked_point(e.mid, size)).collect();
+            let picks: Vec<[f64; 3]> = (0..n).filter_map(|_| edges.get(r.below(edges.len()))).map(|e| [e.mid.x, e.mid.y, e.mid.z]).collect();
             let rad = r.pick(&[0.5, 1.0, 2.0, 2.5, 3.0])?;
             step("fillet", Expect::Any, vec![("solid.fillet", json!({"edges": picks, "radius": rad}))])
         }
         7 => {
             let edges = body.body.edges(tol).ok()?;
             let n = 1 + r.below(3);
-            let picks: Vec<[f64; 3]> = (0..n).filter_map(|_| edges.get(r.below(edges.len()))).map(|e| picked_point(e.mid, size)).collect();
+            let picks: Vec<[f64; 3]> = (0..n).filter_map(|_| edges.get(r.below(edges.len()))).map(|e| [e.mid.x, e.mid.y, e.mid.z]).collect();
             step("chamfer", Expect::Shrink, vec![("solid.chamfer", json!({"edges": picks, "distance": r.pick(&[0.5, 1.0, 2.0])?}))])
         }
         8 => {
             let faces: Vec<_> = body.body.faces(tol).ok()?.into_iter().filter(|f| f.plane_normal.is_some()).collect();
             let f = faces.get(r.below(faces.len()))?;
-            let p = picked_point(f.centroid, size);
+            let p = [f.centroid.x, f.centroid.y, f.centroid.z];
             step("shell", Expect::Shrink, vec![("solid.shell", json!({"faces": [p], "thickness": r.pick(&[1.0, 1.5, 2.0])?}))])
         }
         9 => {
             let faces: Vec<_> = body.body.faces(tol).ok()?.into_iter().filter(|f| f.plane_normal.is_some()).collect();
             let f = faces.get(r.below(faces.len()))?;
-            let p = picked_point(f.centroid, size);
+            let p = [f.centroid.x, f.centroid.y, f.centroid.z];
             let mut h = json!({"position": p, "diameter": r.grid(2.0, 8.0, 1.0)});
             if r.chance(0.5) {
                 h["depth"] = json!(r.grid(2.5, 20.0, G));
@@ -500,36 +485,5 @@ mod tests {
             }
         }
         assert_eq!(kinds, BTreeMap::from([("cone".into(), 1), ("cylinder".into(), 6), ("plane".into(), 22)]));
-    }
-
-    #[test]
-    fn grid_contacts_do_not_inherit_bound_roundoff() {
-        for seed in 0..64 {
-            let (mut exact, mut noisy) = (Rng::new(seed), Rng::new(seed));
-            let want = coord(&mut exact, 0.0, 20.0);
-            let got = coord(&mut noisy, -1.0e-14, 20.0_f64.next_up().next_up());
-            assert_eq!(got.to_bits(), want.to_bits(), "seed {seed}");
-            assert_eq!(noisy.next_u64(), exact.next_u64(), "must not change the random stream");
-        }
-        let p = picked_point(Vec3::new(4.592425496802576e-16, 7.5, -6.25), 15.0);
-        assert_eq!(p, [0.0, 7.5, -6.25]);
-        assert_eq!(p[0].to_bits(), 0.0_f64.to_bits());
-    }
-
-    #[test]
-    fn non_grid_geometry_and_intentional_gaps_are_preserved() {
-        for x in [0.125, -6.25, 20.0 - 1.0e-9, 20.0 + 1.0e-9, -1.0e-9] {
-            assert_eq!(grid_roundoff(x, 30.0), x);
-        }
-        for seed in 0..64 {
-            let mut r = Rng::new(seed);
-            let selector = r.clone().below(4);
-            let got = coord(&mut r, 0.125, 19.875);
-            match selector {
-                0 => assert_eq!(got, 0.125),
-                1 => assert_eq!(got, 19.875),
-                _ => {}
-            }
-        }
     }
 }
