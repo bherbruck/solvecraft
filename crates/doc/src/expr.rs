@@ -454,6 +454,39 @@ fn lex(s: &str) -> Result<Vec<Tok>, DocError> {
     Ok(lex_spans(s)?.into_iter().map(|(t, _, _)| t).collect())
 }
 
+/// Tokens for evaluation: a mixed number (`2 1/8"`, `3 7/16 in`, #1802) is the sum of its
+/// parts, `(2 + 1/8)`, not the product juxtaposition would give. A mixed number is a whole
+/// number, a space and a fraction of whole numbers, standing alone as an operand: not after
+/// `*`, `/`, `%`, `^` or another operand, and not before `^`, `(` or a number.
+fn lex_eval(s: &str) -> Result<Vec<Tok>, DocError> {
+    let spans = lex_spans(s)?;
+    let tok = |k: usize| spans.get(k).map(|(t, _, _)| t);
+    let whole = |k: usize| match spans.get(k) {
+        Some((Tok::Num(v), a, b)) => s.get(*a..*b).is_some_and(|d| d.bytes().all(|c| c.is_ascii_digit())).then_some(*v),
+        _ => None,
+    };
+    let spaced = |k: usize| match (spans.get(k), spans.get(k + 1)) {
+        (Some((_, _, end)), Some((_, start, _))) => start > end,
+        _ => false,
+    };
+    let mut out = Vec::with_capacity(spans.len());
+    let mut i = 0;
+    while let Some(t) = tok(i) {
+        let alone = (i == 0 || matches!(tok(i - 1), Some(Tok::Op('+' | '-' | '(' | ','))))
+            && !matches!(tok(i + 4), Some(Tok::Op('^' | '(') | Tok::Num(_)))
+            && matches!(tok(i + 2), Some(Tok::Op('/')))
+            && spaced(i);
+        if let (true, Some(w), Some(n), Some(d)) = (alone, whole(i), whole(i + 1), whole(i + 3)) {
+            out.extend([Tok::Op('('), Tok::Num(w), Tok::Op('+'), Tok::Num(n), Tok::Op('/'), Tok::Num(d), Tok::Op(')')]);
+            i += 4;
+        } else {
+            out.push(t.clone());
+            i += 1;
+        }
+    }
+    Ok(out)
+}
+
 /// Is the identifier token at `i` a reference to a parameter (not a call, unit or constant)?
 fn is_reference(toks: &[Tok], i: usize, id: &str) -> bool {
     let is_call = matches!(toks.get(i + 1), Some(Tok::Op('(')));
@@ -842,7 +875,7 @@ pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> R
 
 /// Evaluate an expression reading bare numbers next to lengths / angles in `defaults`.
 pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>, defaults: Defaults) -> Result<Value, DocError> {
-    let toks = lex(s)?;
+    let toks = lex_eval(s)?;
     if toks.is_empty() {
         return Err(DocError::Expr("empty expression".into()));
     }
@@ -1007,6 +1040,16 @@ mod tests {
         assert_eq!(ev("1/2\"", Kind::Length).unwrap(), 12.7);
         assert_eq!(ev("width + 1\"", Kind::Length).unwrap(), 65.4);
         assert_eq!(ev("2' + 3\"", Kind::Length).unwrap(), 685.8);
+        // #1802: a mixed number is a whole number plus a fraction, not their product.
+        assert_eq!(ev("2 1/8\"", Kind::Length).unwrap(), 2.125 * 25.4);
+        assert_eq!(ev("2 1/8 in", Kind::Length).unwrap(), 2.125 * 25.4);
+        assert_eq!(ev("-2 1/8\"", Kind::Length).unwrap(), -2.125 * 25.4);
+        assert!((ev("3 7/16\" + 1\"", Kind::Length).unwrap() - (3.0 + 7.0 / 16.0 + 1.0) * 25.4).abs() < 1e-9);
+        assert_eq!(ev("max(2 1/2\", 1\")", Kind::Length).unwrap(), 2.5 * 25.4);
+        // Not a mixed number: products and powers keep their meaning.
+        assert_eq!(ev("2*3 1/2", Kind::Length).unwrap(), 3.0);
+        assert_eq!(ev("2 1/2^2", Kind::Length).unwrap(), 0.5);
+        assert_eq!(ev("2 1.5/3", Kind::Length).unwrap(), 1.0);
         // A mark alone is its unit alone, as `in` is.
         assert_eq!(ev("\"", Kind::Length).ok(), ev("in", Kind::Length).ok());
     }
