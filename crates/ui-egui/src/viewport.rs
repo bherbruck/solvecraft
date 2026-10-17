@@ -101,6 +101,11 @@ pub struct ViewportState {
     /// The 3D mouse's motion this frame, for the page showing the camera to apply with what its
     /// camera may do (`navigation::device`).
     pub device_motion: Option<crate::space_mouse::DeviceMotion>,
+    /// A three-finger trackpad drag's motion this frame, for the page showing the camera to
+    /// turn the view with (`navigation::three_finger_orbit`).
+    pub(crate) touch_orbit: Option<crate::trackpad::ThreeFingerDrag>,
+    /// A three-finger drag is turning the view: its orbit pivot stays until the fingers lift.
+    pub(crate) touch_orbiting: bool,
     /// After immediate zoom, ignore egui's outstanding smoothing until the gesture ends.
     pub(crate) wheel_zoom_raw_until_idle: bool,
     /// While trackpad scrolling runs, ignore egui's smoothing tail for zoom so
@@ -5219,6 +5224,13 @@ mod tests {
             assert_eq!(app.cam.half_height(), height, "trackpad input over a dialog must stay in the popup");
             assert_eq!(app.cam.target, target);
         }
+        // A three-finger drag over the dialog doesn't turn the view either.
+        let yaw = app.cam.yaw;
+        crate::trackpad::three_finger_drag(&mut app, &ctx, vec2(0.2, 0.1), false);
+        frame(&mut app, Some(over), Vec::new());
+        assert_eq!(app.cam.yaw, yaw, "a three-finger drag over a dialog must not orbit");
+        crate::trackpad::three_finger_drag(&mut app, &ctx, egui::Vec2::ZERO, true);
+        frame(&mut app, Some(over), Vec::new());
         let exposed = pos2(40.0, 700.0);
         assert!(!window.contains(exposed));
         frame(&mut app, Some(exposed), Vec::new());
@@ -5229,6 +5241,9 @@ mod tests {
         frame(&mut app, Some(exposed), vec![egui::Event::Zoom(1.2)]);
         assert_ne!(app.cam.half_height(), height, "the exposed viewport still pinch-zooms");
         frame(&mut app, Some(exposed), vec![pan(egui::TouchPhase::End)]);
+        crate::trackpad::three_finger_drag(&mut app, &ctx, vec2(0.2, 0.0), true);
+        frame(&mut app, Some(exposed), Vec::new());
+        assert_ne!(app.cam.yaw, yaw, "the exposed viewport still orbits with three fingers");
     }
 
     #[test]

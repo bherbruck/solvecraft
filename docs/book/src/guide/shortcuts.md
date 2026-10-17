@@ -50,3 +50,7 @@ With the **Touchpad** navigation preset, hold **Shift** while moving the pointer
 **Alt/Option** to orbit, without pressing a mouse button. Vertical scrolling zooms. These
 viewport gestures are separate from rebindable command shortcuts; mouse-button selection
 and editing keep their existing modifiers.
+
+On macOS, dragging three fingers on the trackpad orbits in every preset (Preferences ›
+Navigation › Three-finger drag orbits), once the system's own three-finger swipes (Mission
+Control, switching apps) are set to four fingers in System Settings › Trackpad › More Gestures.

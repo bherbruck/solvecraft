@@ -28,6 +28,8 @@ mod open_documents;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 mod space_mouse;
 mod startup;
+#[cfg(target_os = "macos")]
+mod trackpad;
 
 use solidcraft_engine::{Session, io};
 use solidcraft_ui_egui::{Services, SolveApp};
@@ -66,6 +68,11 @@ impl eframe::App for App {
         #[cfg(target_os = "macos")]
         for f in if self.solve.file_picker_busy() { Vec::new() } else { open_documents::take() } {
             self.solve.open_path_async(&f);
+        }
+        // Three-finger drags on the trackpad, to the page showing the camera.
+        #[cfg(target_os = "macos")]
+        if let Some(drag) = trackpad::take() {
+            solidcraft_ui_egui::trackpad::three_finger_drag(&mut self.solve, ctx, drag.delta, drag.ended);
         }
         self.solve.logic(ctx);
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -584,6 +591,11 @@ fn main() -> eframe::Result {
                 }
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
+            // The trackpad's touches, which winit doesn't forward: three-finger drags orbit.
+            #[cfg(target_os = "macos")]
+            if !trackpad::install(cc, &cc.egui_ctx) {
+                eprintln!("SolidCraft trackpad: three-finger drags won't orbit");
+            }
             app.cpu_meshing = safe_mode;
             if let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))).filter(|_| !safe_mode) {
                 app.load_prefs(&p);

@@ -360,6 +360,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             app.cam.pan(f64::from(pan.x), f64::from(pan.y), h);
         }
     }
+    // A three-finger drag on the trackpad orbits (the app hands it over, `crate::trackpad`).
+    three_finger_orbit(app, rect, hover, inside, caps);
     // A left press with the preset's keys (Alias: Shift+Alt) navigates until the button is let
     // go (kept through the release frame, so the end of the drag doesn't select either).
     if primary_pressed && inside {
@@ -467,7 +469,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             }
         }
     }
-    if !dragging && motion.is_none() {
+    if !dragging && motion.is_none() && !app.viewport.touch_orbiting {
         app.viewport.orbit_pivot = None;
     }
     if app.viewport.spin {
@@ -504,6 +506,31 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         ui.ctx().request_repaint();
     }
     CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, delta, inside, axes, pinch, pan, primary_nav, mode }
+}
+
+/// This frame's three-finger trackpad drag (`crate::trackpad`), applied as an orbit over `rect`
+/// about the configured centre: a cursor pivot is chosen under the pointer when the drag begins
+/// and kept until the fingers lift. A drag turns the view where the page may orbit and the
+/// pointer is over it (the pointer stays put while three fingers move, so a drag that began
+/// there keeps turning); it is taken either way, so one over a dialog, the start page or a flat
+/// page is not replayed later.
+pub(crate) fn three_finger_orbit(app: &mut SolveApp, rect: Rect, hover: Option<Pos2>, inside: bool, caps: NavCaps) {
+    let Some(drag) = app.viewport.touch_orbit.take() else { return };
+    let turning = app.viewport.touch_orbiting;
+    if caps.orbit && app.preferences.trackpad_orbit && (turning || inside) && drag.delta != egui::Vec2::ZERO && drag.delta.is_finite() {
+        app.begin_external_navigation();
+        if !turning {
+            app.viewport.orbit_pivot = None;
+            app.viewport.touch_orbiting = true;
+        }
+        let dx = f64::from(drag.delta.x) * crate::trackpad::POINTS_PER_WIDTH;
+        let dy = f64::from(drag.delta.y) * crate::trackpad::POINTS_PER_WIDTH;
+        orbit(app, rect, dx, dy, hover);
+    }
+    if drag.ended {
+        app.viewport.touch_orbiting = false;
+        app.viewport.orbit_pivot = None;
+    }
 }
 
 /// The 3D mouse's motion this frame (#1336), on a page `rect` whose camera may do `caps`: the cap
@@ -750,6 +777,84 @@ mod tests {
         }
         assert!(scanned > 50, "the source tree was scanned ({scanned} files)");
         assert!(offenders.is_empty(), "camera input outside navigation::handle; call it instead:\n{}", offenders.join("\n"));
+    }
+
+    /// A three-finger trackpad drag turns the view of a page that may orbit while the pointer is
+    /// over it, by the fingers' motion; a flat page, a pointer elsewhere or the preference off
+    /// leave the view still, and the drag isn't kept for later. A cursor pivot holds from the
+    /// first motion until the fingers lift.
+    #[test]
+    fn three_finger_drags_orbit_under_the_pointer() {
+        use egui::{Event, pos2, vec2};
+        let flat = super::NavCaps { orbit: false, pick: false };
+        for (caps, turns) in [(flat, false), (super::NavCaps::MODEL, true), (super::NavCaps::RENDER, true)] {
+            let mut s = solidcraft_engine::Session::default();
+            s.execute("solid.box", &serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
+            let mut app = crate::SolveApp::new(s, crate::Services::default());
+            app.preferences.orbit_around = crate::prefs::OrbitAround::Cursor;
+            let ctx = egui::Context::default();
+            let mut time = 0.0;
+            let mut frame = |app: &mut crate::SolveApp, events: Vec<Event>| {
+                time += 1.0 / 60.0;
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
+                    time: Some(time),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let rect = ui.max_rect();
+                    app.viewport.rect = Some(rect);
+                    let resp = ui.interact(rect, ui.id().with("page"), egui::Sense::click_and_drag());
+                    super::handle(app, ui, rect, &resp, caps);
+                });
+                out.textures_delta.clear();
+            };
+            let turned = |cam: &solidcraft_engine::render::Camera, from: &solidcraft_engine::render::Camera, by: f64| {
+                let yaw = (cam.yaw - from.yaw - by + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                // The fingers' motion is single precision; the turn is within its rounding.
+                yaw.abs() < 1e-6 && cam.pitch == from.pitch
+            };
+            let at = pos2(400.0, 300.0);
+            frame(&mut app, vec![Event::PointerMoved(at)]);
+            frame(&mut app, vec![]);
+            let before = app.cam;
+            // Right across a tenth of the trackpad: the view turns by that much of a mouse drag.
+            crate::trackpad::three_finger_drag(&mut app, &ctx, vec2(0.1, 0.0), false);
+            frame(&mut app, vec![]);
+            assert_eq!(app.viewport.touch_orbit, None, "{caps:?}: the drag was taken, whether or not it applied");
+            if turns {
+                let by = 0.1 * crate::trackpad::POINTS_PER_WIDTH * 0.008;
+                assert!(turned(&app.cam, &before, by), "{caps:?}: the drag turns the view: {:?} from {:?}", app.cam, before);
+                assert!(app.viewport.orbit_pivot.is_some(), "{caps:?}: a cursor pivot was chosen under the pointer");
+                assert!(app.viewport.touch_orbiting);
+                // The pivot holds between motions, until the fingers lift.
+                frame(&mut app, vec![]);
+                assert!(app.viewport.orbit_pivot.is_some(), "{caps:?}: the pivot holds while the fingers rest");
+                crate::trackpad::three_finger_drag(&mut app, &ctx, egui::Vec2::ZERO, true);
+                frame(&mut app, vec![]);
+                assert!(app.viewport.orbit_pivot.is_none(), "{caps:?}: the pivot goes with the fingers");
+                assert!(!app.viewport.touch_orbiting);
+            } else {
+                assert!(turned(&app.cam, &before, 0.0), "{caps:?}: a flat page never turns");
+                assert_eq!(app.cam.target, before.target);
+            }
+            // No pointer over the page: nothing turns, and nothing waits.
+            let before = app.cam;
+            frame(&mut app, vec![Event::PointerGone]);
+            crate::trackpad::three_finger_drag(&mut app, &ctx, vec2(0.1, 0.0), true);
+            frame(&mut app, vec![]);
+            assert!(turned(&app.cam, &before, 0.0), "{caps:?}: no pointer over the page, no orbit");
+            assert_eq!(app.viewport.touch_orbit, None);
+            // The preference off drops the drag.
+            app.preferences.trackpad_orbit = false;
+            frame(&mut app, vec![Event::PointerMoved(at)]);
+            crate::trackpad::three_finger_drag(&mut app, &ctx, vec2(0.1, 0.0), false);
+            frame(&mut app, vec![]);
+            assert!(turned(&app.cam, &before, 0.0), "{caps:?}: the preference off, no orbit");
+            assert_eq!(app.viewport.touch_orbit, None);
+        }
     }
 
     /// A flat page (orbit off) pans and zooms with the same bindings and never turns the view.

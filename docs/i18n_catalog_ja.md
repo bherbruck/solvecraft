@@ -1,4 +1,4 @@
-# SolidCraft 英語・日本語 ローカライズ対照リスト (全 847 件)
+# SolidCraft 英語・日本語 ローカライズ対照リスト (全 849 件)
 
 | 英語 (English) | 日本語 (Japanese) | キー名 (Key) |
 | :--- | :--- | :--- |
@@ -274,6 +274,7 @@
 | Draft Analysis | 勾配解析 | `cmd.inspect_draft` |
 | Drag Sketch Geometry | スケッチ ジオメトリをドラッグ | `cmd.sketch_drag` |
 | Drag Sketch Point | スケッチ点をドラッグ | `cmd.sketch_move_point` |
+| Drag three fingers on the trackpad to turn the view (macOS). Set the system's three-finger swipes (Mission Control, switching apps) to four fingers so they reach SolidCraft | トラックパッドを3本指でドラッグするとビューが回転します（macOS）。システムの3本指スワイプ（Mission Control、アプリの切り替え）を4本指に設定すると、SolidCraft に届きます | `ui.trackpad_orbit_tip` |
 | Draw as {linetype} | {linetype}として描く | `sketch.draw_curves` |
 | Draw Dimensioned Sketch Geometry | 寸法付きスケッチ ジオメトリを描画 | `cmd.sketch_draw_dimensioned` |
 | Drawing | 図面 | `ui.drawing` |
@@ -796,6 +797,7 @@
 | Thread | ねじ | `ui.thread` |
 | THREAD | ねじ | `ui.heading_thread` |
 | Three Point Arc Slot | 3点円弧スロット | `cmd.sketch_slot_arc_three_point` |
+| Three-finger drag orbits | 3本指ドラッグで回転 | `ui.three_finger_drag_orbits` |
 | Tip Angle | 先端角度 | `ui.tip_angle` |
 | To Object | オブジェクトまで | `ui.to_object` |
 | To Offset | オフセットまで | `To Offset` |

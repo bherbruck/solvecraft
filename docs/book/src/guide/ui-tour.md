@@ -26,8 +26,11 @@
   in between, selects the next thing in that list. The
   wheel zooms at the cursor, the middle button pans and right-drag orbits freely (the mouse
   preset in Preferences switches to SolidWorks, Inventor, Alias, Blender, Tinkercad, OpenSCAD or Touchpad style). On a
-  trackpad, pinch zooms and two-finger scroll pans (Navigation › Two-finger scroll pans;
-  off: scroll zooms like the wheel); mouse wheels zoom and the thumb wheel pans sideways.
+  trackpad, pinch zooms, two-finger scroll pans (Navigation › Two-finger scroll pans;
+  off: scroll zooms like the wheel) and, on macOS, a three-finger drag orbits (Navigation ›
+  Three-finger drag orbits; set the system's own three-finger swipes to four fingers in System
+  Settings › Trackpad › More Gestures so they reach SolidCraft); mouse wheels zoom and the thumb
+  wheel pans sideways.
   Shift+middle orbits freely
   in the default and Inventor presets. In every preset, Ctrl+left drag (Cmd on macOS) that starts
   on empty space orbits; a Ctrl+click still adds to the selection. Shift+right-drag snaps to the nearest standard or

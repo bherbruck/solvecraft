@@ -312,6 +312,8 @@ pub struct Prefs {
     pub smooth_wheel_zoom: bool,
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
     pub trackpad_pan: bool,
+    /// A three-finger trackpad drag orbits (macOS, where the app reads the trackpad's touches).
+    pub trackpad_orbit: bool,
     /// View changes (axis view, Look At, Home) animate; `look_at_speed` scales how fast.
     pub look_at_anim: bool,
     pub look_at_speed: f32,
@@ -420,6 +422,7 @@ impl Default for Prefs {
             zoom_to_cursor: true,
             smooth_wheel_zoom: true,
             trackpad_pan: true,
+            trackpad_orbit: true,
             look_at_anim: true,
             look_at_speed: 1.0,
             up_axis: "z".into(),
@@ -614,6 +617,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
             p.zoom_to_cursor = d.zoom_to_cursor;
             p.smooth_wheel_zoom = d.smooth_wheel_zoom;
             p.trackpad_pan = d.trackpad_pan;
+            p.trackpad_orbit = d.trackpad_orbit;
             p.orbit_around = d.orbit_around;
             p.orbit_cursor = d.orbit_cursor;
             p.space_mouse_enabled = d.space_mouse_enabled;
@@ -1175,6 +1179,11 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             } else {
                 crate::i18n::tr_label("Trackpad gestures pan (off: they zoom like the wheel); mouse wheel zooms, thumb wheel pans sideways, pinch always zooms")
             });
+            ui.end_row();
+            ui.label(crate::i18n::tr_label("Three-finger drag orbits"));
+            ui.checkbox(&mut app.preferences.trackpad_orbit, "").on_hover_text(crate::i18n::tr_label(
+                "Drag three fingers on the trackpad to turn the view (macOS). Set the system's three-finger swipes (Mission Control, switching apps) to four fingers so they reach SolidCraft",
+            ));
             ui.end_row();
             ui.label(crate::i18n::tr_label("Orbit around"));
             // Wrapped: three choices, and German or Russian labels are long.
@@ -1850,6 +1859,26 @@ mod tests {
         assert!(app.preferences.trackpad_pan);
         control(&mut app, &json!({"button":"cancel"})).unwrap();
         assert!(!app.preferences.trackpad_pan);
+    }
+
+    #[test]
+    fn trackpad_orbit_defaults_on_persists_and_follows_dialog_buttons() {
+        assert!(serde_json::from_value::<Prefs>(json!({})).unwrap().trackpad_orbit);
+        assert!(Prefs::default().trackpad_orbit);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        control(&mut app, &json!({"open":"Navigation", "trackpad_orbit":false})).unwrap();
+        control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert!(app.preferences.trackpad_orbit);
+        control(&mut app, &json!({"open":"Navigation", "trackpad_orbit":false})).unwrap();
+        control(&mut app, &json!({"button":"apply"})).unwrap();
+        assert!(!app.preferences.trackpad_orbit);
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert!(!other.preferences.trackpad_orbit);
+        control(&mut app, &json!({"open":"Navigation", "button":"defaults"})).unwrap();
+        assert!(app.preferences.trackpad_orbit);
+        control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert!(!app.preferences.trackpad_orbit);
     }
 
     #[test]

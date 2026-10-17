@@ -64,11 +64,14 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# Files opened from Finder and the Dock (src/open_documents.rs); all already come with eframe and rfd.
+# Files opened from Finder and the Dock (src/open_documents.rs) and the trackpad's touches
+# (src/trackpad.rs); all already come with eframe and rfd.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSResponder", "NSTouch", "NSView"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSArray", "NSNotification", "NSOperation", "NSString", "NSURL"] }
 block2 = "0.6"
+# The main window's view for src/trackpad.rs (already in the tree through eframe and winit).
+raw-window-handle = "0.6"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 winit = { version = "0.30", default-features = false, features = ["x11"] }

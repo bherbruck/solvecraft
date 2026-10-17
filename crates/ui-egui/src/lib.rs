@@ -177,6 +177,7 @@ pub mod titlebar;
 pub mod toolbar;
 pub mod toolbar_custom;
 pub mod tools;
+pub mod trackpad;
 pub mod update;
 pub mod viewport;
 mod viewport_layout;
