@@ -8,6 +8,7 @@ struct Triangle {
     base: vec4<f32>, parameters: vec4<f32>, optics: vec4<f32>,
 };
 struct Node { lo: vec3<f32>, first: u32, hi: vec3<f32>, count: u32 };
+struct AreaLight { center: vec4<f32>, u: vec4<f32>, v: vec4<f32>, radiance: vec4<f32> };
 struct Params {
     // width, height, sample index, pixel offset
     image: vec4<u32>,
@@ -16,6 +17,9 @@ struct Params {
     eye: vec4<f32>, right: vec4<f32>, up: vec4<f32>, back: vec4<f32>,
     // ray epsilon, test environment radiance, studio scale, reserved
     lighting: vec4<f32>,
+    environment: vec4<f32>, // RGB radiance, enabled flag
+    light_count: vec4<f32>, // w: rectangle count
+    area_lights: array<AreaLight,4>,
 };
 @group(0) @binding(0) var<uniform> u: Params;
 @group(0) @binding(1) var<storage, read> geometry: array<u32>;
@@ -166,7 +170,7 @@ fn from_local(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     let x = unit(cross(axis,n));
     return unit(x*p.x + cross(n,x)*p.y + n*p.z);
 }
-fn continuation(t: Triangle, n: vec3<f32>, v: vec3<f32>, rng: ptr<function,u32>) -> vec3<f32> {
+fn sample_surface(t: Triangle, n: vec3<f32>, v: vec3<f32>, rng: ptr<function,u32>) -> vec3<f32> {
     let component = random(rng);
     let x = random(rng); let phi = 2.0*PI*random(rng);
     if component < 0.5 {
@@ -178,6 +182,79 @@ fn continuation(t: Triangle, n: vec3<f32>, v: vec3<f32>, rng: ptr<function,u32>)
     let sine = sqrt(max(0.0,1.0-cosine*cosine));
     let h = from_local(vec3<f32>(sine*cos(phi),sine*sin(phi),cosine),n);
     return reflect(-v,h);
+}
+// Conditional opaque mixture density; branch selection is accounted for by callers.
+fn surface_pdf(t: Triangle, n: vec3<f32>, v: vec3<f32>, l: vec3<f32>) -> f32 {
+    let nl = dot(n,l);
+    if nl <= 0.0 { return 0.0; }
+    let h = unit(v+l);
+    let a = t.parameters.y*t.parameters.y;
+    let nh = max(dot(n,h),0.0);
+    return 0.5*nl/PI + 0.5*distribution(nh,a*a)*nh/(4.0*max(dot(v,h),1e-20));
+}
+fn power_weight(a: f32, b: f32) -> f32 {
+    // Ratio form avoids overflow for grazing/very distant rectangular samples.
+    if a <= 0.0 { return 0.0; }
+    let ratio = b/a;
+    return 1.0/(1.0+ratio*ratio);
+}
+struct EmitterHit { distance: f32, index: u32 };
+fn emitter_hit(o: vec3<f32>, d: vec3<f32>) -> EmitterHit {
+    var hit = EmitterHit(FAR,0xffffffffu);
+    for (var i=0u; i<u32(u.light_count.w); i+=1u) {
+        let light = u.area_lights[i];
+        let normal = unit(cross(light.u.xyz,light.v.xyz));
+        let cosine = dot(normal,d);
+        if abs(cosine)<1e-8 { continue; }
+        let distance = dot(light.center.xyz-o,normal)/cosine;
+        if distance <= u.lighting.x || distance >= hit.distance { continue; }
+        let q = o+d*distance-light.center.xyz;
+        if abs(dot(q,light.u.xyz))<=dot(light.u.xyz,light.u.xyz) && abs(dot(q,light.v.xyz))<=dot(light.v.xyz,light.v.xyz) {
+            hit = EmitterHit(distance,i);
+        }
+    }
+    return hit;
+}
+fn area_pdf(light: AreaLight, delta: vec3<f32>) -> f32 {
+    let cosine = dot(unit(cross(light.u.xyz,light.v.xyz)),-unit(delta));
+    if cosine<=0.0 { return 0.0; }
+    return dot(delta,delta)/(light.center.w*cosine);
+}
+fn visible(o: vec3<f32>, d: vec3<f32>, distance: f32) -> bool {
+    // Closest hit is essential: an arbitrary first BVH leaf may lie behind a light.
+    return trace(o,d,false).distance >= distance && emitter_hit(o,d).distance >= distance;
+}
+fn direct_studio(t: Triangle, position: vec3<f32>, o: vec3<f32>, n: vec3<f32>, geometric: vec3<f32>, v: vec3<f32>, last: bool, rng: ptr<function,u32>) -> vec3<f32> {
+    var result = vec3<f32>(0.0);
+    let opaque = 1.0-t.base.w;
+    if opaque<=0.0 { return result; }
+    for (var i=0u; i<u32(u.light_count.w); i+=1u) {
+        let light = u.area_lights[i];
+        let point = light.center.xyz + light.u.xyz*(2.0*random(rng)-1.0) + light.v.xyz*(2.0*random(rng)-1.0);
+        let delta = point-position;
+        let direction = unit(delta);
+        let pdf = area_pdf(light,delta);
+        let nl = dot(n,direction);
+        if pdf<=0.0 || nl<=0.0 || dot(geometric,direction)<=0.0 { continue; }
+        let shadow = point-o;
+        if !visible(o,unit(shadow),length(shadow)-u.lighting.x*2.0) { continue; }
+        let weight = select(power_weight(pdf,opaque*surface_pdf(t,n,v,direction)),1.0,last);
+        result += brdf(t,n,v,direction)*light.radiance.xyz*(opaque*nl*weight/pdf);
+    }
+    if any(u.environment.xyz>vec3<f32>(0.0)) {
+        // Uniform sphere density is the same for NEE and BSDF escape evaluation.
+        let z = 1.0-2.0*random(rng);
+        let phi = 2.0*PI*random(rng);
+        let radius = sqrt(max(0.0,1.0-z*z));
+        let direction = vec3<f32>(radius*cos(phi),radius*sin(phi),z);
+        let nl = dot(n,direction);
+        let pdf = 1.0/(4.0*PI);
+        if nl>0.0 && dot(geometric,direction)>0.0 && visible(o,direction,FAR) {
+            let weight = select(power_weight(pdf,opaque*surface_pdf(t,n,v,direction)),1.0,last);
+            result += brdf(t,n,v,direction)*u.environment.xyz*(opaque*nl*weight/pdf);
+        }
+    }
+    return result;
 }
 struct CameraRay { origin: vec3<f32>, direction: vec3<f32> };
 // The lens lies in the eye plane. A uniform-area disk (r=sqrt(u), phi=2pi*v)
@@ -212,15 +289,40 @@ fn sample_path(pixel: u32) -> vec4<f32> {
     var throughput = vec3<f32>(1.0);
     var radiance = vec3<f32>(0.0);
     var coverage = 0.0;
+    var previous_pdf = 0.0;
+    var previous_delta = true;
     var media: array<Medium,16>;
     var medium_count = 0u;
     let lights = array<vec4<f32>,3>(vec4<f32>(0.6,0.0,0.8,3.0),vec4<f32>(-0.8,0.0,0.6,1.0),vec4<f32>(0.0,-0.6,0.8,1.5));
     for (var bounce = 0u; bounce < u.sampling.y; bounce += 1u) {
         let hit = trace(o,d,false);
+        if u.environment.w > 0.0 {
+            let emitter = emitter_hit(o,d);
+            if emitter.distance < hit.distance {
+                let light = u.area_lights[emitter.index];
+                let point = o+d*emitter.distance;
+                if medium_count>0u {
+                    throughput *= exp(-media[medium_count-1u].sigma*length(point-previous_position));
+                }
+                let pdf = area_pdf(light,point-previous_position);
+                if pdf>0.0 {
+                    let weight = select(power_weight(previous_pdf,pdf),1.0,previous_delta);
+                    radiance += throughput*light.radiance.xyz*weight;
+                }
+                coverage = 1.0;
+                break;
+            }
+        }
         if hit.triangle == 0xffffffffu {
             // Camera-inside and intersecting/open volumes are deliberately unsupported.
             if medium_count > 0u { return vec4<f32>(f32(bounce),0.0,0.0,-1.0); }
-            if u.sampling.w == 0u || d.z < 0.0 { radiance += throughput * u.lighting.y; }
+            if u.environment.w > 0.0 {
+                // The backplate remains request.background; environment lights covered paths.
+                if bounce>0u {
+                    let weight = select(power_weight(previous_pdf,1.0/(4.0*PI)),1.0,previous_delta);
+                    radiance += throughput*u.environment.xyz*weight;
+                }
+            } else if u.sampling.w == 0u || d.z < 0.0 { radiance += throughput * u.lighting.y; }
             break;
         }
         coverage = 1.0;
@@ -245,7 +347,10 @@ fn sample_path(pixel: u32) -> vec4<f32> {
         }
         previous_position = position;
         o = position + geometric*(u.lighting.x*2.0);
-        for (var i=0u; i<3u; i+=1u) {
+        if u.environment.w > 0.0 {
+            radiance += throughput*direct_studio(t,position,o,n,geometric,v,bounce+1u>=u.sampling.y,&rng);
+        }
+        for (var i=0u; i<3u && u.environment.w==0.0; i+=1u) {
             let light = lights[i];
             if u.lighting.z > 0.0 && dot(geometric,light.xyz)>0.0 && dot(n,light.xyz)>0.0 {
                 if trace(o,light.xyz,true).triangle == 0xffffffffu {
@@ -254,6 +359,7 @@ fn sample_path(pixel: u32) -> vec4<f32> {
             }
         }
         if t.base.w > 0.0 && random(&rng) < t.base.w {
+            previous_delta = true;
             var nt = t.parameters.z;
             if t.parameters.w < 0.0 && entering && medium_count > 0u {
                 return vec4<f32>(f32(bounce),0.0,0.0,-4.0);
@@ -302,13 +408,12 @@ fn sample_path(pixel: u32) -> vec4<f32> {
             if dot(d,geometric) > 0.0 { o = position+geometric*(u.lighting.x*2.0); }
             continue;
         }
-        d = continuation(t,n,v,&rng);
+        d = sample_surface(t,n,v,&rng);
         let nl = dot(n,d);
         if nl<=0.0 || dot(geometric,d)<=0.0 { break; }
-        let h = unit(v+d); let vh = max(dot(v,h),1e-20);
-        let alpha = t.parameters.y*t.parameters.y;
-        let nh = max(dot(n,h),0.0);
-        let pdf = 0.5*nl/PI + 0.5*distribution(nh,alpha*alpha)*nh/(4.0*vh);
+        let pdf = surface_pdf(t,n,v,d);
+        previous_pdf = (1.0-t.base.w)*pdf;
+        previous_delta = false;
         throughput *= brdf(t,n,v,d) * (nl/pdf);
         if bounce>=3u {
             let survive = clamp(max(max(throughput.x,throughput.y),throughput.z),0.05,0.95);

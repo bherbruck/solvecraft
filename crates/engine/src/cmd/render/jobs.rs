@@ -20,6 +20,8 @@ struct Start {
     seed: Option<u32>,
     raytrace: super::transmission::Raytrace,
     lens: Option<solidcraft_render::job::ThinLens>,
+    lighting: Option<solidcraft_render::job::StudioLighting>,
+    tone_map: Option<solidcraft_render::job::ToneMap>,
 }
 
 struct Prepared {
@@ -37,8 +39,9 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
         return Err(bad(command, "choose either setup or settings"));
     }
     let mut scene = crate::product_scene::extract(s)?;
-    if !input.progressive && (!input.raytrace.dielectrics.is_empty() || input.lens.is_some()) {
-        return Err(bad(command, "runtime transmission and lens controls require progressive rendering"));
+    if !input.progressive && (!input.raytrace.dielectrics.is_empty() || input.lens.is_some() || input.lighting.is_some() || input.tone_map.is_some())
+    {
+        return Err(bad(command, "runtime transmission, lens, lighting and tone-map controls require progressive rendering"));
     }
     super::transmission::apply(&mut scene, &input.raytrace.dielectrics, command)?;
     let settings = if let Some(name) = &input.setup {
@@ -73,6 +76,8 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
     }
     options.exposure_ev = settings.exposure_ev;
     options.lens = input.lens;
+    options.lighting = input.lighting;
+    options.tone_map = input.tone_map.unwrap_or_default();
     options.validate().map_err(job_error)?;
     let mut features = scene.required_features();
     if input.progressive {

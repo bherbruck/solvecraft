@@ -14,6 +14,9 @@ Editable drawing code, native projects and shipped exports are collected under `
 
 | File | Author | Source | Licence |
 |---|---|---|---|
+| examples/studio/stage1-sweep.json | SolidCraft contributors | original tangent circular-arc CAD cyclorama; no external assets | MIT OR Apache-2.0 |
+| examples/studio/stage1.json | SolidCraft contributors | original editable CAD studio scene; no imported geometry or external image assets | MIT OR Apache-2.0 |
+| examples/studio/stage1-render.json | SolidCraft contributors | original studio camera and lighting parameters | MIT OR Apache-2.0 |
 | examples/render-studio.json | SolidCraft contributors | original procedural box/cylinder enclosure script for the integrated Render workspace | MIT OR Apache-2.0 |
 | examples/render-opaque-studio.json | SolidCraft contributors | original procedural sphere study varying opaque metal fraction and roughness independently; no external assets or engineering data | MIT OR Apache-2.0 |
 | examples/render-path-studio.json | SolidCraft contributors | original procedural opaque enclosure, teal insert and metal fasteners for progressive rendering; no imported models | MIT OR Apache-2.0 |
@@ -472,3 +475,12 @@ A frame whose meshes the GPU refuses to stage (device lost or out of memory) is
 skipped with a warning instead of panicking (#1469).
 Paint callbacks are prepared only after a drawable is acquired, so a skipped
 surface frame cannot strand cached meshes without their GPU initialization.
+
+## Runtime studio lighting mathematics
+
+`crates/gpu/src/path/path.wgsl` implements the power-heuristic estimator from the
+mathematical description in [PBRT fourth edition, section 13.4](https://pbr-book.org/4ed/Light_Transport_I_Surface_Reflection/A_Better_Path_Tracer).
+No PBRT code or assets were copied. `crates/render/src/job/lighting.rs` evaluates
+[Krzysztof Narkowicz's published 2016 ACES rational fit](https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/)
+using its published coefficients (author licenses the fit under CC0/MIT).
+These original implementations are under SolidCraft's MIT OR Apache-2.0 licence.

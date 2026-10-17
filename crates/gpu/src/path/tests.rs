@@ -139,7 +139,7 @@ fn gpu_exact_dielectric_matches_f64_fresnel() {
         for cosine in [0.0, 0.01, 0.5, (nt / ni).atan().cos(), 1.0] {
             let mut params = vec![0; 64];
             scene::vector(&mut params, Vec3::new(cosine, ni, nt), 0.0);
-            params.resize(112, 0);
+            params.resize(PARAMETER_BYTES, 0);
             context.queue.write_buffer(&task.uniform, 0, &params);
             let mut encoder = context.device.create_command_encoder(&Default::default());
             {
@@ -489,6 +489,9 @@ fn gpu_solid_and_thin_slabs_match_absorbing_interreflection_oracle() {
 #[test]
 fn shader_validates_without_a_device() {
     let module = naga::front::wgsl::parse_str(SHADER).unwrap();
+    let parameters = module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some("Params")).unwrap().1;
+    let naga::TypeInner::Struct { span, .. } = &parameters.inner else { panic!("Params must be a struct") };
+    assert_eq!(*span as usize, PARAMETER_BYTES);
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
 }
 
@@ -752,4 +755,118 @@ fn path_performance() {
         seconds,
         seconds * 1000.0 / f64::from(samples)
     );
+}
+
+#[test]
+fn gpu_studio_area_mis_matches_independent_quadrature_and_distance_visibility() {
+    use solidcraft_render::job::{AreaLight, AreaLights, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let surface = white();
+    let plane = |z: f64| {
+        let mesh = Mesh {
+            positions: vec![Vec3::new(-10.0, -10.0, z), Vec3::new(10.0, -10.0, z), Vec3::new(10.0, 10.0, z), Vec3::new(-10.0, 10.0, z)],
+            normals: vec![Vec3::Z; 4],
+            triangles: vec![[0, 1, 2], [0, 2, 3]],
+            tri_face: vec![0, 0],
+            ..Default::default()
+        };
+        ProductMesh {
+            name: "original quadrature plane".into(),
+            mesh: Arc::new(mesh),
+            color: [255; 3],
+            opacity: 1.0,
+            surface: Some(surface),
+            transmission: None,
+            faces: Vec::new(),
+        }
+    };
+    let light = AreaLight { center: [2.0, 0.0, 2.0], u: [1.0, 0.0, 0.0], v: [0.0, -1.0, 0.0], radiance: [3.0; 3] };
+    let mut expected = 0.0;
+    for y in 0..256 {
+        for x in 0..256 {
+            let delta = Vec3::new(1.0 + (f64::from(x) + 0.5) / 128.0, -1.0 + (f64::from(y) + 0.5) / 128.0, 2.0);
+            let l = delta.normalized().unwrap();
+            expected += surface.brdf(Vec3::Z, Vec3::Z, l).unwrap().x * 3.0 * l.z * l.z / delta.len2() * 4.0 / (256.0 * 256.0);
+        }
+    }
+    for depth in [1, 2] {
+        for blocker in [None, Some(4.0), Some(1.0)] {
+            let mut scene = ProductScene { meshes: vec![plane(0.0)], bounds: Aabb3::EMPTY };
+            if let Some(z) = blocker {
+                scene.meshes.push(plane(z));
+            }
+            // Camera sits below any blocker and sees the receiver. Geometry behind
+            // the emitter must not shadow it; the nearer blocker must.
+            let mut image = request(1);
+            image.camera.distance = 0.1;
+            image.camera.fov = 0.001;
+            let options = JobOptions {
+                samples: 4096,
+                max_depth: depth,
+                seed: 37,
+                lighting: Some(StudioLighting { environment: [0.0; 3], area_lights: AreaLights::new(&[light]).unwrap() }),
+                ..Default::default()
+            };
+            let mut task = Task::new(executor.context.clone(), scene, image, options, CancelToken::default()).unwrap();
+            assert_eq!(task.parameters(1).len(), PARAMETER_BYTES);
+            for _ in 0..options.samples {
+                task.dispatch().unwrap();
+            }
+            let value = f64::from(task.read_linear().unwrap()[0][0]);
+            if blocker == Some(1.0) {
+                assert!(value < 1e-6, "blocked depth{depth}: {value}");
+            } else {
+                assert!((value - expected).abs() < 0.04 * expected, "depth{depth}, blocker{blocker:?}: {value} vs {expected}");
+            }
+        }
+    }
+}
+
+#[test]
+fn gpu_studio_environment_mis_matches_furnace_at_last_and_continuing_bounces() {
+    use solidcraft_render::job::StudioLighting;
+    let Some(executor) = executor() else { return };
+    for depth in [1, 2] {
+        let options = JobOptions {
+            samples: 4096,
+            max_depth: depth,
+            seed: 37,
+            lighting: Some(StudioLighting { environment: [1.0; 3], ..Default::default() }),
+            ..Default::default()
+        };
+        let mut task = Task::new(executor.context.clone(), sphere(white()), request(8), options, CancelToken::default()).unwrap();
+        for _ in 0..options.samples {
+            task.dispatch().unwrap();
+        }
+        let pixels = task.read_linear().unwrap();
+        for index in [27, 28, 35, 36] {
+            assert!((pixels[index][0] - 1.0).abs() < 0.07, "depth{depth}: {:?}", pixels[index]);
+        }
+    }
+}
+
+#[test]
+fn gpu_emitter_inside_glass_applies_final_segment_absorption() {
+    use solidcraft_render::job::{AreaLight, AreaLights, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let mut glass = sphere(OpaqueSurface::new(Vec3::ZERO, 0.0, 0.1, 1.0).unwrap());
+    glass.meshes[0].transmission = Some(solidcraft_render::transmission::Transmission::new(Vec3::new(0.7, 0.3, 0.0), None).unwrap());
+    let light = AreaLight { center: [0.0; 3], u: [0.4, 0.0, 0.0], v: [0.0, 0.4, 0.0], radiance: [3.0; 3] };
+    let options = JobOptions {
+        samples: 16,
+        max_depth: 2,
+        lighting: Some(StudioLighting { environment: [0.0; 3], area_lights: AreaLights::new(&[light]).unwrap() }),
+        ..Default::default()
+    };
+    let mut image = request(2);
+    image.camera.fov = 0.0001;
+    let mut task = Task::new(executor.context.clone(), glass, image, options, CancelToken::default()).unwrap();
+    for _ in 0..options.samples {
+        task.dispatch().unwrap();
+    }
+    for pixel in task.read_linear().unwrap() {
+        for (value, sigma) in pixel.iter().zip([0.7_f64, 0.3, 0.0]) {
+            assert!((f64::from(*value) - 3.0 * (-sigma).exp()).abs() < 0.002, "{pixel:?}");
+        }
+    }
 }

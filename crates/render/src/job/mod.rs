@@ -14,10 +14,12 @@ use crate::{BackendId, Camera, ExecutorId};
 mod host;
 mod image;
 mod lens;
+mod lighting;
 mod png;
 pub use host::{CpuHost, HostKind, ImageHost, JobHandle, JobStatus, RenderFrame};
 pub use image::{Admission, ImageTask, TaskPoll, admit, admit_geometry};
 pub use lens::ThinLens;
+pub use lighting::{AreaLight, AreaLights, MAX_AREA_LIGHTS, StudioLighting, ToneMap};
 pub use png::PngTask;
 
 /// Runtime sampling intent, separate from saved documents and device resources.
@@ -29,16 +31,21 @@ pub struct JobOptions {
     pub seed: u32,
     pub exposure_ev: f64,
     pub lens: Option<ThinLens>,
+    pub lighting: Option<StudioLighting>,
+    pub tone_map: ToneMap,
 }
 
 impl Default for JobOptions {
     fn default() -> Self {
-        Self { samples: 64, max_depth: 8, seed: 0, exposure_ev: 0.0, lens: None }
+        Self { samples: 64, max_depth: 8, seed: 0, exposure_ev: 0.0, lens: None, lighting: None, tone_map: ToneMap::default() }
     }
 }
 
 impl JobOptions {
     pub fn validate(&self) -> Result<()> {
+        if let Some(lighting) = self.lighting {
+            lighting.validate()?;
+        }
         if let Some(lens) = self.lens {
             lens.validate()?;
         }

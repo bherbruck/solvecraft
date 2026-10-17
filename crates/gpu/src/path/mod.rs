@@ -20,6 +20,7 @@ mod scene;
 mod tests;
 const SHADER: &str = include_str!("path.wgsl");
 const MAX_TRIANGLES: u64 = 1_048_576;
+const PARAMETER_BYTES: usize = 400;
 const TILE: u32 = 262_144;
 const TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -222,7 +223,7 @@ impl Task {
             |label, bytes: &[u8], usage| device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytes, usage });
         let triangles = make("path triangles", &upload.geometry, wgpu::BufferUsages::STORAGE);
         let nodes = make("path BVH", &upload.nodes, wgpu::BufferUsages::STORAGE);
-        let uniform = make("path parameters", &[0; 112], wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST);
+        let uniform = make("path parameters", &[0; PARAMETER_BYTES], wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST);
         let size = u64::from(request.width) * u64::from(request.height) * 16;
         let accumulation = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("path accumulation"),
@@ -278,7 +279,7 @@ impl Task {
         })
     }
     fn parameters(&self, count: u32) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(112);
+        let mut bytes = Vec::with_capacity(PARAMETER_BYTES);
         for x in [
             self.request.width,
             self.request.height,
@@ -304,6 +305,21 @@ impl Task {
         scene::vector(&mut bytes, up * camera.half_height(), self.options.lens.map_or(0.0, |l| l.focus_distance_mm as f32));
         scene::vector(&mut bytes, back, camera.distance as f32);
         scene::vector(&mut bytes, Vec3::new(f64::from(self.epsilon), f64::from(self.environment), f64::from(self.studio)), 0.0);
+        let lighting = self.options.lighting.unwrap_or_default();
+        scene::vector(
+            &mut bytes,
+            Vec3::new(lighting.environment[0], lighting.environment[1], lighting.environment[2]),
+            if self.options.lighting.is_some() { 1.0 } else { 0.0 },
+        );
+        scene::vector(&mut bytes, Vec3::ZERO, lighting.area_lights.iter().count() as f32);
+        for light in lighting.area_lights.iter() {
+            let vector = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
+            scene::vector(&mut bytes, vector(light.center) - camera.target, light.area() as f32);
+            scene::vector(&mut bytes, vector(light.u), 0.0);
+            scene::vector(&mut bytes, vector(light.v), 0.0);
+            scene::vector(&mut bytes, vector(light.radiance), 0.0);
+        }
+        bytes.resize(PARAMETER_BYTES, 0);
         bytes
     }
     fn dispatch(&mut self) -> Result<()> {
@@ -395,7 +411,7 @@ impl ImageWork for Task {
             let alpha = f64::from(pixel[3]).clamp(0.0, 1.0);
             for (radiance, background) in pixel.iter().take(3).zip(self.request.background) {
                 let c = if alpha > 0.0 { f64::from(*radiance) * exposure / alpha } else { 0.0 };
-                let mapped = c / (1.0 + c);
+                let mapped = self.options.tone_map.map(c);
                 let value = if self.request.transparent_background {
                     mapped
                 } else {
