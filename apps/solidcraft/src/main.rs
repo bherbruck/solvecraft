@@ -27,6 +27,8 @@ mod native_frame;
 mod open_documents;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 mod space_mouse;
+#[cfg(target_os = "macos")]
+mod space_mouse_macos;
 mod startup;
 
 use solidcraft_engine::{Session, io};
@@ -40,6 +42,8 @@ struct App {
     frames: u32,
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     space_mouse: space_mouse::SpaceMouse,
+    #[cfg(target_os = "macos")]
+    space_mouse: space_mouse_macos::SpaceMouse,
 }
 
 impl eframe::App for App {
@@ -68,17 +72,15 @@ impl eframe::App for App {
             self.solve.open_path_async(&f);
         }
         self.solve.logic(ctx);
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
-        if !self.solve.file_picker_busy() {
-            self.space_mouse.tick(&mut self.solve, ctx);
-        }
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+        self.space_mouse.tick(&mut self.solve, ctx);
         if self.solve.quit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
         // Before the app's own hook, which adds the control channel's events.
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         self.space_mouse.raw_input_hook(self.solve.preferences.space_mouse_enabled, raw);
         self.solve.raw_input_hook(raw);
     }
@@ -657,12 +659,14 @@ fn main() -> eframe::Result {
             }
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             let space_mouse = space_mouse::SpaceMouse::start(&cc.egui_ctx);
+            #[cfg(target_os = "macos")]
+            let space_mouse = space_mouse_macos::SpaceMouse::start(&cc.egui_ctx);
             solidcraft_engine::crash::phase("first frame");
             Ok(Box::new(App {
                 solve: app,
                 starting,
                 frames: 0,
-                #[cfg(any(target_os = "windows", target_os = "linux"))]
+                #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                 space_mouse,
             }))
         }),

@@ -215,6 +215,13 @@ unaccepted artwork Open; run `cargo xtask icons` to check the collection.
 
 Windows builds: `cargo xwin build --release --target x86_64-pc-windows-msvc -p solidcraft`.
 
+On macOS, SolidCraft uses the installed 3DxWare Navigation Library for SpaceMouse navigation,
+including SpaceMouse Enterprise. Choose Object mode in 3Dconnexion Settings to make the model
+follow the cap; the driver also controls speed, axes, rotation centers, horizon lock and button
+assignments. SolidCraft's commands are available for mapping to Enterprise buttons and radial
+menus. Sketch editing keeps pan and zoom and locks rotation. See
+[macOS SpaceMouse setup](docs/macos-3d-mouse.md).
+
 On Windows and Linux, SolidCraft detects a connected 3D mouse through its HID multi-axis
 controller interface: a 3Dconnexion SpaceNavigator or SpaceMouse, or a homemade device that
 declares itself one. Move the cap to pan and zoom, and tilt or twist it to rotate the 3D view.
