@@ -1,6 +1,6 @@
 [
  {
-  "note": "#323: every pinned command gets a toolbar button, with no fixed cap. Ten commands pinned to SOLID > CREATE all show as buttons at a wide window; at a narrow one the panel collapses into its drop-down, then into the » menu, and none is dropped."
+  "note": "#323: every pinned command gets a toolbar button, with no fixed cap. Ten commands pinned to MODEL > CREATE all show as buttons at a wide window; at a narrow one the panel collapses into its drop-down, then into the » menu, and none is dropped."
  },
  {
   "call": "ui.resize",
@@ -18,8 +18,8 @@
     "button:solid.torus",
     "button:solid.coil",
     "button:solid.loft",
-    "button:solid.mirror",
-    "button:solid.hole",
+    "button:solid.rib",
+    "button:solid.sweep",
     "button:solid.pipe",
     "button:solid.thread"
    ]
@@ -134,7 +134,7 @@
    "y": 60,
    "target": {
     "type": "toolbar_command",
-    "id": "solid.mirror"
+    "id": "solid.rib"
    }
   }
  },
@@ -151,7 +151,7 @@
    "y": 60,
    "target": {
     "type": "toolbar_command",
-    "id": "solid.hole"
+    "id": "solid.sweep"
    }
   }
  },
@@ -204,8 +204,8 @@
     "button:solid.torus",
     "button:solid.coil",
     "button:solid.loft",
-    "button:solid.mirror",
-    "button:solid.hole",
+    "button:solid.rib",
+    "button:solid.sweep",
     "button:solid.pipe",
     "button:solid.thread"
    ],
@@ -217,8 +217,8 @@
     "button:solid.torus",
     "button:solid.coil",
     "button:solid.loft",
-    "button:solid.mirror",
-    "button:solid.hole",
+    "button:solid.rib",
+    "button:solid.sweep",
     "button:solid.pipe",
     "button:solid.thread"
    ],
@@ -247,20 +247,20 @@
     "button:solid.torus",
     "button:solid.coil",
     "button:solid.loft",
-    "button:solid.mirror",
-    "button:solid.hole",
+    "button:solid.rib",
+    "button:solid.sweep",
     "button:solid.pipe",
     "button:solid.thread"
    ],
    "shown_handles": [
-    "collapsed:SOLID:CREATE",
-    "panel:SOLID:CREATE"
+    "collapsed:MODEL:CREATE",
+    "panel:MODEL:CREATE"
    ]
   }
  },
  {
   "click": {
-   "handle": "collapsed:SOLID:CREATE"
+   "handle": "collapsed:MODEL:CREATE"
   }
  },
  {
@@ -272,8 +272,8 @@
     "dropdown:solid.torus",
     "dropdown:solid.coil",
     "dropdown:solid.loft",
-    "dropdown:solid.mirror",
-    "dropdown:solid.hole",
+    "dropdown:solid.rib",
+    "dropdown:solid.sweep",
     "dropdown:solid.pipe",
     "dropdown:solid.thread"
    ]
@@ -291,8 +291,8 @@
     "dropdown:solid.torus",
     "dropdown:solid.coil",
     "dropdown:solid.loft",
-    "dropdown:solid.mirror",
-    "dropdown:solid.hole",
+    "dropdown:solid.rib",
+    "dropdown:solid.sweep",
     "dropdown:solid.pipe",
     "dropdown:solid.thread"
    ]
@@ -311,16 +311,16 @@
  {
   "expect": {
    "hidden_handles": [
-    "panel:SOLID:CREATE",
-    "collapsed:SOLID:CREATE",
+    "panel:MODEL:CREATE",
+    "collapsed:MODEL:CREATE",
     "button:solid.box",
     "button:solid.cylinder",
     "button:solid.sphere",
     "button:solid.torus",
     "button:solid.coil",
     "button:solid.loft",
-    "button:solid.mirror",
-    "button:solid.hole",
+    "button:solid.rib",
+    "button:solid.sweep",
     "button:solid.pipe",
     "button:solid.thread"
    ],
@@ -346,8 +346,8 @@
     "toolbar:solid.torus",
     "toolbar:solid.coil",
     "toolbar:solid.loft",
-    "toolbar:solid.mirror",
-    "toolbar:solid.hole",
+    "toolbar:solid.rib",
+    "toolbar:solid.sweep",
     "toolbar:solid.pipe",
     "toolbar:solid.thread"
    ]
@@ -378,8 +378,8 @@
     "button:solid.torus",
     "button:solid.coil",
     "button:solid.loft",
-    "button:solid.mirror",
-    "button:solid.hole",
+    "button:solid.rib",
+    "button:solid.sweep",
     "button:solid.pipe",
     "button:solid.thread"
    ],
@@ -414,8 +414,8 @@
     "button:solid.torus",
     "button:solid.coil",
     "button:solid.loft",
-    "button:solid.mirror",
-    "button:solid.hole",
+    "button:solid.rib",
+    "button:solid.sweep",
     "button:solid.pipe",
     "button:solid.thread"
    ],
