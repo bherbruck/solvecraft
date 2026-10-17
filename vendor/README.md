@@ -83,6 +83,17 @@ Changes:
 ## truck-meshalgo 0.4.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
 
 Changes:
+- `tessellation/triangulation.rs`: boundary projections try a spatially equivalent local
+  nearest answer before a global retry. Global retries reuse a lazy 51×51 surface sample
+  grid across a face's loops, retaining the surface's own fallback when a cached seed fails.
+  Cached nearest answers must be finite, in-domain and no farther away than their global seed;
+  local answers must satisfy the existing spatial tolerance. The boundary walk borrows
+  its input and writes directly to its output instead of allocating per point.
+- `tessellation/triangulation.rs`: generated surface boundaries share the edge sampler's
+  chord/angle tolerances and work budget, reusing subdivision scratch storage across
+  edges and boundary segments; periodic trim parameters choose the nearest equivalent
+  to the previous point. This bounds subdivision across rational poles and prevents
+  distant periodic answers from inflating the trim's parameter range.
 - `tessellation/mod.rs`, `triangulation.rs`: a separate provisional `preview_face`
   path accepts at most 4,096 already sampled boundary points and a fixed grid of
   at most 16 subdivisions per direction, including periodic seam connections.

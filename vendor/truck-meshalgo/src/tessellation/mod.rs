@@ -29,7 +29,7 @@ pub fn preview_face<S: RobustMeshableSurface>(surface: &S, loops: &[Vec<Point3>]
 /// the kernel's regressions in the workspace CI.
 #[doc(hidden)]
 pub fn bounded_polyline<C: PolylineableCurve>(curve: &C, range: (f64, f64), d: Deflection) -> PolylineCurve {
-    triangulation::bounded_polyline(curve, range, d)
+    triangulation::bounded_polyline(curve, range, d, &mut Vec::new())
 }
 
 /// SolidCraft: sampling a curve that may fail to evaluate. truck's `IntersectionCurve::subs`
