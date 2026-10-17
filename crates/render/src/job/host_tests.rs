@@ -77,6 +77,7 @@ fn malformed_preparation_fails_the_job_without_stopping_the_host() {
             color: [0; 3],
             opacity: 1.0,
             surface: None,
+            transmission: None,
             faces: Vec::new(),
         }],
     };

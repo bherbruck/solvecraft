@@ -11,10 +11,11 @@ use crate::params::bad;
 use crate::{Result, Session};
 
 mod jobs;
+mod transmission;
 
 pub static COMMANDS: &[CommandSpec] = &[
 CommandSpec::new("render.preflight", "Check Render Request", jobs::preflight).icon("inspect").noundo().doc_only()
-    .params("setup?: saved name OR settings?: full RenderSetup; transparent_background?: false; replace?: false; progressive?: false; samples?: 1..4096 (64); max_depth?: 1..16 (8); seed?: u32 (0). Sampling controls and exposure require progressive rendering. Validates the installed image host and bounded captured product scene without starting work. Stale geometry is rejected. See docs/render-jobs.md"),
+    .params("setup?: saved name OR settings?: full RenderSetup; transparent_background?: false; replace?: false; progressive?: false; samples?: 1..4096 (64); max_depth?: 1..16 (8); seed?: u32 (0). raytrace?: {dielectrics: up to eight runtime body overrides} (see docs/render-transmission.md); lens?: {aperture_radius_mm, focus_distance_mm} (see docs/render-thin-lens.md). Sampling, exposure, transmission and lens controls require progressive rendering. Validates the installed image host and bounded captured product scene without starting work. Stale geometry is rejected. See docs/render-jobs.md"),
 CommandSpec::new("render.start", "Render Image", jobs::start).noundo().doc_only().at("RENDER", "IMAGE").icon("render_image")
     .params("Same request as render.preflight. Captures an immutable product scene and queues a bounded image job. Returns its session-scoped job identity, captured scene_generation and progress. Does not change the design. See docs/render-jobs.md"),
 CommandSpec::new("render.status", "Render Progress", jobs::status).icon("list").noundo().doc_only()
@@ -45,7 +46,8 @@ fn scene(s: &mut Session, params: &Value) -> Result<Value> {
     let bodies: Vec<_> = scene
         .meshes
         .iter()
-        .map(|m| json!({"name":m.name,"triangles":m.mesh.triangles.len(),"color":m.color,"opacity":m.opacity,"face_appearances":m.faces.len()}))
+        .enumerate()
+        .map(|(ordinal,m)| json!({"ordinal":ordinal,"name":m.name,"triangles":m.mesh.triangles.len(),"color":m.color,"opacity":m.opacity,"face_appearances":m.faces.len()}))
         .collect();
     Ok(
         json!({"bodies":bodies,"bounds":if scene.bounds.is_empty() { Value::Null } else { json!({"min":scene.bounds.min,"max":scene.bounds.max}) },"overlays":false}),

@@ -4,12 +4,19 @@ use solidcraft_render::{
     ProductScene,
     job::{CancelToken, ErrorCode, JobError, Result},
     surface::{OpaqueSurface, srgb8_to_linear},
+    transmission::Transmission,
 };
 
 pub(super) struct Triangle {
     pub p: [Vec3; 3],
     pub indices: [u32; 3],
     pub surface: OpaqueSurface,
+    pub transmission: Option<Transmission>,
+    pub medium: u32,
+}
+type MediumEdge = ([i64; 3], [i64; 3], i32);
+pub(super) fn medium_preparation_bytes_per_triangle() -> usize {
+    std::mem::size_of::<Triangle>() + 3 * std::mem::size_of::<MediumEdge>() + std::mem::size_of::<usize>()
 }
 
 impl Triangle {
@@ -47,8 +54,10 @@ pub(super) fn flatten(scene: &ProductScene, origin: Vec3, cancel: &CancelToken) 
     let vertex_count = scene.meshes.iter().map(|m| m.mesh.positions.len()).sum::<usize>();
     let mut vertices = reserved(vertex_count * 32)?;
     let mut vertex_offset = 0u32;
-    for body in &scene.meshes {
+    let mut media_bounds = reserved::<(Vec3, Vec3, bool)>(8)?;
+    for (body_index, body) in scene.meshes.iter().enumerate() {
         cancel.check()?;
+        let body_start = triangles.len();
         let mut faces = reserved(body.faces.len())?;
         faces.extend(body.faces.iter());
         faces.sort_unstable_by_key(|f| f.face);
@@ -78,8 +87,9 @@ pub(super) fn flatten(scene: &ProductScene, origin: Vec3, cancel: &CancelToken) 
             let face = mesh.tri_face.get(index).copied().ok_or_else(|| invalid("missing triangle face"))?;
             let look = faces.binary_search_by_key(&face, |f| f.face).ok().and_then(|i| faces.get(i));
             let opacity = look.map_or(body.opacity, |f| f.opacity);
-            if opacity != 1.0 {
-                return Err(invalid("gpu-path currently requires opaque surfaces; refraction is not implemented"));
+            let transmission = look.map_or(body.transmission, |f| f.transmission);
+            if opacity != 1.0 && transmission.is_none() {
+                return Err(invalid("gpu-path requires explicit transmission for nonopaque preview appearances"));
             }
             let color = look.map_or(body.color, |f| f.color);
             let surface = look
@@ -106,7 +116,34 @@ pub(super) fn flatten(scene: &ProductScene, origin: Vec3, cancel: &CancelToken) 
             if (p[1] - p[0]).cross(p[2] - p[0]).len() <= 1e-12 {
                 continue;
             }
-            triangles.push(Triangle { p, indices: global_indices, surface });
+            if transmission.is_some() && surface.metallic() != 0.0 {
+                return Err(invalid("transmission requires a nonmetallic surface"));
+            }
+            triangles.push(Triangle { p, indices: global_indices, surface, transmission, medium: body_index as u32 + 1 });
+        }
+        validate_medium(&triangles[body_start..], cancel)?;
+        let body_triangles = &triangles[body_start..];
+        if body_triangles.iter().any(|t| t.transmission.is_some()) {
+            if media_bounds.len() >= 8 {
+                return Err(invalid("at most eight dielectric bodies are supported"));
+            }
+            let closed = body_triangles.iter().any(|t| t.transmission.is_some_and(|v| v.thin_wall_thickness_mm().is_none()));
+            let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+            let mut hi = -lo;
+            for t in body_triangles {
+                for p in t.p {
+                    lo = lo.min(p);
+                    hi = hi.max(p);
+                }
+            }
+            for (other_lo, other_hi, other_closed) in &media_bounds {
+                if (closed || *other_closed)
+                    && !(hi.x < other_lo.x || lo.x > other_hi.x || hi.y < other_lo.y || lo.y > other_hi.y || hi.z < other_lo.z || lo.z > other_hi.z)
+                {
+                    return Err(invalid("nested or overlapping dielectric bounds are unsupported; separate the bodies' bounds"));
+                }
+            }
+            media_bounds.push((lo, hi, closed));
         }
         vertex_offset = vertex_offset.checked_add(mesh.positions.len() as u32).ok_or_else(|| invalid("vertex offset overflow"))?;
     }
@@ -114,8 +151,8 @@ pub(super) fn flatten(scene: &ProductScene, origin: Vec3, cancel: &CancelToken) 
     nodes.push(Node::default());
     build(&mut triangles, 0, &mut nodes, 0, cancel)?;
     let extent = nodes.first().map_or(1.0, |n| n.lo.iter().zip(n.hi).map(|(a, b)| b - a).fold(0.0f32, f32::max));
-    let mut geometry = reserved(16 + triangles.len().max(1) * 48 + vertices.len())?;
-    let mut materials = reserved(triangles.len().max(1) * 32)?;
+    let mut geometry = reserved(16 + triangles.len().max(1) * 64 + vertices.len())?;
+    let mut materials = reserved(triangles.len().max(1) * 48)?;
     let vertex_word = 4 + triangles.len().max(1) * 4;
     let material_word = vertex_word + vertices.len() / 4;
     for word in [triangles.len() as u32, vertex_word as u32, material_word as u32, vertex_count as u32] {
@@ -129,12 +166,17 @@ pub(super) fn flatten(scene: &ProductScene, origin: Vec3, cancel: &CancelToken) 
             geometry.extend_from_slice(&index.to_le_bytes());
         }
         geometry.extend_from_slice(&(material as u32).to_le_bytes());
-        vector(&mut materials, t.surface.base_color(), 0.0);
-        vector(&mut materials, Vec3::new(t.surface.metallic(), t.surface.roughness(), t.surface.dielectric_ior()), 0.0);
+        vector(&mut materials, t.surface.base_color(), if t.transmission.is_some() { 1.0 } else { 0.0 });
+        vector(
+            &mut materials,
+            Vec3::new(t.surface.metallic(), t.surface.roughness(), t.surface.dielectric_ior()),
+            t.transmission.and_then(|t| t.thin_wall_thickness_mm()).unwrap_or(-1.0) as f32,
+        );
+        vector(&mut materials, t.transmission.map_or(Vec3::ZERO, |t| t.extinction()), t.medium as f32);
     }
     if geometry.len() == 16 {
         geometry.resize(32, 0);
-        materials.resize(32, 0);
+        materials.resize(48, 0);
     }
     geometry.extend_from_slice(&vertices);
     drop(vertices);
@@ -152,6 +194,76 @@ pub(super) fn flatten(scene: &ProductScene, origin: Vec3, cancel: &CancelToken) 
         node_bytes.extend_from_slice(&node.count.to_le_bytes());
     }
     Ok(Upload { geometry, nodes: node_bytes, epsilon: (extent * 1e-7).max(1e-5) })
+}
+
+// Volume transmission needs a consistently oriented closed two-manifold. Tessellation
+// often duplicates vertices at face seams; weld position keys at one nanometre in mm
+// units for this topology check only. The uploaded geometry itself is unchanged.
+fn validate_medium(triangles: &[Triangle], cancel: &CancelToken) -> Result<()> {
+    let Some(first) = triangles.iter().find(|t| t.transmission.is_some_and(|v| v.thin_wall_thickness_mm().is_none())) else { return Ok(()) };
+    if triangles.iter().any(|t| t.transmission != first.transmission || t.surface.dielectric_ior() != first.surface.dielectric_ior()) {
+        return Err(invalid("a closed glass body must use one homogeneous transmission medium; use separate bodies or thin walls"));
+    }
+    let mut edges = reserved::<MediumEdge>(triangles.len() * 3)?;
+    let mut parents = reserved::<usize>(triangles.len())?;
+    parents.extend(0..triangles.len());
+    let origin = first.p[0];
+    let mut six_volume = 0.0;
+    for (index, triangle) in triangles.iter().enumerate() {
+        if index % 1024 == 0 {
+            cancel.check()?;
+        }
+        let keys = triangle.p.map(|p| [p.x, p.y, p.z].map(|v| (v * 1e6).round() as i64));
+        for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+            if keys[a] == keys[b] {
+                return Err(invalid("glass triangle collapses at the 1e-6 mm topology tolerance"));
+            }
+            let ordinal = i32::try_from(index + 1).map_err(|_| invalid("too many glass triangles"))?;
+            edges.push(if keys[a] < keys[b] { (keys[a], keys[b], ordinal) } else { (keys[b], keys[a], -ordinal) });
+        }
+        six_volume += (triangle.p[0] - origin).dot((triangle.p[1] - origin).cross(triangle.p[2] - origin));
+    }
+    edges.sort_unstable();
+    for edge in edges.chunks(2) {
+        let [a, b] = edge else {
+            return Err(invalid("volume glass requires a closed mesh; use thin_wall_thickness_mm for sheets"));
+        };
+        if a.0 != b.0 || a.1 != b.1 || a.2.signum() + b.2.signum() != 0 {
+            return Err(invalid("volume glass requires a closed, consistently outward-oriented mesh"));
+        }
+        let first = medium_root(&mut parents, a.2.unsigned_abs() as usize - 1)?;
+        let second = medium_root(&mut parents, b.2.unsigned_abs() as usize - 1)?;
+        *parents.get_mut(first).ok_or_else(|| invalid("invalid glass component"))? = second;
+    }
+    // Groups with four or more coincident directed edges cannot be a two-manifold.
+    if edges.windows(3).any(|e| e[0].0 == e[2].0 && e[0].1 == e[2].1) {
+        return Err(invalid("nonmanifold glass edge"));
+    }
+    let component = medium_root(&mut parents, 0)?;
+    for index in 0..parents.len() {
+        if index % 1024 == 0 {
+            cancel.check()?;
+        }
+        if medium_root(&mut parents, index)? != component {
+            return Err(invalid("closed dielectric body must contain exactly one connected shell"));
+        }
+    }
+    if six_volume <= 0.0 || !six_volume.is_finite() {
+        return Err(invalid("glass mesh must enclose positive outward-oriented volume"));
+    }
+    cancel.check()
+}
+
+fn medium_root(parents: &mut [usize], mut index: usize) -> Result<usize> {
+    loop {
+        let parent = *parents.get(index).ok_or_else(|| invalid("invalid glass component index"))?;
+        if parent == index {
+            return Ok(index);
+        }
+        let grandparent = *parents.get(parent).ok_or_else(|| invalid("invalid glass component parent"))?;
+        *parents.get_mut(index).ok_or_else(|| invalid("invalid glass component index"))? = grandparent;
+        index = grandparent;
+    }
 }
 
 fn build(triangles: &mut [Triangle], offset: usize, nodes: &mut Vec<Node>, index: usize, cancel: &CancelToken) -> Result<()> {

@@ -20,6 +20,7 @@ pub mod texture_input;
 pub mod texture_interpolation;
 pub mod texture_lod;
 pub mod texture_sampling;
+pub mod transmission;
 
 pub use analysis::{AnalysisColors, AnalysisMode, SceneAnalysis};
 pub use backend::{

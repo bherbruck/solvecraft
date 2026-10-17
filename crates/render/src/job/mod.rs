@@ -13,9 +13,11 @@ use crate::{BackendId, Camera, ExecutorId};
 
 mod host;
 mod image;
+mod lens;
 mod png;
 pub use host::{CpuHost, HostKind, ImageHost, JobHandle, JobStatus, RenderFrame};
 pub use image::{Admission, ImageTask, TaskPoll, admit, admit_geometry};
+pub use lens::ThinLens;
 pub use png::PngTask;
 
 /// Runtime sampling intent, separate from saved documents and device resources.
@@ -26,16 +28,20 @@ pub struct JobOptions {
     pub max_depth: u32,
     pub seed: u32,
     pub exposure_ev: f64,
+    pub lens: Option<ThinLens>,
 }
 
 impl Default for JobOptions {
     fn default() -> Self {
-        Self { samples: 64, max_depth: 8, seed: 0, exposure_ev: 0.0 }
+        Self { samples: 64, max_depth: 8, seed: 0, exposure_ev: 0.0, lens: None }
     }
 }
 
 impl JobOptions {
     pub fn validate(&self) -> Result<()> {
+        if let Some(lens) = self.lens {
+            lens.validate()?;
+        }
         if !(1..=4096).contains(&self.samples)
             || !(1..=16).contains(&self.max_depth)
             || !self.exposure_ev.is_finite()

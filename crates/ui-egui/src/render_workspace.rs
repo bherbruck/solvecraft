@@ -416,17 +416,21 @@ pub fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
         body.name.hash(&mut hash);
         body.color.hash(&mut hash);
         body.opacity.to_bits().hash(&mut hash);
+        body.transmission.is_some().hash(&mut hash);
         hash_surface(body.surface, &mut hash);
         let looks: std::collections::BTreeMap<_, _> = body.faces.iter().map(|l| (l.face, l)).collect();
         for face in &body.faces {
             face.face.hash(&mut hash);
             face.color.hash(&mut hash);
             face.opacity.to_bits().hash(&mut hash);
+            face.transmission.is_some().hash(&mut hash);
             hash_surface(face.surface, &mut hash);
         }
         for (index, triangle) in body.mesh.triangles.iter().enumerate() {
             let face = body.mesh.tri_face.get(index).and_then(|f| looks.get(f));
-            let (color, opacity, surface) = face.map_or((body.color, body.opacity, body.surface), |l| (l.color, l.opacity, l.surface));
+            let (color, opacity, surface) = face.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |l| {
+                (l.color, l.opacity, l.surface.filter(|_| l.transmission.is_none()))
+            });
             if surface.is_some() && opacity != 1.0 {
                 return Err("opaque PBR requires opacity 1".into());
             }

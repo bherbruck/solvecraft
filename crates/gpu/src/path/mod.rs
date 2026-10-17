@@ -1,4 +1,4 @@
-//! Native progressive opaque product rendering. Software BVH traversal needs no ray-query
+//! Native progressive product rendering. Software BVH traversal needs no ray-query
 //! features. Every worker quantum submits at most 256K paths, then checks cancellation.
 use solidcraft_geom::Vec3;
 use solidcraft_render::{
@@ -116,7 +116,7 @@ fn descriptor() -> Result<ExecutorDescriptor> {
             mode: RenderMode::Preview,
             operation: RenderOperation::Image,
             formats: vec![RenderFormat::Png],
-            features: vec![RenderFeature::Pbr, RenderFeature::Progressive],
+            features: vec![RenderFeature::Pbr, RenderFeature::Progressive, RenderFeature::Refraction],
         }],
         limits: RenderLimits::default(),
         scratch: ScratchLayout { sample_scale: 1, sample_bytes_per_pixel: 16, output_bytes_per_pixel: 16, encoding_bytes_per_pixel: 16 },
@@ -126,6 +126,14 @@ fn descriptor() -> Result<ExecutorDescriptor> {
 fn admission(scene: &ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission> {
     options.validate()?;
     let camera = request.camera;
+    if options.lens.is_some_and(|lens| lens.aperture_radius_mm > 0.0)
+        && (camera.distance < 1e-6 || !(1e-6..=1e6).contains(&(camera.half_height() / camera.distance)) || camera.fov == 0.0)
+    {
+        return Err(JobError::new(
+            ErrorCode::InvalidRequest,
+            "thin-lens depth of field requires a bounded perspective camera (distance >= 0.000001 mm and tan(fov/2) in 0.000001..1000000)",
+        ));
+    }
     if !camera.fov.is_finite()
         || !(0.0..std::f64::consts::PI).contains(&camera.fov)
         || !camera.half_height().is_finite()
@@ -135,17 +143,22 @@ fn admission(scene: &ProductScene, request: &ImageRequest, options: JobOptions) 
         return Err(JobError::new(ErrorCode::InvalidRequest, "gpu-path requires a bounded finite camera"));
     }
     let mut admission = admit_geometry(scene, request, MAX_TRIANGLES)?;
-    if scene.meshes.iter().any(|m| m.opacity != 1.0 || m.faces.iter().any(|f| f.opacity != 1.0)) {
-        return Err(JobError::new(ErrorCode::InvalidScene, "gpu-path supports opaque surfaces only; refraction is not implemented"));
+    if scene
+        .meshes
+        .iter()
+        .any(|m| (m.opacity != 1.0 && m.transmission.is_none()) || m.faces.iter().any(|f| f.opacity != 1.0 && f.transmission.is_none()))
+    {
+        return Err(JobError::new(ErrorCode::InvalidScene, "gpu-path requires explicit transmission for nonopaque preview appearances"));
     }
     // Peak preparation: f64 triangles + nodes + serialized upload. After preparation:
     // serialized + device geometry + accumulation/readback/RGBA/PNG. These phases don't overlap.
     let pixels = u64::from(request.width) * u64::from(request.height);
     admission.pixel_scratch_bytes = pixels * 64;
     let vertex_bytes = scene.meshes.iter().map(|m| m.mesh.positions.len() as u64 * 32).sum::<u64>();
-    admission.preparation_bytes = (admission.triangles * 400 + vertex_bytes * 2 + admission.face_appearances * 8)
-        .max(admission.triangles * 160 + vertex_bytes * 2 + pixels * 32)
-        .max(admission.triangles * 80 + vertex_bytes + admission.pixel_scratch_bytes)
+    let triangle_preparation = 400_u64.max(scene::medium_preparation_bytes_per_triangle() as u64);
+    admission.preparation_bytes = (admission.triangles * triangle_preparation + vertex_bytes * 2 + admission.face_appearances * 8)
+        .max(admission.triangles * 192 + vertex_bytes * 2 + pixels * 32)
+        .max(admission.triangles * 96 + vertex_bytes + admission.pixel_scratch_bytes)
         + 1_048_576;
     admission.estimated_total_bytes = admission.geometry_bytes + admission.preparation_bytes;
     if admission.estimated_total_bytes > 512 * 1024 * 1024 {
@@ -161,7 +174,7 @@ impl ImageExecutor for Executor {
     fn admit(&self, scene: &ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission> {
         let a = admission(scene, request, options)?;
         let limit = self.context.device.limits().max_storage_buffer_binding_size;
-        let geometry_bytes = 16 + a.triangles.max(1) * 48 + scene.meshes.iter().map(|m| m.mesh.positions.len() as u64 * 32).sum::<u64>();
+        let geometry_bytes = 16 + a.triangles.max(1) * 64 + scene.meshes.iter().map(|m| m.mesh.positions.len() as u64 * 32).sum::<u64>();
         if geometry_bytes > limit || u64::from(request.width) * u64::from(request.height) * 16 > limit {
             return Err(JobError::new(ErrorCode::LimitExceeded, "gpu-path storage buffer exceeds this device's limit"));
         }
@@ -189,6 +202,7 @@ struct Task {
     started: Instant,
     // Uniform environment is used only by the numerical furnace test, never advertised as HDRI.
     environment: f32,
+    environment_bottom_only: bool,
     studio: f32,
     #[cfg(test)]
     metrics: (f64, u64, f64),
@@ -257,6 +271,7 @@ impl Task {
             png: None,
             started: Instant::now(),
             environment: 0.0,
+            environment_bottom_only: false,
             studio: 1.0,
             #[cfg(test)]
             metrics: (bvh_ms, upload_bytes, upload_ms),
@@ -264,7 +279,16 @@ impl Task {
     }
     fn parameters(&self, count: u32) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(112);
-        for x in [self.request.width, self.request.height, self.sample, self.offset, self.options.seed, self.options.max_depth, count, 0] {
+        for x in [
+            self.request.width,
+            self.request.height,
+            self.sample,
+            self.offset,
+            self.options.seed,
+            self.options.max_depth,
+            count,
+            u32::from(self.environment_bottom_only),
+        ] {
             bytes.extend_from_slice(&x.to_le_bytes());
         }
         let camera = self.request.camera;
@@ -272,8 +296,12 @@ impl Task {
         let perspective = camera.fov > 0.0;
         let eye = back * (camera.distance * if perspective { 1.0 } else { 4.0 });
         scene::vector(&mut bytes, eye, if perspective { 1.0 } else { 0.0 });
-        scene::vector(&mut bytes, right * camera.half_height() * (f64::from(self.request.width) / f64::from(self.request.height)), 0.0);
-        scene::vector(&mut bytes, up * camera.half_height(), 0.0);
+        scene::vector(
+            &mut bytes,
+            right * camera.half_height() * (f64::from(self.request.width) / f64::from(self.request.height)),
+            self.options.lens.map_or(0.0, |l| l.aperture_radius_mm as f32),
+        );
+        scene::vector(&mut bytes, up * camera.half_height(), self.options.lens.map_or(0.0, |l| l.focus_distance_mm as f32));
         scene::vector(&mut bytes, back, camera.distance as f32);
         scene::vector(&mut bytes, Vec3::new(f64::from(self.epsilon), f64::from(self.environment), f64::from(self.studio)), 0.0);
         bytes
@@ -320,7 +348,17 @@ impl Task {
         rx.try_recv().map_err(gpu)?.map_err(gpu)?;
         let data = slice.get_mapped_range().map_err(gpu)?;
         let mut values = scene::reserved((self.request.width * self.request.height) as usize)?;
-        for pixel in data.as_chunks::<16>().0 {
+        for (index, pixel) in data.as_chunks::<16>().0.iter().enumerate() {
+            if f32::from_le_bytes([pixel[12], pixel[13], pixel[14], pixel[15]]) < 0.0 {
+                let diagnostic = [0, 4, 8, 12].map(|i| f32::from_le_bytes([pixel[i], pixel[i + 1], pixel[i + 2], pixel[i + 3]]));
+                return Err(JobError::new(
+                    ErrorCode::InvalidScene,
+                    format!(
+                        "inconsistent glass medium path at pixel {index}, bounce {}, sample {}, code {}: camera must start outside volumes; overlapping solids or more than 16 nested media are unsupported",
+                        diagnostic[0], diagnostic[1], -diagnostic[3]
+                    ),
+                ));
+            }
             let mut value = [0.0; 4];
             for (v, bytes) in value.iter_mut().zip(pixel.as_chunks::<4>().0) {
                 *v = f32::from_le_bytes(*bytes) / self.sample as f32;

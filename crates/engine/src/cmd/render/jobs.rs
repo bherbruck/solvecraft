@@ -18,6 +18,8 @@ struct Start {
     samples: Option<u32>,
     max_depth: Option<u32>,
     seed: Option<u32>,
+    raytrace: super::transmission::Raytrace,
+    lens: Option<solidcraft_render::job::ThinLens>,
 }
 
 struct Prepared {
@@ -34,7 +36,11 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
     if input.setup.is_some() && input.settings.is_some() {
         return Err(bad(command, "choose either setup or settings"));
     }
-    let scene = crate::product_scene::extract(s)?;
+    let mut scene = crate::product_scene::extract(s)?;
+    if !input.progressive && (!input.raytrace.dielectrics.is_empty() || input.lens.is_some()) {
+        return Err(bad(command, "runtime transmission and lens controls require progressive rendering"));
+    }
+    super::transmission::apply(&mut scene, &input.raytrace.dielectrics, command)?;
     let settings = if let Some(name) = &input.setup {
         s.doc.render.setups.get(name).cloned().ok_or_else(|| bad(command, "no saved render setup with that name"))?
     } else if let Some(settings) = &input.settings {
@@ -66,10 +72,14 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
         options.seed = seed;
     }
     options.exposure_ev = settings.exposure_ev;
+    options.lens = input.lens;
     options.validate().map_err(job_error)?;
     let mut features = scene.required_features();
     if input.progressive {
         features.push(solidcraft_render::RenderFeature::Progressive);
+        if scene.has_transmission() {
+            features.push(solidcraft_render::RenderFeature::Refraction);
+        }
     }
     let resolved = solidcraft_render::resolve_request(
         &[s.render_backend()],
@@ -97,7 +107,8 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
         transparent_background: input.transparent_background,
     };
     let admission = host.admit(&scene, &request, options).map_err(job_error)?;
-    let reply = json!({"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":if input.progressive {"opaque_only"} else {"sorted_alpha_approximation"},"options":options,"refraction":false});
+    let refraction = input.progressive && scene.has_transmission();
+    let reply = json!({"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":if refraction {"physical_transmission"} else if input.progressive {"opaque_only"} else {"sorted_alpha_approximation"},"options":options,"refraction":refraction,"dielectric_boundaries": if resolved.executor.as_str() == "gpu-path" {vec!["thin_sheet","closed_box","closed_mesh"]} else {Vec::<&str>::new()}});
     Ok(Prepared { input, scene, request, reply, executor: resolved.executor, options })
 }
 

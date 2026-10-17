@@ -1,8 +1,8 @@
-# Progressive opaque product images
+# Progressive product images
 
 Native applications can register `solidcraft_gpu::path::host()` alongside the
 existing CPU image host. `render.backends` then exposes `builtin/gpu-path` with
-Preview, Image, PNG, Pbr and Progressive. The browser keeps its CPU image host.
+Preview, Image, PNG, Pbr, Progressive and Refraction. The browser keeps its CPU image host.
 Device discovery follows `SOLIDCRAFT_GPU` and `WGPU_BACKEND`; a device which cannot
 create the compute pipeline does not register an available path executor.
 The native UI opens its independent job device on the viewport's selected adapter,
@@ -28,6 +28,10 @@ Cancel, status, retained-image ownership and atomic PNG export use the same host
 protocol as CPU jobs. Defaults are 64 samples, depth 8 and seed 0; the bounds are
 1–4096 samples and 1–16 bounces. Sampling controls require `progressive: true`.
 
+Runtime request-only [glass overrides](render-transmission.md) and an optional
+[thin-lens camera](render-thin-lens.md) are available through those same commands.
+Neither adds saved document fields. Positive aperture requires perspective.
+
 ```sh
 solidcraft-cli render examples/render-path-studio.json --out enclosure.png --progressive --samples 64 --max-depth 8 --seed 0 --width 800 --height 600
 ```
@@ -47,15 +51,19 @@ environment illumination in the production profile. All legacy opaque colors use
 linear-sRGB base color, metallic 0, roughness 0.5, IOR 1.5. Explicit face appearances
 take precedence over body appearances.
 
-This initial executor rejects opacity below one. It does not implement refraction,
-absorption, HDRI, area lights, denoising, textures, EXR or Final mode. A path-traced
+Explicit optical appearances can now select smooth dielectric reflection,
+refraction, Beer–Lambert absorption and ideal thin sheets; see
+[the transmission contract](render-transmission.md). Preview opacity remains a
+separate scalar-alpha approximation. Opacity below one without an explicit
+transmission record is rejected by the path executor. It does not implement
+HDRI, area lights, denoising, textures, EXR or Final mode. A path-traced
 preview is not a declaration of those capabilities. The uniform environment used
 by the numerical furnace test is deliberately not exposed as an HDRI feature.
 
 Each job builds a balanced median-split BVH over its immutable captured meshes;
 there is no cross-document cache to confuse scene generations. Positions are
 rebased around the camera target before f32 upload. The upload packs indexed 32-byte position/normal vertices, 16-byte triangle records
-(including material IDs), 32-byte resolved materials and 32-byte BVH nodes. The
+(including material IDs), 48-byte resolved materials and 32-byte BVH nodes. The
 geometry arrays share one buffer so traversal fits baseline storage-binding limits.
 Geometry must be
 within 1e7 mm of the camera target; ray offsets are max(1e-5 mm, extent × 1e-7).

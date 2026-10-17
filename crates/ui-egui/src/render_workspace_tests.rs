@@ -341,6 +341,28 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
 }
 
 #[test]
+fn transmission_uses_legacy_preview_buffers_and_invalidates_the_opaque_cache() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Glass"})).unwrap();
+    let appearance = json!({"bodies":["Glass"],"color":"#336699",
+        "pbr":{"metallic":0,"roughness":0.1,"dielectric_ior":1.5}});
+    s.execute("appearance.assign", &appearance).unwrap();
+    let (opaque_key, opaque) = gpu_scene(&solidcraft_engine::product_scene::extract(&s).unwrap()).unwrap();
+    assert!(!opaque.pbr.is_empty());
+    let mut scene = solidcraft_engine::product_scene::extract(&s).unwrap();
+    scene.meshes[0].transmission =
+        Some(solidcraft_engine::render::transmission::Transmission::new(solidcraft_engine::geom::Vec3::ZERO, None).unwrap());
+    let (glass_key, glass) = gpu_scene(&scene).unwrap();
+    assert_ne!(opaque_key, glass_key);
+    assert!(glass.pbr.is_empty());
+    assert!(!glass.tris.is_empty());
+    scene.meshes[0].opacity = 0.4;
+    let (_, transparent) = gpu_scene(&scene).unwrap();
+    assert!(transparent.pbr.is_empty());
+    assert!(!transparent.glass.is_empty());
+}
+
+#[test]
 fn host_profiles_advertise_only_installed_opaque_pbr_not_hdri_refraction_or_final() {
     use solidcraft_engine::render::*;
     let host = host_executor(512, true, 4).unwrap();
